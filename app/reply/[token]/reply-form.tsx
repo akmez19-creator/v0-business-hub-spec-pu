@@ -443,8 +443,22 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                   </div>
 
                 ) : (
-                  /* Compact Location Options */
+                  /* Compact Location Options - Map Pin first (most accurate indoors) */
                   <div className="grid grid-cols-3 gap-2">
+                    {/* Pin on Map - PRIMARY (most accurate for indoor) */}
+                    {mapboxToken && (
+                      <button
+                        onClick={() => setLocationMode('pin')}
+                        className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-primary/10 border-2 border-primary/40 hover:border-primary/60 transition-all relative"
+                      >
+                        <div className="absolute -top-1 -right-1 px-1 py-0.5 rounded bg-primary text-[8px] font-bold text-primary-foreground">Best</div>
+                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-orange-600 flex items-center justify-center">
+                          <Crosshair className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="text-[10px] font-medium text-primary">Map Pin</span>
+                      </button>
+                    )}
+
                     {/* GPS */}
                     <button
                       onClick={shareGPS}
@@ -456,19 +470,6 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                       </div>
                       <span className="text-[10px] font-medium text-accent">GPS</span>
                     </button>
-
-                    {/* Pin on Map */}
-                    {mapboxToken && (
-                      <button
-                        onClick={() => setLocationMode('pin')}
-                        className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25 hover:border-cyan-500/50 transition-all"
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center">
-                          <Crosshair className="w-4 h-4 text-white" />
-                        </div>
-                        <span className="text-[10px] font-medium text-cyan-400">Map Pin</span>
-                      </button>
-                    )}
 
                     {/* Paste Link */}
                     <button
