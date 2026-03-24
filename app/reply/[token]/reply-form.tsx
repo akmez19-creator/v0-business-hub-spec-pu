@@ -201,9 +201,11 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setError('')
     setLocationMode('gps')
 
+    console.log('[v0] Getting GPS location...')
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords
+        console.log('[v0] GPS success:', latitude, longitude)
         const url = `https://www.google.com/maps?q=${latitude},${longitude}`
         setLocationUrl(url)
         setRawCoords({ lat: latitude, lng: longitude })
@@ -211,6 +213,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
         checkRegionDistance(latitude, longitude)
       },
       (err) => {
+        console.log('[v0] GPS error:', err.code, err.message)
         setGettingLocation(false)
         setLocationMode('none')
         if (err.code === 1) {
@@ -236,6 +239,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   }
 
   async function handleSubmit() {
+    console.log('[v0] handleSubmit called', { reply, locationUrl, rawCoords, locationMode })
     if (!reply.trim() && !locationUrl) {
       setError('Please type a reply or share your location.')
       return
@@ -244,7 +248,9 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setError('')
 
     const source = locationMode === 'gps' ? 'gps' : locationMode === 'pin' ? 'pin' : 'manual'
+    console.log('[v0] Calling submitClientReply with:', { token, reply, locationUrl, rawCoords, source })
     const result = await submitClientReply(token, reply, locationUrl, rawCoords ?? undefined, source as any, regionCenter)
+    console.log('[v0] submitClientReply result:', result)
 
     if (result.error) {
       setError(result.error)
