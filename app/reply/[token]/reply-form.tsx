@@ -105,13 +105,14 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       if (!mapContainerRef.current) return
       mapboxgl.default.accessToken = mapboxToken
 
-      // Center on the delivery region so the client sees their delivery area
-      const center = regionCenter || { lat: -20.25, lng: 57.57 }
+      // Center on GPS coords (if coming from Current button) or region center
+      const center = rawCoords || regionCenter || { lat: -20.25, lng: 57.57 }
+      const zoomLevel = rawCoords ? 18 : (regionCenter ? 15 : 11) // Zoom in more if GPS coords
       const map = new mapboxgl.default.Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/dark-v11',
         center: [center.lng, center.lat],
-        zoom: regionCenter ? 15 : 11,
+        zoom: zoomLevel,
         pitch: 50,
         bearing: -10,
         antialias: true,
@@ -151,6 +152,12 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       const marker = new mapboxgl.default.Marker({ element: markerEl, draggable: true, anchor: 'bottom' })
         .setLngLat([center.lng, center.lat])
         .addTo(map)
+      
+      // If GPS coords were set, auto-set the location (client can adjust by dragging/clicking)
+      if (rawCoords) {
+        setLocationUrl(`https://www.google.com/maps?q=${rawCoords.lat},${rawCoords.lng}`)
+        setPinMoved(true)
+      }
 
       marker.on('dragend', () => {
         const lngLat = marker.getLngLat()
@@ -174,7 +181,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       markerRef.current = marker
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapboxToken, regionCenter])
+  }, [mapboxToken, regionCenter, rawCoords])
 
   // Cleanup map when leaving pin mode
   useEffect(() => {
@@ -197,11 +204,11 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords
-        const url = `https://www.google.com/maps?q=${latitude},${longitude}`
-        setLocationUrl(url)
-        setRawCoords({ lat: latitude, lng: longitude })
+        // Open pin mode centered on GPS location so client can verify/adjust
         setGettingLocation(false)
-        checkRegionDistance(latitude, longitude)
+        setLocationMode('pin')
+        // Store the GPS coords to center the map on them
+        setRawCoords({ lat: latitude, lng: longitude })
       },
       (err) => {
         setGettingLocation(false)
