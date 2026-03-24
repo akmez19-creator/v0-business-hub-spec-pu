@@ -345,8 +345,10 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   const GpsConfirmModal = () => {
     if (!showGpsConfirm || !pendingGpsCoords) return null
     
-    const isAccurate = (gpsAccuracy || 0) <= 20
-    const accuracyColor = isAccurate ? 'emerald' : (gpsAccuracy || 0) <= 50 ? 'amber' : 'red'
+    // Accuracy thresholds: <35m = good (green), 35-75m = okay (amber), >75m = poor (red)
+    const isAccurate = (gpsAccuracy || 0) <= 35
+    const isOkay = (gpsAccuracy || 0) <= 75
+    const accuracyColor = isAccurate ? 'emerald' : isOkay ? 'amber' : 'red'
     
     return createPortal(
       <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4">
@@ -430,12 +432,14 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           <div className="p-4 space-y-3">
             <div className="text-center">
               <h3 className="font-bold text-foreground">
-                {isAccurate ? 'Location looks good!' : 'Location may be inaccurate'}
+                {isAccurate ? 'Location looks good!' : isOkay ? 'Check your location' : 'Location may be off'}
               </h3>
               <p className="text-xs text-muted-foreground mt-1">
                 {isAccurate 
-                  ? 'Your GPS location is accurate. Confirm to use this location.'
-                  : `GPS accuracy is ~${gpsAccuracy}m. For indoor locations, try "Map Pin" instead.`}
+                  ? 'Your GPS location is accurate. The blue dot shows where the rider will go.'
+                  : isOkay
+                  ? `GPS accuracy is ~${gpsAccuracy}m. Check if the blue dot is at your location.`
+                  : `GPS accuracy is ~${gpsAccuracy}m. Consider using "Map Pin" for better precision.`}
               </p>
             </div>
             
@@ -447,19 +451,21 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
               >
                 <Crosshair className="w-5 h-5 text-primary" />
                 <span className="text-xs font-medium">Use Map Pin</span>
-                <span className="text-[10px] text-muted-foreground">More precise</span>
+                <span className="text-[10px] text-muted-foreground">Place manually</span>
               </button>
               <button
                 onClick={confirmGpsLocation}
                 className={`flex flex-col items-center gap-1 p-3 rounded-xl border transition-all ${
                   isAccurate 
                     ? 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/50' 
-                    : 'bg-amber-500/10 border-amber-500/30 hover:border-amber-500/50'
+                    : isOkay
+                    ? 'bg-amber-500/10 border-amber-500/30 hover:border-amber-500/50'
+                    : 'bg-red-500/10 border-red-500/30 hover:border-red-500/50'
                 }`}
               >
-                <CheckCircle className={`w-5 h-5 ${isAccurate ? 'text-emerald-500' : 'text-amber-500'}`} />
-                <span className="text-xs font-medium">Use This</span>
-                <span className="text-[10px] text-muted-foreground">{isAccurate ? 'Recommended' : 'Accept anyway'}</span>
+                <CheckCircle className={`w-5 h-5 ${isAccurate ? 'text-emerald-500' : isOkay ? 'text-amber-500' : 'text-red-500'}`} />
+                <span className="text-xs font-medium">{isAccurate ? 'Confirm' : 'Use This'}</span>
+                <span className="text-[10px] text-muted-foreground">{isAccurate ? 'Recommended' : 'Looks correct'}</span>
               </button>
             </div>
             
