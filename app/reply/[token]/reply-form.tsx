@@ -62,10 +62,13 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   // - delivered: Successfully completed delivery
   // - nwd: Next Working Day - client requested reschedule, NOT delivered
   // - cms: Customer Service Center - client needs CS attention, NOT delivered
-  const isDelivered = delivery.status === 'delivered'
-  const isNWD = delivery.status === 'nwd'
-  const isCMS = delivery.status === 'cms'
+  const normalizedStatus = delivery.status?.toLowerCase()
+  const isDelivered = normalizedStatus === 'delivered'
+  const isNWD = normalizedStatus === 'nwd'
+  const isCMS = normalizedStatus === 'cms'
   const isFailed = isNWD || isCMS
+  
+  console.log('[v0] Delivery status:', delivery.status, 'normalized:', normalizedStatus, 'isDelivered:', isDelivered, 'isNWD:', isNWD, 'isCMS:', isCMS)
 
   // VAT calculation (prices are VAT inclusive)
   const vatRate = company?.vat_rate || 15
