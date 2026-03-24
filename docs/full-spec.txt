@@ -1,0 +1,36 @@
+# **Business Hub - Complete Application Specification**
+
+## **1. PROJECT OVERVIEW**
+
+**Name:** Business Hub - Enterprise Management Platform**Purpose:** Centralized platform for managing marketing, procurement, inventory, sales, logistics, and delivery operations for a Mauritius-based business.**Currency:** MUR (Mauritian Rupee) - displayed as "Rs X,XXX"**Phone Format:** +230 XXXX XXXX**Language:** English
+
+---
+
+## **2. USER ROLES & PERMISSIONS**
+
+### **Role Hierarchy (highest to lowest)**
+
+| Role | Level | Description
+|-----|-----|-----
+| `admin` | 4 | Full system access, user management, all modules
+| `manager` | 3 | All operational modules, can view all data
+| `marketing_agent` | 2 | Marketing, sales, products modules
+| `contractor` | 2 | Logistics - manages riders, assigns deliveries
+| `rider` | 1 | Logistics - sees only their assigned deliveries
+
+
+### **Module Access by Role**
+
+```plaintext
+admin: facebook-ads, product-master, settings, orders, admin, logistics, sales, clients
+manager: facebook-ads, product-master, orders, logistics, sales, clients
+marketing_agent: facebook-ads, product-master, sales, clients
+contractor: logistics, orders (own riders only)
+rider: logistics (own deliveries only)
+```
+
+### **Login Behavior**
+
+- **Admin/Manager/Marketing Agent:** See full dashboard at `/` with module cards
+- **Contractor:** Auto-redirect to `/logistics/contractor-dashboard` (mobile-first UI)
+- **Rider:** Auto-redirect to `/logistics/rider-dashboard` (mobile-first UI)

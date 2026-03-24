@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 400px;
+      max-height: 600px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+      color: #fff;
+      overflow-y: auto;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo {
+      width: 36px;
+      height: 36px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .header h1 { font-size: 16px; font-weight: 700; }
+    .header .sub { font-size: 10px; opacity: 0.8; }
+    
+    .content { padding: 14px; }
+    
+    .login-msg {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+    .login-msg p { color: #fca5a5; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
+    .login-btn {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .login-btn:hover { opacity: 0.9; }
+    
+    .form-group { margin-bottom: 12px; }
+    .form-group label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+    .form-group label .req { color: #f97316; }
+    
+    .input-row { display: flex; gap: 8px; }
+    .input-row .form-group { flex: 1; margin-bottom: 0; }
+    
+    input, select, textarea {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: all 0.15s;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: #f97316;
+      background: rgba(249, 115, 22, 0.05);
+    }
+    input::placeholder, textarea::placeholder { color: #555; }
+    select { cursor: pointer; }
+    select option { background: #1a1a2e; color: #fff; }
+    textarea { resize: none; height: 50px; }
+    
+    .input-wrap { position: relative; }
+    .input-wrap input { padding-right: 55px; }
+    .paste-btn {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(249, 115, 22, 0.3);
+      border: none;
+      border-radius: 5px;
+      padding: 5px 8px;
+      color: #f97316;
+      font-size: 9px;
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    .paste-btn:hover { background: rgba(249, 115, 22, 0.5); }
+    
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #f97316;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin: 16px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(249, 115, 22, 0.2);
+    }
+    
+    .products-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      max-height: 140px;
+      overflow-y: auto;
+      padding: 2px;
+    }
+    .product-btn {
+      position: relative;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .product-btn:hover {
+      background: rgba(249, 115, 22, 0.15);
+      border-color: #f97316;
+    }
+    .product-btn.selected {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      border-color: #f97316;
+    }
+    .product-btn .qty-badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      min-width: 16px;
+      height: 16px;
+      background: #10b981;
+      border-radius: 8px;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+    }
+    .product-btn .price { font-size: 9px; opacity: 0.7; display: block; margin-top: 2px; }
+    
+    .cart-summary {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .cart-summary .items { color: #6ee7b7; }
+    .cart-summary .total { color: #10b981; font-weight: 700; }
+    
+    .submit-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 14px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.15s;
+    }
+    .submit-btn:hover { transform: scale(1.02); box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3); }
+    .submit-btn:active { transform: scale(0.98); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    
+    .success-msg {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+    .success-msg .checkmark { font-size: 48px; margin-bottom: 12px; }
+    .success-msg h3 { color: #10b981; margin-bottom: 8px; font-size: 16px; }
+    .success-msg p { color: #6ee7b7; font-size: 12px; margin-bottom: 16px; }
+    .success-msg .new-order-btn {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #10b981;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    
+    .error-msg {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      padding: 10px;
+      color: #fca5a5;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 50px 20px;
+      color: #888;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(249, 115, 22, 0.2);
+      border-top-color: #f97316;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    .user-info {
+      background: rgba(139, 92, 246, 0.1);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #a5b4fc;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .user-info .dot {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">A</div>
+    <div>
+      <h1>Akmez Quick Order</h1>
+      <div class="sub">Create orders from anywhere</div>
+    </div>
+  </div>
+  
+  <div class="content" id="content">
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>Connecting to Akmez...</p>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
