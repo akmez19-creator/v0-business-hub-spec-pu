@@ -194,16 +194,43 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setError('')
     setLocationMode('gps')
 
-    navigator.geolocation.getCurrentPosition(
+    // Use watchPosition to get progressively more accurate readings
+    let bestAccuracy = Infinity
+    let bestPosition: { lat: number; lng: number } | null = null
+    let attempts = 0
+    const maxAttempts = 5
+    
+    const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        const { latitude, longitude } = position.coords
-        const url = `https://www.google.com/maps?q=${latitude},${longitude}`
-        setLocationUrl(url)
-        setRawCoords({ lat: latitude, lng: longitude })
-        setGettingLocation(false)
-        checkRegionDistance(latitude, longitude)
+        attempts++
+        const { latitude, longitude, accuracy } = position.coords
+        
+        // Keep the most accurate reading
+        if (accuracy < bestAccuracy) {
+          bestAccuracy = accuracy
+          bestPosition = { lat: latitude, lng: longitude }
+        }
+        
+        // If we have good accuracy (under 20m) or max attempts, use it
+        if (accuracy <= 20 || attempts >= maxAttempts) {
+          navigator.geolocation.clearWatch(watchId)
+          
+          if (bestPosition) {
+            const url = `https://www.google.com/maps?q=${bestPosition.lat},${bestPosition.lng}`
+            setLocationUrl(url)
+            setRawCoords(bestPosition)
+            checkRegionDistance(bestPosition.lat, bestPosition.lng)
+            
+            // Warn if accuracy is still low
+            if (bestAccuracy > 50) {
+              setError(`Location accuracy: ~${Math.round(bestAccuracy)}m. For better accuracy, go outside or use "Map Pin".`)
+            }
+          }
+          setGettingLocation(false)
+        }
       },
       (err) => {
+        navigator.geolocation.clearWatch(watchId)
         setGettingLocation(false)
         setLocationMode('none')
         if (err.code === 1) {
@@ -212,8 +239,27 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           setError('Could not get your location. Please try again or pin on map.')
         }
       },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { 
+        enableHighAccuracy: true, 
+        timeout: 20000, 
+        maximumAge: 0 // Force fresh location, no cache
+      }
     )
+    
+    // Timeout fallback - use best position we got after 15 seconds
+    setTimeout(() => {
+      if (bestPosition && gettingLocation) {
+        navigator.geolocation.clearWatch(watchId)
+        const url = `https://www.google.com/maps?q=${bestPosition.lat},${bestPosition.lng}`
+        setLocationUrl(url)
+        setRawCoords(bestPosition)
+        checkRegionDistance(bestPosition.lat, bestPosition.lng)
+        setGettingLocation(false)
+        if (bestAccuracy > 50) {
+          setError(`Location accuracy: ~${Math.round(bestAccuracy)}m. Consider using "Map Pin" for more precision.`)
+        }
+      }
+    }, 15000)
   }
 
   function clearLocation() {
