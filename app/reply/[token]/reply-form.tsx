@@ -52,9 +52,6 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   const [outsideRegion, setOutsideRegion] = useState(false)
   const [showLocationUpdate, setShowLocationUpdate] = useState(false)
   const [pinMoved, setPinMoved] = useState(false)
-  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null)
-  const [showGpsConfirm, setShowGpsConfirm] = useState(false)
-  const [pendingGpsCoords, setPendingGpsCoords] = useState<{ lat: number; lng: number } | null>(null)
 
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<any>(null)
@@ -197,38 +194,16 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setError('')
     setLocationMode('gps')
 
-    // Use watchPosition to get progressively more accurate readings
-    let bestAccuracy = Infinity
-    let bestPosition: { lat: number; lng: number } | null = null
-    let attempts = 0
-    const maxAttempts = 5
-    
-    const watchId = navigator.geolocation.watchPosition(
+    navigator.geolocation.getCurrentPosition(
       (position) => {
-        attempts++
-        const { latitude, longitude, accuracy } = position.coords
-        
-        // Keep the most accurate reading
-        if (accuracy < bestAccuracy) {
-          bestAccuracy = accuracy
-          bestPosition = { lat: latitude, lng: longitude }
-        }
-        
-        // If we have good accuracy (under 15m) or max attempts, use it
-        if (accuracy <= 15 || attempts >= maxAttempts) {
-          navigator.geolocation.clearWatch(watchId)
-          
-          if (bestPosition) {
-            // Always show confirmation step with accuracy
-            setPendingGpsCoords(bestPosition)
-            setGpsAccuracy(Math.round(bestAccuracy))
-            setShowGpsConfirm(true)
-          }
-          setGettingLocation(false)
-        }
+        const { latitude, longitude } = position.coords
+        const url = `https://www.google.com/maps?q=${latitude},${longitude}`
+        setLocationUrl(url)
+        setRawCoords({ lat: latitude, lng: longitude })
+        setGettingLocation(false)
+        checkRegionDistance(latitude, longitude)
       },
       (err) => {
-        navigator.geolocation.clearWatch(watchId)
         setGettingLocation(false)
         setLocationMode('none')
         if (err.code === 1) {
@@ -237,44 +212,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           setError('Could not get your location. Please try again or pin on map.')
         }
       },
-      { 
-        enableHighAccuracy: true, 
-        timeout: 20000, 
-        maximumAge: 0 // Force fresh location, no cache
-      }
+      { enableHighAccuracy: true, timeout: 15000 }
     )
-    
-    // Timeout fallback - use best position we got after 15 seconds
-    setTimeout(() => {
-      if (bestPosition && gettingLocation) {
-        navigator.geolocation.clearWatch(watchId)
-        setPendingGpsCoords(bestPosition)
-        setGpsAccuracy(Math.round(bestAccuracy))
-        setShowGpsConfirm(true)
-        setGettingLocation(false)
-      }
-    }, 15000)
-  }
-  
-  // Confirm GPS location
-  function confirmGpsLocation() {
-    if (pendingGpsCoords) {
-      const url = `https://www.google.com/maps?q=${pendingGpsCoords.lat},${pendingGpsCoords.lng}`
-      setLocationUrl(url)
-      setRawCoords(pendingGpsCoords)
-      checkRegionDistance(pendingGpsCoords.lat, pendingGpsCoords.lng)
-    }
-    setShowGpsConfirm(false)
-    setPendingGpsCoords(null)
-    setGpsAccuracy(null)
-  }
-  
-  // Switch from GPS to Map Pin
-  function switchToMapPin() {
-    setShowGpsConfirm(false)
-    setPendingGpsCoords(null)
-    setGpsAccuracy(null)
-    setLocationMode('pin')
   }
 
   function clearLocation() {
@@ -341,151 +280,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     )
   }
 
-  // GPS Confirmation Modal with accuracy circle
-  const GpsConfirmModal = () => {
-    if (!showGpsConfirm || !pendingGpsCoords) return null
-    
-    // Accuracy thresholds: <35m = good (green), 35-75m = okay (amber), >75m = poor (red)
-    const isAccurate = (gpsAccuracy || 0) <= 35
-    const isOkay = (gpsAccuracy || 0) <= 75
-    const accuracyColor = isAccurate ? 'emerald' : isOkay ? 'amber' : 'red'
-    
-    return createPortal(
-      <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4">
-        <div className="bg-card border border-border rounded-2xl w-full max-w-sm overflow-hidden">
-          {/* Map with accuracy circle */}
-          <div className="relative h-48 bg-muted">
-            <div 
-              ref={(node) => {
-                if (!node || !mapboxToken) return
-                // Check if map already exists
-                if (node.querySelector('canvas')) return
-                
-                import('mapbox-gl').then(mapboxgl => {
-                  mapboxgl.default.accessToken = mapboxToken
-                  const map = new mapboxgl.default.Map({
-                    container: node,
-                    style: 'mapbox://styles/mapbox/dark-v11',
-                    center: [pendingGpsCoords.lng, pendingGpsCoords.lat],
-                    zoom: 17,
-                    interactive: false
-                  })
-                  
-                  map.on('load', () => {
-                    // Add accuracy circle
-                    map.addSource('accuracy', {
-                      type: 'geojson',
-                      data: {
-                        type: 'Feature',
-                        properties: {},
-                        geometry: {
-                          type: 'Point',
-                          coordinates: [pendingGpsCoords.lng, pendingGpsCoords.lat]
-                        }
-                      }
-                    })
-                    
-                    // Circle layer showing accuracy radius
-                    map.addLayer({
-                      id: 'accuracy-circle',
-                      type: 'circle',
-                      source: 'accuracy',
-                      paint: {
-                        'circle-radius': {
-                          stops: [[0, 0], [20, (gpsAccuracy || 20) * 2]]
-                        },
-                        'circle-color': accuracyColor === 'emerald' ? '#10b981' : accuracyColor === 'amber' ? '#f59e0b' : '#ef4444',
-                        'circle-opacity': 0.2,
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': accuracyColor === 'emerald' ? '#10b981' : accuracyColor === 'amber' ? '#f59e0b' : '#ef4444'
-                      }
-                    })
-                    
-                    // Center point
-                    map.addLayer({
-                      id: 'center-point',
-                      type: 'circle',
-                      source: 'accuracy',
-                      paint: {
-                        'circle-radius': 8,
-                        'circle-color': '#3b82f6',
-                        'circle-stroke-width': 3,
-                        'circle-stroke-color': '#ffffff'
-                      }
-                    })
-                  })
-                })
-              }}
-              className="w-full h-full"
-            />
-            {/* Accuracy badge */}
-            <div className={`absolute top-2 left-2 px-2 py-1 rounded-lg text-xs font-bold ${
-              accuracyColor === 'emerald' ? 'bg-emerald-500/90 text-white' : 
-              accuracyColor === 'amber' ? 'bg-amber-500/90 text-white' : 
-              'bg-red-500/90 text-white'
-            }`}>
-              ~{gpsAccuracy}m accuracy
-            </div>
-          </div>
-          
-          {/* Content */}
-          <div className="p-4 space-y-3">
-            <div className="text-center">
-              <h3 className="font-bold text-foreground">
-                {isAccurate ? 'Location looks good!' : isOkay ? 'Check your location' : 'Location may be off'}
-              </h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                {isAccurate 
-                  ? 'Your GPS location is accurate. The blue dot shows where the rider will go.'
-                  : isOkay
-                  ? `GPS accuracy is ~${gpsAccuracy}m. Check if the blue dot is at your location.`
-                  : `GPS accuracy is ~${gpsAccuracy}m. Consider using "Map Pin" for better precision.`}
-              </p>
-            </div>
-            
-            {/* Buttons */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={switchToMapPin}
-                className="flex flex-col items-center gap-1 p-3 rounded-xl bg-muted border border-border hover:border-primary/50 transition-all"
-              >
-                <Crosshair className="w-5 h-5 text-primary" />
-                <span className="text-xs font-medium">Use Map Pin</span>
-                <span className="text-[10px] text-muted-foreground">Place manually</span>
-              </button>
-              <button
-                onClick={confirmGpsLocation}
-                className={`flex flex-col items-center gap-1 p-3 rounded-xl border transition-all ${
-                  isAccurate 
-                    ? 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/50' 
-                    : isOkay
-                    ? 'bg-amber-500/10 border-amber-500/30 hover:border-amber-500/50'
-                    : 'bg-red-500/10 border-red-500/30 hover:border-red-500/50'
-                }`}
-              >
-                <CheckCircle className={`w-5 h-5 ${isAccurate ? 'text-emerald-500' : isOkay ? 'text-amber-500' : 'text-red-500'}`} />
-                <span className="text-xs font-medium">{isAccurate ? 'Confirm' : 'Use This'}</span>
-                <span className="text-[10px] text-muted-foreground">{isAccurate ? 'Recommended' : 'Looks correct'}</span>
-              </button>
-            </div>
-            
-            {/* Cancel */}
-            <button
-              onClick={() => { setShowGpsConfirm(false); setPendingGpsCoords(null); setLocationMode('none') }}
-              className="w-full text-xs text-muted-foreground hover:text-foreground py-2"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>,
-      document.body
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background to-card/30">
-      <GpsConfirmModal />
       <div className="max-w-md mx-auto px-3 py-4 space-y-3">
         
         {/* Compact Header */}
