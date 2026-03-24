@@ -202,27 +202,40 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setLocationMode('gps')
 
     console.log('[v0] Getting GPS location...')
+    
+    const handlePosition = (position: GeolocationPosition) => {
+      const { latitude, longitude, accuracy } = position.coords
+      console.log('[v0] GPS success:', latitude, longitude, 'accuracy:', accuracy)
+      const url = `https://www.google.com/maps?q=${latitude},${longitude}`
+      setLocationUrl(url)
+      setRawCoords({ lat: latitude, lng: longitude })
+      setGettingLocation(false)
+      checkRegionDistance(latitude, longitude)
+    }
+    
+    const handleError = (err: GeolocationPositionError) => {
+      console.log('[v0] GPS error:', err.code, err.message)
+      setGettingLocation(false)
+      setLocationMode('none')
+      if (err.code === 1) {
+        setError('Location access denied. Please enable location in your browser settings.')
+      } else {
+        setError('Could not get your location. Please try again or pin on map.')
+      }
+    }
+    
+    // Try high accuracy first (GPS), fallback to low accuracy (WiFi/cell) if it fails
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords
-        console.log('[v0] GPS success:', latitude, longitude)
-        const url = `https://www.google.com/maps?q=${latitude},${longitude}`
-        setLocationUrl(url)
-        setRawCoords({ lat: latitude, lng: longitude })
-        setGettingLocation(false)
-        checkRegionDistance(latitude, longitude)
-      },
+      handlePosition,
       (err) => {
-        console.log('[v0] GPS error:', err.code, err.message)
-        setGettingLocation(false)
-        setLocationMode('none')
-        if (err.code === 1) {
-          setError('Location access denied. Please enable location in your browser settings.')
-        } else {
-          setError('Could not get your location. Please try again or pin on map.')
-        }
+        console.log('[v0] High accuracy failed, trying low accuracy...')
+        navigator.geolocation.getCurrentPosition(
+          handlePosition,
+          handleError,
+          { enableHighAccuracy: false, timeout: 10000 }
+        )
       },
-      { enableHighAccuracy: false, timeout: 15000 }
+      { enableHighAccuracy: true, timeout: 10000 }
     )
   }
 
