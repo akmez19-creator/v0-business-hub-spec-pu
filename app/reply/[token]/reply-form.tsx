@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { submitClientReply } from '@/lib/delivery-actions'
-import { MapPin, Send, CheckCircle, Package, Navigation, Loader2, FileText, Crosshair, AlertTriangle, Phone, MessageSquare, Clock, X } from 'lucide-react'
+import { MapPin, Send, CheckCircle, Package, Navigation, Loader2, FileText, Crosshair, AlertTriangle, Phone, MessageSquare, Clock, X, ChevronRight } from 'lucide-react'
 import { createPortal } from 'react-dom'
 
 interface DeliveryInfo {
@@ -58,7 +58,14 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   const markerRef = useRef<any>(null)
 
   const hasExistingReply = !!delivery.client_response
-  const isDelivered = ['delivered', 'nwd', 'cms'].includes(delivery.status)
+  // Status meanings:
+  // - delivered: Successfully completed delivery
+  // - nwd: Next Working Day - client requested reschedule, NOT delivered
+  // - cms: Customer Service Center - client needs CS attention, NOT delivered
+  const isDelivered = delivery.status === 'delivered'
+  const isNWD = delivery.status === 'nwd'
+  const isCMS = delivery.status === 'cms'
+  const isFailed = isNWD || isCMS
 
   // VAT calculation (prices are VAT inclusive)
   const vatRate = company?.vat_rate || 15
@@ -241,18 +248,29 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
 
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="text-center space-y-4 max-w-sm">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto">
-            <CheckCircle className="w-10 h-10 text-emerald-500" />
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="text-center space-y-6 max-w-sm">
+          {/* Success Icon with 3D effect */}
+          <div className="relative mx-auto w-24 h-24">
+            <div className="absolute inset-0 rounded-full bg-emerald-500/20 blur-xl animate-pulse" />
+            <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-[0_8px_32px_rgba(16,185,129,0.4),inset_0_2px_0_rgba(255,255,255,0.2)]">
+              <CheckCircle className="w-12 h-12 text-white" />
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Reply Sent!</h1>
-          <p className="text-muted-foreground">
-            Thank you, {delivery.customer_name}. Your delivery agent has been notified.
-          </p>
-          {locationUrl && <p className="text-sm text-emerald-400">Your location has been shared.</p>}
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-foreground">Reply Sent!</h1>
+            <p className="text-muted-foreground">
+              Thank you, <span className="text-foreground font-medium">{delivery.customer_name}</span>. Your delivery agent has been notified.
+            </p>
+          </div>
+          {locationUrl && (
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">
+              <Navigation className="w-4 h-4" />
+              <span>Location shared successfully</span>
+            </div>
+          )}
           {outsideRegion && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
               <p className="text-xs text-amber-400">Note: The location you shared appears to be outside your delivery area. The rider may call you to confirm.</p>
             </div>
           )}
@@ -262,410 +280,509 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   }
 
   return (
-    <div className="max-w-md mx-auto p-4 pt-6 space-y-4">
-      {/* Header */}
-      <div className="text-center space-y-1">
-        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
-          <Package className="w-7 h-7 text-primary" />
-        </div>
-        {company && (
-          <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{company.company_name}</p>
-        )}
-        <h1 className="text-xl font-bold text-foreground">
-          {isDelivered ? 'Delivery Complete' : 'Delivery Notification'}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {isDelivered
-            ? <>Hi <span className="font-semibold text-foreground">{delivery.customer_name}</span>, your order has been delivered. Thank you!</>
-            : <>Hi <span className="font-semibold text-foreground">{delivery.customer_name}</span>, you have a delivery coming your way.</>
-          }
-        </p>
-      </div>
-
-      {/* Location Section - TOP PRIORITY, only before delivery */}
-      {!isDelivered && (
-        <div className="relative rounded-2xl overflow-hidden">
-          {/* 3D Glass card effect */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 via-cyan-500/5 to-blue-600/10 rounded-2xl" />
-          <div className="absolute inset-0 rounded-2xl shadow-[inset_0_1px_1px_rgba(255,255,255,0.1),0_4px_24px_rgba(59,130,246,0.12),0_1px_2px_rgba(0,0,0,0.15)]" />
-          <div className="relative p-4 space-y-3 border border-blue-500/20 rounded-2xl backdrop-blur-sm">
-
-            {/* Already has location */}
-            {hasExistingReply && delivery.latitude && !showLocationUpdate ? (
-              <>
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 shadow-[0_2px_12px_rgba(16,185,129,0.1)]">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center shadow-[0_0_16px_rgba(16,185,129,0.2)]">
-                    <CheckCircle className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-emerald-400">Location shared</p>
-                    <p className="text-[10px] text-muted-foreground">Your location has been sent to the rider.</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowLocationUpdate(true)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-background/50 border border-border/50 text-muted-foreground hover:text-foreground hover:border-blue-500/30 transition-all"
-                >
-                  <MapPin className="w-4 h-4" />
-                  <span className="text-xs font-medium">Update Location</span>
-                </button>
-              </>
-            ) : (
-              <>
-                {/* Heading with glow icon */}
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-full bg-blue-500/15 flex items-center justify-center shadow-[0_0_20px_rgba(59,130,246,0.25),inset_0_1px_1px_rgba(255,255,255,0.1)]">
-                    <Navigation className="w-5 h-5 text-blue-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-bold text-foreground">
-                      {showLocationUpdate ? 'Update Your Location' : 'Share Your Location'}
-                    </h2>
-                    <p className="text-[11px] text-muted-foreground">
-                      {showLocationUpdate ? 'Pick a new location to update.' : 'Help the driver find you faster.'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Location already captured */}
-                {locationUrl ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 shadow-[0_2px_12px_rgba(59,130,246,0.08)]">
-                      <Navigation className="w-5 h-5 text-blue-400 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-blue-400">
-                          Location {rawCoords ? '(Pinned)' : locationMode === 'gps' ? '(GPS)' : '(Link)'}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground truncate">{locationUrl}</p>
-                      </div>
-                      <button onClick={clearLocation} className="text-[10px] px-2 py-1 rounded-lg bg-background/50 border border-border/50 text-muted-foreground hover:text-foreground transition-colors">
-                        Change
-                      </button>
-                    </div>
-                    {outsideRegion && (
-                      <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 shadow-[0_2px_12px_rgba(245,158,11,0.1)]">
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-xs font-medium text-amber-400">Location appears outside your area</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            This seems far from {delivery.locality || 'your delivery area'}. The rider may call to confirm.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                ) : locationMode === 'pin' ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
-                      <Crosshair className="w-5 h-5 text-cyan-400 shrink-0 animate-pulse" />
-                      <p className="text-xs text-cyan-400 font-medium flex-1">Pinning location on map...</p>
-                      <button onClick={clearLocation} className="text-[10px] px-2 py-1 rounded-lg bg-background/50 border border-border/50 text-muted-foreground hover:text-foreground transition-colors">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-
-                ) : (
-                  /* 3 location option buttons */
-                  <div className="space-y-2">
-                    {/* GPS - Primary action */}
-                    <button
-                      onClick={shareGPS}
-                      disabled={gettingLocation}
-                      className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-blue-500/10 border border-blue-500/25 text-blue-400 hover:bg-blue-500/15 transition-all disabled:opacity-50 shadow-[0_2px_12px_rgba(59,130,246,0.08),inset_0_1px_1px_rgba(255,255,255,0.05)]"
-                    >
-                      <div className="w-9 h-9 rounded-full bg-blue-500/15 flex items-center justify-center shadow-[0_0_12px_rgba(59,130,246,0.2)]">
-                        {gettingLocation
-                          ? <Loader2 className="w-4 h-4 animate-spin" />
-                          : <Navigation className="w-4 h-4" />}
-                      </div>
-                      <div className="text-left">
-                        <span className="text-sm font-semibold block">{gettingLocation ? 'Getting location...' : 'Send Current Location'}</span>
-                        <span className="text-[10px] text-blue-400/60">Uses your GPS - most accurate</span>
-                      </div>
-                    </button>
-                    {/* Pin on map */}
-                    {mapboxToken && (
-                      <button
-                        onClick={() => setLocationMode('pin')}
-                        className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 hover:bg-cyan-500/15 transition-all shadow-[0_2px_12px_rgba(6,182,212,0.08),inset_0_1px_1px_rgba(255,255,255,0.05)]"
-                      >
-                        <div className="w-9 h-9 rounded-full bg-cyan-500/15 flex items-center justify-center shadow-[0_0_12px_rgba(6,182,212,0.2)]">
-                          <Crosshair className="w-4 h-4" />
-                        </div>
-                        <div className="text-left">
-                          <span className="text-sm font-semibold block">Pin on Map</span>
-                          <span className="text-[10px] text-cyan-400/60">Tap to place a pin on the map</span>
-                        </div>
-                      </button>
-                    )}
-                    {/* Paste link */}
-                    <button
-                      onClick={() => {
-                        const url = prompt('Paste a Google Maps link or coordinates:')
-                        if (url && url.trim()) {
-                          setLocationUrl(url.trim())
-                          setLocationMode('manual')
-                          const qMatch = url.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/)
-                          const atMatch = url.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/)
-                          const match = qMatch || atMatch
-                          if (match) {
-                            const coords = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) }
-                            setRawCoords(coords)
-                            checkRegionDistance(coords.lat, coords.lng)
-                          }
-                        }
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-background/50 border border-border/50 text-muted-foreground hover:text-foreground hover:border-border transition-all"
-                    >
-                      <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center">
-                        <MapPin className="w-4 h-4" />
-                      </div>
-                      <div className="text-left">
-                        <span className="text-xs font-medium block">Paste a Location Link</span>
-                        <span className="text-[10px] opacity-50">Share from Google Maps</span>
-                      </div>
-                    </button>
-                  </div>
-                )}
-
-                {showLocationUpdate && (
-                  <button
-                    onClick={() => { setShowLocationUpdate(false); clearLocation() }}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Cancel update
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Delivery Info Card */}
-      <div className="rounded-xl bg-card border border-border p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground uppercase tracking-wide">Your Order</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowInvoice(!showInvoice)} className="text-xs text-primary hover:underline flex items-center gap-1">
-              <FileText className="w-3 h-3" />
-              {showInvoice ? 'Hide' : 'View'} {isDelivered ? 'Invoice' : 'Proforma'}
-            </button>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium capitalize">
-              {delivery.status.replace('_', ' ')}
-            </span>
-          </div>
-        </div>
-        {delivery.products && (
-          <div>
-            <p className="text-xs text-muted-foreground">Products</p>
-            <p className="text-sm font-medium text-foreground">{delivery.products}</p>
-          </div>
-        )}
-        <div className="flex gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground">Qty</p>
-            <p className="text-sm font-semibold text-foreground">{delivery.qty}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Amount</p>
-            <p className="text-sm font-semibold text-foreground">Rs {delivery.amount.toLocaleString()}</p>
-          </div>
-          {delivery.locality && (
-            <div>
-              <p className="text-xs text-muted-foreground">Area</p>
-              <p className="text-sm font-semibold text-foreground">{delivery.locality}</p>
+    <div className="min-h-screen bg-gradient-to-b from-background via-background to-card/30">
+      <div className="max-w-md mx-auto px-4 py-8 space-y-6">
+        
+        {/* Header with 3D Logo */}
+        <header className="text-center space-y-4">
+          {/* 3D Package Icon */}
+          <div className="relative mx-auto w-20 h-20">
+            <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl" />
+            <div 
+              className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/90 to-primary flex items-center justify-center shadow-[0_12px_40px_rgba(255,150,50,0.3),inset_0_2px_0_rgba(255,255,255,0.15)]"
+              style={{ transform: 'perspective(500px) rotateX(5deg) rotateY(-5deg)' }}
+            >
+              <Package className="w-10 h-10 text-primary-foreground" />
             </div>
-          )}
-        </div>
-        {delivery.delivery_notes && (
-          <div className="pt-2 border-t border-border/50">
-            <p className="text-xs text-amber-500">Note: {delivery.delivery_notes}</p>
           </div>
-        )}
-      </div>
-
-      {/* Invoice (collapsible) */}
-      {showInvoice && (
-        <div className="rounded-xl bg-card border border-border p-4 space-y-3">
-          {/* Company header */}
+          
           {company && (
-            <div className="text-center border-b border-border pb-3 space-y-0.5">
-              <p className="text-sm font-bold text-foreground">{company.company_name}</p>
-              {company.company_address && <p className="text-[10px] text-muted-foreground">{company.company_address}</p>}
-              <div className="flex items-center justify-center gap-3 text-[10px] text-muted-foreground">
-                {company.brn && <span>BRN: {company.brn}</span>}
-                {company.vat_number && <span>VAT: {company.vat_number}</span>}
-              </div>
-              {company.phone && <p className="text-[10px] text-muted-foreground">Tel: {company.phone}</p>}
-            </div>
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-[0.2em]">
+              {company.company_name}
+            </p>
           )}
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-foreground uppercase">
-              {isDelivered ? 'Invoice' : 'Proforma Invoice'}
-            </span>
-            <span className="text-[10px] text-muted-foreground">{new Date().toLocaleDateString()}</span>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold text-foreground">
+              {isDelivered ? 'Delivery Complete' : 
+               isNWD ? 'Rescheduled - Next Working Day' : 
+               isCMS ? 'Under Customer Service Care' : 
+               'Delivery Notification'}
+            </h1>
+            <p className="text-muted-foreground">
+              Hi <span className="text-foreground font-semibold">{delivery.customer_name}</span>,
+              {isDelivered
+                ? ' your order has been delivered. Thank you!'
+                : isNWD
+                ? ' your delivery has been rescheduled. We will attempt delivery on the next working day.'
+                : isCMS
+                ? ' your order is being handled by our customer service team. They will contact you shortly.'
+                : ' you have a delivery coming your way.'}
+            </p>
           </div>
+        </header>
 
-          <div className="text-xs text-muted-foreground">
-            <p>Customer: <span className="text-foreground font-medium">{delivery.customer_name}</span></p>
-            {delivery.locality && <p>Locality: <span className="text-foreground">{delivery.locality}</span></p>}
-          </div>
-
-          {/* Line items */}
-          <div className="border border-border rounded-lg overflow-hidden">
-            <div className="grid grid-cols-12 gap-1 px-3 py-1.5 bg-muted/50 text-[10px] font-bold text-muted-foreground uppercase">
-              <div className="col-span-6">Item</div>
-              <div className="col-span-2 text-center">Qty</div>
-              <div className="col-span-4 text-right">Amount</div>
+        {/* NWD Status Banner */}
+        {isNWD && (
+          <div className="flex items-center gap-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-lg shrink-0">
+              <Clock className="w-6 h-6 text-white" />
             </div>
-            <div className="grid grid-cols-12 gap-1 px-3 py-2 text-xs">
-              <div className="col-span-6 text-foreground">{delivery.products || 'Delivery'}</div>
-              <div className="col-span-2 text-center text-muted-foreground">{delivery.qty}</div>
-              <div className="col-span-4 text-right text-foreground font-medium">Rs {totalInclVat.toLocaleString()}</div>
+            <div className="flex-1">
+              <p className="font-semibold text-amber-500">NWD - Next Working Day</p>
+              <p className="text-xs text-muted-foreground">Your delivery will be reattempted. Please update your location or add any instructions below.</p>
             </div>
           </div>
+        )}
 
-          {/* Totals */}
-          <div className="space-y-1 pt-2 border-t border-border">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
-              <span className="text-foreground">Rs {totalExclVat.toFixed(2)}</span>
+        {/* CMS Status Banner */}
+        {isCMS && (
+          <div className="flex items-center gap-4 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center shadow-lg shrink-0">
+              <Phone className="w-6 h-6 text-white" />
             </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">VAT ({vatRate}%)</span>
-              <span className="text-foreground">Rs {vatAmount.toFixed(2)}</span>
+            <div className="flex-1">
+              <p className="font-semibold text-blue-500">CMS - Customer Service</p>
+              <p className="text-xs text-muted-foreground">Our customer service team is handling your order. They will contact you soon.</p>
             </div>
-            <div className="flex justify-between text-xs pt-1 border-t border-border">
-              <span className="text-muted-foreground">Total (incl. VAT)</span>
-              <span className="text-foreground">Rs {totalInclVat.toLocaleString()}</span>
-            </div>
-            {isDelivered ? (
-              <div className="flex justify-between items-center pt-2 mt-1 border-t-2 border-emerald-500/30 bg-emerald-500/5 -mx-4 px-4 py-2 rounded-b-lg">
-                <span className="text-sm font-bold text-emerald-500 uppercase">Paid</span>
-                <span className="text-lg font-black text-emerald-500">Rs {totalInclVat.toLocaleString()}</span>
+          </div>
+        )}
+
+        {/* Location Section - Modern Card with 3D depth */}
+        {/* Show for pending deliveries AND for NWD/CMS (since they need to reschedule) */}
+        {(!isDelivered || isFailed) && (
+          <section className="relative">
+            {/* 3D Card Effect */}
+            <div 
+              className="relative rounded-3xl overflow-hidden"
+              style={{ 
+                transform: 'perspective(1000px) rotateX(1deg)',
+                transformStyle: 'preserve-3d'
+              }}
+            >
+              {/* Glow effect */}
+              <div className="absolute -inset-px rounded-3xl bg-gradient-to-br from-accent/30 via-transparent to-primary/20 opacity-50" />
+              
+              {/* Main card */}
+              <div className="relative bg-card/80 backdrop-blur-xl border border-border/50 rounded-3xl p-5 space-y-4">
+                
+                {/* Already has location */}
+                {hasExistingReply && delivery.latitude && !showLocationUpdate ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-4 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg">
+                        <CheckCircle className="w-6 h-6 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-emerald-400">Location Shared</p>
+                        <p className="text-xs text-muted-foreground">Your location has been sent to the rider</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowLocationUpdate(true)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-muted/50 border border-border text-muted-foreground hover:text-foreground hover:border-accent/30 transition-all"
+                    >
+                      <MapPin className="w-4 h-4" />
+                      <span className="text-sm font-medium">Update Location</span>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Header */}
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-accent/80 to-accent flex items-center justify-center shadow-[0_4px_20px_rgba(0,200,255,0.25)]">
+                        <Navigation className="w-6 h-6 text-accent-foreground" />
+                      </div>
+                      <div>
+                        <h2 className="font-bold text-foreground">
+                          {showLocationUpdate ? 'Update Your Location' : 'Share Your Location'}
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                          {showLocationUpdate ? 'Pick a new location to update' : 'Help the driver find you faster'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Location captured */}
+                    {locationUrl ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3 p-4 rounded-2xl bg-accent/10 border border-accent/20">
+                          <Navigation className="w-5 h-5 text-accent shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-accent">
+                              Location {locationMode === 'gps' ? '(GPS)' : locationMode === 'pin' ? '(Pinned)' : '(Link)'}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground truncate">{locationUrl}</p>
+                          </div>
+                          <button 
+                            onClick={clearLocation} 
+                            className="px-3 py-1.5 rounded-lg bg-background/80 border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Change
+                          </button>
+                        </div>
+                        {outsideRegion && (
+                          <div className="flex items-start gap-3 p-4 rounded-2xl bg-warning/10 border border-warning/30">
+                            <AlertTriangle className="w-5 h-5 text-warning shrink-0" />
+                            <div>
+                              <p className="text-sm font-medium text-warning">Outside delivery area</p>
+                              <p className="text-xs text-muted-foreground">
+                                This location seems far from {delivery.locality || 'your area'}. The rider may call to confirm.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                    ) : locationMode === 'pin' ? (
+                      <div className="flex items-center gap-3 p-4 rounded-2xl bg-cyan-500/10 border border-cyan-500/20">
+                        <Crosshair className="w-5 h-5 text-cyan-400 animate-pulse" />
+                        <p className="flex-1 text-sm font-medium text-cyan-400">Pinning location on map...</p>
+                        <button 
+                          onClick={clearLocation} 
+                          className="px-3 py-1.5 rounded-lg bg-background/80 border border-border text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                    ) : (
+                      /* Location Options - Clean 3D buttons */
+                      <div className="space-y-3">
+                        {/* GPS - Primary */}
+                        <button
+                          onClick={shareGPS}
+                          disabled={gettingLocation}
+                          className="group w-full flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/25 hover:border-accent/50 transition-all disabled:opacity-50"
+                        >
+                          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-accent to-cyan-600 flex items-center justify-center shadow-[0_4px_16px_rgba(0,200,255,0.3)] group-hover:shadow-[0_4px_24px_rgba(0,200,255,0.4)] transition-shadow">
+                            {gettingLocation ? (
+                              <Loader2 className="w-5 h-5 text-white animate-spin" />
+                            ) : (
+                              <Navigation className="w-5 h-5 text-white" />
+                            )}
+                          </div>
+                          <div className="flex-1 text-left">
+                            <p className="font-semibold text-accent">
+                              {gettingLocation ? 'Getting location...' : 'Send Current Location'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">Uses your GPS - most accurate</p>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-accent/50 group-hover:text-accent transition-colors" />
+                        </button>
+
+                        {/* Pin on Map */}
+                        {mapboxToken && (
+                          <button
+                            onClick={() => setLocationMode('pin')}
+                            className="group w-full flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 to-cyan-500/5 border border-cyan-500/25 hover:border-cyan-500/50 transition-all"
+                          >
+                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center shadow-[0_4px_16px_rgba(6,182,212,0.3)] group-hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] transition-shadow">
+                              <Crosshair className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 text-left">
+                              <p className="font-semibold text-cyan-400">Pin on Map</p>
+                              <p className="text-xs text-muted-foreground">Tap to place a pin on the map</p>
+                            </div>
+                            <ChevronRight className="w-5 h-5 text-cyan-400/50 group-hover:text-cyan-400 transition-colors" />
+                          </button>
+                        )}
+
+                        {/* Paste Link */}
+                        <button
+                          onClick={() => {
+                            const url = prompt('Paste a Google Maps link or coordinates:')
+                            if (url && url.trim()) {
+                              setLocationUrl(url.trim())
+                              setLocationMode('manual')
+                              const qMatch = url.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/)
+                              const atMatch = url.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/)
+                              const match = qMatch || atMatch
+                              if (match) {
+                                const coords = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) }
+                                setRawCoords(coords)
+                                checkRegionDistance(coords.lat, coords.lng)
+                              }
+                            }
+                          }}
+                          className="group w-full flex items-center gap-4 p-4 rounded-2xl bg-muted/30 border border-border/50 hover:border-border transition-all"
+                        >
+                          <div className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center">
+                            <MapPin className="w-5 h-5 text-muted-foreground" />
+                          </div>
+                          <div className="flex-1 text-left">
+                            <p className="font-medium text-foreground">Paste a Location Link</p>
+                            <p className="text-xs text-muted-foreground">Share from Google Maps</p>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
+                        </button>
+                      </div>
+                    )}
+
+                    {showLocationUpdate && (
+                      <button
+                        onClick={() => { setShowLocationUpdate(false); clearLocation() }}
+                        className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Cancel update
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
-            ) : (
-              <div className="flex justify-between items-center pt-2 mt-1 border-t-2 border-primary/30 bg-primary/5 -mx-4 px-4 py-2 rounded-b-lg">
-                <span className="text-sm font-bold text-primary uppercase">Amount Due</span>
-                <span className="text-lg font-black text-primary">Rs {totalInclVat.toLocaleString()}</span>
+            </div>
+          </section>
+        )}
+
+        {/* Order Details Card */}
+        <section 
+          className="relative rounded-2xl overflow-hidden"
+          style={{ transform: 'perspective(1000px) rotateX(0.5deg)' }}
+        >
+          <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Your Order</span>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setShowInvoice(!showInvoice)} 
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  {showInvoice ? 'Hide' : 'View'} {isDelivered ? 'Invoice' : 'Proforma'}
+                </button>
+                <span className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                  isDelivered ? 'bg-success/10 text-success' :
+                  isNWD ? 'bg-amber-500/10 text-amber-500' :
+                  isCMS ? 'bg-blue-500/10 text-blue-500' :
+                  'bg-primary/10 text-primary'
+                }`}>
+                  {isDelivered ? 'Delivered' : 
+                   isNWD ? 'NWD' : 
+                   isCMS ? 'CMS' : 
+                   delivery.status.replace('_', ' ')}
+                </span>
+              </div>
+            </div>
+
+            {/* Products */}
+            {delivery.products && (
+              <div className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                <p className="text-xs text-muted-foreground mb-1">Products</p>
+                <p className="font-semibold text-foreground">{delivery.products}</p>
+              </div>
+            )}
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3 rounded-xl bg-muted/30 border border-border/50 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Qty</p>
+                <p className="text-lg font-bold text-foreground">{delivery.qty}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Amount</p>
+                <p className="text-lg font-bold text-primary">Rs {delivery.amount.toLocaleString()}</p>
+              </div>
+              {delivery.locality && (
+                <div className="p-3 rounded-xl bg-muted/30 border border-border/50 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Area</p>
+                  <p className="text-sm font-semibold text-foreground truncate">{delivery.locality}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Notes */}
+            {delivery.delivery_notes && (
+              <div className="p-3 rounded-xl bg-warning/5 border border-warning/20">
+                <p className="text-sm text-warning flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {delivery.delivery_notes}
+                </p>
               </div>
             )}
           </div>
+        </section>
 
-          <p className="text-[9px] text-muted-foreground/50 text-center">
-            All prices are VAT inclusive.{!isDelivered && ' This is a proforma invoice and is not a tax invoice.'}
-          </p>
-        </div>
-      )}
+        {/* Invoice (collapsible) */}
+        {showInvoice && (
+          <section className="rounded-2xl bg-card border border-border p-5 space-y-4 animate-fadeIn">
+            {/* Company header */}
+            {company && (
+              <div className="text-center border-b border-border pb-4 space-y-1">
+                <p className="font-bold text-foreground">{company.company_name}</p>
+                {company.company_address && <p className="text-xs text-muted-foreground">{company.company_address}</p>}
+                <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+                  {company.brn && <span>BRN: {company.brn}</span>}
+                  {company.vat_number && <span>VAT: {company.vat_number}</span>}
+                </div>
+                {company.phone && <p className="text-xs text-muted-foreground">Tel: {company.phone}</p>}
+              </div>
+            )}
 
-      {/* Existing reply */}
-      {hasExistingReply && (
-        <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3">
-          <p className="text-xs text-emerald-500 font-medium mb-1">Your previous reply:</p>
-          <p className="text-sm text-foreground">{delivery.client_response}</p>
-        </div>
-      )}
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold text-foreground uppercase">
+                {isDelivered ? 'Invoice' : 'Proforma Invoice'}
+              </span>
+              <span className="text-xs text-muted-foreground">{new Date().toLocaleDateString()}</span>
+            </div>
 
-      {/* Reply Text - only before delivery */}
-      {!isDelivered && (
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            {hasExistingReply ? 'Update Your Reply' : 'Your Reply'}
-          </label>
-          <textarea
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            placeholder={hasExistingReply ? "Update your message to the rider..." : "Type your message... e.g. I will be home at 2pm, leave it at the gate..."}
-            rows={3}
-            className="w-full px-3 py-2.5 rounded-xl bg-muted border border-border text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-          />
-        </div>
-      )}
+            <div className="text-sm text-muted-foreground">
+              <p>Customer: <span className="text-foreground font-medium">{delivery.customer_name}</span></p>
+              {delivery.locality && <p>Locality: <span className="text-foreground">{delivery.locality}</span></p>}
+            </div>
 
+            {/* Line items */}
+            <div className="border border-border rounded-xl overflow-hidden">
+              <div className="grid grid-cols-12 gap-1 px-4 py-2 bg-muted/50 text-xs font-bold text-muted-foreground uppercase">
+                <div className="col-span-6">Item</div>
+                <div className="col-span-2 text-center">Qty</div>
+                <div className="col-span-4 text-right">Amount</div>
+              </div>
+              <div className="grid grid-cols-12 gap-1 px-4 py-3 text-sm">
+                <div className="col-span-6 text-foreground">{delivery.products || 'Delivery'}</div>
+                <div className="col-span-2 text-center text-muted-foreground">{delivery.qty}</div>
+                <div className="col-span-4 text-right text-foreground font-medium">Rs {totalInclVat.toLocaleString()}</div>
+              </div>
+            </div>
 
+            {/* Totals */}
+            <div className="space-y-2 pt-3 border-t border-border">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
+                <span className="text-foreground">Rs {totalExclVat.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">VAT ({vatRate}%)</span>
+                <span className="text-foreground">Rs {vatAmount.toFixed(2)}</span>
+              </div>
+              {isDelivered ? (
+                <div className="flex justify-between items-center pt-3 mt-2 border-t-2 border-success/30 bg-success/5 -mx-5 px-5 py-3 rounded-b-xl">
+                  <span className="text-sm font-bold text-success uppercase">Paid</span>
+                  <span className="text-xl font-black text-success">Rs {totalInclVat.toLocaleString()}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center pt-3 mt-2 border-t-2 border-primary/30 bg-primary/5 -mx-5 px-5 py-3 rounded-b-xl">
+                  <span className="text-sm font-bold text-primary uppercase">Amount Due</span>
+                  <span className="text-xl font-black text-primary">Rs {totalInclVat.toLocaleString()}</span>
+                </div>
+              )}
+            </div>
 
-      {/* Error */}
-      {error && (
-        <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
-      )}
+            <p className="text-[10px] text-muted-foreground/60 text-center">
+              All prices are VAT inclusive.{!isDelivered && ' This is a proforma invoice and is not a tax invoice.'}
+            </p>
+          </section>
+        )}
 
-      {/* Submit - only before delivery */}
-      {!isDelivered && (
-        <button
-          onClick={handleSubmit}
-          disabled={submitting || (!reply.trim() && !locationUrl)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>Sending...</span>
-            </>
-          ) : (
-            <>
-              <Send className="w-5 h-5" />
-              <span>{hasExistingReply ? 'Update Reply' : 'Send Reply'}</span>
-            </>
-          )}
-        </button>
-      )}
+        {/* Existing reply */}
+        {hasExistingReply && (
+          <section className="rounded-2xl bg-success/5 border border-success/20 p-4">
+            <p className="text-xs text-success font-semibold mb-2">Your previous reply:</p>
+            <p className="text-sm text-foreground">{delivery.client_response}</p>
+          </section>
+        )}
 
-      {/* Need Help section - only shown after delivery */}
-      {['delivered', 'nwd', 'cms', 'cancelled', 'returned'].includes(delivery.status) && (
-        <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-muted-foreground" />
-            <p className="text-xs font-medium text-foreground">Need help?</p>
+        {/* Reply Text - allow for pending, NWD, and CMS (not for delivered) */}
+        {(!isDelivered || isFailed) && (
+          <section className="space-y-3">
+            <label className="text-sm font-semibold text-foreground">
+              {hasExistingReply ? 'Update Your Reply' : 'Your Reply'}
+            </label>
+            <textarea
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              placeholder={hasExistingReply ? "Update your message to the rider..." : "Type your message... e.g. I will be home at 2pm, leave it at the gate..."}
+              rows={3}
+              className="w-full px-4 py-3 rounded-2xl bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 resize-none transition-all"
+            />
+          </section>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="p-4 rounded-2xl bg-destructive/10 border border-destructive/20">
+            <p className="text-sm text-destructive">{error}</p>
           </div>
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Having an issue with your delivery? Request a callback or drop us a message. We usually get back to you in less than 2 hours.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <a
-              href={company?.phone ? `tel:${company.phone}` : '#'}
-              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
-            >
-              <Phone className="w-4 h-4" />
-              <span className="text-xs font-medium">Request Call</span>
-            </a>
-            <a
-              href={company?.phone ? `https://wa.me/${company.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hi, I need help with my delivery (${delivery.customer_name} - ${delivery.locality}). Order ref: ${delivery.id}`)}` : '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg bg-green-500/10 border border-green-500/30 text-green-500 hover:bg-green-500/20 transition-colors"
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span className="text-xs font-medium">Message Us</span>
-            </a>
-          </div>
-        </div>
-      )}
+        )}
 
-      <p className="text-center text-[10px] text-muted-foreground/50 pb-4">
-        Powered by {company?.company_name || 'Juice Dash'}
-      </p>
+        {/* Submit - allow for pending, NWD, and CMS (not for delivered) */}
+        {(!isDelivered || isFailed) && (
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || (!reply.trim() && !locationUrl)}
+            className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-semibold hover:shadow-[0_8px_32px_rgba(255,150,50,0.35)] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Sending...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-5 h-5" />
+                <span>{hasExistingReply ? 'Update Reply' : 'Send Reply'}</span>
+              </>
+            )}
+          </button>
+        )}
+
+        {/* Need Help section - only shown after delivery */}
+        {['delivered', 'nwd', 'cms', 'cancelled', 'returned'].includes(delivery.status) && (
+          <section className="rounded-2xl bg-muted/30 border border-border p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
+                <Clock className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Need help?</p>
+                <p className="text-xs text-muted-foreground">We usually respond in less than 2 hours</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <a
+                href={company?.phone ? `tel:${company.phone}` : '#'}
+                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+              >
+                <Phone className="w-4 h-4" />
+                <span className="text-sm font-medium">Call Us</span>
+              </a>
+              <a
+                href={company?.phone ? `https://wa.me/${company.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hi, I need help with my delivery (${delivery.customer_name} - ${delivery.locality}). Order ref: ${delivery.id}`)}` : '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-green-500/10 border border-green-500/30 text-green-500 hover:bg-green-500/20 transition-colors"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span className="text-sm font-medium">WhatsApp</span>
+              </a>
+            </div>
+          </section>
+        )}
+
+        {/* Footer */}
+        <footer className="text-center pb-6">
+          <p className="text-xs text-muted-foreground/50">
+            Powered by {company?.company_name || 'Juice Dash'}
+          </p>
+        </footer>
+      </div>
 
       {/* Fullscreen Map Overlay */}
       {locationMode === 'pin' && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
           {/* Top bar */}
-          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/80 via-black/50 to-transparent">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center shadow-[0_0_16px_rgba(6,182,212,0.3)]">
-                <Crosshair className="w-4 h-4 text-cyan-400" />
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-4 bg-gradient-to-b from-black/90 via-black/60 to-transparent">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.4)]">
+                <Crosshair className="w-5 h-5 text-cyan-400" />
               </div>
               <div>
-                <p className="text-sm font-bold text-white">Pin Your Location</p>
-                <p className="text-[10px] text-white/50">{delivery.locality || 'Tap or drag the pin'}</p>
+                <p className="font-bold text-white">Pin Your Location</p>
+                <p className="text-xs text-white/50">{delivery.locality || 'Tap or drag the pin'}</p>
               </div>
             </div>
             <button
               onClick={clearLocation}
-              className="w-9 h-9 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+              className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur-sm border border-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
             >
               <X className="w-5 h-5 text-white" />
             </button>
@@ -675,34 +792,34 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           <div ref={initMap} className="flex-1 w-full" />
 
           {/* Bottom confirm bar */}
-          <div className="absolute bottom-0 left-0 right-0 z-10 p-4 bg-gradient-to-t from-black/90 via-black/60 to-transparent">
+          <div className="absolute bottom-0 left-0 right-0 z-10 p-5 bg-gradient-to-t from-black/95 via-black/70 to-transparent">
             {pinMoved ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 backdrop-blur-sm">
-                  <Navigation className="w-4 h-4 text-blue-400 shrink-0" />
-                  <p className="text-[11px] text-blue-400 font-mono">{rawCoords?.lat.toFixed(6)}, {rawCoords?.lng.toFixed(6)}</p>
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-accent/10 border border-accent/20 backdrop-blur-sm">
+                  <Navigation className="w-5 h-5 text-accent shrink-0" />
+                  <p className="text-sm text-accent font-mono">{rawCoords?.lat.toFixed(6)}, {rawCoords?.lng.toFixed(6)}</p>
                 </div>
                 {outsideRegion && (
-                  <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 backdrop-blur-sm">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <p className="text-[10px] text-amber-400">This location is outside {delivery.locality || 'your delivery area'}. The rider may call to confirm.</p>
+                  <div className="flex items-start gap-3 px-4 py-3 rounded-2xl bg-warning/10 border border-warning/30 backdrop-blur-sm">
+                    <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+                    <p className="text-xs text-warning">This location is outside {delivery.locality || 'your delivery area'}. The rider may call to confirm.</p>
                   </div>
                 )}
                 <button
                   onClick={() => setLocationMode('none')}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-blue-500 text-white font-semibold text-sm hover:bg-blue-600 transition-colors shadow-[0_4px_24px_rgba(59,130,246,0.35)]"
+                  className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl bg-gradient-to-r from-accent to-cyan-600 text-white font-semibold hover:shadow-[0_8px_32px_rgba(0,200,255,0.4)] transition-all"
                 >
                   <CheckCircle className="w-5 h-5" />
                   <span>Confirm This Location</span>
                 </button>
               </div>
             ) : (
-              <div className="space-y-2 text-center py-3">
-                <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 animate-pulse">
-                  <span className="text-lg">👆</span>
-                  <span className="text-sm font-medium text-white">Tap the map or drag the pin to your location</span>
+              <div className="space-y-3 text-center py-4">
+                <div className="inline-flex items-center gap-3 px-5 py-3 rounded-full bg-white/10 backdrop-blur-sm border border-white/10">
+                  <span className="text-xl">👆</span>
+                  <span className="font-medium text-white">Tap the map or drag the pin</span>
                 </div>
-                <p className="text-[10px] text-white/30">Move the pin to exactly where you are in {delivery.locality || 'your area'}</p>
+                <p className="text-xs text-white/40">Move the pin to exactly where you are in {delivery.locality || 'your area'}</p>
               </div>
             )}
           </div>

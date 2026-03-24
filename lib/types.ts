@@ -158,6 +158,26 @@ export const STATUS_LABELS: Record<DeliveryStatus, string> = {
   cms: 'CMS'
 }
 
+/** Full descriptions for delivery statuses - useful for tooltips and client-facing UI */
+export const STATUS_DESCRIPTIONS: Record<DeliveryStatus, string> = {
+  pending: 'Awaiting assignment to a rider',
+  assigned: 'Assigned to a rider for delivery',
+  picked_up: 'Rider has picked up the order',
+  delivered: 'Successfully delivered to customer',
+  nwd: 'Next Working Day - delivery rescheduled',
+  cms: 'Customer Service Center - under CS care'
+}
+
+/** Check if a status represents a failed/incomplete delivery attempt */
+export function isFailedStatus(status: DeliveryStatus | string): boolean {
+  return ['nwd', 'cms'].includes(status)
+}
+
+/** Check if a status represents a completed delivery (only 'delivered') */
+export function isCompletedStatus(status: DeliveryStatus | string): boolean {
+  return status === 'delivered'
+}
+
 export const STATUS_COLORS: Record<DeliveryStatus, string> = {
   pending: 'bg-muted text-muted-foreground',
   assigned: 'bg-primary/10 text-primary',
