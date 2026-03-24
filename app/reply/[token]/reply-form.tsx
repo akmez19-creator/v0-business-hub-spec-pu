@@ -219,7 +219,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           setError('Could not get your location. Please try again or pin on map.')
         }
       },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: false, timeout: 15000 }
     )
   }
 
