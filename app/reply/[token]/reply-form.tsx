@@ -595,38 +595,38 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                   </div>
 
                 ) : (
-                  /* Compact Location Options - Map Pin first (most accurate indoors) */
+                  /* Location Options: GPS first (recommended), Map Pin second, Paste third */
                   <div className="grid grid-cols-3 gap-2">
-                    {/* Pin on Map - PRIMARY (most accurate for indoor) */}
-                    {mapboxToken && (
-                      <button
-                        onClick={() => setLocationMode('pin')}
-                        className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-primary/10 border-2 border-primary/40 hover:border-primary/60 transition-all relative"
-                      >
-                        <div className="absolute -top-1 -right-1 px-1 py-0.5 rounded bg-primary text-[8px] font-bold text-primary-foreground">Best</div>
-                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-orange-600 flex items-center justify-center">
-                          <Crosshair className="w-4 h-4 text-white" />
-                        </div>
-                        <span className="text-[10px] font-medium text-primary">Map Pin</span>
-                      </button>
-                    )}
-
-                    {/* GPS */}
+                    {/* GPS - PRIMARY (client is usually at delivery location) */}
                     <button
                       onClick={shareGPS}
                       disabled={gettingLocation}
-                      className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-accent/10 border border-accent/25 hover:border-accent/50 transition-all disabled:opacity-50"
+                      className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-primary/10 border-2 border-primary/40 hover:border-primary/60 transition-all disabled:opacity-50 relative"
                     >
-                      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-accent to-cyan-600 flex items-center justify-center">
+                      <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-primary text-[7px] font-bold text-primary-foreground whitespace-nowrap">Recommended</div>
+                      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-orange-600 flex items-center justify-center">
                         {gettingLocation ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Navigation className="w-4 h-4 text-white" />}
                       </div>
-                      <span className="text-[10px] font-medium text-accent">GPS</span>
+                      <span className="text-[10px] font-medium text-primary">Current</span>
                     </button>
 
-                    {/* Paste Link */}
+                    {/* Map Pin - for when client is NOT at current location */}
+                    {mapboxToken && (
+                      <button
+                        onClick={() => setLocationMode('pin')}
+                        className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-accent/10 border border-accent/25 hover:border-accent/50 transition-all"
+                      >
+                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-accent to-cyan-600 flex items-center justify-center">
+                          <Crosshair className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="text-[10px] font-medium text-accent">Pin Map</span>
+                      </button>
+                    )}
+
+                    {/* Paste - shared Google Maps link */}
                     <button
                       onClick={() => {
-                        const url = prompt('Paste Google Maps link:')
+                        const url = prompt('Paste shared Google Maps link:')
                         if (url?.trim()) {
                           setLocationUrl(url.trim())
                           setLocationMode('manual')
@@ -658,96 +658,137 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           </section>
         )}
 
-        {/* Compact Order Card */}
-        <section className="bg-card border border-border rounded-xl p-3 space-y-2">
-          {/* Header row */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase">Order</span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                isDelivered ? 'bg-success/10 text-success' :
-                isNWD ? 'bg-amber-500/10 text-amber-500' :
-                isCMS ? 'bg-blue-500/10 text-blue-500' :
-                'bg-primary/10 text-primary'
-              }`}>
-                {isDelivered ? 'Delivered' : isNWD ? 'NWD' : isCMS ? 'CMS' : delivery.status.replace('_', ' ')}
-              </span>
-            </div>
-            <button 
-              onClick={() => setShowInvoice(!showInvoice)} 
-              className="flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary text-[10px] font-medium"
-            >
-              <FileText className="w-3 h-3" />
-              {showInvoice ? 'Hide' : isDelivered ? 'Invoice' : 'Proforma'}
-            </button>
+        {/* Order Details Card - Clear product display */}
+        <section className="bg-card border border-border rounded-xl overflow-hidden">
+          {/* Header with status */}
+          <div className="flex items-center justify-between px-4 py-2 bg-muted/30 border-b border-border">
+            <span className="text-xs font-semibold text-foreground uppercase tracking-wide">Your Order</span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              isDelivered ? 'bg-success/20 text-success' :
+              isNWD ? 'bg-amber-500/20 text-amber-500' :
+              isCMS ? 'bg-blue-500/20 text-blue-500' :
+              'bg-primary/20 text-primary'
+            }`}>
+              {isDelivered ? 'Delivered' : isNWD ? 'Next Working Day' : isCMS ? 'Customer Service' : delivery.status.replace('_', ' ')}
+            </span>
           </div>
-
-          {/* Product + Stats inline */}
-          <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 border border-border/50">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-foreground truncate">{delivery.products || 'Delivery'}</p>
-              <p className="text-[10px] text-muted-foreground">{delivery.locality}</p>
+          
+          {/* Product details */}
+          <div className="p-4 space-y-3">
+            {/* Product name - prominent */}
+            <div>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Products</p>
+              <p className="text-sm font-semibold text-foreground">{delivery.products || 'Delivery'}</p>
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-sm font-bold text-primary">Rs {delivery.amount.toLocaleString()}</p>
-              <p className="text-[10px] text-muted-foreground">Qty: {delivery.qty}</p>
+            
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-2 rounded-lg bg-muted/30 text-center">
+                <p className="text-[10px] text-muted-foreground">Qty</p>
+                <p className="text-sm font-bold text-foreground">{delivery.qty}</p>
+              </div>
+              <div className="p-2 rounded-lg bg-primary/10 text-center">
+                <p className="text-[10px] text-muted-foreground">Amount</p>
+                <p className="text-sm font-bold text-primary">Rs {delivery.amount.toLocaleString()}</p>
+              </div>
+              <div className="p-2 rounded-lg bg-muted/30 text-center">
+                <p className="text-[10px] text-muted-foreground">Area</p>
+                <p className="text-xs font-semibold text-foreground truncate">{delivery.locality || '-'}</p>
+              </div>
             </div>
-          </div>
-
-          {/* Notes */}
-          {delivery.delivery_notes && (
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-warning/5 border border-warning/20">
-              <AlertTriangle className="w-3 h-3 text-warning shrink-0" />
-              <p className="text-[10px] text-warning">{delivery.delivery_notes}</p>
-            </div>
-          )}
-        </section>
-
-        {/* Compact Invoice */}
-        {showInvoice && (
-          <section className="rounded-xl bg-card border border-border p-3 space-y-2 text-xs">
-            {company && (
-              <div className="text-center border-b border-border pb-2">
-                <p className="font-bold text-foreground text-sm">{company.company_name}</p>
-                {company.company_address && <p className="text-[10px] text-muted-foreground">{company.company_address}</p>}
-                <p className="text-[10px] text-muted-foreground">
-                  {company.brn && `BRN: ${company.brn}`} {company.vat_number && `VAT: ${company.vat_number}`}
-                </p>
+            
+            {/* Notes */}
+            {delivery.delivery_notes && (
+              <div className="flex items-start gap-2 p-2 rounded-lg bg-warning/10 border border-warning/20">
+                <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
+                <p className="text-xs text-warning">{delivery.delivery_notes}</p>
               </div>
             )}
+            
+            {/* View Invoice/Proforma button */}
+            <button 
+              onClick={() => setShowInvoice(!showInvoice)} 
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-muted/50 border border-border text-foreground text-xs font-medium hover:bg-muted transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              {showInvoice ? 'Hide' : 'View'} {isDelivered ? 'Invoice / Receipt' : 'Proforma Invoice'}
+            </button>
+          </div>
+        </section>
 
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-foreground uppercase">{isDelivered ? 'Invoice' : 'Proforma'}</span>
-              <span className="text-muted-foreground">{new Date().toLocaleDateString()}</span>
-            </div>
-
-            <div className="text-muted-foreground">
-              <p>Customer: <span className="text-foreground font-medium">{delivery.customer_name}</span></p>
-              {delivery.locality && <p>Locality: {delivery.locality}</p>}
-            </div>
-
-            {/* Line items */}
-            <div className="border border-border rounded-lg overflow-hidden">
-              <div className="grid grid-cols-12 gap-1 px-2 py-1.5 bg-muted/50 text-[10px] font-bold text-muted-foreground uppercase">
-                <div className="col-span-6">Item</div>
-                <div className="col-span-2 text-center">Qty</div>
-                <div className="col-span-4 text-right">Amount</div>
+        {/* Invoice / Receipt - Full details */}
+        {showInvoice && (
+          <section className="rounded-xl bg-card border border-border overflow-hidden">
+            {/* Company header */}
+            {company && (
+              <div className="text-center p-4 bg-muted/20 border-b border-border">
+                <p className="font-bold text-foreground">{company.company_name}</p>
+                {company.company_address && <p className="text-xs text-muted-foreground mt-0.5">{company.company_address}</p>}
+                <div className="flex items-center justify-center gap-3 mt-1 text-[10px] text-muted-foreground">
+                  {company.brn && <span>BRN: {company.brn}</span>}
+                  {company.vat_number && <span>VAT: {company.vat_number}</span>}
+                </div>
+                {company.phone && <p className="text-xs text-muted-foreground mt-0.5">Tel: {company.phone}</p>}
               </div>
-              <div className="grid grid-cols-12 gap-1 px-2 py-2">
-                <div className="col-span-6 text-foreground truncate">{delivery.products || 'Delivery'}</div>
-                <div className="col-span-2 text-center text-muted-foreground">{delivery.qty}</div>
-                <div className="col-span-4 text-right text-foreground font-medium">Rs {totalInclVat.toLocaleString()}</div>
+            )}
+            
+            <div className="p-4 space-y-3">
+              {/* Document type and date */}
+              <div className="flex justify-between items-center pb-2 border-b border-border">
+                <span className="text-sm font-bold text-foreground uppercase">{isDelivered ? 'Invoice' : 'Proforma Invoice'}</span>
+                <span className="text-xs text-muted-foreground">{new Date().toLocaleDateString()}</span>
               </div>
-            </div>
 
-            {/* Totals */}
-            <div className="space-y-1 pt-2 border-t border-border text-[10px]">
-              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>Rs {totalExclVat.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">VAT ({vatRate}%)</span><span>Rs {vatAmount.toFixed(2)}</span></div>
-              <div className={`flex justify-between items-center pt-2 mt-1 border-t-2 ${isDelivered ? 'border-success/30' : 'border-primary/30'} -mx-3 px-3 py-2`}>
-                <span className={`text-xs font-bold uppercase ${isDelivered ? 'text-success' : 'text-primary'}`}>{isDelivered ? 'Paid' : 'Due'}</span>
-                <span className={`text-base font-black ${isDelivered ? 'text-success' : 'text-primary'}`}>Rs {totalInclVat.toLocaleString()}</span>
+              {/* Customer info */}
+              <div className="text-xs space-y-1">
+                <p className="text-muted-foreground">Customer: <span className="text-foreground font-medium">{delivery.customer_name}</span></p>
+                {delivery.locality && <p className="text-muted-foreground">Locality: <span className="text-foreground">{delivery.locality}</span></p>}
               </div>
+
+              {/* Line items table */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="grid grid-cols-12 gap-1 px-3 py-2 bg-muted/50 text-[10px] font-bold text-muted-foreground uppercase">
+                  <div className="col-span-6">Item</div>
+                  <div className="col-span-2 text-center">Qty</div>
+                  <div className="col-span-4 text-right">Amount</div>
+                </div>
+                <div className="grid grid-cols-12 gap-1 px-3 py-3 text-sm">
+                  <div className="col-span-6 text-foreground">{delivery.products || 'Delivery'}</div>
+                  <div className="col-span-2 text-center text-muted-foreground">{delivery.qty}</div>
+                  <div className="col-span-4 text-right text-foreground font-medium">Rs {totalInclVat.toLocaleString()}</div>
+                </div>
+              </div>
+
+              {/* Totals */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal (excl. VAT)</span>
+                  <span className="text-foreground">Rs {totalExclVat.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">VAT ({vatRate}%)</span>
+                  <span className="text-foreground">Rs {vatAmount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total (incl. VAT)</span>
+                  <span className="text-foreground font-medium">Rs {totalInclVat.toLocaleString()}</span>
+                </div>
+              </div>
+              
+              {/* Payment status */}
+              <div className={`flex justify-between items-center p-3 rounded-lg ${isDelivered ? 'bg-success/10 border border-success/20' : 'bg-primary/10 border border-primary/20'}`}>
+                <span className={`text-sm font-bold uppercase ${isDelivered ? 'text-success' : 'text-primary'}`}>
+                  {isDelivered ? 'Paid' : 'Amount Due'}
+                </span>
+                <span className={`text-lg font-black ${isDelivered ? 'text-success' : 'text-primary'}`}>
+                  Rs {totalInclVat.toLocaleString()}
+                </span>
+              </div>
+              
+              {/* Footer note */}
+              <p className="text-[10px] text-muted-foreground text-center">
+                All prices are VAT inclusive.{!isDelivered && ' This is a proforma invoice.'}
+              </p>
             </div>
           </section>
         )}
