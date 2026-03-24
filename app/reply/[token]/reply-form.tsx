@@ -58,7 +58,14 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
   const markerRef = useRef<any>(null)
 
   const hasExistingReply = !!delivery.client_response
-  const isDelivered = ['delivered', 'nwd', 'cms'].includes(delivery.status)
+  // Status meanings:
+  // - delivered: Successfully completed delivery
+  // - nwd: Next Working Day - client requested reschedule, NOT delivered
+  // - cms: Customer Service Center - client needs CS attention, NOT delivered
+  const isDelivered = delivery.status === 'delivered'
+  const isNWD = delivery.status === 'nwd'
+  const isCMS = delivery.status === 'cms'
+  const isFailed = isNWD || isCMS
 
   // VAT calculation (prices are VAT inclusive)
   const vatRate = company?.vat_rate || 15
@@ -296,19 +303,53 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           )}
           <div className="space-y-1">
             <h1 className="text-2xl font-bold text-foreground">
-              {isDelivered ? 'Delivery Complete' : 'Delivery Notification'}
+              {isDelivered ? 'Delivery Complete' : 
+               isNWD ? 'Rescheduled - Next Working Day' : 
+               isCMS ? 'Under Customer Service Care' : 
+               'Delivery Notification'}
             </h1>
             <p className="text-muted-foreground">
               Hi <span className="text-foreground font-semibold">{delivery.customer_name}</span>,
               {isDelivered
                 ? ' your order has been delivered. Thank you!'
+                : isNWD
+                ? ' your delivery has been rescheduled. We will attempt delivery on the next working day.'
+                : isCMS
+                ? ' your order is being handled by our customer service team. They will contact you shortly.'
                 : ' you have a delivery coming your way.'}
             </p>
           </div>
         </header>
 
+        {/* NWD Status Banner */}
+        {isNWD && (
+          <div className="flex items-center gap-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-lg shrink-0">
+              <Clock className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-amber-500">NWD - Next Working Day</p>
+              <p className="text-xs text-muted-foreground">Your delivery will be reattempted. Please update your location or add any instructions below.</p>
+            </div>
+          </div>
+        )}
+
+        {/* CMS Status Banner */}
+        {isCMS && (
+          <div className="flex items-center gap-4 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center shadow-lg shrink-0">
+              <Phone className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-blue-500">CMS - Customer Service</p>
+              <p className="text-xs text-muted-foreground">Our customer service team is handling your order. They will contact you soon.</p>
+            </div>
+          </div>
+        )}
+
         {/* Location Section - Modern Card with 3D depth */}
-        {!isDelivered && (
+        {/* Show for pending deliveries AND for NWD/CMS (since they need to reschedule) */}
+        {(!isDelivered || isFailed) && (
           <section className="relative">
             {/* 3D Card Effect */}
             <div 
@@ -509,8 +550,16 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                   <FileText className="w-3.5 h-3.5" />
                   {showInvoice ? 'Hide' : 'View'} {isDelivered ? 'Invoice' : 'Proforma'}
                 </button>
-                <span className="px-3 py-1.5 rounded-lg bg-success/10 text-success text-xs font-semibold capitalize">
-                  {delivery.status.replace('_', ' ')}
+                <span className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                  isDelivered ? 'bg-success/10 text-success' :
+                  isNWD ? 'bg-amber-500/10 text-amber-500' :
+                  isCMS ? 'bg-blue-500/10 text-blue-500' :
+                  'bg-primary/10 text-primary'
+                }`}>
+                  {isDelivered ? 'Delivered' : 
+                   isNWD ? 'NWD' : 
+                   isCMS ? 'CMS' : 
+                   delivery.status.replace('_', ' ')}
                 </span>
               </div>
             </div>
@@ -632,8 +681,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           </section>
         )}
 
-        {/* Reply Text - only before delivery */}
-        {!isDelivered && (
+        {/* Reply Text - allow for pending, NWD, and CMS (not for delivered) */}
+        {(!isDelivered || isFailed) && (
           <section className="space-y-3">
             <label className="text-sm font-semibold text-foreground">
               {hasExistingReply ? 'Update Your Reply' : 'Your Reply'}
@@ -655,8 +704,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           </div>
         )}
 
-        {/* Submit - only before delivery */}
-        {!isDelivered && (
+        {/* Submit - allow for pending, NWD, and CMS (not for delivered) */}
+        {(!isDelivered || isFailed) && (
           <button
             onClick={handleSubmit}
             disabled={submitting || (!reply.trim() && !locationUrl)}
