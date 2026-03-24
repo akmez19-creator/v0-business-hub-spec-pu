@@ -204,11 +204,11 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords
-        // Open pin mode centered on GPS location so client can verify/adjust
-        setGettingLocation(false)
-        setLocationMode('pin')
-        // Store the GPS coords to center the map on them
+        const url = `https://www.google.com/maps?q=${latitude},${longitude}`
+        setLocationUrl(url)
         setRawCoords({ lat: latitude, lng: longitude })
+        setGettingLocation(false)
+        checkRegionDistance(latitude, longitude)
       },
       (err) => {
         setGettingLocation(false)
