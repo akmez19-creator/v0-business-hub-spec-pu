@@ -23,6 +23,28 @@ function formatPhone(phone: string): string {
   return phone
 }
 
+// Parse comma-separated products string into items array
+// "2x Mini Cooker, 1x Aluminium Tape" -> [{ name: "Mini Cooker", qty: 2, amount: X }, ...]
+function parseProductsToItems(products: string | null, totalAmount: number): { name: string; qty: number; amount: number }[] {
+  if (!products) return []
+  const parts = products.split(',').map(s => s.trim()).filter(Boolean)
+  const items: { name: string; qty: number; amount: number }[] = []
+  const totalQty = parts.reduce((sum, p) => {
+    const m = p.match(/^(\d+)\s*x\s*/i)
+    return sum + (m ? parseInt(m[1], 10) : 1)
+  }, 0) || 1
+  for (const part of parts) {
+    const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
+    if (match) {
+      const qty = parseInt(match[1], 10)
+      items.push({ name: match[2].trim(), qty, amount: Math.round((totalAmount / totalQty) * qty * 100) / 100 })
+    } else {
+      items.push({ name: part, qty: 1, amount: Math.round(totalAmount / totalQty * 100) / 100 })
+    }
+  }
+  return items
+}
+
 // ── Types ──
 export interface DeliveryPin {
   id: string
@@ -188,7 +210,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ═════════�����════════════════════════════════════════════════
+// ═════════������════════════════════════════════════════════════
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -3128,9 +3150,32 @@ export function DeliveryMap({
           if (modifyTarget) {
             modifyTarget.amount = result.newAmount
             modifyTarget.qty = result.newQty
-            if (result.newProducts) modifyTarget.products = result.newProducts
+            if (result.newProducts) {
+              modifyTarget.products = result.newProducts
+              // Also update items array for proper display
+              modifyTarget.items = parseProductsToItems(result.newProducts, result.newAmount)
+            }
             modifyTarget.isModified = true
             modifyTarget.modificationCount = (modifyTarget.modificationCount || 0) + 1
+            
+            // Also update optimizedStops if navigating
+            setOptimizedStops(prev => prev.map(stop => {
+              if (stop.pin.id === modifyTarget.id) {
+                return {
+                  ...stop,
+                  pin: {
+                    ...stop.pin,
+                    amount: result.newAmount,
+                    qty: result.newQty,
+                    products: result.newProducts || stop.pin.products,
+                    items: result.newProducts ? parseProductsToItems(result.newProducts, result.newAmount) : stop.pin.items,
+                    isModified: true,
+                    modificationCount: (stop.pin.modificationCount || 0) + 1,
+                  }
+                }
+              }
+              return stop
+            }))
           }
           // Update affected source pin on the map (if active client was impacted)
           if (result.affectedClient) {
