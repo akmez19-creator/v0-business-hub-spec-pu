@@ -220,6 +220,14 @@ export async function modifyOrder(params: {
   if (!contractorId && riderId) {
     contractorId = await getContractorIdFromDelivery(targetDeliveryId)
   }
+
+  // Get the user's role to determine approval status
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+
   const { data: modification, error: modError } = await admin
     .from('order_modifications')
     .insert({
