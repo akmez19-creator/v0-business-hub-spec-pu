@@ -83,52 +83,20 @@ export function ContractorMobileLayout({
     startHideTimer()
   }, [startHideTimer])
 
-  const toggleFullscreen = async () => {
-    const elem = document.documentElement as any
-    const doc = document as any
-    
-    // Detect iOS - Fullscreen API not supported, use app-level focus mode only
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    
+  const toggleFullscreen = useCallback(() => {
+    // Simple toggle: hide/show app header and footer bars
     if (!isFullscreen) {
       // Enter focus mode: hide app header/footer bars
       setIsFullscreen(true)
       setBarsVisible(false)
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-      
-      // On non-iOS, also try native fullscreen
-      if (!isIOS) {
-        try {
-          if (elem.requestFullscreen) {
-            await elem.requestFullscreen()
-          } else if (elem.webkitRequestFullscreen) {
-            await elem.webkitRequestFullscreen()
-          } else if (elem.msRequestFullscreen) {
-            await elem.msRequestFullscreen()
-          }
-        } catch (e) {}
-      }
-      // iOS: just hides app bars (header/footer) - no native fullscreen available
     } else {
       // Exit focus mode: restore bars
       setIsFullscreen(false)
-      showBars()
-      
-      // Exit native fullscreen if active (non-iOS)
-      const fsElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement
-      if (fsElement) {
-        try {
-          if (doc.exitFullscreen) {
-            await doc.exitFullscreen()
-          } else if (doc.webkitExitFullscreen) {
-            await doc.webkitExitFullscreen()
-          } else if (doc.msExitFullscreen) {
-            await doc.msExitFullscreen()
-          }
-        } catch (e) {}
-      }
+      setBarsVisible(true)
+      startHideTimer()
     }
-  }
+  }, [isFullscreen, startHideTimer])
 
   // Fetch real header stats
   const { data: stats } = useSWR('/api/contractor-stats', fetcher, {
@@ -145,16 +113,7 @@ export function ContractorMobileLayout({
   useEffect(() => {
     setMounted(true)
     startHideTimer()
-    const doc = document as any
-    const onFsChange = () => {
-      const fsElement = doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement
-      setIsFullscreen(!!fsElement)
-    }
-    document.addEventListener('fullscreenchange', onFsChange)
-    document.addEventListener('webkitfullscreenchange', onFsChange)
     return () => {
-      document.removeEventListener('fullscreenchange', onFsChange)
-      document.removeEventListener('webkitfullscreenchange', onFsChange)
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
     }
   }, [startHideTimer])
@@ -218,9 +177,8 @@ export function ContractorMobileLayout({
           {/* Actions */}
           <div className="flex items-center gap-2">
             <button
-              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); toggleFullscreen() }}
-              onClick={(e) => { e.stopPropagation(); toggleFullscreen() }}
-              className="p-2 rounded-xl glass-card hover:glow-accent transition-all"
+              onClick={toggleFullscreen}
+              className="p-2 rounded-xl glass-card hover:glow-accent transition-all active:scale-95"
               aria-label={isFullscreen ? 'Exit focus mode' : 'Enter focus mode'}
             >
               {isFullscreen ? <Minimize className="w-5 h-5 text-foreground" /> : <Maximize className="w-5 h-5 text-foreground" />}
