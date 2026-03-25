@@ -32,7 +32,7 @@ interface ModifyOrderSheetProps {
   customerName: string
   currentProducts: string
   currentAmount: number
-  onModified?: (result: { newAmount: number; newQty: number; affectedClient?: { deliveryId: string; name: string; markedNwd: boolean; remainingQty: number } | null }) => void
+  onModified?: (result: { newAmount: number; newQty: number; newProducts?: string; affectedClient?: { deliveryId: string; name: string; markedNwd: boolean; remainingQty: number } | null }) => void
 }
 
 export function ModifyOrderSheet({
@@ -139,6 +139,7 @@ export function ModifyOrderSheet({
       onModified?.({
         newAmount: result.newAmount!,
         newQty: result.newQty!,
+        newProducts: result.newProducts,
         affectedClient: affected ? {
           deliveryId: selectedSource.deliveryId,
           name: affected.name,

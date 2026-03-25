@@ -188,7 +188,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ══════════════════════════════════════════════════════════
+// ═════════��════════════════════════════════════════════════
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -3069,10 +3069,11 @@ export function DeliveryMap({
         currentProducts={modifyTarget?.products || ''}
         currentAmount={modifyTarget?.amount || 0}
         onModified={(result) => {
-          // Update target pin
+          // Update target pin with new values
           if (modifyTarget) {
             modifyTarget.amount = result.newAmount
             modifyTarget.qty = result.newQty
+            if (result.newProducts) modifyTarget.products = result.newProducts
             modifyTarget.isModified = true
             modifyTarget.modificationCount = (modifyTarget.modificationCount || 0) + 1
           }
