@@ -188,7 +188,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ═════════����════════════════════════════════════════════════
+// ═════════�����════════════════════════════════════════════════
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -944,9 +944,9 @@ export function DeliveryMap({
     const fileName = `batch-message-${dayName}-${regionName.replace(/\s+/g, '-').toLowerCase()}`
     
     if (device === 'apple') {
-      // Download as XLSX for Apple/iPhone
+      // Download as XLSX for Apple/iPhone - uses "Mobile" header
       const XLSX = await import('xlsx')
-      const wsData = [['Phone', 'Message'], ...rows.map(r => [r.phone, r.message])]
+      const wsData = [['Mobile', 'Message'], ...rows.map(r => [r.phone, r.message])]
       const ws = XLSX.utils.aoa_to_sheet(wsData)
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Messages')
