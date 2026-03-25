@@ -1084,8 +1084,16 @@ export function DeliveryMap({
     if (!mapRef.current || !placingPin) return; setSavingPin(true)
     const center = mapRef.current.getCenter()
     const ids = placingPin.itemIds?.length ? placingPin.itemIds : [placingPin.id]
+    const pinLocality = placingPin.locality // Save the region before clearing
     await Promise.all(ids.map(id => updateDeliveryLocation(id, center.lat, center.lng, 'manual_pin')))
-    setSavingPin(false); setPlacingPin(null); router.refresh()
+    setSavingPin(false); setPlacingPin(null)
+    // Re-open client list with the same region expanded so user can continue with next client
+    if (pinLocality) {
+      setClientSearch(pinLocality)
+      setExpandedRegions(new Set([pinLocality]))
+    }
+    setShowClientList(true)
+    router.refresh()
   }, [placingPin, router])
 
   // ── Paste location link handler ──
@@ -1103,9 +1111,17 @@ export function DeliveryMap({
     const coords = extractCoordsFromLink(link.trim())
     if (!coords) { alert('Could not extract location from that link. Try a Google Maps link.'); return }
     setUpdatingPinId(pin.id)
+    const pinLocality = pin.locality // Save the region before updating
     const ids = pin.itemIds?.length ? pin.itemIds : [pin.id]
     await Promise.all(ids.map(id => updateDeliveryLocation(id, coords.lat, coords.lng, 'shared')))
-    setUpdatingPinId(null); setLocationLinkInput(null); setLocationLinkValue(''); router.refresh()
+    setUpdatingPinId(null); setLocationLinkInput(null); setLocationLinkValue('')
+    // Re-open client list with the same region expanded so user can continue with next client
+    if (pinLocality) {
+      setClientSearch(pinLocality)
+      setExpandedRegions(new Set([pinLocality]))
+    }
+    setShowClientList(true)
+    router.refresh()
   }, [extractCoordsFromLink, router])
 
   // ── Optimize route ──
