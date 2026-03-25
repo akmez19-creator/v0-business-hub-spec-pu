@@ -84,19 +84,22 @@ export function ContractorMobileLayout({
   }, [startHideTimer])
 
   const toggleFullscreen = useCallback(() => {
+    console.log("[v0] toggleFullscreen called, current isFullscreen:", isFullscreen, "barsVisible:", barsVisible)
     // Simple toggle: hide/show app header and footer bars
     if (!isFullscreen) {
       // Enter focus mode: hide app header/footer bars
+      console.log("[v0] Entering focus mode - hiding bars")
       setIsFullscreen(true)
       setBarsVisible(false)
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
     } else {
       // Exit focus mode: restore bars
+      console.log("[v0] Exiting focus mode - showing bars")
       setIsFullscreen(false)
       setBarsVisible(true)
       startHideTimer()
     }
-  }, [isFullscreen, startHideTimer])
+  }, [isFullscreen, barsVisible, startHideTimer])
 
   // Fetch real header stats
   const { data: stats } = useSWR('/api/contractor-stats', fetcher, {
