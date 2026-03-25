@@ -48,6 +48,20 @@
   --glass-border: hsla(240, 10%, 30%, 0.3);
 }
 
+/* Conic gradient for liquid glass border effect */
+.bg-gradient-conic {
+  background: conic-gradient(from 0deg, var(--tw-gradient-stops));
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
 .dark {
   --background: hsl(240, 15%, 8%);
   --foreground: hsl(240, 5%, 95%);

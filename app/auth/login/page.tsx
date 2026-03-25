@@ -167,20 +167,51 @@ export default function LoginPage() {
               </h1>
             </div>
 
-            {/* Glassmorphism Card */}
-            <div className="relative">
-              <div className="absolute -inset-[1px] bg-gradient-to-b from-cyan-500/20 via-white/5 to-transparent rounded-2xl" />
-              <div className="relative bg-black/40 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-8">
+            {/* Liquid Glass Card */}
+            <div className="relative group">
+              {/* Outer glow */}
+              <div className="absolute -inset-4 bg-gradient-to-b from-cyan-500/15 via-cyan-400/5 to-purple-500/10 rounded-[32px] blur-2xl opacity-60 group-hover:opacity-80 transition-opacity duration-700" />
+              
+              {/* Animated border gradient */}
+              <div className="absolute -inset-[1px] rounded-[28px] overflow-hidden">
+                <div 
+                  className="absolute inset-0 bg-gradient-conic from-cyan-500/40 via-transparent via-30% to-purple-500/30 animate-spin"
+                  style={{ animationDuration: '8s' }}
+                />
+              </div>
+              
+              {/* Glass highlight - top edge */}
+              <div className="absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+              
+              {/* Inner glass layers */}
+              <div className="relative rounded-[28px] overflow-hidden">
+                {/* Base glass layer */}
+                <div className="absolute inset-0 bg-gradient-to-b from-white/[0.08] via-white/[0.03] to-black/20 backdrop-blur-2xl" />
                 
-                {/* Form Header */}
-                <div className="mb-8">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="h-px flex-1 bg-gradient-to-r from-cyan-500/50 to-transparent" />
-                    <p className="text-[10px] tracking-[0.3em] text-cyan-400/60 font-mono uppercase px-2">Authentication</p>
-                    <div className="h-px flex-1 bg-gradient-to-l from-cyan-500/50 to-transparent" />
+                {/* Noise texture overlay */}
+                <div 
+                  className="absolute inset-0 opacity-[0.015]"
+                  style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.8\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\'/%3E%3C/svg%3E")' }}
+                />
+                
+                {/* Glossy reflection */}
+                <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/[0.07] to-transparent rounded-t-[28px]" />
+                
+                {/* Depth shadow */}
+                <div className="absolute inset-0 shadow-[inset_0_-20px_40px_-20px_rgba(0,0,0,0.5)]" />
+                
+                {/* Content */}
+                <div className="relative p-8 border border-white/[0.06] rounded-[28px]">
+                
+                  {/* Form Header */}
+                  <div className="mb-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="h-px flex-1 bg-gradient-to-r from-cyan-500/50 to-transparent" />
+                      <p className="text-[10px] tracking-[0.3em] text-cyan-400/60 font-mono uppercase px-2">Authentication</p>
+                      <div className="h-px flex-1 bg-gradient-to-l from-cyan-500/50 to-transparent" />
+                    </div>
+                    <h2 className="text-xl font-semibold text-white text-center">Sign in to continue</h2>
                   </div>
-                  <h2 className="text-xl font-semibold text-white text-center">Sign in to continue</h2>
-                </div>
 
                 <form onSubmit={handleSubmit} className="space-y-5">
                   {error && (
@@ -190,41 +221,53 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  {/* Email Field */}
+                  {/* Email Field - Glass Input */}
                   <div className="space-y-2">
                     <label className="text-[10px] tracking-[0.2em] text-white/40 font-mono uppercase">Email Address</label>
                     <div className="relative group">
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        onFocus={() => setFocusedField('email')}
-                        onBlur={() => setFocusedField(null)}
-                        required
-                        autoComplete="email"
-                        placeholder="you@example.com"
-                        className="w-full h-12 px-4 bg-white/[0.03] border border-white/[0.08] rounded-xl text-white placeholder:text-white/20 font-mono text-sm focus:outline-none focus:border-cyan-500/40 focus:bg-cyan-500/5 transition-all"
-                      />
-                      <div className={`absolute inset-0 rounded-xl bg-cyan-500/10 blur-xl transition-opacity duration-300 -z-10 ${focusedField === 'email' ? 'opacity-100' : 'opacity-0'}`} />
+                      {/* Outer glow on focus */}
+                      <div className={`absolute -inset-1 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 blur-lg transition-opacity duration-500 ${focusedField === 'email' ? 'opacity-100' : 'opacity-0'}`} />
+                      {/* Glass container */}
+                      <div className="relative">
+                        <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-md" />
+                        <div className="absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          onFocus={() => setFocusedField('email')}
+                          onBlur={() => setFocusedField(null)}
+                          required
+                          autoComplete="email"
+                          placeholder="you@example.com"
+                          className="relative w-full h-12 px-4 bg-transparent border border-white/[0.1] rounded-xl text-white placeholder:text-white/25 font-mono text-sm focus:outline-none focus:border-cyan-400/50 transition-all"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  {/* Password Field */}
+                  {/* Password Field - Glass Input */}
                   <div className="space-y-2">
                     <label className="text-[10px] tracking-[0.2em] text-white/40 font-mono uppercase">Password</label>
                     <div className="relative group">
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        onFocus={() => setFocusedField('password')}
-                        onBlur={() => setFocusedField(null)}
-                        required
-                        autoComplete="current-password"
-                        placeholder="Enter password"
-                        className="w-full h-12 px-4 bg-white/[0.03] border border-white/[0.08] rounded-xl text-white placeholder:text-white/20 font-mono text-sm focus:outline-none focus:border-cyan-500/40 focus:bg-cyan-500/5 transition-all"
-                      />
-                      <div className={`absolute inset-0 rounded-xl bg-cyan-500/10 blur-xl transition-opacity duration-300 -z-10 ${focusedField === 'password' ? 'opacity-100' : 'opacity-0'}`} />
+                      {/* Outer glow on focus */}
+                      <div className={`absolute -inset-1 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 blur-lg transition-opacity duration-500 ${focusedField === 'password' ? 'opacity-100' : 'opacity-0'}`} />
+                      {/* Glass container */}
+                      <div className="relative">
+                        <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-md" />
+                        <div className="absolute inset-x-2 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                        <input
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          onFocus={() => setFocusedField('password')}
+                          onBlur={() => setFocusedField(null)}
+                          required
+                          autoComplete="current-password"
+                          placeholder="Enter password"
+                          className="relative w-full h-12 px-4 bg-transparent border border-white/[0.1] rounded-xl text-white placeholder:text-white/25 font-mono text-sm focus:outline-none focus:border-cyan-400/50 transition-all"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -271,6 +314,7 @@ export default function LoginPage() {
                     <span>Create an account</span>
                     <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-1" />
                   </Link>
+                </div>
                 </div>
               </div>
             </div>
