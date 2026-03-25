@@ -306,48 +306,19 @@ export function DeliveryMap({
     }
   }, [nightMode])
 
-  // ── Fullscreen toggle - native API with CSS fallback ──
-  const toggleFullscreen = useCallback(async () => {
+  // ── Fullscreen toggle (CSS-based for mobile compatibility) ──
+  const toggleFullscreen = useCallback(() => {
     const el = mapContainerParentRef.current
     if (!el) return
-    
-    const doc = document as any
-    const isNativeFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement)
-    
-    if (!isFullscreen && !isNativeFullscreen) {
-      // Enter fullscreen - try native API first (hides browser chrome on mobile)
-      setIsFullscreen(true)
-      try {
-        if (el.requestFullscreen) {
-          await el.requestFullscreen()
-        } else if ((el as any).webkitRequestFullscreen) {
-          await (el as any).webkitRequestFullscreen()
-        } else if ((el as any).msRequestFullscreen) {
-          await (el as any).msRequestFullscreen()
-        }
-      } catch {
-        // Fallback to CSS-based fullscreen if native fails
-        el.style.position = 'fixed'
-        el.style.inset = '0'
-        el.style.zIndex = '9999'
-        el.style.width = '100vw'
-        el.style.height = '100dvh'
-        document.body.style.overflow = 'hidden'
-      }
+    const next = !isFullscreen
+    if (next) {
+      el.style.position = 'fixed'
+      el.style.inset = '0'
+      el.style.zIndex = '9999'
+      el.style.width = '100vw'
+      el.style.height = '100dvh'
+      document.body.style.overflow = 'hidden'
     } else {
-      // Exit fullscreen
-      setIsFullscreen(false)
-      
-      // Exit native fullscreen if active
-      if (isNativeFullscreen) {
-        try {
-          if (doc.exitFullscreen) await doc.exitFullscreen()
-          else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen()
-          else if (doc.msExitFullscreen) await doc.msExitFullscreen()
-        } catch {}
-      }
-      
-      // Reset CSS styles
       el.style.position = ''
       el.style.inset = ''
       el.style.zIndex = ''
@@ -355,9 +326,9 @@ export function DeliveryMap({
       el.style.height = ''
       document.body.style.overflow = ''
     }
-    
+    setIsFullscreen(next)
     // Trigger map resize after layout change
-    setTimeout(() => { mapRef.current?.resize() }, 150)
+    setTimeout(() => { mapRef.current?.resize() }, 100)
   }, [isFullscreen])
 
   // ── Open in external nav app (Google Maps / Waze) ──
