@@ -147,11 +147,11 @@ export function ModifyOrderSheet({
     }
   }
 
-  // Handle replacing the single product with another
+  // Handle replacing the single product with another (keeps same price)
   const handleReplace = async () => {
-    if (!replacingWith) return
-    const price = parseFloat(replacePrice || '0')
-    if (price <= 0) { setError('Enter a valid price'); return }
+    if (!replacingWith || !currentItems[0]) return
+    // Keep the same price as the original order
+    const price = currentItems[0].unitPrice
     
     setIsReplacing(true)
     setError(null)
@@ -483,20 +483,11 @@ const handleSubmit = async () => {
                     <div className="p-2 rounded-lg bg-white/5 border border-white/10">
                       <p className="text-[10px] text-white/50 font-mono mb-1">REPLACING WITH:</p>
                       <p className="text-xs text-white/80 font-medium">{replacingWith.productName}</p>
-                    </div>
-                    <div>
-                      <p className="text-[9px] text-white/40 font-mono mb-1">NEW PRICE</p>
-                      <input
-                        type="number"
-                        value={replacePrice}
-                        onChange={(e) => setReplacePrice(e.target.value)}
-                        placeholder="Enter price"
-                        className="w-full h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-purple-400/40"
-                      />
+                      <p className="text-[10px] text-white/40 mt-1">Price stays: Rs {currentItems[0]?.unitPrice || 0}</p>
                     </div>
                     <button
                       onClick={handleReplace}
-                      disabled={isReplacing || !replacePrice}
+                      disabled={isReplacing}
                       className="w-full h-10 rounded-lg bg-purple-500 text-white text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       {isReplacing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
