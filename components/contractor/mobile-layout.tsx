@@ -66,7 +66,12 @@ export function ContractorMobileLayout({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [barsVisible, setBarsVisible] = useState(true)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const navItems = getNavItems(isAlsoRider, hasPartners)
+  
+  // Fetch company settings to check if orders module is enabled
+  const { data: companySettings } = useSWR('/api/company-settings', fetcher)
+  const ordersEnabled = companySettings?.orders_module_enabled ?? true
+  
+  const navItems = getNavItems(isAlsoRider, hasPartners, ordersEnabled)
 
   const startHideTimer = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
@@ -397,14 +402,14 @@ export function ContractorMobileLayout({
   )
 }
 
-const getNavItems = (_isAlsoRider: boolean, hasPartners: boolean) => {
+const getNavItems = (_isAlsoRider: boolean, hasPartners: boolean, ordersEnabled: boolean = true) => {
   const items = [
     { href: '/dashboard/contractors', label: 'Home', icon: LayoutDashboard },
     { href: '/dashboard/contractors/riders', label: 'Team', icon: Users },
     { href: '/dashboard/contractors/my-deliveries', label: 'Assign', icon: UserPlus },
     ...(hasPartners ? [{ href: '/dashboard/contractors/partner-deliveries', label: 'Partner', icon: FileSpreadsheet }] : []),
     { href: '/dashboard/contractors/stock', label: 'Stock', icon: Package },
-    { href: '/dashboard/contractors/deliveries', label: 'Orders', icon: Truck },
+    ...(ordersEnabled ? [{ href: '/dashboard/contractors/deliveries', label: 'Orders', icon: Truck }] : []),
     { href: '/dashboard/contractors/map', label: 'Map', icon: Map },
     { href: '/dashboard/contractors/cash-collection', label: 'Cash', icon: Banknote },
     { href: '/dashboard/contractors/juice-collection', label: 'Juice', icon: Smartphone },

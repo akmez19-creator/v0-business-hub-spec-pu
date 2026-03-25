@@ -40,11 +40,11 @@ interface MobileLayoutProps {
   xpToNextLevel?: number
 }
 
-const navItems = [
+const getNavItems = (ordersEnabled: boolean = true) => [
   { href: '/dashboard/riders', label: 'Home', icon: LayoutDashboard },
   { href: '/dashboard/riders/stock', label: 'Stock', icon: Package },
   { href: '/dashboard/riders/collections', label: 'Collect', icon: Banknote },
-  { href: '/dashboard/riders/deliveries', label: 'Orders', icon: Truck },
+  ...(ordersEnabled ? [{ href: '/dashboard/riders/deliveries', label: 'Orders', icon: Truck }] : []),
   { href: '/dashboard/riders/map', label: 'Map', icon: Map },
   { href: '/dashboard/riders/earnings', label: 'Earnings', icon: Wallet },
   { href: 'more', label: 'More', icon: User },
@@ -64,6 +64,11 @@ export function RiderMobileLayout({
   const [barsVisible, setBarsVisible] = useState(true)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const xpProgress = (xp / xpToNextLevel) * 100
+  
+  // Fetch company settings to check if orders module is enabled
+  const { data: companySettings } = useSWR('/api/company-settings', fetcher)
+  const ordersEnabled = companySettings?.orders_module_enabled ?? true
+  const navItems = getNavItems(ordersEnabled)
 
   const startHideTimer = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
