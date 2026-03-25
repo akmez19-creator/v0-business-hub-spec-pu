@@ -167,82 +167,74 @@ export default function LoginPage() {
               </h1>
             </div>
 
-            {/* ULTIMATE Liquid Glass Card */}
-            <div className="relative group perspective-1000">
-              {/* Floating light orbs - ambient */}
-              <div className="absolute -top-16 -left-16 w-32 h-32 rounded-full bg-cyan-400/20 blur-3xl float-orb" />
-              <div className="absolute -bottom-12 -right-12 w-24 h-24 rounded-full bg-purple-500/15 blur-2xl float-orb" style={{ animationDelay: '2s' }} />
-              <div className="absolute top-1/2 -right-20 w-20 h-20 rounded-full bg-blue-400/10 blur-2xl float-orb" style={{ animationDelay: '4s' }} />
+            {/* WORLD-CLASS Liquid Glass Card - Apple Vision Pro Style */}
+            <div className="relative group">
+              {/* Animated ambient glow orbs */}
+              <div className="absolute -top-20 -left-20 w-40 h-40 rounded-full bg-gradient-to-br from-cyan-400/30 to-blue-500/20 blur-[60px] animate-pulse" style={{ animationDuration: '3s' }} />
+              <div className="absolute -bottom-16 -right-16 w-36 h-36 rounded-full bg-gradient-to-br from-purple-500/25 to-pink-500/15 blur-[50px] animate-pulse" style={{ animationDuration: '4s', animationDelay: '1.5s' }} />
+              <div className="absolute top-1/3 -left-24 w-28 h-28 rounded-full bg-gradient-to-br from-blue-400/20 to-cyan-400/10 blur-[40px] animate-pulse" style={{ animationDuration: '5s', animationDelay: '0.5s' }} />
               
-              {/* Layer 1: Deep ambient glow */}
-              <div className="absolute -inset-8 rounded-[48px] opacity-60">
-                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/25 via-transparent to-purple-600/20 blur-3xl animate-pulse" style={{ animationDuration: '4s' }} />
-                <div className="absolute inset-0 bg-gradient-to-tl from-blue-500/15 via-transparent to-cyan-400/15 blur-3xl animate-pulse" style={{ animationDuration: '6s', animationDelay: '2s' }} />
-              </div>
-              
-              {/* Layer 2: Chromatic aberration ring */}
-              <div className="absolute -inset-[2px] rounded-[30px] overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/50 via-transparent to-cyan-500/50 blur-[1px]" style={{ transform: 'translateX(-2px)' }} />
-                <div className="absolute inset-0 bg-gradient-to-r from-purple-500/30 via-transparent to-purple-500/30 blur-[1px]" style={{ transform: 'translateX(2px)' }} />
-              </div>
-              
-              {/* Layer 3: Animated border - rotating conic gradient */}
-              <div className="absolute -inset-[1px] rounded-[29px] overflow-hidden">
+              {/* Holographic rainbow border glow */}
+              <div className="absolute -inset-[3px] rounded-[32px] opacity-80">
                 <div 
-                  className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,transparent_0deg,rgba(6,182,212,0.5)_60deg,transparent_120deg,rgba(139,92,246,0.4)_180deg,transparent_240deg,rgba(6,182,212,0.3)_300deg,transparent_360deg)]"
-                  style={{ animation: 'spin 6s linear infinite' }}
+                  className="absolute inset-0 rounded-[32px] bg-[conic-gradient(from_var(--angle),#06b6d4,#3b82f6,#8b5cf6,#ec4899,#f43f5e,#f97316,#eab308,#22c55e,#06b6d4)]"
+                  style={{ 
+                    '--angle': '0deg',
+                    animation: 'rotate-gradient 4s linear infinite',
+                    filter: 'blur(8px)'
+                  } as React.CSSProperties}
                 />
               </div>
               
-              {/* Layer 4: Main glass container */}
-              <div className="relative rounded-[28px] overflow-hidden" style={{ transform: 'translateZ(0)' }}>
-                {/* Glass base - multi-layer depth */}
-                <div className="absolute inset-0 bg-gradient-to-b from-white/[0.12] via-white/[0.04] to-black/40 backdrop-blur-3xl" />
-                <div className="absolute inset-0 bg-gradient-to-br from-cyan-950/20 via-transparent to-purple-950/10" />
-                
-                {/* Frosted noise texture */}
+              {/* Inner animated border */}
+              <div className="absolute -inset-[1.5px] rounded-[30px] overflow-hidden">
                 <div 
-                  className="absolute inset-0 opacity-[0.03] mix-blend-overlay"
+                  className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent,rgba(6,182,212,0.8)_10%,transparent_20%,transparent_50%,rgba(139,92,246,0.6)_60%,transparent_70%)]"
+                  style={{ animation: 'spin 3s linear infinite' }}
+                />
+              </div>
+              
+              {/* Main glass card */}
+              <div className="relative rounded-[28px] overflow-hidden backdrop-blur-2xl bg-gradient-to-b from-white/[0.15] via-white/[0.08] to-white/[0.03]">
+                {/* Noise texture for frosted effect */}
+                <div 
+                  className="absolute inset-0 opacity-[0.04] mix-blend-overlay pointer-events-none"
                   style={{ 
-                    backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 512 512\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.7\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
-                    backgroundSize: '200px'
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
                   }}
                 />
                 
-                {/* Top glossy reflection - curved highlight */}
-                <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-white/[0.15] via-white/[0.05] to-transparent rounded-t-[28px]" />
-                <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent" />
-                <div className="absolute inset-x-16 top-[1px] h-px bg-gradient-to-r from-transparent via-white/30 to-transparent blur-[0.5px]" />
+                {/* Top curved highlight - like light hitting glass from above */}
+                <div className="absolute inset-x-0 top-0 h-[120px]">
+                  <div className="absolute inset-0 bg-gradient-to-b from-white/25 via-white/10 to-transparent rounded-t-[28px]" />
+                  <div className="absolute inset-x-6 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+                  <div className="absolute inset-x-12 top-[1px] h-[1px] bg-gradient-to-r from-transparent via-white/40 to-transparent blur-[0.5px]" />
+                </div>
                 
-                {/* Side highlights */}
-                <div className="absolute left-0 inset-y-8 w-px bg-gradient-to-b from-white/20 via-white/5 to-transparent" />
-                <div className="absolute right-0 inset-y-8 w-px bg-gradient-to-b from-white/10 via-white/3 to-transparent" />
+                {/* Left edge highlight */}
+                <div className="absolute left-0 top-8 bottom-8 w-[1px] bg-gradient-to-b from-white/30 via-white/10 to-transparent" />
                 
-                {/* Inner glow */}
-                <div className="absolute inset-4 rounded-[20px] shadow-[inset_0_0_60px_rgba(6,182,212,0.05)]" />
+                {/* Right edge subtle reflection */}
+                <div className="absolute right-0 top-12 bottom-12 w-[1px] bg-gradient-to-b from-transparent via-white/5 to-transparent" />
                 
-                {/* Bottom depth shadow */}
-                <div className="absolute inset-0 shadow-[inset_0_-40px_60px_-30px_rgba(0,0,0,0.6)]" />
-                <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/30 to-transparent rounded-b-[28px]" />
+                {/* Depth shadow at bottom */}
+                <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/40 via-black/10 to-transparent rounded-b-[28px]" />
                 
-                {/* Moving light reflection - simulates environment */}
-                <div 
-                  className="absolute inset-0 opacity-30 pointer-events-none overflow-hidden rounded-[28px]"
-                >
+                {/* Moving shimmer light */}
+                <div className="absolute inset-0 overflow-hidden rounded-[28px] pointer-events-none">
                   <div 
-                    className="absolute w-[200%] h-32 bg-gradient-to-r from-transparent via-white/10 to-transparent -rotate-12"
+                    className="absolute w-[150%] h-24 bg-gradient-to-r from-transparent via-white/[0.15] to-transparent -rotate-12 -translate-x-full"
                     style={{ 
-                      animation: 'shimmer 8s ease-in-out infinite',
-                      top: '-20%',
-                      left: '-50%'
+                      animation: 'shimmer-sweep 6s ease-in-out infinite',
+                      top: '10%',
                     }}
                   />
                 </div>
                 
-                {/* Content container */}
-                <div className="relative p-8 border border-white/[0.08] rounded-[28px]">
-                  {/* Inner border glow */}
-                  <div className="absolute inset-0 rounded-[28px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]" />
+                {/* Content */}
+                <div className="relative p-8">
+                  {/* Inner glow effect */}
+                  <div className="absolute inset-3 rounded-[22px] shadow-[inset_0_0_80px_rgba(6,182,212,0.06),inset_0_0_30px_rgba(139,92,246,0.04)]" />
                 
                   {/* Form Header */}
                   <div className="mb-8">
@@ -262,25 +254,18 @@ export default function LoginPage() {
                     </div>
                   )}
 
-                  {/* Email Field - Ultimate Glass Input */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] tracking-[0.2em] text-white/50 font-mono uppercase">Email Address</label>
+                  {/* Email Field - World-Class Glass Input */}
+                  <div className="space-y-2.5">
+                    <label className="text-[11px] tracking-[0.15em] text-white/60 font-medium uppercase">Email Address</label>
                     <div className="relative group/input">
-                      {/* Multi-layer glow on focus */}
-                      <div className={`absolute -inset-2 rounded-2xl transition-all duration-700 ${focusedField === 'email' ? 'opacity-100' : 'opacity-0'}`}>
-                        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/30 to-blue-500/20 blur-xl" />
-                        <div className="absolute inset-1 bg-gradient-to-r from-cyan-400/20 to-purple-500/15 blur-lg" />
+                      {/* Animated glow on focus */}
+                      <div className={`absolute -inset-[2px] rounded-2xl transition-all duration-500 ${focusedField === 'email' ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-blue-500 to-cyan-500 rounded-2xl blur-md animate-pulse" style={{ animationDuration: '2s' }} />
                       </div>
-                      {/* Glass container */}
-                      <div className="relative overflow-hidden rounded-xl">
-                        {/* Glass layers */}
-                        <div className="absolute inset-0 bg-gradient-to-b from-white/[0.1] via-white/[0.04] to-black/20 backdrop-blur-xl" />
-                        <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/[0.03] to-transparent" />
-                        {/* Top highlight */}
-                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
-                        <div className="absolute inset-x-4 top-[1px] h-px bg-gradient-to-r from-transparent via-white/20 to-transparent blur-[0.5px]" />
-                        {/* Inner shadow */}
-                        <div className="absolute inset-0 shadow-[inset_0_-8px_16px_-8px_rgba(0,0,0,0.3)]" />
+                      {/* Glass input container */}
+                      <div className="relative rounded-xl overflow-hidden backdrop-blur-xl bg-white/[0.08] border border-white/[0.12] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                        {/* Inner highlight */}
+                        <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                         <input
                           type="email"
                           value={email}
@@ -290,31 +275,24 @@ export default function LoginPage() {
                           required
                           autoComplete="email"
                           placeholder="you@example.com"
-                          className="relative w-full h-12 px-4 bg-transparent border border-white/[0.08] rounded-xl text-white placeholder:text-white/30 font-mono text-sm focus:outline-none focus:border-cyan-400/40 transition-all duration-300"
+                          className="relative w-full h-13 px-4 py-3.5 bg-transparent text-white placeholder:text-white/35 text-sm focus:outline-none transition-all"
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Password Field - Ultimate Glass Input */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] tracking-[0.2em] text-white/50 font-mono uppercase">Password</label>
+                  {/* Password Field - World-Class Glass Input */}
+                  <div className="space-y-2.5">
+                    <label className="text-[11px] tracking-[0.15em] text-white/60 font-medium uppercase">Password</label>
                     <div className="relative group/input">
-                      {/* Multi-layer glow on focus */}
-                      <div className={`absolute -inset-2 rounded-2xl transition-all duration-700 ${focusedField === 'password' ? 'opacity-100' : 'opacity-0'}`}>
-                        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/25 to-cyan-500/20 blur-xl" />
-                        <div className="absolute inset-1 bg-gradient-to-r from-blue-400/15 to-cyan-500/15 blur-lg" />
+                      {/* Animated glow on focus */}
+                      <div className={`absolute -inset-[2px] rounded-2xl transition-all duration-500 ${focusedField === 'password' ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 rounded-2xl blur-md animate-pulse" style={{ animationDuration: '2s' }} />
                       </div>
-                      {/* Glass container */}
-                      <div className="relative overflow-hidden rounded-xl">
-                        {/* Glass layers */}
-                        <div className="absolute inset-0 bg-gradient-to-b from-white/[0.1] via-white/[0.04] to-black/20 backdrop-blur-xl" />
-                        <div className="absolute inset-0 bg-gradient-to-br from-purple-500/[0.02] to-transparent" />
-                        {/* Top highlight */}
-                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
-                        <div className="absolute inset-x-4 top-[1px] h-px bg-gradient-to-r from-transparent via-white/20 to-transparent blur-[0.5px]" />
-                        {/* Inner shadow */}
-                        <div className="absolute inset-0 shadow-[inset_0_-8px_16px_-8px_rgba(0,0,0,0.3)]" />
+                      {/* Glass input container */}
+                      <div className="relative rounded-xl overflow-hidden backdrop-blur-xl bg-white/[0.08] border border-white/[0.12] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                        {/* Inner highlight */}
+                        <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                         <input
                           type="password"
                           value={password}
@@ -324,47 +302,50 @@ export default function LoginPage() {
                           required
                           autoComplete="current-password"
                           placeholder="Enter password"
-                          className="relative w-full h-12 px-4 bg-transparent border border-white/[0.08] rounded-xl text-white placeholder:text-white/30 font-mono text-sm focus:outline-none focus:border-cyan-400/40 transition-all duration-300"
+                          className="relative w-full h-13 px-4 py-3.5 bg-transparent text-white placeholder:text-white/35 text-sm focus:outline-none transition-all"
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Submit Button - Ultimate Glass */}
+                  {/* Submit Button - World-Class Liquid Glass */}
                   <button 
                     type="submit" 
                     disabled={loading}
-                    className="group relative w-full h-14 mt-3 rounded-2xl font-medium text-sm overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed transition-transform duration-300 active:scale-[0.98]"
+                    className="group relative w-full h-14 mt-4 rounded-2xl font-semibold text-sm overflow-hidden disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-300 active:scale-[0.97]"
                   >
-                    {/* Button glow */}
-                    <div className="absolute -inset-1 bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-500 rounded-2xl blur-lg opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
+                    {/* Animated outer glow */}
+                    <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-cyan-400 via-emerald-400 to-cyan-400 opacity-70 blur-lg group-hover:opacity-100 group-hover:blur-xl transition-all duration-500" style={{ backgroundSize: '200% 100%', animation: 'gradient-shift 3s ease infinite' }} />
                     
-                    {/* Glass background */}
-                    <div className="absolute inset-0 rounded-2xl overflow-hidden">
-                      <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 via-cyan-400 to-cyan-500 transition-all duration-500" />
-                      <div className="absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-black/20" />
-                      {/* Top shine */}
-                      <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/40 to-transparent rounded-t-2xl" />
-                      {/* Moving highlight */}
-                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+                    {/* Main button surface */}
+                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-cyan-400 via-cyan-300 to-emerald-400" style={{ backgroundSize: '200% 100%', animation: 'gradient-shift 3s ease infinite' }} />
+                    
+                    {/* Glass overlay layers */}
+                    <div className="absolute inset-0 rounded-2xl">
+                      {/* Top highlight - curved reflection */}
+                      <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/50 via-white/20 to-transparent rounded-t-2xl" />
+                      {/* Bottom shadow for depth */}
+                      <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/20 to-transparent rounded-b-2xl" />
+                      {/* Moving shine on hover */}
+                      <div className="absolute inset-0 overflow-hidden rounded-2xl">
+                        <div className="absolute w-[200%] h-full -translate-x-full group-hover:translate-x-0 transition-transform duration-700 ease-out bg-gradient-to-r from-transparent via-white/40 to-transparent" />
                       </div>
                     </div>
                     
-                    {/* Border highlight */}
-                    <div className="absolute inset-0 rounded-2xl border border-white/20" />
-                    <div className="absolute inset-[1px] rounded-[15px] border border-black/10" />
+                    {/* Inner border for depth */}
+                    <div className="absolute inset-[1px] rounded-[15px] border border-white/30 pointer-events-none" />
                     
-                    <span className="relative z-10 flex items-center justify-center gap-2 text-black font-bold tracking-wide">
+                    {/* Button text */}
+                    <span className="relative z-10 flex items-center justify-center gap-2.5 text-gray-900 font-bold tracking-wide drop-shadow-sm">
                       {loading ? (
                         <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Loader2 className="w-5 h-5 animate-spin" />
                           <span>Authenticating...</span>
                         </>
                       ) : (
                         <>
                           <span>Access System</span>
-                          <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                          <ArrowRight className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1" />
                         </>
                       )}
                     </span>

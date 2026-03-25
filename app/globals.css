@@ -136,6 +136,32 @@
   animation: float-orb 8s ease-in-out infinite;
 }
 
+/* World-class glass effects */
+@keyframes rotate-gradient {
+  0% { --angle: 0deg; transform: rotate(0deg); }
+  100% { --angle: 360deg; transform: rotate(360deg); }
+}
+
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%) rotate(-12deg); }
+  100% { transform: translateX(200%) rotate(-12deg); }
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.5; filter: blur(15px); }
+  50% { opacity: 0.8; filter: blur(20px); }
+}
+
+/* Height utility */
+.h-13 {
+  height: 3.25rem;
+}
+
 .dark {
   --background: hsl(240, 15%, 8%);
   --foreground: hsl(240, 5%, 95%);
