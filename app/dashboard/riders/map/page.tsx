@@ -62,7 +62,7 @@ export default async function RiderMapPage() {
   let deliveries: any[] = []
   const { data: todayData } = await supabase
     .from('deliveries')
-    .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product')
+    .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count')
     .eq('rider_id', rider.id)
     .eq('delivery_date', today)
     .order('delivery_sequence', { ascending: true })
@@ -73,7 +73,7 @@ export default async function RiderMapPage() {
     // Fall back to latest date with deliveries
     const { data: latestData } = await supabase
       .from('deliveries')
-      .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product')
+      .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count')
       .eq('rider_id', rider.id)
       .order('delivery_date', { ascending: false })
       .limit(100)
