@@ -16,6 +16,7 @@ export const MAURITIUS_LOCALITIES: Record<string, { lat: number; lng: number }> 
   'Gokhoola': { lat: -20.0850, lng: 57.6050 },
   'Goodlands': { lat: -20.0350, lng: 57.6530 },
   'Grand Bay': { lat: -20.0100, lng: 57.5800 },
+  'Grand Baie': { lat: -20.0100, lng: 57.5800 },
   'Grand Gaube': { lat: -20.0050, lng: 57.6250 },
   'Ilot': { lat: -20.0750, lng: 57.6200 },
   "L'Esperance Trebuchet": { lat: -20.0950, lng: 57.5750 },
