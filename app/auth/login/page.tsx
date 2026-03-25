@@ -278,7 +278,7 @@ export default function LoginPage() {
             {/* Footer */}
             <div className="mt-8 text-center">
               <p className="text-[10px] tracking-[0.15em] text-white/20 font-mono uppercase">
-                AKMEZ Technologies Ltd.
+                akmez.tech
               </p>
             </div>
           </div>
