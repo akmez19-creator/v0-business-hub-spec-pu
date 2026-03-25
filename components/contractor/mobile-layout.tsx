@@ -182,8 +182,11 @@ export function ContractorMobileLayout({
           {/* Actions */}
           <div className="flex items-center gap-2">
             <button
-              onClick={toggleFullscreen}
-              className="p-2 rounded-xl glass-card hover:glow-accent transition-all active:scale-95"
+              onClick={() => {
+                console.log("[v0] Header fullscreen button clicked")
+                toggleFullscreen()
+              }}
+              className="relative z-10 p-2 rounded-xl glass-card hover:glow-accent transition-all active:scale-95"
               aria-label={isFullscreen ? 'Exit focus mode' : 'Enter focus mode'}
             >
               {isFullscreen ? <Minimize className="w-5 h-5 text-foreground" /> : <Maximize className="w-5 h-5 text-foreground" />}
