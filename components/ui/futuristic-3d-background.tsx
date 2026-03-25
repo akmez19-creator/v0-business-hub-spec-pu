@@ -271,22 +271,40 @@ function SceneWrapper() {
 }
 
 export default function Futuristic3DBackground() {
+  const [hasError, setHasError] = useState(false)
+  
   return (
-    <div className="absolute inset-0 z-0">
-      <Canvas
-        camera={{ position: [0, 1, 10], fov: 55 }}
-        dpr={[1, 2]}
-        gl={{ 
-          antialias: true, 
-          alpha: false,
-          powerPreference: 'high-performance',
-          stencil: false,
-          depth: true
-        }}
-        performance={{ min: 0.5 }}
-      >
-        <SceneWrapper />
-      </Canvas>
+    <div className="absolute inset-0 z-0 bg-black">
+      {/* Dark fallback gradient - always visible behind 3D */}
+      <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-black to-cyan-950/30" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(6,182,212,0.12),transparent_60%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(8,51,68,0.25),transparent_60%)]" />
+      
+      {/* 3D Canvas - on top of fallback */}
+      {!hasError && (
+        <div className="absolute inset-0">
+          <Canvas
+            camera={{ position: [0, 1, 10], fov: 55 }}
+            dpr={[1, 1.5]}
+            gl={{ 
+              antialias: true, 
+              alpha: false,
+              powerPreference: 'high-performance',
+              stencil: false,
+              depth: true,
+              failIfMajorPerformanceCaveat: false
+            }}
+            performance={{ min: 0.5 }}
+            onCreated={({ gl }) => {
+              gl.setClearColor('#000000')
+            }}
+            onError={() => setHasError(true)}
+          >
+            <SceneWrapper />
+          </Canvas>
+        </div>
+      )}
+      
       {/* Depth overlays */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 pointer-events-none" />
       <div className="absolute inset-0 bg-gradient-to-br from-cyan-950/15 via-transparent to-black/20 pointer-events-none" />
