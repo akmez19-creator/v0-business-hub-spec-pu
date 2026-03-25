@@ -489,6 +489,110 @@ export async function reviewModification(modificationId: string, action: 'approv
   return { success: true }
 }
 
+// ── Replace single product with different product ──
+export async function replaceOrderProduct(params: {
+  deliveryId: string
+  oldProductName: string
+  newProductName: string
+  sourceDeliveryId: string
+  unitPrice: number
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { deliveryId, oldProductName, newProductName, sourceDeliveryId, unitPrice } = params
+  const admin = createAdminClient()
+
+  // Get the target delivery
+  const { data: delivery } = await admin
+    .from('deliveries')
+    .select('id, customer_name, products, qty, amount, rider_id, contractor_id, delivery_date, is_modified, modification_count, original_amount')
+    .eq('id', deliveryId)
+    .single()
+
+  if (!delivery) return { error: 'Delivery not found' }
+
+  // Get source delivery to verify stock
+  const { data: source } = await admin
+    .from('deliveries')
+    .select('id, products, qty, status, customer_name')
+    .eq('id', sourceDeliveryId)
+    .single()
+
+  if (!source) return { error: 'Source delivery not found' }
+
+  // Calculate new amount (keep same qty, just change product)
+  const currentQty = Number(delivery.qty || 1)
+  const newAmount = unitPrice * currentQty
+  const newProducts = `${currentQty}x ${newProductName}`
+
+  // Store original amount if first modification
+  const originalAmount = delivery.is_modified ? delivery.original_amount : delivery.amount
+
+  // Update target delivery with new product
+  const { error: updateError } = await admin
+    .from('deliveries')
+    .update({
+      products: newProducts,
+      amount: newAmount,
+      original_amount: originalAmount,
+      is_modified: true,
+      modification_count: (delivery.modification_count || 0) + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', deliveryId)
+
+  if (updateError) return { error: updateError.message }
+
+  // Log the modification
+  const contractorId = delivery.contractor_id || await getContractorIdFromDelivery(deliveryId)
+
+  await admin
+    .from('order_modifications')
+    .insert({
+      target_delivery_id: deliveryId,
+      source_delivery_id: sourceDeliveryId,
+      modified_by: user.id,
+      rider_id: delivery.rider_id,
+      contractor_id: contractorId,
+      product_name: newProductName,
+      qty: currentQty,
+      unit_price: unitPrice,
+      total_price: newAmount,
+      reason: 'product_replacement',
+      notes: `Replaced ${oldProductName} with ${newProductName}`,
+      delivery_date: delivery.delivery_date,
+      status: 'approved',
+    })
+
+  // Notify contractor
+  if (contractorId) {
+    await notify({
+      userId: contractorId,
+      type: 'info',
+      title: 'Product Replaced',
+      message: `${delivery.customer_name}: ${oldProductName} → ${newProductName} (Rs ${newAmount})`,
+      link: '/dashboard/contractors/my-deliveries',
+    })
+
+    try { await syncContractorStock(contractorId) } catch {}
+  }
+
+  revalidatePath('/dashboard/deliveries')
+  revalidatePath('/dashboard/riders')
+  revalidatePath('/dashboard/contractors')
+  revalidatePath('/dashboard/contractors/map')
+  revalidatePath('/dashboard/contractors/my-deliveries')
+
+  return {
+    success: true,
+    newAmount,
+    newQty: currentQty,
+    newProducts,
+  }
+}
+
 // ── Reduce or remove item from current order ──
 export async function reduceOrderItem(params: {
   deliveryId: string

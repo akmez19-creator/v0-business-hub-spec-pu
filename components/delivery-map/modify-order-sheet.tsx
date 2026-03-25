@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { X, Package, Plus, Minus, ChevronDown, ChevronUp, AlertTriangle, Check, Loader2, Users, Trash2, Edit3 } from 'lucide-react'
+import { X, Package, Plus, Minus, ChevronDown, ChevronUp, AlertTriangle, Check, Loader2, Users, Trash2, Edit3, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getAvailableProducts, modifyOrder, reduceOrderItem } from '@/lib/modification-actions'
+import { getAvailableProducts, modifyOrder, reduceOrderItem, replaceOrderProduct } from '@/lib/modification-actions'
 
 interface StockSource {
   deliveryId: string
@@ -50,6 +50,12 @@ export function ModifyOrderSheet({
   const [editingItem, setEditingItem] = useState<string | null>(null)
   const [pendingQty, setPendingQty] = useState<Record<string, number>>({})
   const [reducingItem, setReducingItem] = useState<string | null>(null)
+  
+  // Replace mode - for single product orders
+  const [replaceMode, setReplaceMode] = useState(false)
+  const [replacingWith, setReplacingWith] = useState<{ productName: string; source: StockSource } | null>(null)
+  const [replacePrice, setReplacePrice] = useState('')
+  const [isReplacing, setIsReplacing] = useState(false)
 
   // Selection state
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
@@ -72,6 +78,10 @@ export function ModifyOrderSheet({
     setEditingItem(null)
     setPendingQty({})
     setReducingItem(null)
+    setReplaceMode(false)
+    setReplacingWith(null)
+    setReplacePrice('')
+    setIsReplacing(false)
     
     // Parse current products into editable items
     const items: { name: string; qty: number; unitPrice: number }[] = []
@@ -113,6 +123,10 @@ export function ModifyOrderSheet({
     setSelectedNotes('')
     setError(null)
     setConfirmStep(false)
+    setReplaceMode(false)
+    setReplacingWith(null)
+    setReplacePrice('')
+    setIsReplacing(false)
   }, [])
 
   const selectSource = (src: StockSource) => {
@@ -130,6 +144,38 @@ export function ModifyOrderSheet({
       setConfirmStep(false)
     } else {
       selectSource(src)
+    }
+  }
+
+  // Handle replacing the single product with another
+  const handleReplace = async () => {
+    if (!replacingWith) return
+    const price = parseFloat(replacePrice || '0')
+    if (price <= 0) { setError('Enter a valid price'); return }
+    
+    setIsReplacing(true)
+    setError(null)
+    
+    const result = await replaceOrderProduct({
+      deliveryId,
+      oldProductName: currentItems[0].name,
+      newProductName: replacingWith.productName,
+      sourceDeliveryId: replacingWith.source.deliveryId,
+      unitPrice: price,
+    })
+    
+    setIsReplacing(false)
+    
+    if (result.error) {
+      setError(result.error)
+    } else {
+      setSuccess(true)
+      onModified?.({
+        newAmount: result.newAmount!,
+        newQty: result.newQty!,
+        newProducts: result.newProducts,
+      })
+      setTimeout(() => { onClose(); resetForm(); setSuccess(false) }, 1500)
     }
   }
 
@@ -342,6 +388,17 @@ export function ModifyOrderSheet({
                             )}
                           </div>
                         )}
+                        
+                        {/* Replace button - only for single product orders */}
+                        {currentItems.length === 1 && pendingReduce === 0 && (
+                          <button
+                            onClick={() => { setReplaceMode(true); setEditingItem(null) }}
+                            className="w-full h-8 mt-1 rounded-lg bg-purple-500/10 border border-purple-400/20 text-purple-400 text-[10px] font-bold font-mono flex items-center justify-center gap-1.5 active:bg-purple-500/20"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            REPLACE WITH DIFFERENT PRODUCT
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -397,8 +454,54 @@ export function ModifyOrderSheet({
 
         {!loading && !success && (
           <>
+            {/* Replace mode header */}
+            {replaceMode && (
+              <div className="mx-4 mb-3 p-3 rounded-xl bg-purple-500/10 border border-purple-400/20">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-purple-400" />
+                    <p className="text-[11px] font-bold text-purple-400 font-mono">REPLACE MODE</p>
+                  </div>
+                  <button onClick={() => { setReplaceMode(false); setReplacingWith(null); setReplacePrice('') }}
+                    className="p-1 rounded hover:bg-white/10">
+                    <X className="w-3 h-3 text-white/40" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-purple-400/60">
+                  Select a product below to replace "{currentItems[0]?.name}"
+                </p>
+                
+                {replacingWith && (
+                  <div className="mt-3 space-y-2">
+                    <div className="p-2 rounded-lg bg-white/5 border border-white/10">
+                      <p className="text-[10px] text-white/50 font-mono mb-1">REPLACING WITH:</p>
+                      <p className="text-xs text-white/80 font-medium">{replacingWith.productName}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-white/40 font-mono mb-1">NEW PRICE</p>
+                      <input
+                        type="number"
+                        value={replacePrice}
+                        onChange={(e) => setReplacePrice(e.target.value)}
+                        placeholder="Enter price"
+                        className="w-full h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-purple-400/40"
+                      />
+                    </div>
+                    <button
+                      onClick={handleReplace}
+                      disabled={isReplacing || !replacePrice}
+                      className="w-full h-10 rounded-lg bg-purple-500 text-white text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {isReplacing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      CONFIRM REPLACEMENT
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            
             <div className="px-4 mb-2">
-              <p className="text-[10px] text-cyan-400/50 font-mono">RIDER STOCK</p>
+              <p className="text-[10px] text-cyan-400/50 font-mono">{replaceMode ? 'SELECT REPLACEMENT' : 'RIDER STOCK'}</p>
             </div>
 
             {/* Product list */}
@@ -413,9 +516,24 @@ export function ModifyOrderSheet({
                   <button
                     className={cn(
                       "w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left",
-                      isExpanded ? "bg-cyan-500/8 border-cyan-400/15" : "bg-white/3 border-white/5 active:bg-white/5"
+                      replaceMode && replacingWith?.productName === product.productName 
+                        ? "bg-purple-500/10 border-purple-400/20" 
+                        : isExpanded ? "bg-cyan-500/8 border-cyan-400/15" : "bg-white/3 border-white/5 active:bg-white/5"
                     )}
-                    onClick={() => { setExpandedProduct(isExpanded ? null : product.productName); setSelectedSource(null); setConfirmStep(false) }}
+                    onClick={() => { 
+                      if (replaceMode) {
+                        // In replace mode, select product directly (use first available source)
+                        const bestSource = product.sources.find(s => s.isFree) || product.sources[0]
+                        if (bestSource) {
+                          setReplacingWith({ productName: product.productName, source: bestSource })
+                          setReplacePrice(String(product.unitPrice))
+                        }
+                      } else {
+                        setExpandedProduct(isExpanded ? null : product.productName)
+                        setSelectedSource(null)
+                        setConfirmStep(false)
+                      }
+                    }}
                   >
                     <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
                       product.freeQty > 0 ? "bg-emerald-500/15" : product.availableQty > 0 ? "bg-cyan-500/10" : "bg-white/5")}>
