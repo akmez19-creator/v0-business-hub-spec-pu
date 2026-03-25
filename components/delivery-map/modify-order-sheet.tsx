@@ -392,7 +392,12 @@ export function ModifyOrderSheet({
                         {/* Replace button - only for single product orders */}
                         {currentItems.length === 1 && pendingReduce === 0 && (
                           <button
-                            onClick={() => { setReplaceMode(true); setEditingItem(null) }}
+                            onClick={() => { 
+                              setReplaceMode(true)
+                              setEditingItem(null)
+                              setExpandedProduct(null)
+                              setSelectedSource(null)
+                            }}
                             className="w-full h-8 mt-1 rounded-lg bg-purple-500/10 border border-purple-400/20 text-purple-400 text-[10px] font-bold font-mono flex items-center justify-center gap-1.5 active:bg-purple-500/20"
                           >
                             <RefreshCw className="w-3.5 h-3.5" />
@@ -564,11 +569,12 @@ export function ModifyOrderSheet({
                       <p className="text-xs font-bold text-white/60">x{product.availableQty || totalSourceQty}</p>
                       <p className="text-[10px] text-white/30">Rs {product.unitPrice}</p>
                     </div>
-                    {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-white/20" /> : <ChevronDown className="w-3.5 h-3.5 text-white/20" />}
+                    {!replaceMode && (isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-white/20" /> : <ChevronDown className="w-3.5 h-3.5 text-white/20" />)}
+                    {replaceMode && replacingWith?.productName === product.productName && <Check className="w-4 h-4 text-purple-400" />}
                   </button>
 
-                  {/* Expanded: sources list */}
-                  {isExpanded && (
+                  {/* Expanded: sources list - only show when NOT in replace mode */}
+                  {isExpanded && !replaceMode && (
                     <div className="mt-1 ml-3 space-y-1">
 
                       {/* ── FREE sources (NWD/CMS) ── */}
