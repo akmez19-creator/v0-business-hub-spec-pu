@@ -1,0 +1,87 @@
+{
+  "name": "Business Hub - Delivery & Client Management",
+  "short_name": "Business Hub",
+  "description": "Comprehensive business management platform for deliveries, logistics, and client database",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1a",
+  "theme_color": "#06b6d4",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-72x72.jpg",
+      "sizes": "72x72",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-96x96.jpg",
+      "sizes": "96x96",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-128x128.jpg",
+      "sizes": "128x128",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-144x144.jpg",
+      "sizes": "144x144",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-152x152.jpg",
+      "sizes": "152x152",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-192x192.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-384x384.jpg",
+      "sizes": "384x384",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "screenshots": [
+    {
+      "src": "/screenshots/dashboard.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Dashboard Overview"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "My Deliveries",
+      "short_name": "Deliveries",
+      "description": "View and manage your deliveries",
+      "url": "/dashboard/contractors/my-deliveries",
+      "icons": [{ "src": "/icons/icon-96x96.jpg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Map View",
+      "short_name": "Map",
+      "description": "Open delivery map",
+      "url": "/dashboard/contractors/map",
+      "icons": [{ "src": "/icons/icon-96x96.jpg", "sizes": "96x96" }]
+    }
+  ]
+}

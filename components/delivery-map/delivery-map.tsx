@@ -188,7 +188,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ═════════��════════════════════════════════════════════════
+// ═════════���════════════════════════════════════════════════
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -2182,7 +2182,7 @@ export function DeliveryMap({
             </div>
             <div className="glow-line" />
             <div className="px-4 py-2.5">
-              <p className="text-xs text-white/50 truncate font-mono">{selectedPin.products} {selectedPin.qty > 1 ? `x${selectedPin.qty}` : ''}</p>
+              <p className="text-xs text-white/50 truncate font-mono">{selectedPin.items?.length ? selectedPin.items.map(it => `${it.qty}x ${it.name}`).join(', ') : selectedPin.products}</p>
               {selectedPin.salesType && ['exchange', 'trade_in', 'refund'].includes(selectedPin.salesType) && (
                 <div className={`mt-1.5 p-2 rounded-lg border ${selectedPin.salesType === 'exchange' ? 'bg-violet-500/15 border-violet-500/25' : selectedPin.salesType === 'trade_in' ? 'bg-blue-500/15 border-blue-500/25' : 'bg-red-500/15 border-red-500/25'}`}>
                   <div className={`flex items-center gap-1 text-[10px] font-bold ${selectedPin.salesType === 'exchange' ? 'text-violet-400' : selectedPin.salesType === 'trade_in' ? 'text-blue-400' : 'text-red-400'}`}>
@@ -2384,7 +2384,7 @@ export function DeliveryMap({
                 )}
                       </div>
                       {/* Product - clear display */}
-                      <p className="text-[9px] text-white/35 truncate mt-0.5 font-mono">{stop.pin.products}{stop.pin.qty > 1 ? ` x${stop.pin.qty}` : ''}</p>
+                      <p className="text-[9px] text-white/35 truncate mt-0.5 font-mono">{stop.pin.items?.length ? stop.pin.items.map(it => `${it.qty}x ${it.name}`).join(', ') : stop.pin.products}</p>
                       {stop.pin.returnProduct && <p className="text-[7px] text-amber-400/40 font-mono truncate mt-0.5">Pickup: {stop.pin.returnProduct}</p>}
                       {/* Location source */}
                       <div className="flex items-center gap-2 mt-0.5">
