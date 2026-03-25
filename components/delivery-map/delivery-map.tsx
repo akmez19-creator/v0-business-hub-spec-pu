@@ -188,7 +188,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ═════════���════════════════════════════════════════════════
+// ═════════����════════════════════════════════════════════════
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -890,6 +890,7 @@ export function DeliveryMap({
   // ── Export batch SMS for region ──
   const [exporting, setExporting] = useState<string | null>(null)
   const [exportedRegion, setExportedRegion] = useState<string | null>(null)
+  const [deviceSelectRegion, setDeviceSelectRegion] = useState<string | null>(null)
   // Track which regions have been batch-exported today (persists per day in sessionStorage)
   const batchExportedKey = `batch-exported-${new Date().toISOString().slice(0, 10)}`
   const [batchExportedRegions, setBatchExportedRegions] = useState<Set<string>>(() => {
@@ -914,10 +915,11 @@ export function DeliveryMap({
     return null
   }, [safeRegionGroups])
 
-  const exportBatchSms = useCallback(async (regionName: string) => {
+  const exportBatchSms = useCallback(async (regionName: string, device: 'android' | 'apple') => {
     const group = safeRegionGroups.find(g => g.region === regionName)
     if (!group) return
     setExporting(regionName)
+    setDeviceSelectRegion(null)
     const allPins = [...group.routable, ...group.unreachable].filter(d => d.contact1 && !['delivered', 'nwd', 'cms'].includes(d.status))
     // Generate reply tokens
     const deliveryIds = allPins.flatMap(p => p.itemIds)
@@ -927,7 +929,7 @@ export function DeliveryMap({
       tokenMap = result.tokens || result
     } catch {}
     const baseUrl = window.location.origin
-    const lines: string[] = []
+    const rows: { phone: string; message: string }[] = []
     for (const pin of allPins) {
       const phone = formatPhone(pin.contact1!)
       const ids = pin.itemIds?.length ? pin.itemIds : [pin.id]
@@ -936,26 +938,38 @@ export function DeliveryMap({
       const rawTemplate = customTemplates?.['location'] || MAP_TEMPLATES['location']
       const body = rawTemplate.replace(/^Hi,?\s*/i, '')
       const msg = `Hi ${pin.customerName}, ${body}${replyUrl ? `\nShare your location here: ${replyUrl}` : ''}`
-      const escapedMsg = `"${msg.replace(/"/g, '""')}"`
-      lines.push(`${phone},${escapedMsg}`)
+      rows.push({ phone, message: msg })
     }
-    const csv = 'Phone,Message\n' + lines.join('\n')
-    // Download as CSV
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     const dayName = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][new Date().getDay()]
-    a.download = `batch-message-${dayName}-${regionName.replace(/\s+/g, '-').toLowerCase()}.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    const fileName = `batch-message-${dayName}-${regionName.replace(/\s+/g, '-').toLowerCase()}`
+    
+    if (device === 'apple') {
+      // Download as XLSX for Apple/iPhone
+      const XLSX = await import('xlsx')
+      const wsData = [['Phone', 'Message'], ...rows.map(r => [r.phone, r.message])]
+      const ws = XLSX.utils.aoa_to_sheet(wsData)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Messages')
+      XLSX.writeFile(wb, `${fileName}.xlsx`)
+    } else {
+      // Download as CSV for Android
+      const lines = rows.map(r => `${r.phone},"${r.message.replace(/"/g, '""')}"`)
+      const csv = 'Phone,Message\n' + lines.join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${fileName}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }
     markRegionExported(regionName)
     setExportedRegion(regionName)
     setTimeout(() => setExportedRegion(null), 3000)
     setExporting(null)
-  }, [safeRegionGroups, customTemplates])
+  }, [safeRegionGroups, customTemplates, markRegionExported])
 
   // ── Status change + Payment ──
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
@@ -2520,10 +2534,10 @@ export function DeliveryMap({
                             <TrendingUp className="w-5 h-5 text-amber-400" />
                           </button>
                         )}
-                        {allGroupPins.length > 9 && allGroupPins.some(d => d.contact1) && !isRegionBatchExported(group.region) && (
-                          <button onClick={e => { e.stopPropagation(); exportBatchSms(group.region) }} disabled={!!exporting}
-                            className="action-pill w-10 h-10 bg-gradient-to-br from-purple-500/12 to-purple-600/5 border border-purple-400/10 disabled:opacity-30"
-                            title="Download batch messages">
+  {allGroupPins.length > 9 && allGroupPins.some(d => d.contact1) && !isRegionBatchExported(group.region) && (
+  <button onClick={e => { e.stopPropagation(); setDeviceSelectRegion(group.region) }} disabled={!!exporting}
+  className="action-pill w-10 h-10 bg-gradient-to-br from-purple-500/12 to-purple-600/5 border border-purple-400/10 disabled:opacity-30"
+  title="Download batch messages">
                             {exporting === group.region
                               ? <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
                               : exportedRegion === group.region
@@ -3004,6 +3018,47 @@ export function DeliveryMap({
                 ) : (
                   <><Check className="w-4 h-4" /><span>Confirm Payment</span></>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Device Selection for Batch Export */}
+      {deviceSelectRegion && (
+        <div className="absolute inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setDeviceSelectRegion(null)}>
+          <div className="w-full max-w-[320px] bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <div>
+                <h3 className="font-semibold text-white text-sm">Download Batch Messages</h3>
+                <p className="text-xs text-white/40">Choose your device type</p>
+              </div>
+              <button onClick={() => setDeviceSelectRegion(null)} className="p-2 rounded-lg hover:bg-white/10 transition"><X className="w-4 h-4 text-white/40" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <button 
+                onClick={() => exportBatchSms(deviceSelectRegion, 'android')}
+                className="w-full flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition active:scale-95"
+              >
+                <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 2.015a.5.5 0 0 0-.662.236l-1.5 3a.5.5 0 0 0 .428.749h.711v2H7.5V6h.711a.5.5 0 0 0 .428-.749l-1.5-3a.5.5 0 0 0-.898.448l1.14 2.28c-.16.014-.321.021-.481.021H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1.9c-.16 0-.321-.007-.481-.021l1.14-2.28a.5.5 0 0 0-.236-.684zM8 17a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm8 0a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold text-sm">Android</div>
+                  <div className="text-xs text-emerald-400/60">Downloads as CSV file</div>
+                </div>
+              </button>
+              <button 
+                onClick={() => exportBatchSms(deviceSelectRegion, 'apple')}
+                className="w-full flex items-center gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition active:scale-95"
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold text-sm">Apple / iPhone</div>
+                  <div className="text-xs text-blue-400/60">Downloads as Excel file</div>
+                </div>
               </button>
             </div>
           </div>
