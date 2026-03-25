@@ -225,6 +225,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     }
     
     // Try high accuracy first (GPS), fallback to low accuracy (WiFi/cell) if it fails
+    // maximumAge: 0 forces fresh position (no cached data)
     navigator.geolocation.getCurrentPosition(
       handlePosition,
       (err) => {
@@ -232,10 +233,10 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
         navigator.geolocation.getCurrentPosition(
           handlePosition,
           handleError,
-          { enableHighAccuracy: false, timeout: 10000 }
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         )
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
   }
 
