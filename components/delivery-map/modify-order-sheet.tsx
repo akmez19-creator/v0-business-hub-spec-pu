@@ -218,8 +218,10 @@ export function ModifyOrderSheet({
     }
   }
 
-  const handleSubmit = async () => {
-    if (!selectedSource) return
+const handleSubmit = async () => {
+  // Block if in replace mode - use handleReplace instead
+  if (replaceMode) return
+  if (!selectedSource) return
     const product = stockProducts.find(p => p.sources.includes(selectedSource))
     if (!product) return
 
@@ -528,10 +530,14 @@ export function ModifyOrderSheet({
                     onClick={() => { 
                       if (replaceMode) {
                         // In replace mode, select product directly (use first available source)
+                        // DO NOT expand or set selectedSource to prevent add flow
                         const bestSource = product.sources.find(s => s.isFree) || product.sources[0]
                         if (bestSource) {
                           setReplacingWith({ productName: product.productName, source: bestSource })
                           setReplacePrice(String(product.unitPrice))
+                          // Clear any expanded/selected state to prevent add flow
+                          setExpandedProduct(null)
+                          setSelectedSource(null)
                         }
                       } else {
                         setExpandedProduct(isExpanded ? null : product.productName)
