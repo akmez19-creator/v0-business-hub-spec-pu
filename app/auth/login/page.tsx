@@ -167,74 +167,24 @@ export default function LoginPage() {
               </h1>
             </div>
 
-            {/* WORLD-CLASS Liquid Glass Card - Apple Vision Pro Style */}
+            {/* Clean Glass Card */}
             <div className="relative group">
-              {/* Animated ambient glow orbs */}
-              <div className="absolute -top-20 -left-20 w-40 h-40 rounded-full bg-gradient-to-br from-cyan-400/30 to-blue-500/20 blur-[60px] animate-pulse" style={{ animationDuration: '3s' }} />
-              <div className="absolute -bottom-16 -right-16 w-36 h-36 rounded-full bg-gradient-to-br from-purple-500/25 to-pink-500/15 blur-[50px] animate-pulse" style={{ animationDuration: '4s', animationDelay: '1.5s' }} />
-              <div className="absolute top-1/3 -left-24 w-28 h-28 rounded-full bg-gradient-to-br from-blue-400/20 to-cyan-400/10 blur-[40px] animate-pulse" style={{ animationDuration: '5s', animationDelay: '0.5s' }} />
+              {/* Subtle static glow - cyan only */}
+              <div className="absolute -inset-4 rounded-[36px] bg-cyan-500/10 blur-2xl" />
               
-              {/* Holographic rainbow border glow */}
-              <div className="absolute -inset-[3px] rounded-[32px] opacity-80">
-                <div 
-                  className="absolute inset-0 rounded-[32px] bg-[conic-gradient(from_var(--angle),#06b6d4,#3b82f6,#8b5cf6,#ec4899,#f43f5e,#f97316,#eab308,#22c55e,#06b6d4)]"
-                  style={{ 
-                    '--angle': '0deg',
-                    animation: 'rotate-gradient 4s linear infinite',
-                    filter: 'blur(8px)'
-                  } as React.CSSProperties}
-                />
-              </div>
-              
-              {/* Inner animated border */}
-              <div className="absolute -inset-[1.5px] rounded-[30px] overflow-hidden">
-                <div 
-                  className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent,rgba(6,182,212,0.8)_10%,transparent_20%,transparent_50%,rgba(139,92,246,0.6)_60%,transparent_70%)]"
-                  style={{ animation: 'spin 3s linear infinite' }}
-                />
-              </div>
+              {/* Subtle border glow */}
+              <div className="absolute -inset-[1px] rounded-[29px] bg-gradient-to-b from-white/20 via-white/5 to-transparent" />
               
               {/* Main glass card */}
-              <div className="relative rounded-[28px] overflow-hidden backdrop-blur-2xl bg-gradient-to-b from-white/[0.15] via-white/[0.08] to-white/[0.03]">
-                {/* Noise texture for frosted effect */}
-                <div 
-                  className="absolute inset-0 opacity-[0.04] mix-blend-overlay pointer-events-none"
-                  style={{ 
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-                  }}
-                />
+              <div className="relative rounded-[28px] overflow-hidden backdrop-blur-xl bg-white/[0.08] border border-white/10">
+                {/* Top highlight line */}
+                <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
                 
-                {/* Top curved highlight - like light hitting glass from above */}
-                <div className="absolute inset-x-0 top-0 h-[120px]">
-                  <div className="absolute inset-0 bg-gradient-to-b from-white/25 via-white/10 to-transparent rounded-t-[28px]" />
-                  <div className="absolute inset-x-6 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/80 to-transparent" />
-                  <div className="absolute inset-x-12 top-[1px] h-[1px] bg-gradient-to-r from-transparent via-white/40 to-transparent blur-[0.5px]" />
-                </div>
-                
-                {/* Left edge highlight */}
-                <div className="absolute left-0 top-8 bottom-8 w-[1px] bg-gradient-to-b from-white/30 via-white/10 to-transparent" />
-                
-                {/* Right edge subtle reflection */}
-                <div className="absolute right-0 top-12 bottom-12 w-[1px] bg-gradient-to-b from-transparent via-white/5 to-transparent" />
-                
-                {/* Depth shadow at bottom */}
-                <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/40 via-black/10 to-transparent rounded-b-[28px]" />
-                
-                {/* Moving shimmer light */}
-                <div className="absolute inset-0 overflow-hidden rounded-[28px] pointer-events-none">
-                  <div 
-                    className="absolute w-[150%] h-24 bg-gradient-to-r from-transparent via-white/[0.15] to-transparent -rotate-12 -translate-x-full"
-                    style={{ 
-                      animation: 'shimmer-sweep 6s ease-in-out infinite',
-                      top: '10%',
-                    }}
-                  />
-                </div>
+                {/* Subtle top glow */}
+                <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/10 to-transparent rounded-t-[28px]" />
                 
                 {/* Content */}
                 <div className="relative p-8">
-                  {/* Inner glow effect */}
-                  <div className="absolute inset-3 rounded-[22px] shadow-[inset_0_0_80px_rgba(6,182,212,0.06),inset_0_0_30px_rgba(139,92,246,0.04)]" />
                 
                   {/* Form Header */}
                   <div className="mb-8">
