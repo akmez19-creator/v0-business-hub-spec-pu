@@ -256,10 +256,34 @@ export async function modifyOrder(params: {
   const newAmount = currentAmount + totalPrice
   const currentQty = Number(target.qty || 1)
   const newQty = currentQty + qty
+  
+  // Parse existing products and aggregate same product quantities
   const currentProducts = target.products || ''
-  const newProducts = currentProducts
-    ? `${currentProducts}, ${qty}x ${productName}`
-    : `${qty}x ${productName}`
+  const productMap = new Map<string, number>()
+  
+  // Parse existing products (format: "2x Product A, 1x Product B")
+  if (currentProducts) {
+    const items = currentProducts.split(',').map(s => s.trim())
+    for (const item of items) {
+      const match = item.match(/^(\d+)\s*x\s*(.+)$/i)
+      if (match) {
+        const itemQty = parseInt(match[1], 10)
+        const itemName = match[2].trim()
+        productMap.set(itemName, (productMap.get(itemName) || 0) + itemQty)
+      } else if (item) {
+        // Handle "Product Name" without qty prefix (assume 1)
+        productMap.set(item, (productMap.get(item) || 0) + 1)
+      }
+    }
+  }
+  
+  // Add the new product
+  productMap.set(productName, (productMap.get(productName) || 0) + qty)
+  
+  // Build aggregated products string
+  const newProducts = Array.from(productMap.entries())
+    .map(([name, q]) => `${q}x ${name}`)
+    .join(', ')
 
   const { error: updateError } = await admin
     .from('deliveries')
