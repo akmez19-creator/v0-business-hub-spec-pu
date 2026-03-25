@@ -274,11 +274,30 @@ export default function Futuristic3DBackground() {
   const [hasError, setHasError] = useState(false)
   
   return (
-    <div className="absolute inset-0 z-0 bg-black">
-      {/* Dark fallback gradient - always visible behind 3D */}
-      <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-black to-cyan-950/30" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(6,182,212,0.12),transparent_60%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(8,51,68,0.25),transparent_60%)]" />
+    <div className="absolute inset-0 z-0" style={{ backgroundColor: '#000000' }}>
+      {/* Solid black base - guaranteed dark */}
+      <div className="absolute inset-0" style={{ backgroundColor: '#000000' }} />
+      
+      {/* Dark gradient overlays */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#0a0a0a] via-[#000000] to-[#051015]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(6,182,212,0.15),transparent_60%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(8,51,68,0.3),transparent_60%)]" />
+      
+      {/* Animated gradient orbs for depth when 3D fails */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-cyan-500/5 blur-[100px] animate-pulse" style={{ animationDuration: '4s' }} />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-blue-500/5 blur-[80px] animate-pulse" style={{ animationDuration: '6s', animationDelay: '2s' }} />
+      
+      {/* Grid pattern overlay */}
+      <div 
+        className="absolute inset-0 opacity-[0.03]"
+        style={{
+          backgroundImage: `
+            linear-gradient(rgba(6,182,212,0.3) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(6,182,212,0.3) 1px, transparent 1px)
+          `,
+          backgroundSize: '50px 50px'
+        }}
+      />
       
       {/* 3D Canvas - on top of fallback */}
       {!hasError && (
@@ -306,10 +325,10 @@ export default function Futuristic3DBackground() {
       )}
       
       {/* Depth overlays */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-br from-cyan-950/15 via-transparent to-black/20 pointer-events-none" />
-      {/* Vignette */}
-      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: 'inset 0 0 180px 50px rgba(0,0,0,0.8)' }} />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-br from-cyan-950/20 via-transparent to-black/30 pointer-events-none" />
+      {/* Strong vignette */}
+      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: 'inset 0 0 200px 80px rgba(0,0,0,0.9)' }} />
     </div>
   )
 }
