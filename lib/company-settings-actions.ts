@@ -17,6 +17,7 @@ export type CompanySettings = {
   warehouse_name: string | null
   warehouse_lat: number | null
   warehouse_lng: number | null
+  orders_module_enabled: boolean
   updated_at: string
 }
 
@@ -147,5 +148,43 @@ export async function updateStampUrl(stampUrl: string): Promise<{ error?: string
   if (error) return { error: error.message }
 
   revalidatePath('/dashboard/admin/settings')
+  return {}
+}
+
+export async function toggleOrdersModule(enabled: boolean): Promise<{ error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const adminDb = createAdminClient()
+  const { data: profile } = await adminDb
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile || profile.role !== 'admin') return { error: 'Not authorized' }
+
+  const { data: existing } = await adminDb
+    .from('company_settings')
+    .select('id')
+    .limit(1)
+    .single()
+
+  if (!existing) return { error: 'Settings not found' }
+
+  const { error } = await adminDb
+    .from('company_settings')
+    .update({
+      orders_module_enabled: enabled,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/dashboard/admin/settings')
+  revalidatePath('/dashboard/contractors')
+  revalidatePath('/dashboard/riders')
   return {}
 }

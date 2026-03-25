@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Building2, MapPin } from 'lucide-react'
+import { Building2, MapPin, Settings2 } from 'lucide-react'
 import { CompanySettingsForm } from '@/components/admin/company-settings-form'
 import { WarehouseMapPicker } from '@/components/admin/warehouse-map-picker'
+import { ModuleToggles } from '@/components/admin/module-toggles'
 import { getCompanySettings } from '@/lib/company-settings-actions'
 
 export default async function AdminSettingsPage() {
@@ -64,6 +65,23 @@ export default async function AdminSettingsPage() {
             warehouseLng={settings?.warehouse_lng || null}
             mapboxToken={process.env.MAPBOX_TOKEN || ''}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+              <Settings2 className="w-5 h-5 text-cyan-500" />
+            </div>
+            <div>
+              <CardTitle>Module Settings</CardTitle>
+              <CardDescription>Enable or disable modules for contractors and riders.</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ModuleToggles ordersModuleEnabled={settings?.orders_module_enabled ?? true} />
         </CardContent>
       </Card>
     </div>
