@@ -27,6 +27,18 @@ function extractMapsLinks(text: string): string[] {
   return text.match(MAPS_URL_REGEX) || []
 }
 
+// Parse products string to extract item name without quantity prefix
+// If products is "2x Large Scale Spoon", returns { name: "Large Scale Spoon", qty: 2 }
+// If products is "Large Scale Spoon", returns { name: "Large Scale Spoon", qty: fallbackQty }
+function parseProductItem(products: string | null, fallbackQty: number, amount: number): { name: string; qty: number; amount: number } {
+  if (!products) return { name: 'Item', qty: fallbackQty, amount }
+  const match = products.match(/^(\d+)\s*x\s*(.+)$/i)
+  if (match) {
+    return { name: match[2].trim(), qty: parseInt(match[1], 10), amount }
+  }
+  return { name: products, qty: fallbackQty, amount }
+}
+
 interface MapPageContentProps {
   deliveries: any[]
   riderMap: Record<string, string>
@@ -204,7 +216,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
         locationFlagged: items.some(d => d.location_flagged),
         isModified: items.some(d => d.is_modified),
         modificationCount: items.reduce((sum, d) => sum + (d.modification_count || 0), 0),
-        items: items.map(d => ({ name: d.products || 'Item', qty: d.qty || 1, amount: d.amount || 0 })),
+        items: items.map(d => parseProductItem(d.products, d.qty || 1, d.amount || 0)),
         salesType: first.sales_type || null,
         returnProduct: first.return_product || null,
       }
@@ -280,7 +292,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
           locationFlagged: !!d.location_flagged,
           isModified: !!d.is_modified,
           modificationCount: d.modification_count || 0,
-          items: [{ name: d.products || 'Item', qty: d.qty || 1, amount: d.amount || 0 }],
+          items: [parseProductItem(d.products, d.qty || 1, d.amount || 0)],
         }
         if (!localityGroupMap['Unassigned']) localityGroupMap['Unassigned'] = { routable: [], unreachable: [], parentRegion: '' }
         localityGroupMap['Unassigned'].unreachable.push(pin)
