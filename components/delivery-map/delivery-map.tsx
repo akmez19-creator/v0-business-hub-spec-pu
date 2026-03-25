@@ -306,25 +306,46 @@ export function DeliveryMap({
     }
   }, [nightMode])
 
-  // ── Fullscreen toggle (CSS-based for mobile compatibility) ──
+  // ── Fullscreen toggle (CSS + native API for true fullscreen on mobile) ──
   const toggleFullscreen = useCallback(() => {
     const el = mapContainerParentRef.current
     if (!el) return
     const next = !isFullscreen
+    
     if (next) {
+      // CSS-based fullscreen
       el.style.position = 'fixed'
       el.style.inset = '0'
       el.style.zIndex = '9999'
       el.style.width = '100vw'
       el.style.height = '100dvh'
       document.body.style.overflow = 'hidden'
+      
+      // Try native fullscreen API to hide browser chrome (Android)
+      try {
+        if (el.requestFullscreen) {
+          el.requestFullscreen().catch(() => {})
+        } else if ((el as any).webkitRequestFullscreen) {
+          (el as any).webkitRequestFullscreen()
+        }
+      } catch {}
     } else {
+      // Exit CSS fullscreen
       el.style.position = ''
       el.style.inset = ''
       el.style.zIndex = ''
       el.style.width = ''
       el.style.height = ''
       document.body.style.overflow = ''
+      
+      // Exit native fullscreen if active
+      try {
+        const doc = document as any
+        if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+          if (doc.exitFullscreen) doc.exitFullscreen().catch(() => {})
+          else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen()
+        }
+      } catch {}
     }
     setIsFullscreen(next)
     // Trigger map resize after layout change
