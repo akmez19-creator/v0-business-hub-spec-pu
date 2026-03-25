@@ -534,8 +534,9 @@ const handleSubmit = async () => {
                         const bestSource = product.sources.find(s => s.isFree) || product.sources[0]
                         if (bestSource) {
                           setReplacingWith({ productName: product.productName, source: bestSource })
-                          // Use the new product's price - let user change it if needed
-                          setReplacePrice(product.unitPrice > 0 ? String(product.unitPrice) : '')
+                          // Default to current order's price when swapping (user can change if needed)
+                          const currentOrderPrice = currentItems[0]?.unitPrice || 0
+                          setReplacePrice(String(currentOrderPrice))
                           // Clear any expanded/selected state to prevent add flow
                           setExpandedProduct(null)
                           setSelectedSource(null)
