@@ -1,193 +1,24 @@
 'use client'
 
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useRef, useMemo, useEffect, useState, useCallback } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { useRef, useMemo, useEffect, useState } from 'react'
 import * as THREE from 'three'
-import { Float } from '@react-three/drei'
 
-// Smooth spatial tracking for iPhone-like parallax
-function useSpatialTracking() {
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const targetPos = useRef({ x: 0, y: 0 })
-  
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      targetPos.current.x = (e.clientX / window.innerWidth - 0.5) * 2
-      targetPos.current.y = (e.clientY / window.innerHeight - 0.5) * 2
-    }
-    
-    const handleDeviceOrientation = (e: DeviceOrientationEvent) => {
-      if (e.gamma !== null && e.beta !== null) {
-        targetPos.current.x = Math.max(-1, Math.min(1, (e.gamma || 0) / 25)) * 1.5
-        targetPos.current.y = Math.max(-1, Math.min(1, ((e.beta || 0) - 45) / 25)) * 1.5
-      }
-    }
-    
-    // Smooth animation loop
-    let animationId: number
-    const animate = () => {
-      setPosition(prev => ({
-        x: prev.x + (targetPos.current.x - prev.x) * 0.08,
-        y: prev.y + (targetPos.current.y - prev.y) * 0.08
-      }))
-      animationId = requestAnimationFrame(animate)
-    }
-    animate()
-    
-    window.addEventListener('mousemove', handleMouseMove, { passive: true })
-    window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true })
-    
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('deviceorientation', handleDeviceOrientation)
-      cancelAnimationFrame(animationId)
-    }
-  }, [])
-  
-  return position
-}
-
-// Smooth camera following
-function SpatialCamera({ pos }: { pos: { x: number; y: number } }) {
-  const { camera } = useThree()
-  
-  useFrame(() => {
-    camera.position.x += (pos.x * 2.5 - camera.position.x) * 0.05
-    camera.position.y += (1 + pos.y * -1.2 - camera.position.y) * 0.05
-    camera.lookAt(pos.x * -0.5, pos.y * 0.2, 0)
-  })
-  
-  return null
-}
-
-// Optimized glass material using standard material with transparency
-function GlassMaterial({ color = '#083344' }: { color?: string }) {
-  return (
-    <meshPhysicalMaterial
-      color={color}
-      transparent
-      opacity={0.4}
-      roughness={0.05}
-      metalness={0.1}
-      clearcoat={1}
-      clearcoatRoughness={0.1}
-      envMapIntensity={1}
-      ior={1.5}
-      thickness={1}
-      transmission={0.9}
-    />
-  )
-}
-
-// Central glass sphere with smooth morph
-function CentralGlobe({ pos }: { pos: { x: number; y: number } }) {
-  const meshRef = useRef<THREE.Mesh>(null)
-  
-  useFrame((state) => {
-    if (meshRef.current) {
-      const t = state.clock.elapsedTime
-      meshRef.current.rotation.x = t * 0.1 + pos.y * 0.3
-      meshRef.current.rotation.y = t * 0.15 + pos.x * 0.3
-      meshRef.current.position.x = pos.x * -1.5
-      meshRef.current.position.y = pos.y * 0.8
-      meshRef.current.scale.setScalar(2 + Math.sin(t * 0.5) * 0.1)
-    }
-  })
-
-  return (
-    <Float speed={1.5} rotationIntensity={0.1} floatIntensity={0.3}>
-      <mesh ref={meshRef} position={[0, 0, -3]}>
-        <icosahedronGeometry args={[1, 3]} />
-        <GlassMaterial color="#0c4a6e" />
-      </mesh>
-    </Float>
-  )
-}
-
-// Floating orbs at different depths
-function FloatingOrbs({ pos }: { pos: { x: number; y: number } }) {
-  const groupRef = useRef<THREE.Group>(null)
-  
-  const orbs = useMemo(() => 
-    Array.from({ length: 8 }, (_, i) => ({
-      pos: [
-        (Math.random() - 0.5) * 18,
-        (Math.random() - 0.5) * 10,
-        -3 - Math.random() * 12
-      ] as [number, number, number],
-      scale: 0.3 + Math.random() * 0.6,
-      speed: 0.1 + Math.random() * 0.2,
-      offset: Math.random() * Math.PI * 2,
-      depth: 0.3 + Math.random() * 0.7
-    })), [])
-
-  useFrame((state) => {
-    if (groupRef.current) {
-      const t = state.clock.elapsedTime
-      groupRef.current.children.forEach((child, i) => {
-        const orb = orbs[i]
-        child.position.y = orb.pos[1] + Math.sin(t * orb.speed + orb.offset) * 1.5
-        child.position.x = orb.pos[0] + pos.x * orb.depth * -2
-        child.rotation.x = t * 0.1
-        child.rotation.z = t * 0.15
-      })
-    }
-  })
-
-  return (
-    <group ref={groupRef}>
-      {orbs.map((orb, i) => (
-        <mesh key={i} position={orb.pos} scale={orb.scale}>
-          <sphereGeometry args={[1, 24, 24]} />
-          <GlassMaterial color="#164e63" />
-        </mesh>
-      ))}
-    </group>
-  )
-}
-
-// Animated rings
-function GlassRings({ pos }: { pos: { x: number; y: number } }) {
-  const groupRef = useRef<THREE.Group>(null)
-
-  useFrame((state) => {
-    if (groupRef.current) {
-      const t = state.clock.elapsedTime
-      groupRef.current.rotation.z = t * 0.1
-      groupRef.current.rotation.x = pos.y * 0.3
-      groupRef.current.rotation.y = pos.x * 0.3
-      groupRef.current.position.x = -6 + pos.x * -2
-      groupRef.current.position.y = pos.y * 0.8
-    }
-  })
-
-  return (
-    <group ref={groupRef} position={[-6, 0, -6]}>
-      {[2.5, 3.5, 4.5].map((r, i) => (
-        <mesh key={i} rotation={[i * 0.5, i * 0.3, i * 0.2]}>
-          <torusGeometry args={[r, 0.08, 16, 64]} />
-          <GlassMaterial color="#22d3ee" />
-        </mesh>
-      ))}
-    </group>
-  )
-}
-
-// Optimized particles using instanced mesh
-function Particles({ pos }: { pos: { x: number; y: number } }) {
+// Dark matter particles - monochromatic, subtle movement
+function DarkMatterParticles() {
   const meshRef = useRef<THREE.InstancedMesh>(null)
-  const count = 200
+  const count = 300
   
   const particles = useMemo(() => {
     return Array.from({ length: count }, () => ({
       pos: [
-        (Math.random() - 0.5) * 40,
-        (Math.random() - 0.5) * 20,
-        (Math.random() - 0.5) * 30 - 5
+        (Math.random() - 0.5) * 50,
+        (Math.random() - 0.5) * 30,
+        (Math.random() - 0.5) * 40 - 10
       ],
-      speed: 0.2 + Math.random() * 0.5,
+      speed: 0.05 + Math.random() * 0.15,
       offset: Math.random() * Math.PI * 2,
-      depth: 0.2 + Math.random() * 0.8
+      size: 0.02 + Math.random() * 0.06
     }))
   }, [])
 
@@ -197,12 +28,13 @@ function Particles({ pos }: { pos: { x: number; y: number } }) {
     if (meshRef.current) {
       const t = state.clock.elapsedTime
       particles.forEach((p, i) => {
+        // Slow drifting motion like dark matter
         dummy.position.set(
-          p.pos[0] + pos.x * p.depth * -1.5,
-          p.pos[1] + Math.sin(t * p.speed + p.offset) * 0.5 + pos.y * p.depth * 0.8,
-          p.pos[2]
+          p.pos[0] + Math.sin(t * p.speed * 0.5 + p.offset) * 2,
+          p.pos[1] + Math.cos(t * p.speed * 0.3 + p.offset) * 1.5,
+          p.pos[2] + Math.sin(t * p.speed * 0.4 + p.offset * 2) * 1
         )
-        dummy.scale.setScalar(0.03 + p.depth * 0.04)
+        dummy.scale.setScalar(p.size)
         dummy.updateMatrix()
         meshRef.current!.setMatrixAt(i, dummy.matrix)
       })
@@ -213,103 +45,162 @@ function Particles({ pos }: { pos: { x: number; y: number } }) {
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
       <sphereGeometry args={[1, 8, 8]} />
-      <meshBasicMaterial color="#22d3ee" transparent opacity={0.7} />
+      <meshBasicMaterial color="#ffffff" transparent opacity={0.15} />
     </instancedMesh>
   )
 }
 
-// Grid floor
-function GridFloor({ pos }: { pos: { x: number; y: number } }) {
-  const gridRef = useRef<THREE.Group>(null)
+// Larger dark matter wisps - very subtle
+function DarkMatterWisps() {
+  const groupRef = useRef<THREE.Group>(null)
   
+  const wisps = useMemo(() => 
+    Array.from({ length: 6 }, (_, i) => ({
+      pos: [
+        (Math.random() - 0.5) * 30,
+        (Math.random() - 0.5) * 15,
+        -8 - Math.random() * 15
+      ] as [number, number, number],
+      scale: 1.5 + Math.random() * 2,
+      speed: 0.02 + Math.random() * 0.03,
+      offset: Math.random() * Math.PI * 2
+    })), [])
+
   useFrame((state) => {
-    if (gridRef.current) {
-      gridRef.current.position.x = pos.x * -0.4
-      gridRef.current.position.z = pos.y * 0.3
-      gridRef.current.position.y = -4 + Math.sin(state.clock.elapsedTime * 0.2) * 0.05
+    if (groupRef.current) {
+      const t = state.clock.elapsedTime
+      groupRef.current.children.forEach((child, i) => {
+        const wisp = wisps[i]
+        child.position.y = wisp.pos[1] + Math.sin(t * wisp.speed + wisp.offset) * 3
+        child.position.x = wisp.pos[0] + Math.cos(t * wisp.speed * 0.7 + wisp.offset) * 2
+        child.rotation.z = t * 0.02
+      })
     }
   })
 
   return (
-    <group ref={gridRef} position={[0, -4, 0]} rotation={[Math.PI * 0.5, 0, 0]}>
-      <gridHelper args={[50, 50, '#0e7490', '#052e3d']} rotation={[Math.PI * 0.5, 0, 0]} />
+    <group ref={groupRef}>
+      {wisps.map((wisp, i) => (
+        <mesh key={i} position={wisp.pos} scale={wisp.scale}>
+          <sphereGeometry args={[1, 16, 16]} />
+          <meshBasicMaterial color="#0a1520" transparent opacity={0.4} />
+        </mesh>
+      ))}
     </group>
   )
 }
 
-// Lights
-function Lights() {
+// Slow rotating nebula/dust clouds
+function DarkNebula() {
+  const meshRef = useRef<THREE.Mesh>(null)
+  
+  useFrame((state) => {
+    if (meshRef.current) {
+      meshRef.current.rotation.z = state.clock.elapsedTime * 0.01
+      meshRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.02) * 0.1
+    }
+  })
+
   return (
-    <>
-      <ambientLight intensity={0.4} />
-      <pointLight position={[10, 10, 10]} intensity={0.6} color="#06b6d4" />
-      <pointLight position={[-10, -5, -10]} intensity={0.4} color="#0891b2" />
-      <pointLight position={[0, 8, 5]} intensity={0.5} color="#22d3ee" />
-    </>
+    <mesh ref={meshRef} position={[0, 0, -20]}>
+      <planeGeometry args={[60, 60]} />
+      <meshBasicMaterial transparent opacity={0.08}>
+        <canvasTexture 
+          attach="map" 
+          image={(() => {
+            if (typeof window === 'undefined') return null
+            const canvas = document.createElement('canvas')
+            canvas.width = 512
+            canvas.height = 512
+            const ctx = canvas.getContext('2d')
+            if (ctx) {
+              // Create dark swirling pattern
+              const gradient = ctx.createRadialGradient(256, 256, 0, 256, 256, 256)
+              gradient.addColorStop(0, 'rgba(6, 182, 212, 0.1)')
+              gradient.addColorStop(0.3, 'rgba(8, 51, 68, 0.08)')
+              gradient.addColorStop(0.6, 'rgba(0, 0, 0, 0.05)')
+              gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+              ctx.fillStyle = gradient
+              ctx.fillRect(0, 0, 512, 512)
+            }
+            return canvas
+          })() as HTMLCanvasElement}
+        />
+      </meshBasicMaterial>
+    </mesh>
   )
 }
 
-function Scene({ pos }: { pos: { x: number; y: number } }) {
+// Grid floor with slow drift
+function GridFloor() {
+  const gridRef = useRef<THREE.Group>(null)
+  
+  useFrame((state) => {
+    if (gridRef.current) {
+      gridRef.current.position.y = -5 + Math.sin(state.clock.elapsedTime * 0.1) * 0.2
+    }
+  })
+
+  return (
+    <group ref={gridRef} position={[0, -5, 0]} rotation={[Math.PI * 0.5, 0, 0]}>
+      <gridHelper args={[60, 40, '#082f49', '#0c1a24']} rotation={[Math.PI * 0.5, 0, 0]} />
+    </group>
+  )
+}
+
+function Scene() {
   return (
     <>
       <color attach="background" args={['#000000']} />
-      <fog attach="fog" args={['#000508', 12, 40]} />
-      <SpatialCamera pos={pos} />
-      <Lights />
-      <CentralGlobe pos={pos} />
-      <FloatingOrbs pos={pos} />
-      <GlassRings pos={pos} />
-      <Particles pos={pos} />
-      <GridFloor pos={pos} />
+      <fog attach="fog" args={['#000205', 15, 50]} />
+      <ambientLight intensity={0.1} />
+      <DarkMatterParticles />
+      <DarkMatterWisps />
+      <DarkNebula />
+      <GridFloor />
     </>
   )
 }
 
-function SceneWrapper() {
-  const position = useSpatialTracking()
-  return <Scene pos={position} />
-}
-
 export default function Futuristic3DBackground() {
-  const [hasError, setHasError] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   
   return (
     <div className="absolute inset-0 z-0 bg-black">
-      {/* Dark fallback gradient - always visible behind 3D */}
-      <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-black to-cyan-950/30" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(6,182,212,0.12),transparent_60%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,rgba(8,51,68,0.25),transparent_60%)]" />
+      {/* Pure black base - always visible */}
+      <div className="absolute inset-0 bg-black" />
       
-      {/* 3D Canvas - on top of fallback */}
-      {!hasError && (
+      {/* Very subtle ambient glows */}
+      <div className="absolute top-0 right-0 w-[400px] h-[300px] bg-[radial-gradient(ellipse_at_center,rgba(6,182,212,0.04),transparent_70%)]" />
+      <div className="absolute bottom-0 left-0 w-[300px] h-[200px] bg-[radial-gradient(ellipse_at_center,rgba(6,182,212,0.03),transparent_70%)]" />
+      
+      {/* 3D Canvas - dark matter effect */}
+      {mounted && (
         <div className="absolute inset-0">
           <Canvas
-            camera={{ position: [0, 1, 10], fov: 55 }}
+            camera={{ position: [0, 0, 15], fov: 60 }}
             dpr={[1, 1.5]}
             gl={{ 
               antialias: true, 
               alpha: false,
               powerPreference: 'high-performance',
-              stencil: false,
-              depth: true,
               failIfMajorPerformanceCaveat: false
             }}
-            performance={{ min: 0.5 }}
             onCreated={({ gl }) => {
               gl.setClearColor('#000000')
             }}
-            onError={() => setHasError(true)}
           >
-            <SceneWrapper />
+            <Scene />
           </Canvas>
         </div>
       )}
       
-      {/* Depth overlays */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-br from-cyan-950/15 via-transparent to-black/20 pointer-events-none" />
-      {/* Vignette */}
-      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: 'inset 0 0 180px 50px rgba(0,0,0,0.8)' }} />
+      {/* Vignette overlay */}
+      <div className="absolute inset-0 pointer-events-none" style={{ boxShadow: 'inset 0 0 150px 60px rgba(0,0,0,0.8)' }} />
     </div>
   )
 }
