@@ -489,6 +489,150 @@ export async function reviewModification(modificationId: string, action: 'approv
   return { success: true }
 }
 
+// ── Reduce or remove item from current order ──
+export async function reduceOrderItem(params: {
+  deliveryId: string
+  productName: string
+  reduceBy: number  // How many to reduce (if reduceBy >= current qty, removes entirely)
+  reason?: string
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { deliveryId, productName, reduceBy, reason } = params
+  const admin = createAdminClient()
+
+  // Get the delivery
+  const { data: delivery } = await admin
+    .from('deliveries')
+    .select('id, customer_name, products, qty, amount, rider_id, contractor_id, delivery_date, is_modified, modification_count, original_amount')
+    .eq('id', deliveryId)
+    .single()
+
+  if (!delivery) return { error: 'Delivery not found' }
+
+  // Parse current products
+  const productMap = new Map<string, { qty: number; unitPrice: number }>()
+  const totalAmount = Number(delivery.amount || 0)
+  const totalQty = Number(delivery.qty || 1)
+  const avgUnitPrice = totalQty > 0 ? totalAmount / totalQty : 0
+
+  if (delivery.products) {
+    const items = delivery.products.split(',').map((s: string) => s.trim())
+    for (const item of items) {
+      const match = item.match(/^(\d+)\s*x\s*(.+)$/i)
+      if (match) {
+        const itemQty = parseInt(match[1], 10)
+        const itemName = match[2].trim()
+        productMap.set(itemName, { qty: itemQty, unitPrice: avgUnitPrice })
+      } else if (item) {
+        productMap.set(item, { qty: 1, unitPrice: avgUnitPrice })
+      }
+    }
+  }
+
+  // Find the product to reduce
+  const existing = productMap.get(productName)
+  if (!existing) return { error: `Product "${productName}" not found in order` }
+
+  const actualReduce = Math.min(reduceBy, existing.qty)
+  const newQtyForProduct = existing.qty - actualReduce
+
+  if (newQtyForProduct <= 0) {
+    // Remove entirely
+    productMap.delete(productName)
+  } else {
+    productMap.set(productName, { ...existing, qty: newQtyForProduct })
+  }
+
+  // Calculate new totals
+  let newTotalQty = 0
+  for (const [, v] of productMap) {
+    newTotalQty += v.qty
+  }
+  const priceReduction = actualReduce * avgUnitPrice
+  const newAmount = Math.max(0, Math.round((totalAmount - priceReduction) * 100) / 100)
+
+  // Build new products string
+  const newProducts = productMap.size > 0
+    ? Array.from(productMap.entries()).map(([name, v]) => `${v.qty}x ${name}`).join(', ')
+    : ''
+
+  // If no products left, we should handle this case (maybe mark as CMS?)
+  if (productMap.size === 0) {
+    return { error: 'Cannot remove all products. Use CMS to cancel the delivery.' }
+  }
+
+  // Store original amount if first modification
+  const originalAmount = delivery.is_modified ? delivery.original_amount : totalAmount
+
+  // Update delivery
+  const { error: updateError } = await admin
+    .from('deliveries')
+    .update({
+      products: newProducts,
+      qty: newTotalQty,
+      amount: newAmount,
+      original_amount: originalAmount,
+      is_modified: true,
+      modification_count: (delivery.modification_count || 0) + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', deliveryId)
+
+  if (updateError) return { error: updateError.message }
+
+  // Log the modification
+  const contractorId = delivery.contractor_id || await getContractorIdFromDelivery(deliveryId)
+  
+  await admin
+    .from('order_modifications')
+    .insert({
+      target_delivery_id: deliveryId,
+      source_delivery_id: null,
+      modified_by: user.id,
+      rider_id: delivery.rider_id,
+      contractor_id: contractorId,
+      product_name: productName,
+      qty: -actualReduce, // Negative to indicate reduction
+      unit_price: avgUnitPrice,
+      total_price: -priceReduction,
+      reason: 'client_reduction',
+      notes: reason || `Reduced ${actualReduce}x ${productName}`,
+      delivery_date: delivery.delivery_date,
+      status: 'approved', // Auto-approved since it's client choice
+    })
+
+  // Notify contractor
+  if (contractorId) {
+    await notify({
+      userId: contractorId,
+      type: 'info',
+      title: 'Order Reduced',
+      message: `${delivery.customer_name}: -${actualReduce}x ${productName} (Rs -${Math.round(priceReduction)})`,
+      link: '/dashboard/contractors/my-deliveries',
+    })
+
+    // Sync stock
+    try { await syncContractorStock(contractorId) } catch {}
+  }
+
+  revalidatePath('/dashboard/deliveries')
+  revalidatePath('/dashboard/riders')
+  revalidatePath('/dashboard/contractors')
+  revalidatePath('/dashboard/contractors/map')
+  revalidatePath('/dashboard/contractors/my-deliveries')
+
+  return {
+    success: true,
+    newAmount,
+    newQty: newTotalQty,
+    newProducts,
+    reducedQty: actualReduce,
+  }
+}
+
 // ── Get all pending modifications for contractor/admin ──
 export async function getPendingModifications(contractorId?: string) {
   const supabase = await createClient()

@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { X, Package, Plus, ChevronDown, ChevronUp, AlertTriangle, Check, Loader2, Users } from 'lucide-react'
+import { X, Package, Plus, Minus, ChevronDown, ChevronUp, AlertTriangle, Check, Loader2, Users, Trash2, Edit3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getAvailableProducts, modifyOrder } from '@/lib/modification-actions'
+import { getAvailableProducts, modifyOrder, reduceOrderItem } from '@/lib/modification-actions'
 
 interface StockSource {
   deliveryId: string
@@ -44,6 +44,12 @@ export function ModifyOrderSheet({
   const [success, setSuccess] = useState(false)
   const [affectedInfo, setAffectedInfo] = useState<{ name: string; markedNwd: boolean; remainingQty: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  
+  // Current order items (parsed from currentProducts)
+  const [currentItems, setCurrentItems] = useState<{ name: string; qty: number; unitPrice: number }[]>([])
+  const [editingItem, setEditingItem] = useState<string | null>(null)
+  const [pendingQty, setPendingQty] = useState<Record<string, number>>({})
+  const [reducingItem, setReducingItem] = useState<string | null>(null)
 
   // Selection state
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
@@ -63,12 +69,41 @@ export function ModifyOrderSheet({
     setExpandedProduct(null)
     setSelectedSource(null)
     setConfirmStep(false)
+    setEditingItem(null)
+    setPendingQty({})
+    setReducingItem(null)
+    
+    // Parse current products into editable items
+    const items: { name: string; qty: number; unitPrice: number }[] = []
+    if (currentProducts) {
+      const parts = currentProducts.split(',').map(s => s.trim())
+      let totalQty = 0
+      for (const part of parts) {
+        const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
+        if (match) {
+          totalQty += parseInt(match[1], 10)
+        } else {
+          totalQty += 1
+        }
+      }
+      const avgPrice = totalQty > 0 ? currentAmount / totalQty : 0
+      for (const part of parts) {
+        const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
+        if (match) {
+          items.push({ name: match[2].trim(), qty: parseInt(match[1], 10), unitPrice: avgPrice })
+        } else if (part) {
+          items.push({ name: part, qty: 1, unitPrice: avgPrice })
+        }
+      }
+    }
+    setCurrentItems(items)
+    
     getAvailableProducts(deliveryId).then(res => {
       if (res.error) setError(res.error)
       setStockProducts(res.stockProducts || [])
       setLoading(false)
     })
-  }, [open, deliveryId])
+  }, [open, deliveryId, currentProducts, currentAmount])
 
   const resetForm = useCallback(() => {
     setExpandedProduct(null)
@@ -95,6 +130,45 @@ export function ModifyOrderSheet({
       setConfirmStep(false)
     } else {
       selectSource(src)
+    }
+  }
+
+  const handleReduceItem = async (productName: string, reduceBy: number) => {
+    setReducingItem(productName)
+    setError(null)
+    
+    const result = await reduceOrderItem({
+      deliveryId,
+      productName,
+      reduceBy,
+      reason: 'Client requested change',
+    })
+    
+    setReducingItem(null)
+    
+    if (result.error) {
+      setError(result.error)
+    } else {
+      // Update local state
+      setCurrentItems(prev => {
+        const updated = prev.map(item => {
+          if (item.name === productName) {
+            const newQty = item.qty - reduceBy
+            return newQty > 0 ? { ...item, qty: newQty } : null
+          }
+          return item
+        }).filter(Boolean) as typeof prev
+        return updated
+      })
+      setEditingItem(null)
+      setPendingQty({})
+      
+      // Notify parent of modification
+      onModified?.({
+        newAmount: result.newAmount!,
+        newQty: result.newQty!,
+        newProducts: result.newProducts,
+      })
     }
   }
 
@@ -174,11 +248,107 @@ export function ModifyOrderSheet({
           </button>
         </div>
 
-        {/* Current order */}
+        {/* Current order - Editable */}
         <div className="mx-4 mb-3 p-3 rounded-xl bg-white/3 border border-white/5">
-          <p className="text-[10px] text-white/30 font-mono mb-1">CURRENT ORDER</p>
-          <p className="text-xs text-white/70 truncate">{currentProducts || 'No products'}</p>
-          <p className="text-sm font-bold text-amber-400 mt-1">Rs {currentAmount.toLocaleString()}</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] text-white/30 font-mono">CURRENT ORDER</p>
+            <p className="text-sm font-bold text-amber-400">Rs {currentAmount.toLocaleString()}</p>
+          </div>
+          
+          {currentItems.length === 0 ? (
+            <p className="text-xs text-white/40">No products</p>
+          ) : (
+            <div className="space-y-2">
+              {currentItems.map((item) => {
+                const isEditing = editingItem === item.name
+                const pendingReduce = pendingQty[item.name] ?? 0
+                const newQty = item.qty - pendingReduce
+                
+                return (
+                  <div key={item.name} className={cn(
+                    "rounded-lg border transition-all",
+                    isEditing ? "bg-amber-500/8 border-amber-400/20 p-2" : "bg-white/2 border-white/5 px-2 py-1.5"
+                  )}>
+                    {!isEditing ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-cyan-400 w-6">{item.qty}x</span>
+                        <span className="text-[11px] text-white/70 flex-1 truncate">{item.name}</span>
+                        <span className="text-[10px] text-white/30">Rs {Math.round(item.qty * item.unitPrice)}</span>
+                        <button 
+                          onClick={() => { setEditingItem(item.name); setPendingQty(p => ({ ...p, [item.name]: 0 })) }}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
+                        >
+                          <Edit3 className="w-3 h-3 text-white/40" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-white/70 truncate flex-1">{item.name}</span>
+                          <button onClick={() => { setEditingItem(null); setPendingQty(p => ({ ...p, [item.name]: 0 })) }}
+                            className="p-1 rounded hover:bg-white/10">
+                            <X className="w-3 h-3 text-white/40" />
+                          </button>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] text-white/30 font-mono">QTY</span>
+                          <button 
+                            onClick={() => setPendingQty(p => ({ ...p, [item.name]: Math.min(item.qty - 1, (p[item.name] ?? 0) + 1) }))}
+                            disabled={newQty <= 1}
+                            className="w-7 h-7 rounded-lg bg-red-500/10 border border-red-400/20 flex items-center justify-center text-red-400 disabled:opacity-30 active:bg-red-500/20"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <div className={cn(
+                            "w-10 h-7 rounded-lg border flex items-center justify-center text-[11px] font-bold",
+                            pendingReduce > 0 ? "bg-red-500/10 border-red-400/20 text-red-400" : "bg-white/5 border-white/10 text-white/70"
+                          )}>
+                            {newQty}
+                          </div>
+                          <button 
+                            onClick={() => setPendingQty(p => ({ ...p, [item.name]: Math.max(0, (p[item.name] ?? 0) - 1) }))}
+                            disabled={pendingReduce <= 0}
+                            className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-400/20 flex items-center justify-center text-emerald-400 disabled:opacity-30 active:bg-emerald-500/20"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="text-[9px] text-white/20">was {item.qty}</span>
+                        </div>
+                        
+                        {pendingReduce > 0 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleReduceItem(item.name, pendingReduce)}
+                              disabled={reducingItem === item.name}
+                              className="flex-1 h-8 rounded-lg bg-red-500/15 border border-red-400/20 text-red-400 text-[10px] font-bold font-mono flex items-center justify-center gap-1.5 active:bg-red-500/25 disabled:opacity-50"
+                            >
+                              {reducingItem === item.name ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Minus className="w-3.5 h-3.5" />
+                              )}
+                              REMOVE {pendingReduce} (Rs -{Math.round(pendingReduce * item.unitPrice)})
+                            </button>
+                            {item.qty > 1 && pendingReduce < item.qty - 1 && (
+                              <button
+                                onClick={() => handleReduceItem(item.name, item.qty - 1)}
+                                disabled={reducingItem === item.name}
+                                className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-white/50 text-[10px] font-mono flex items-center justify-center gap-1 active:bg-white/10 disabled:opacity-50"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                KEEP 1
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Success */}
