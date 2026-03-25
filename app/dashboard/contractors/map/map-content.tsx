@@ -121,6 +121,8 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
   }, [router])
 
   const { exactPins, regions, regionGroups, totalMapped, totalUnmapped } = useMemo(() => {
+    console.log("[v0] filteredDeliveries count:", filteredDeliveries.length)
+    console.log("[v0] filteredDeliveries sample:", filteredDeliveries[0])
     const exact: DeliveryPin[] = []
     // Step 1: Group deliveries by client (same name+contact = same client, like orders page)
     const clientMap: Record<string, typeof filteredDeliveries> = {}
@@ -309,6 +311,8 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
       }))
       .sort((a, b) => b.totalCount - a.totalCount)
 
+    console.log("[v0] exact pins:", exact.length, "regions:", regionClusters.length, "groups:", regionGroups.length)
+    console.log("[v0] localityMap keys:", Object.keys(localityMap))
     return {
       exactPins: exact,
       regions: regionClusters,
