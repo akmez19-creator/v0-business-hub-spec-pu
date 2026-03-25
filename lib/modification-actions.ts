@@ -369,6 +369,7 @@ export async function modifyOrder(params: {
     modification,
     newAmount,
     newQty,
+    newProducts,
     affectedClient,
   }
 }
