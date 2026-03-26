@@ -574,7 +574,17 @@ export function DeliveryMap({
           config: { basemap: { lightPreset: 'dusk', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
         })
         miniMapInstance.current = mini
-        map.on('move', () => { mini.setCenter(map.getCenter()); mini.setBearing(map.getBearing()) })
+        // Throttle mini-map sync to reduce render load (every 100ms instead of every frame)
+        let lastSync = 0
+        map.on('move', () => {
+          const now = Date.now()
+          if (now - lastSync > 100) {
+            lastSync = now
+            mini.setCenter(map.getCenter())
+            mini.setBearing(map.getBearing())
+          }
+        })
+        map.on('moveend', () => { mini.setCenter(map.getCenter()); mini.setBearing(map.getBearing()) })
       }
     }
 
