@@ -240,6 +240,7 @@ export function DeliveryMap({
   const [navTarget, setNavTarget] = useState<DeliveryPin | null>(null)
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
+  const [mapLoading, setMapLoading] = useState(true) // Preloading Mauritius tiles
   const [navReady, setNavReady] = useState(false)
   const [navStopsExpanded, setNavStopsExpanded] = useState(false)
   const [arrivalAlert, setArrivalAlert] = useState<string | null>(null)
@@ -502,23 +503,38 @@ export function DeliveryMap({
       // Disable inertia for instant response (reduces perceived lag)
       map.dragPan.enable({ linearity: 0.15, deceleration: 2500, maxSpeed: 1400 })
       
-      // Preload tiles at adjacent zoom levels for smoother transitions
-      map.on('idle', () => {
-        const currentZoom = Math.floor(map.getZoom())
-        const bounds = map.getBounds()
-        // Preload +1 and -1 zoom levels in background
-        if (currentZoom < 19) {
-          map.areTilesLoaded() // Trigger tile loading check
-        }
-      })
+      // PRELOAD ALL MAURITIUS TILES - wait for full load before interaction
+      // Mauritius bounds: SW [-20.53, 57.30] to NE [-19.97, 57.81]
+      const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
+      const zoomLevels = [10, 12, 14, 16, 18] // Preload common zoom levels
       
-      // Smooth zoom animation settings
-      map.on('zoomstart', () => {
-        // Keep old tiles visible during zoom for smooth transition
-        document.querySelectorAll('.mapboxgl-tile').forEach(tile => {
-          (tile as HTMLElement).style.transition = 'opacity 300ms ease-out'
-        })
-      })
+      const preloadTiles = async () => {
+        setMapLoading(true)
+        for (const z of zoomLevels) {
+          // Fly to bounds at each zoom level to trigger tile loading
+          map.fitBounds(mauritiusBounds, { duration: 0, padding: 0 })
+          map.setZoom(z)
+          // Wait for tiles to load at this zoom level
+          await new Promise<void>(resolve => {
+            const checkTiles = () => {
+              if (map.areTilesLoaded()) {
+                resolve()
+              } else {
+                setTimeout(checkTiles, 100)
+              }
+            }
+            checkTiles()
+          })
+        }
+        // Return to original position
+        map.setCenter(center)
+        map.setZoom(15)
+        map.setPitch(60)
+        map.setBearing(-20)
+        setMapLoading(false)
+      }
+      
+      map.once('idle', preloadTiles)
 
       // ── Static dusk lighting (no weather effects) ──
       map.on('style.load', () => {
@@ -1578,6 +1594,15 @@ export function DeliveryMap({
   </div>
   <button onClick={stopNavigation} className="ml-2 px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-400/20 text-red-400 text-[10px] font-bold active:scale-95 transition-all">Cancel</button>
           </div>
+        </div>
+      )}
+
+      {/* Map Preloading Overlay */}
+      {mapLoading && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="w-16 h-16 border-4 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin mb-4" />
+          <p className="text-white font-semibold text-sm">Loading map tiles...</p>
+          <p className="text-cyan-400/70 text-xs mt-1">Preparing smooth experience</p>
         </div>
       )}
 
