@@ -192,6 +192,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     }
   }, [locationMode])
 
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null)
+  
   async function shareGPS() {
     if (!navigator.geolocation) {
       setError('Location sharing is not supported on your device.')
@@ -200,25 +202,42 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setGettingLocation(true)
     setError('')
     setLocationMode('gps')
+    setGpsAccuracy(null)
 
-    console.log('[v0] Getting GPS location...')
+    // Use watchPosition to get improving accuracy readings over time
+    let bestAccuracy = Infinity
+    let bestPosition: { lat: number; lng: number } | null = null
+    let watchId: number
     
     const handlePosition = (position: GeolocationPosition) => {
       const { latitude, longitude, accuracy } = position.coords
-      console.log('[v0] GPS success:', latitude, longitude, 'accuracy:', accuracy)
-      const url = `https://www.google.com/maps?q=${latitude},${longitude}`
-      const coords = { lat: latitude, lng: longitude }
-      setLocationUrl(url)
-      setRawCoords(coords)
-      setGettingLocation(false)
-      checkRegionDistance(latitude, longitude)
-      // Don't auto-save - let user verify on map first, then confirm
+      setGpsAccuracy(Math.round(accuracy))
+      
+      // Keep the most accurate reading
+      if (accuracy < bestAccuracy) {
+        bestAccuracy = accuracy
+        bestPosition = { lat: latitude, lng: longitude }
+        
+        // Update display with current best
+        const url = `https://www.google.com/maps?q=${latitude},${longitude}`
+        setLocationUrl(url)
+        setRawCoords(bestPosition)
+        checkRegionDistance(latitude, longitude)
+      }
+      
+      // Stop watching if accuracy is good enough (under 20 meters)
+      if (accuracy <= 20) {
+        navigator.geolocation.clearWatch(watchId)
+        setGettingLocation(false)
+        setGpsAccuracy(null)
+      }
     }
     
     const handleError = (err: GeolocationPositionError) => {
-      console.log('[v0] GPS error:', err.code, err.message)
+      navigator.geolocation.clearWatch(watchId)
       setGettingLocation(false)
       setLocationMode('none')
+      setGpsAccuracy(null)
       if (err.code === 1) {
         setError('Location access denied. Please enable location in your browser settings.')
       } else {
@@ -226,20 +245,21 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       }
     }
     
-    // Try high accuracy first (GPS), fallback to low accuracy (WiFi/cell) if it fails
-    // maximumAge: 0 forces fresh position (no cached data)
-    navigator.geolocation.getCurrentPosition(
+    // Watch position for improving accuracy
+    watchId = navigator.geolocation.watchPosition(
       handlePosition,
-      (err) => {
-        console.log('[v0] High accuracy failed, trying low accuracy...')
-        navigator.geolocation.getCurrentPosition(
-          handlePosition,
-          handleError,
-          { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
-        )
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      handleError,
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
+    
+    // Stop after 5 seconds max and use best reading
+    setTimeout(() => {
+      navigator.geolocation.clearWatch(watchId)
+      if (bestPosition) {
+        setGettingLocation(false)
+        setGpsAccuracy(null)
+      }
+    }, 5000)
   }
 
   function clearLocation() {
@@ -419,9 +439,14 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                       ) : (
                         <Navigation className="w-4 h-4 text-accent shrink-0" />
                       )}
-                      <p className={`flex-1 text-xs font-medium truncate ${locationSaved ? 'text-emerald-400' : savingLocation ? 'text-blue-400' : 'text-accent'}`}>
-                        {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS location found' : 'Link parsed'}
-                      </p>
+                      <div className="flex-1">
+                        <p className={`text-xs font-medium truncate ${locationSaved ? 'text-emerald-400' : savingLocation ? 'text-blue-400' : 'text-accent'}`}>
+                          {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS location found' : 'Link parsed'}
+                        </p>
+                        {gpsAccuracy && gettingLocation && (
+                          <p className="text-[10px] text-blue-400">Refining accuracy: {gpsAccuracy}m...</p>
+                        )}
+                      </div>
                       {!savingLocation && !locationSaved && (
                         <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
                           Change
