@@ -3286,9 +3286,9 @@ export function DeliveryMap({
                 className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition active:scale-95">
                 <Ban className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Client Refused</span>
               </button>
-              <button onClick={() => confirmCmsReason('Not At Home')}
+              <button onClick={() => confirmCmsReason('Change of Address')}
                 className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition active:scale-95">
-                <MapPin className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Not At Home</span>
+                <MapPin className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Change of Address</span>
               </button>
               <button onClick={() => confirmCmsReason('Cancelled Order')}
                 className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition active:scale-95">
