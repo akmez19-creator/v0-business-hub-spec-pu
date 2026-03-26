@@ -403,7 +403,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
         {/* Compact Location Section */}
         {(!isDelivered || isFailed) && (
           <section className="bg-card/80 border border-border/50 rounded-xl p-3 space-y-2">
-            {/* Already has location (from client OR rider) - don't allow changing */}
+            {/* Already has location - show confirmed state with Update option */}
             {delivery.latitude && !showLocationUpdate ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-3 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
@@ -414,6 +414,12 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                     <p className="text-sm font-semibold text-emerald-400">Location Confirmed</p>
                     <p className="text-[10px] text-emerald-400/70">Rider has your delivery location</p>
                   </div>
+                  <button
+                    onClick={() => setShowLocationUpdate(true)}
+                    className="px-3 py-1.5 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+                  >
+                    Update
+                  </button>
                 </div>
               </div>
             ) : (
