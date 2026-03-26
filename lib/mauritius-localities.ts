@@ -109,9 +109,10 @@ export const MAURITIUS_LOCALITIES: Record<string, { lat: number; lng: number }> 
   // PORT LOUIS area
   'Pailles': { lat: -20.1850, lng: 57.4800 },
   'Plaine Lauzun': { lat: -20.1650, lng: 57.5050 },
-  // Near Port Louis North area
-  'Bassin': { lat: -20.1350, lng: 57.4750 },  // Near Canal Dayot / Pointe aux Sables
-  'Palma': { lat: -20.1450, lng: 57.5150 },   // Near Roche Bois / Vallee Pitot area
+  // Beau Bassin-Rose Hill area
+  'Bassin': { lat: -20.2332, lng: 57.4661 },  // Beau Bassin area
+  // Near Quatre Bornes
+  'Palma': { lat: -20.2730, lng: 57.4708 },   // Palma Road near Quatre Bornes
   // Central Mauritius localities (near Rose Hill/Beau Bassin area)
   'Soreze': { lat: -20.1980, lng: 57.4850 },
   'Montreal': { lat: -20.1920, lng: 57.4680 },
