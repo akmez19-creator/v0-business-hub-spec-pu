@@ -212,8 +212,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       setRawCoords(coords)
       setGettingLocation(false)
       checkRegionDistance(latitude, longitude)
-      // Auto-save the location immediately
-      autoSaveLocation(coords, url, 'gps')
+      // Don't auto-save - let user verify on map first, then confirm
     }
     
     const handleError = (err: GeolocationPositionError) => {
@@ -421,9 +420,9 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                         <Navigation className="w-4 h-4 text-accent shrink-0" />
                       )}
                       <p className={`flex-1 text-xs font-medium truncate ${locationSaved ? 'text-emerald-400' : savingLocation ? 'text-blue-400' : 'text-accent'}`}>
-                        {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS' : 'Link'}
+                        {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS location found' : 'Link parsed'}
                       </p>
-                      {!savingLocation && (
+                      {!savingLocation && !locationSaved && (
                         <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
                           Change
                         </button>
@@ -434,6 +433,20 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                         <AlertTriangle className="w-3 h-3 text-warning shrink-0" />
                         <p className="text-[10px] text-warning">Outside delivery area - rider may call</p>
                       </div>
+                    )}
+                    {/* Confirm button for GPS/Paste - user must verify position first */}
+                    {!locationSaved && rawCoords && (
+                      <button
+                        onClick={() => {
+                          const url = locationUrl || `https://www.google.com/maps?q=${rawCoords.lat},${rawCoords.lng}`
+                          autoSaveLocation(rawCoords, url, locationMode === 'gps' ? 'gps' : 'manual')
+                        }}
+                        disabled={savingLocation}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                      >
+                        {savingLocation ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        <span>Confirm This Location</span>
+                      </button>
                     )}
                   </div>
 
@@ -502,8 +515,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                             const coords = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) }
                             setRawCoords(coords)
                             checkRegionDistance(coords.lat, coords.lng)
-                            // Auto-save the pasted location
-                            autoSaveLocation(coords, url.trim(), 'manual')
+                            // Don't auto-save - let user verify first
                           }
                         }
                       }}
