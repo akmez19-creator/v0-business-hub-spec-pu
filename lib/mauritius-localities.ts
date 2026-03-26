@@ -109,6 +109,14 @@ export const MAURITIUS_LOCALITIES: Record<string, { lat: number; lng: number }> 
   // PORT LOUIS area
   'Pailles': { lat: -20.1850, lng: 57.4800 },
   'Plaine Lauzun': { lat: -20.1650, lng: 57.5050 },
+  // Central Mauritius localities (near Rose Hill/Beau Bassin area)
+  'Bassin': { lat: -20.2180, lng: 57.4580 },
+  'Palma': { lat: -20.2000, lng: 57.5250 },
+  'Soreze': { lat: -20.1980, lng: 57.4850 },
+  'Montreal': { lat: -20.1920, lng: 57.4680 },
+  'Mount Ory': { lat: -20.2200, lng: 57.5050 },
+  'Domaine Les Pailles': { lat: -20.1850, lng: 57.4750 },
+  'Les Pailles': { lat: -20.1850, lng: 57.4750 },
   // GOODLANDS area
   'Khoyratty': { lat: -20.0500, lng: 57.6500 },
   // Additional common Mauritius localities
