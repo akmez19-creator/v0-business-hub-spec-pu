@@ -470,22 +470,31 @@ export function DeliveryMap({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/standard',
         center, zoom: 15, maxZoom: 20, pitch: 60, bearing: -20,
-        antialias: true, projection: 'globe',
+        antialias: false, // Disable for better performance
+        projection: 'globe',
         touchZoomRotate: true, touchPitch: true, dragRotate: true,
         cooperativeGestures: false, logoPosition: 'bottom-left',
         attributionControl: false,
-        pixelRatio: Math.min(window.devicePixelRatio || 1, 1.5), // Reduced for smoother performance
-        optimizeForTerrain: true, fadeDuration: 0, // Instant transitions for smoother zoom
-        renderWorldCopies: false, // Less rendering overhead
-        refreshExpiredTiles: false, // Don't refresh during interaction
+        pixelRatio: 1, // Minimum for max performance
+        optimizeForTerrain: true, 
+        fadeDuration: 0,
+        renderWorldCopies: false,
+        refreshExpiredTiles: false,
         trackResize: true,
+        maxTileCacheSize: 50, // Limit cache for memory
+        localIdeographFontFamily: 'sans-serif', // Faster text rendering
+        crossSourceCollisions: false, // Faster label placement
+        collectResourceTiming: false, // No perf tracking overhead
         config: { basemap: { lightPreset: 'dusk', show3dObjects: true, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: true, showTransitLabels: true } },
       })
       map.touchZoomRotate.enableRotation()
       map.touchPitch.enable()
-      // Smoother zoom with reduced scroll sensitivity
-      map.scrollZoom.setWheelZoomRate(1/300)
-      map.scrollZoom.setZoomRate(1/150)
+      // Ultra smooth zoom settings
+      map.scrollZoom.setWheelZoomRate(1/450) // Slower, smoother
+      map.scrollZoom.setZoomRate(1/200)
+      // Disable expensive features during interaction
+      map.on('zoomstart', () => { map.setLayoutProperty('poi-label', 'visibility', 'none').catch(() => {}) })
+      map.on('zoomend', () => { map.setLayoutProperty('poi-label', 'visibility', 'visible').catch(() => {}) })
 
       // ── Static dusk lighting (no weather effects) ──
       map.on('style.load', () => {
@@ -1471,7 +1480,7 @@ export function DeliveryMap({
     }
   }, [navigating, navTarget, distToTarget])
 
-  // ══════════════════════════════════════════
+  // ═══════���══════════════════════════════════
   // ██  RENDER
   // ══════════════════════════════════════════
   return (
@@ -1582,8 +1591,8 @@ export function DeliveryMap({
         </div>
       )}
 
-      {/* Map container */}
-      <div ref={mapContainerRef} className="flex-1 w-full" />
+      {/* Map container - GPU accelerated for smooth zoom */}
+      <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
 
       {/* Mini-map radar */}
       <div className="absolute bottom-24 left-3 z-20 w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden border-2 border-cyan-400/30 shadow-lg shadow-cyan-500/10">
