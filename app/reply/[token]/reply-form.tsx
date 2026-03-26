@@ -207,10 +207,13 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       const { latitude, longitude, accuracy } = position.coords
       console.log('[v0] GPS success:', latitude, longitude, 'accuracy:', accuracy)
       const url = `https://www.google.com/maps?q=${latitude},${longitude}`
+      const coords = { lat: latitude, lng: longitude }
       setLocationUrl(url)
-      setRawCoords({ lat: latitude, lng: longitude })
+      setRawCoords(coords)
       setGettingLocation(false)
       checkRegionDistance(latitude, longitude)
+      // Auto-save the location immediately
+      autoSaveLocation(coords, url, 'gps')
     }
     
     const handleError = (err: GeolocationPositionError) => {
@@ -249,6 +252,23 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       mapInstanceRef.current.remove()
       mapInstanceRef.current = null
       markerRef.current = null
+    }
+  }
+
+  // Auto-save location when captured (no need for reply button)
+  const [locationSaved, setLocationSaved] = useState(false)
+  const [savingLocation, setSavingLocation] = useState(false)
+  
+  async function autoSaveLocation(coords: { lat: number; lng: number }, url: string, source: 'gps' | 'pin' | 'manual') {
+    console.log('[v0] Auto-saving location:', { coords, source })
+    setSavingLocation(true)
+    const result = await submitClientReply(token, '', url, coords, source, regionCenter)
+    console.log('[v0] Auto-save result:', result)
+    setSavingLocation(false)
+    if (!result.error) {
+      setLocationSaved(true)
+    } else {
+      setError(result.error)
     }
   }
 
@@ -394,17 +414,25 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                   </p>
                 </div>
 
-                {/* Location captured */}
-                {locationUrl ? (
+                {/* Location captured and saved */}
+                {locationUrl && locationMode !== 'pin' ? (
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-2 rounded-lg bg-accent/10 border border-accent/20">
-                      <Navigation className="w-4 h-4 text-accent shrink-0" />
-                      <p className="flex-1 text-xs text-accent truncate">
-                        {locationMode === 'gps' ? 'GPS' : locationMode === 'pin' ? 'Pinned' : 'Link'}
+                    <div className={`flex items-center gap-2 p-2 rounded-lg ${locationSaved ? 'bg-emerald-500/10 border border-emerald-500/20' : savingLocation ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-accent/10 border border-accent/20'}`}>
+                      {savingLocation ? (
+                        <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                      ) : locationSaved ? (
+                        <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <Navigation className="w-4 h-4 text-accent shrink-0" />
+                      )}
+                      <p className={`flex-1 text-xs font-medium truncate ${locationSaved ? 'text-emerald-400' : savingLocation ? 'text-blue-400' : 'text-accent'}`}>
+                        {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS' : 'Link'}
                       </p>
-                      <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
-                        Change
-                      </button>
+                      {!savingLocation && (
+                        <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
+                          Change
+                        </button>
+                      )}
                     </div>
                     {outsideRegion && (
                       <div className="flex items-center gap-2 p-2 rounded-lg bg-warning/10 border border-warning/30">
@@ -415,12 +443,27 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                   </div>
 
                 ) : locationMode === 'pin' ? (
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
-                    <Crosshair className="w-4 h-4 text-cyan-400 animate-pulse" />
-                    <p className="flex-1 text-xs text-cyan-400">Pinning on map...</p>
-                    <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
-                      Cancel
-                    </button>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                      <Crosshair className="w-4 h-4 text-cyan-400 animate-pulse" />
+                      <p className="flex-1 text-xs text-cyan-400">{pinMoved ? 'Pin placed - confirm below' : 'Tap map to place pin'}</p>
+                      <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
+                        Cancel
+                      </button>
+                    </div>
+                    {pinMoved && rawCoords && (
+                      <button
+                        onClick={() => {
+                          const url = `https://www.google.com/maps?q=${rawCoords.lat},${rawCoords.lng}`
+                          autoSaveLocation(rawCoords, url, 'pin')
+                        }}
+                        disabled={savingLocation}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white text-sm font-semibold disabled:opacity-50"
+                      >
+                        {savingLocation ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        <span>Confirm This Location</span>
+                      </button>
+                    )}
                   </div>
 
                 ) : (
@@ -464,6 +507,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                             const coords = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) }
                             setRawCoords(coords)
                             checkRegionDistance(coords.lat, coords.lng)
+                            // Auto-save the pasted location
+                            autoSaveLocation(coords, url.trim(), 'manual')
                           }
                         }
                       }}
@@ -630,25 +675,56 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
           </div>
         )}
 
-        {/* Reply Text */}
+        {/* Reply Text - only show if no location yet OR user wants to add a message */}
         {(!isDelivered || isFailed) && (
           <div className="space-y-2">
-            <textarea
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-              placeholder={hasExistingReply ? "Update message..." : "Message to rider..."}
-              rows={2}
-              className="w-full px-3 py-2 rounded-xl bg-muted/50 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
-            />
-            {error && <p className="text-[10px] text-destructive">{error}</p>}
-            <button
-              onClick={handleSubmit}
-              disabled={submitting || (!reply.trim() && !locationUrl)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold disabled:opacity-50"
-            >
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              <span>{hasExistingReply ? 'Update' : 'Send'}</span>
-            </button>
+            {/* If location already exists (from DB or just set), show confirmation and optional message */}
+            {(delivery.latitude || locationUrl) && !showLocationUpdate ? (
+              <>
+                {/* Location is confirmed - optional message section */}
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <p className="text-xs text-emerald-400 font-medium">Location confirmed</p>
+                </div>
+                <textarea
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  placeholder="Add a message for the rider (optional)..."
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-xl bg-muted/50 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
+                />
+                {error && <p className="text-[10px] text-destructive">{error}</p>}
+                {reply.trim() && (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                  >
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <span>Send Message</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <textarea
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  placeholder={hasExistingReply ? "Update message..." : "Message to rider..."}
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-xl bg-muted/50 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 resize-none"
+                />
+                {error && <p className="text-[10px] text-destructive">{error}</p>}
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || (!reply.trim() && !locationUrl)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  <span>{hasExistingReply ? 'Update' : 'Send'}</span>
+                </button>
+              </>
+            )}
           </div>
         )}
 
