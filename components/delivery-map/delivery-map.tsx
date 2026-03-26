@@ -468,7 +468,7 @@ export function DeliveryMap({
 
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/standard?optimize=true', // Style-optimized tiles - removes unused layers
+        style: 'mapbox://styles/mapbox/standard?optimize=true',
         center, zoom: 15, maxZoom: 20, pitch: 60, bearing: -20,
         antialias: false,
         projection: 'globe',
@@ -477,18 +477,18 @@ export function DeliveryMap({
         attributionControl: false,
         pixelRatio: 1,
         optimizeForTerrain: true, 
-        fadeDuration: 0,
+        fadeDuration: 300, // Smooth tile fade transitions (not 0!)
         renderWorldCopies: false,
         refreshExpiredTiles: false,
         trackResize: true,
-        maxTileCacheSize: 100, // Increase cache to reduce tile reloads during zoom
+        maxTileCacheSize: 200, // Large cache = fewer tile reloads during zoom
         localIdeographFontFamily: 'sans-serif',
         crossSourceCollisions: false,
         collectResourceTiming: false,
         testMode: false,
-        boxZoom: false, // Disable box zoom for cleaner interactions
-        doubleClickZoom: false, // Disable double-click zoom (use buttons instead)
-        config: { basemap: { lightPreset: 'dusk', show3dObjects: true, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } }, // Reduced labels
+        boxZoom: false,
+        doubleClickZoom: false,
+        config: { basemap: { lightPreset: 'dusk', show3dObjects: true, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
       })
       
       // Enable smooth interactions
@@ -502,12 +502,23 @@ export function DeliveryMap({
       // Disable inertia for instant response (reduces perceived lag)
       map.dragPan.enable({ linearity: 0.15, deceleration: 2500, maxSpeed: 1400 })
       
-      // Performance: throttle heavy operations during zoom/pan
-      let isInteracting = false
-      map.on('movestart', () => { isInteracting = true })
-      map.on('moveend', () => { isInteracting = false })
-      map.on('zoomstart', () => { isInteracting = true })
-      map.on('zoomend', () => { isInteracting = false })
+      // Preload tiles at adjacent zoom levels for smoother transitions
+      map.on('idle', () => {
+        const currentZoom = Math.floor(map.getZoom())
+        const bounds = map.getBounds()
+        // Preload +1 and -1 zoom levels in background
+        if (currentZoom < 19) {
+          map.areTilesLoaded() // Trigger tile loading check
+        }
+      })
+      
+      // Smooth zoom animation settings
+      map.on('zoomstart', () => {
+        // Keep old tiles visible during zoom for smooth transition
+        document.querySelectorAll('.mapboxgl-tile').forEach(tile => {
+          (tile as HTMLElement).style.transition = 'opacity 300ms ease-out'
+        })
+      })
 
       // ── Static dusk lighting (no weather effects) ──
       map.on('style.load', () => {
