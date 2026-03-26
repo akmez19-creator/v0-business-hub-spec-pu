@@ -201,17 +201,23 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
     setError('')
     setLocationMode('gps')
 
+    console.log('[v0] Getting GPS location...')
+    
     const handlePosition = (position: GeolocationPosition) => {
-      const { latitude, longitude } = position.coords
+      const { latitude, longitude, accuracy } = position.coords
+      console.log('[v0] GPS success:', latitude, longitude, 'accuracy:', accuracy)
       const url = `https://www.google.com/maps?q=${latitude},${longitude}`
       const coords = { lat: latitude, lng: longitude }
       setLocationUrl(url)
       setRawCoords(coords)
       setGettingLocation(false)
       checkRegionDistance(latitude, longitude)
+      // Auto-save the location immediately
+      autoSaveLocation(coords, url, 'gps')
     }
     
     const handleError = (err: GeolocationPositionError) => {
+      console.log('[v0] GPS error:', err.code, err.message)
       setGettingLocation(false)
       setLocationMode('none')
       if (err.code === 1) {
@@ -221,11 +227,12 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
       }
     }
     
-    // Use high accuracy GPS - maximumAge: 0 forces fresh position
+    // Try high accuracy first (GPS), fallback to low accuracy (WiFi/cell) if it fails
+    // maximumAge: 0 forces fresh position (no cached data)
     navigator.geolocation.getCurrentPosition(
       handlePosition,
       (err) => {
-        // If high accuracy fails, try low accuracy as fallback
+        console.log('[v0] High accuracy failed, trying low accuracy...')
         navigator.geolocation.getCurrentPosition(
           handlePosition,
           handleError,
@@ -377,7 +384,7 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
         {/* Compact Location Section */}
         {(!isDelivered || isFailed) && (
           <section className="bg-card/80 border border-border/50 rounded-xl p-3 space-y-2">
-            {/* Already has location - show confirmed state with Update option */}
+            {/* Already has location (from client OR rider) - don't allow changing */}
             {delivery.latitude && !showLocationUpdate ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-3 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
@@ -388,12 +395,6 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                     <p className="text-sm font-semibold text-emerald-400">Location Confirmed</p>
                     <p className="text-[10px] text-emerald-400/70">Rider has your delivery location</p>
                   </div>
-                  <button
-                    onClick={() => setShowLocationUpdate(true)}
-                    className="px-3 py-1.5 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
-                  >
-                    Update
-                  </button>
                 </div>
               </div>
             ) : (
@@ -420,9 +421,9 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                         <Navigation className="w-4 h-4 text-accent shrink-0" />
                       )}
                       <p className={`flex-1 text-xs font-medium truncate ${locationSaved ? 'text-emerald-400' : savingLocation ? 'text-blue-400' : 'text-accent'}`}>
-                        {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS location found' : 'Link parsed'}
+                        {savingLocation ? 'Saving location...' : locationSaved ? 'Location saved!' : locationMode === 'gps' ? 'GPS' : 'Link'}
                       </p>
-                      {!savingLocation && !locationSaved && (
+                      {!savingLocation && (
                         <button onClick={clearLocation} className="px-2 py-1 rounded bg-background/80 text-[10px] text-muted-foreground">
                           Change
                         </button>
@@ -433,20 +434,6 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                         <AlertTriangle className="w-3 h-3 text-warning shrink-0" />
                         <p className="text-[10px] text-warning">Outside delivery area - rider may call</p>
                       </div>
-                    )}
-                    {/* Confirm button for GPS/Paste - user must verify position first */}
-                    {!locationSaved && rawCoords && (
-                      <button
-                        onClick={() => {
-                          const url = locationUrl || `https://www.google.com/maps?q=${rawCoords.lat},${rawCoords.lng}`
-                          autoSaveLocation(rawCoords, url, locationMode === 'gps' ? 'gps' : 'manual')
-                        }}
-                        disabled={savingLocation}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold disabled:opacity-50"
-                      >
-                        {savingLocation ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                        <span>Confirm This Location</span>
-                      </button>
                     )}
                   </div>
 
@@ -515,7 +502,8 @@ export function ReplyForm({ delivery, token, company, regionCenter, mapboxToken 
                             const coords = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) }
                             setRawCoords(coords)
                             checkRegionDistance(coords.lat, coords.lng)
-                            // Don't auto-save - let user verify first
+                            // Auto-save the pasted location
+                            autoSaveLocation(coords, url.trim(), 'manual')
                           }
                         }
                       }}
