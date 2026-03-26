@@ -474,12 +474,18 @@ export function DeliveryMap({
         touchZoomRotate: true, touchPitch: true, dragRotate: true,
         cooperativeGestures: false, logoPosition: 'bottom-left',
         attributionControl: false,
-        pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
-        optimizeForTerrain: true, fadeDuration: 300,
+        pixelRatio: Math.min(window.devicePixelRatio || 1, 1.5), // Reduced for smoother performance
+        optimizeForTerrain: true, fadeDuration: 0, // Instant transitions for smoother zoom
+        renderWorldCopies: false, // Less rendering overhead
+        refreshExpiredTiles: false, // Don't refresh during interaction
+        trackResize: true,
         config: { basemap: { lightPreset: 'dusk', show3dObjects: true, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: true, showTransitLabels: true } },
       })
       map.touchZoomRotate.enableRotation()
       map.touchPitch.enable()
+      // Smoother zoom with reduced scroll sensitivity
+      map.scrollZoom.setWheelZoomRate(1/300)
+      map.scrollZoom.setZoomRate(1/150)
 
       // ── Static dusk lighting (no weather effects) ──
       map.on('style.load', () => {
@@ -574,7 +580,17 @@ export function DeliveryMap({
           config: { basemap: { lightPreset: 'dusk', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
         })
         miniMapInstance.current = mini
-        map.on('move', () => { mini.setCenter(map.getCenter()); mini.setBearing(map.getBearing()) })
+        // Throttle mini-map sync to reduce render load (every 100ms instead of every frame)
+        let lastSync = 0
+        map.on('move', () => {
+          const now = Date.now()
+          if (now - lastSync > 100) {
+            lastSync = now
+            mini.setCenter(map.getCenter())
+            mini.setBearing(map.getBearing())
+          }
+        })
+        map.on('moveend', () => { mini.setCenter(map.getCenter()); mini.setBearing(map.getBearing()) })
       }
     }
 
