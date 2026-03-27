@@ -366,7 +366,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Cite La Cure': { lat: -20.15583, lng: 57.52778 },
   'Cite Martial': { lat: -20.16000, lng: 57.50000 },
   'Cite Roche Bois': { lat: -20.14000, lng: 57.50000 },
-  'Cite Valijee': { lat: -20.26000, lng: 57.48500 },
+  'Cite Valijee': { lat: -20.16945, lng: 57.48177 },
   'Croisee Vallee Des Pretes': { lat: -20.17000, lng: 57.51000 },
   'Domaine Les Pailles': { lat: -20.18330, lng: 57.48330 },
   'Dr. A. G. Jeetoo Hospital': { lat: -20.16900, lng: 57.50216 },
@@ -390,7 +390,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'St Croix': { lat: -20.14733, lng: 57.52822 },
   'SVICC': { lat: -20.16000, lng: 57.50000 },
   'Tranquebar': { lat: -20.16500, lng: 57.50500 },
-  'Vallee Des Pretes': { lat: -20.32000, lng: 57.54000 },
+  'Vallee Des Pretes': { lat: -20.16861, lng: 57.53639 },
   'Vallee Pitot': { lat: -20.17150, lng: 57.51910 },
   'Venus': { lat: -20.15000, lng: 57.50000 },
 
