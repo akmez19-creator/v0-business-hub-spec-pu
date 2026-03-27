@@ -225,7 +225,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Solitude': { lat: -20.10390, lng: 57.57030 },
   'St Joseph': { lat: -20.12000, lng: 57.57000 },
   'St Malo': { lat: -20.13000, lng: 57.58000 },
-  'Terre Rouge': { lat: -20.12610, lng: 57.52440 },
+  'Terre Rouge': { lat: -20.12800, lng: 57.53500 },
   'The Mount': { lat: -20.09833, lng: 57.60528 },
   'Triolet': { lat: -20.05760, lng: 57.55025 },
   'Trou Aux Biches': { lat: -20.05000, lng: 57.55000 },
