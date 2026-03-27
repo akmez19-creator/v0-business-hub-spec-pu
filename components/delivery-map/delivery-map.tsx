@@ -1538,7 +1538,7 @@ export function DeliveryMap({
       alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
       setNavigating(false); setNavTarget(null); setNavReady(false)
     } finally { setRouteLoading(false) }
-  }, [driverLocation, mapboxToken, updateDriverMarker, startContinuousTracking, snapToRoad])
+  }, [driverLocation, mapboxToken, updateDriverMarker, startContinuousTracking, snapToRoad, multiStopNav, optimizedStops])
 
   // Keep ref in sync so drag handlers can call startNavigation without circular deps
   startNavigationRef.current = startNavigation
