@@ -369,7 +369,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Cite Valijee': { lat: -20.26000, lng: 57.48500 },
   'Croisee Vallee Des Pretes': { lat: -20.17000, lng: 57.51000 },
   'Domaine Les Pailles': { lat: -20.18330, lng: 57.48330 },
-  'Dr. A. G. Jeetoo Hospital': { lat: -20.16000, lng: 57.50000 },
+  'Dr. A. G. Jeetoo Hospital': { lat: -20.16900, lng: 57.50216 },
   'Guibies': { lat: -20.18000, lng: 57.49000 },
   'La Butte': { lat: -20.16000, lng: 57.50000 },
   'La Cure': { lat: -20.18750, lng: 57.51670 },
