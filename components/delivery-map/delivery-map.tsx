@@ -941,47 +941,68 @@ export function DeliveryMap({
   }, [])
   
   // ══════════════════════════════════════════════════════════════════════════
-  // SIMPLE RAW GPS TRACKING - Same approach as client location pinning
-  // No road snapping, no complex filtering - just accurate raw GPS
-  // ═══════════════════════════════════════════���════════════════��═════════════
+  // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
+  // watchPosition has known Chrome bugs - setInterval is more reliable
+  // ══════════════════════════════════════════════════════════════════════════
+  const gpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  
   const startContinuousTracking = useCallback(() => {
     if (!navigator.geolocation) return
-    if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
     
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (p) => {
-        // Use RAW GPS coordinates - same as client location pinning
-        const lat = p.coords.latitude
-        const lng = p.coords.longitude
-        const speed = p.coords.speed ? p.coords.speed * 3.6 : 0 // km/h
-        const heading = p.coords.heading ?? 0
-        const pos = { lat, lng }
-        
-        // Smooth animate marker to actual GPS position
-        const animDuration = speed > 20 ? 400 : speed > 5 ? 700 : 1000
-        animateMarkerTo(pos, heading, animDuration)
-        setDriverHeading(heading)
-        setSpeed(Math.round(speed))
-        
-        // Smooth camera follow during navigation
-        if (mapRef.current && navigating && !routeOverviewRef.current) {
-          mapRef.current.easeTo({ 
-            center: [lng, lat], 
-            bearing: heading, 
-            pitch: 65, 
-            zoom: speed > 30 ? 16 : 17,
-            duration: speed > 15 ? 600 : 1000,
-            easing: (t: number) => 1 - Math.pow(1 - t, 3) 
-          })
-        }
-      },
-      (err) => { console.log('[v0] GPS error:', err.message) }, 
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-    )
+    // Clear any existing tracking
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current)
+      watchIdRef.current = null
+    }
+    if (gpsIntervalRef.current) {
+      clearInterval(gpsIntervalRef.current)
+      gpsIntervalRef.current = null
+    }
+    
+    // Function to get and update position
+    const updatePosition = () => {
+      navigator.geolocation.getCurrentPosition(
+        (p) => {
+          // Use RAW GPS coordinates - same as client location pinning
+          const lat = p.coords.latitude
+          const lng = p.coords.longitude
+          const speed = p.coords.speed ? p.coords.speed * 3.6 : 0 // km/h
+          const heading = p.coords.heading ?? 0
+          const pos = { lat, lng }
+          
+          // Smooth animate marker to actual GPS position
+          const animDuration = speed > 20 ? 400 : speed > 5 ? 700 : 1000
+          animateMarkerTo(pos, heading, animDuration)
+          setDriverHeading(heading)
+          setSpeed(Math.round(speed))
+          
+          // Smooth camera follow during navigation
+          if (mapRef.current && navigating && !routeOverviewRef.current) {
+            mapRef.current.easeTo({ 
+              center: [lng, lat], 
+              bearing: heading, 
+              pitch: 65, 
+              zoom: speed > 30 ? 16 : 17,
+              duration: speed > 15 ? 600 : 1000,
+              easing: (t: number) => 1 - Math.pow(1 - t, 3) 
+            })
+          }
+        },
+        (err) => { /* Silent fail - will retry on next interval */ }, 
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 4000 }
+      )
+    }
+    
+    // Get initial position immediately
+    updatePosition()
+    
+    // Then poll every 2 seconds for continuous updates (more reliable than watchPosition)
+    gpsIntervalRef.current = setInterval(updatePosition, 2000)
   }, [navigating, animateMarkerTo])
 
   useEffect(() => () => { 
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    if (gpsIntervalRef.current) clearInterval(gpsIntervalRef.current)
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
   }, [])
 
