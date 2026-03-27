@@ -208,7 +208,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Mont Choisy': { lat: -20.02080, lng: 57.54580 },
   'Mont Choisy Shopping Mall': { lat: -20.02000, lng: 57.55000 },
   'Morcellement Maison Blanche': { lat: -20.10000, lng: 57.55000 },
-  'Morcellement St Andre': { lat: -20.09000, lng: 57.57000 },
+  'Morcellement St Andre': { lat: -20.07199, lng: 57.56833 },
   'Nicoliere': { lat: -20.11670, lng: 57.60000 },
   'Notre Dame': { lat: -20.10000, lng: 57.54000 },
   'Pamplemousses': { lat: -20.10390, lng: 57.57030 },
