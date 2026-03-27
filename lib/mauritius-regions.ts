@@ -387,7 +387,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Quay D': { lat: -20.15500, lng: 57.50000 },
   'Roche Bois': { lat: -20.14440, lng: 57.50560 },
   'Soreze': { lat: -20.16000, lng: 57.51000 },
-  'St Croix': { lat: -20.16670, lng: 57.51670 },
+  'St Croix': { lat: -20.14733, lng: 57.52822 },
   'SVICC': { lat: -20.16000, lng: 57.50000 },
   'Tranquebar': { lat: -20.21000, lng: 57.51000 },
   'Vallee Des Pretes': { lat: -20.32000, lng: 57.54000 },
