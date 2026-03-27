@@ -176,8 +176,8 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   // PAMPLEMOUSSES DISTRICT (54 regions)
   // ══════════════════════════════════════════════════════════════════════════
-  'Arsenal': { lat: -20.11250, lng: 57.50830 },
-  'Baie Du Tombeau': { lat: -20.12080, lng: 57.50000 },
+  'Arsenal': { lat: -20.10560, lng: 57.53530 },
+  'Baie Du Tombeau': { lat: -20.11383, lng: 57.50658 },
   'Balaclava': { lat: -20.08330, lng: 57.51560 },
   'Beau Plan': { lat: -20.10000, lng: 57.56000 },
   'Bois Mangue': { lat: -20.12000, lng: 57.54000 },
@@ -219,13 +219,13 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Plaine des Papayes': { lat: -20.11360, lng: 57.57590 },
   'Pointe Aux Biches': { lat: -20.05830, lng: 57.54170 },
   'Pointe Aux Piments': { lat: -20.06670, lng: 57.52500 },
-  'Riche Terre': { lat: -20.11670, lng: 57.52500 },
+  'Riche Terre': { lat: -20.13015, lng: 57.52165 },
   'Riche Terre Ind Zone': { lat: -20.12000, lng: 57.52000 },
   'S.S.R.N.Hospital': { lat: -20.10000, lng: 57.57000 },
   'Solitude': { lat: -20.07780, lng: 57.52000 },
   'St Joseph': { lat: -20.12000, lng: 57.57000 },
   'St Malo': { lat: -20.13000, lng: 57.58000 },
-  'Terre Rouge': { lat: -20.13060, lng: 57.53330 },
+  'Terre Rouge': { lat: -20.12610, lng: 57.52440 },
   'The Mount': { lat: -20.09833, lng: 57.60528 },
   'Triolet': { lat: -20.05760, lng: 57.55030 },
   'Trou Aux Biches': { lat: -20.03330, lng: 57.54170 },
