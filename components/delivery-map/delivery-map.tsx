@@ -845,7 +845,7 @@ export function DeliveryMap({
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap])
 
-  // ── GPS Tracking ──
+  // ── GPS Tracking - RAW GPS, no road snapping ──
   const startTracking = useCallback(() => {
     if (!navigator.geolocation || locating) return
     setLocating(true)
@@ -853,16 +853,16 @@ export function DeliveryMap({
     const wid = navigator.geolocation.watchPosition(
       (p) => {
         if (done) return; done = true; navigator.geolocation.clearWatch(wid); setLocating(false)
+        // Use RAW GPS position - no road snapping for accurate location
         const rawPos = { lat: p.coords.latitude, lng: p.coords.longitude }
         setDriverLocation(rawPos); updateDriverMarker(rawPos, p.coords.heading ?? 0)
         mapRef.current?.flyTo({ center: [rawPos.lng, rawPos.lat], zoom: 17, pitch: 60, bearing: p.coords.heading ?? 0, duration: 1800, essential: true })
-        snapToRoad(rawPos.lat, rawPos.lng).then(s => { setDriverLocation({ lat: s.lat, lng: s.lng }); updateDriverMarker({ lat: s.lat, lng: s.lng }, s.bearing) }).catch(() => {})
       },
       () => { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 } // maximumAge: 0 for fresh position
     )
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
-  }, [updateDriverMarker, snapToRoad, locating])
+  }, [updateDriverMarker, locating])
 
   // ══════════════════════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
@@ -943,7 +943,7 @@ export function DeliveryMap({
   // ══════════════════════════════════════════════════════════════════════════
   // SIMPLE RAW GPS TRACKING - Same approach as client location pinning
   // No road snapping, no complex filtering - just accurate raw GPS
-  // ══════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════���══════════════════════════════
   const startContinuousTracking = useCallback(() => {
     if (!navigator.geolocation) return
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
@@ -998,22 +998,22 @@ export function DeliveryMap({
     if (dist < 30 && currentStepIndex < routeInfo.steps.length - 1) setCurrentStepIndex(prev => prev + 1)
   }, [navigating, driverLocation, routeInfo, currentStepIndex])
 
-  // ── Auto-show driver on map load ──
+  // ── Auto-show driver on map load - RAW GPS, no road snapping ──
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || driverMarkerRef.current) return
-    const placeDriver = async (lat: number, lng: number, heading = 0, flyTo = false) => {
+    const placeDriver = (lat: number, lng: number, heading = 0, flyTo = false) => {
+      // Use RAW GPS position - no road snapping for accurate location
       setDriverLocation({ lat, lng }); updateDriverMarker({ lat, lng }, heading)
       if (flyTo && mapRef.current) mapRef.current.flyTo({ center: [lng, lat], zoom: 16.5, pitch: 60, bearing: heading, duration: 1500 })
-      try { const s = await snapToRoad(lat, lng); setDriverLocation({ lat: s.lat, lng: s.lng }); updateDriverMarker({ lat: s.lat, lng: s.lng }, s.bearing || heading) } catch {}
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => placeDriver(p.coords.latitude, p.coords.longitude, p.coords.heading ?? 0, true),
         () => { const c = mapRef.current!.getCenter(); placeDriver(c.lat, c.lng, 0, false) },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 } // Fresh position
       )
     } else { const c = mapRef.current!.getCenter(); placeDriver(c.lat, c.lng, 0, false) }
-  }, [mapLoaded, updateDriverMarker, snapToRoad])
+  }, [mapLoaded, updateDriverMarker])
 
   // ── Warehouse marker ──
   useEffect(() => {
@@ -1256,7 +1256,7 @@ export function DeliveryMap({
     setExporting(null)
   }, [safeRegionGroups, customTemplates, markRegionExported])
 
-  // ── Status change + Payment ──
+  // ── Status change + Payment ─���
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
     // Exchange / Trade-in / Refund: show protocol popup via paymentPopup with protocol flag
     if (isReturnOrder(pin)) {
