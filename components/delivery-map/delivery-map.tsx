@@ -1863,57 +1863,37 @@ export function DeliveryMap({
             )
           })()}
           <div className="holo-panel rounded-2xl overflow-hidden nav-card-3d glow-border-pulse">
-            {/* ═══ CURRENT STOP: Client + Product + Amount ═══ */}
+            {/* ═══ COMPACT CURRENT STOP ═══ */}
             {navTarget && (
-              <div className="px-4 pt-4 pb-3 relative">
-                {/* Row 1: Name + Amount + List toggle */}
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_currentColor]" style={{ backgroundColor: STATUS_COLORS[navTarget.status]?.dot || '#6b7280' }} />
-                      <p className="text-[13px] font-bold text-white truncate tracking-wide">{navTarget.customerName}</p>
-                    </div>
-                    {/* Row 2: Product - clear and prominent */}
-                    <div className="ml-[18px] rounded-lg bg-white/[0.03] border border-white/[0.06] px-2.5 py-1.5 mb-1.5">
-                {navTarget.items?.length ? navTarget.items.map((item, i) => (
-                  <p key={i} className="text-[11px] text-white/70 font-mono leading-relaxed">{item.qty} x {item.name}{isReturnOrder(navTarget) && (navTarget.amount || 0) <= 0 ? '' : ` Rs ${item.amount.toLocaleString()}`}</p>
-                )) : <p className="text-[11px] text-white/70 font-mono leading-relaxed">{navTarget.products}</p>}
-                    </div>
-                    {/* Row 3: Amount / Return type */}
-                    <div className="ml-[18px] flex items-center gap-3">
-                      {isReturnOrder(navTarget) && (navTarget.amount || 0) <= 0 ? (
-                        <span className="text-xs font-bold text-white/30 font-mono">No payment</span>
-                      ) : (
-                        <span className="text-sm font-black text-cyan-400 font-mono" style={{ textShadow: '0 0 12px rgba(0,200,255,0.4)' }}>Rs {navTarget.amount.toLocaleString()}</span>
-                      )}
-                      {isReturnOrder(navTarget) && (
-                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${navTarget.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : navTarget.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
-                          {getReturnLabel(navTarget.salesType!)}
-                        </span>
-                      )}
-                      {navTarget.source === 'response' && <span className="text-[8px] text-cyan-400/50 font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-400/10">GPS</span>}
-                      {navTarget.source === 'geocoded' && <span className="text-[8px] text-orange-400/60 font-mono px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-400/10">APPROX</span>}
-                      {navTarget.locationFlagged && <span className="text-[8px] text-red-400 font-bold animate-pulse">FLAGGED</span>}
-                    </div>
-                  </div>
-                  {/* List toggle */}
+              <div className="px-3 pt-3 pb-2 relative">
+                {/* Row 1: Status dot + Name + Price + List toggle */}
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full shrink-0 shadow-[0_0_6px_currentColor]" style={{ backgroundColor: STATUS_COLORS[navTarget.status]?.dot || '#6b7280' }} />
+                  <p className="text-[12px] font-bold text-white truncate flex-1">{navTarget.customerName}</p>
+                  {isReturnOrder(navTarget) && (navTarget.amount || 0) <= 0 ? (
+                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${navTarget.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : navTarget.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {getReturnLabel(navTarget.salesType!)}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-black text-cyan-400 font-mono shrink-0" style={{ textShadow: '0 0 8px rgba(0,200,255,0.4)' }}>Rs {navTarget.amount.toLocaleString()}</span>
+                  )}
+                  {navTarget.locationFlagged && <span className="text-[7px] text-red-400 font-bold animate-pulse shrink-0">FLAG</span>}
                   <button onClick={() => setNavStopsExpanded(!navStopsExpanded)}
-                    className={cn('btn-holo w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 transition-all mt-0.5',
-                      navStopsExpanded ? 'bg-cyan-500/15 border-cyan-400/25 text-cyan-400 shadow-[0_0_12px_rgba(0,200,255,0.2)]' : 'bg-white/5 border-white/10 text-white/30 hover:text-cyan-400 hover:border-cyan-400/20')}>
-                    <List className="w-4 h-4" />
+                    className={cn('btn-holo w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-all',
+                      navStopsExpanded ? 'bg-cyan-500/15 border-cyan-400/25 text-cyan-400' : 'bg-white/5 border-white/10 text-white/30')}>
+                    <List className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                {/* Notes + GPS request */}
-                {(navTarget.deliveryNotes || navTarget.clientResponse || navTarget.source === 'geocoded') && (
-                  <div className="ml-[18px] mt-2 flex flex-wrap items-center gap-2">
-                    {navTarget.source === 'geocoded' && !isRegionBatchExported(getRegionForPin(navTarget) || '') && (
-                      <button onClick={() => sendMapMessage(navTarget, 'sms', 'location')} disabled={sendingMsg === navTarget.id || !navTarget.contact1}
-                        className="btn-holo flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-500/10 border border-orange-400/15 text-orange-400 text-[9px] font-bold shadow-[0_0_6px_rgba(251,146,60,0.1)]">
-                        <MapPin className="w-2.5 h-2.5" /> Request GPS
-                      </button>
-                    )}
-                    {navTarget.deliveryNotes && <p className="text-[9px] text-amber-400/50 truncate flex-1 font-mono">{navTarget.deliveryNotes}</p>}
-                    {navTarget.clientResponse && <p className="text-[9px] text-cyan-400/40 truncate flex-1 font-mono">{navTarget.clientResponse}</p>}
+                {/* Row 2: Product (compact single line) */}
+                <p className="text-[10px] text-white/50 font-mono truncate mt-1 ml-4">
+                  {navTarget.items?.length ? navTarget.items.map((item, i) => `${item.qty}x ${item.name}`).join(' • ') : navTarget.products}
+                </p>
+                {/* Row 3: Badges + Notes (only if exists) */}
+                {(navTarget.deliveryNotes || navTarget.source === 'geocoded') && (
+                  <div className="flex items-center gap-1.5 mt-1.5 ml-4">
+                    {navTarget.source === 'response' && <span className="text-[7px] text-cyan-400/50 font-mono px-1 py-px rounded bg-cyan-500/10">GPS</span>}
+                    {navTarget.source === 'geocoded' && <span className="text-[7px] text-orange-400/60 font-mono px-1 py-px rounded bg-orange-500/10">APPROX</span>}
+                    {navTarget.deliveryNotes && <p className="text-[8px] text-amber-400/40 truncate flex-1 font-mono">{navTarget.deliveryNotes}</p>}
                   </div>
                 )}
               </div>
@@ -2230,84 +2210,67 @@ export function DeliveryMap({
               )
             })()}
 
-            {/* ═══ QUICK ACTIONS BAR: SMS + Call + WhatsApp ═══ */}
-            {navTarget && !navStopsExpanded && (() => {
-              const tpl = distToTarget < 200 ? 'arrived' : 'onway'
-              const tplLabel = distToTarget < 200 ? 'Arrived' : 'On the way'
-              return (
-                <div className="px-4 pb-2">
-                  <div className="glow-line mb-2" />
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => sendMapMessage(navTarget, 'sms', tpl)} disabled={sendingMsg === navTarget.id || !navTarget.contact1 || isRegionBatchExported(getRegionForPin(navTarget) || '')}
-                      className={cn("btn-holo flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10px] font-bold border transition",
-                        !navTarget.contact1 || isRegionBatchExported(getRegionForPin(navTarget) || '') ? "bg-white/3 text-white/15 border-white/5"
-                        : contactedMap[navTarget.id]?.sms ? "bg-amber-500/10 text-amber-400 border-amber-400/15 shadow-[0_0_10px_rgba(245,158,11,0.1)]"
-                        : "bg-blue-500/10 text-blue-400 border-blue-400/15 shadow-[0_0_10px_rgba(59,130,246,0.1)]")}>
-                      {sendingMsg === navTarget.id ? <div className="w-3 h-3 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" /> :
-                      <Mail className="w-3.5 h-3.5" />}
-                      {isRegionBatchExported(getRegionForPin(navTarget) || '') ? 'Batch sent' : tplLabel}
-                    </button>
-                    <a href={navTarget.contact1 ? `tel:${formatPhone(navTarget.contact1)}` : '#'} onClick={e => { if (!navTarget.contact1) e.preventDefault(); else markContacted(navTarget.id, 'call') }}
-                      className={cn("btn-holo w-10 py-2.5 rounded-xl text-[10px] font-bold border transition flex items-center justify-center",
-                        !navTarget.contact1 ? "bg-white/3 text-white/15 border-white/5"
-                        : contactedMap[navTarget.id]?.call ? "bg-amber-500/10 text-amber-400 border-amber-400/15 shadow-[0_0_8px_rgba(245,158,11,0.1)]"
-                        : "bg-emerald-500/10 text-emerald-400 border-emerald-400/15 shadow-[0_0_8px_rgba(52,211,153,0.1)]")}>
-                      <Phone className="w-3.5 h-3.5" />
-                    </a>
-
-                  </div>
-                </div>
-              )
-            })()}
-
-            {/* Action buttons: Delivered / CMS / NWD */}
-            {navTarget && (
-              <div className="px-4 pb-4">
-                <div className="glow-line mb-3" />
+            {/* ═══ COMPACT ACTION BAR ═══ */}
+            {navTarget && !navStopsExpanded && (
+              <div className="px-3 pb-3">
                 {!['delivered', 'nwd', 'cms'].includes(navTarget.status) ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
+                  <div className="space-y-1.5">
+                    {/* Row 1: SMS + Call + Delivered */}
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => sendMapMessage(navTarget, 'sms', distToTarget < 200 ? 'arrived' : 'onway')} disabled={sendingMsg === navTarget.id || !navTarget.contact1 || isRegionBatchExported(getRegionForPin(navTarget) || '')}
+                        className={cn("btn-holo flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[9px] font-bold border transition",
+                          !navTarget.contact1 || isRegionBatchExported(getRegionForPin(navTarget) || '') ? "bg-white/3 text-white/15 border-white/5"
+                          : contactedMap[navTarget.id]?.sms ? "bg-amber-500/10 text-amber-400 border-amber-400/15" : "bg-blue-500/10 text-blue-400 border-blue-400/15")}>
+                        {sendingMsg === navTarget.id ? <div className="w-2.5 h-2.5 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" /> : <Mail className="w-3 h-3" />}
+                        {distToTarget < 200 ? 'Arrived' : 'On way'}
+                      </button>
+                      <a href={navTarget.contact1 ? `tel:${formatPhone(navTarget.contact1)}` : '#'} onClick={e => { if (!navTarget.contact1) e.preventDefault(); else markContacted(navTarget.id, 'call') }}
+                        className={cn("btn-holo w-9 h-9 rounded-lg border flex items-center justify-center shrink-0",
+                          !navTarget.contact1 ? "bg-white/3 text-white/15 border-white/5" : contactedMap[navTarget.id]?.call ? "bg-amber-500/10 text-amber-400 border-amber-400/15" : "bg-emerald-500/10 text-emerald-400 border-emerald-400/15")}>
+                        <Phone className="w-3.5 h-3.5" />
+                      </a>
                       <button onClick={() => handleMapDelivered(navTarget)} disabled={updatingPinId === navTarget.id}
-                        className={cn("btn-holo flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold disabled:opacity-50",
-                          isReturnOrder(navTarget) ? "bg-violet-500/15 text-violet-400 border border-violet-400/20 shadow-[0_0_15px_rgba(139,92,246,0.15)]" : "bg-emerald-500/15 text-emerald-400 border border-emerald-400/20 shadow-[0_0_15px_rgba(52,211,153,0.15)]")}>
-                        {updatingPinId === navTarget.id ? <div className="w-3.5 h-3.5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                        className={cn("btn-holo flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] font-bold disabled:opacity-50",
+                          isReturnOrder(navTarget) ? "bg-violet-500/15 text-violet-400 border border-violet-400/20" : "bg-emerald-500/15 text-emerald-400 border border-emerald-400/20")}>
+                        {updatingPinId === navTarget.id ? <div className="w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                         {isReturnOrder(navTarget) ? 'Collected' : 'Delivered'}
                       </button>
+                    </div>
+                    {/* Row 2: CMS + NWD + Modify + Exit */}
+                    <div className="flex items-center gap-1.5">
                       {!isReturnOrder(navTarget) && (
                       <>
                       <button onClick={() => setCmsPopup({ pin: navTarget })} disabled={updatingPinId === navTarget.id}
-                        className="btn-holo flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl bg-amber-500/10 text-amber-400 text-xs font-bold border border-amber-400/15 disabled:opacity-50 shadow-[0_0_10px_rgba(251,191,36,0.1)] shrink-0">
-                        <Ban className="w-3.5 h-3.5" /> CMS
+                        className="btn-holo flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 text-[9px] font-bold border border-amber-400/15 disabled:opacity-50 shrink-0">
+                        <Ban className="w-3 h-3" /> CMS
                       </button>
                       <button onClick={() => handleMapStatusChange(navTarget, 'nwd', 'Next working day', true)} disabled={updatingPinId === navTarget.id}
-                        className="btn-holo flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl bg-red-500/10 text-red-400 text-xs font-bold border border-red-400/15 disabled:opacity-50 shadow-[0_0_10px_rgba(239,68,68,0.1)] shrink-0">
-                        <Clock className="w-3.5 h-3.5" /> NWD
+                        className="btn-holo flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-[9px] font-bold border border-red-400/15 disabled:opacity-50 shrink-0">
+                        <Clock className="w-3 h-3" /> NWD
                       </button>
                       </>
                       )}
+                      <button onClick={() => setModifyTarget(navTarget)}
+                        className="btn-holo flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-purple-500/10 text-purple-400 text-[9px] font-bold border border-purple-400/15 shrink-0">
+                        <Package className="w-3 h-3" /> Modify
+                      </button>
+                      <button onClick={() => { stopNavigation(); if (multiStopNav) { setMultiStopNav(false); setOptimizedStops([]); setCurrentStopIdx(0); setActiveRegion(null); const map = mapRef.current; if (map) { ['opt-route-casing','opt-route-line','opt-route-core'].forEach(l => { try { if (map.getLayer(l)) map.removeLayer(l) } catch {} }); try { if (map.getSource('opt-route')) map.removeSource('opt-route') } catch {} } } }}
+                        className="btn-holo flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-white/[0.03] text-white/40 text-[9px] font-bold border border-white/[0.06] hover:text-red-400">
+                        <X className="w-3 h-3" /> Exit
+                      </button>
                     </div>
-                    {/* Modify Order */}
-                    <button onClick={() => setModifyTarget(navTarget)}
-                      className="btn-holo w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-purple-500/10 text-purple-400 text-[10px] font-bold border border-purple-400/15 active:bg-purple-500/20 transition-all">
-                      <Package className="w-3.5 h-3.5" /> Modify Order
-                    </button>
-                    {/* Exit navigation */}
-                    <button onClick={() => { stopNavigation(); if (multiStopNav) { setMultiStopNav(false); setOptimizedStops([]); setCurrentStopIdx(0); setActiveRegion(null); const map = mapRef.current; if (map) { ['opt-route-casing','opt-route-line','opt-route-core'].forEach(l => { try { if (map.getLayer(l)) map.removeLayer(l) } catch {} }); try { if (map.getSource('opt-route')) map.removeSource('opt-route') } catch {} } } }}
-                      className="btn-holo w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-white/[0.03] text-white/40 text-[10px] font-bold border border-white/[0.06] hover:text-red-400 hover:border-red-400/20 hover:bg-red-500/5 transition-all">
-                      <X className="w-3 h-3" /> Exit Navigation
-                    </button>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-3 py-1">
-                    <div className={cn("flex items-center gap-2 text-xs font-bold",
+                  <div className="flex items-center gap-2">
+                    <div className={cn("flex items-center gap-1.5 text-[10px] font-bold",
                       navTarget.status === 'delivered' ? "text-emerald-400" : navTarget.status === 'cms' ? "text-amber-400" : "text-red-400"
-                    )} style={{ textShadow: '0 0 10px currentColor' }}>
-                      {navTarget.status === 'delivered' ? <Check className="w-4 h-4" /> : navTarget.status === 'cms' ? <Ban className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
-                      {navTarget.status === 'delivered' ? 'Delivered' : navTarget.status === 'cms' ? 'CMS' : 'NWD'}
+                    )} style={{ textShadow: '0 0 8px currentColor' }}>
+                      {navTarget.status === 'delivered' ? <Check className="w-3.5 h-3.5" /> : navTarget.status === 'cms' ? <Ban className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                      {navTarget.status === 'delivered' ? 'Done' : navTarget.status === 'cms' ? 'CMS' : 'NWD'}
                     </div>
                     <button onClick={() => { multiStopNav ? arriveAtStop() : stopNavigation() }}
-                      className="btn-holo flex-1 py-3 rounded-xl bg-cyan-500/15 text-cyan-400 text-xs font-bold border border-cyan-400/20 text-center shadow-[0_0_15px_rgba(0,200,255,0.15)]">
-                      {multiStopNav ? (currentStopIdx < optimizedStops.length - 1 ? 'Next Stop' : 'Finish Route') : 'Done'}
+                      className="btn-holo flex-1 py-2 rounded-lg bg-cyan-500/15 text-cyan-400 text-[10px] font-bold border border-cyan-400/20 text-center">
+                      {multiStopNav ? (currentStopIdx < optimizedStops.length - 1 ? 'Next Stop' : 'Finish') : 'Done'}
                     </button>
                   </div>
                 )}
