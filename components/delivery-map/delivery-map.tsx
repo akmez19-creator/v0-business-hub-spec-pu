@@ -1844,9 +1844,17 @@ export function DeliveryMap({
                     return (
                       <button key={s.pin.id} onClick={() => {
                         if (isDone || isCurr) return
+                        // Navigate to selected stop and fly to its location
+                        const selectedStop = s.pin
                         setCurrentStopIdx(i)
                         setNavStopsExpanded(false)
-                        setTimeout(() => startNavigationRef.current(optimizedStops[i].pin), 100)
+                        // Fly to the selected stop location first
+                        const map = mapRef.current
+                        if (map && selectedStop.latitude && selectedStop.longitude) {
+                          map.flyTo({ center: [selectedStop.longitude, selectedStop.latitude], zoom: 16, pitch: 60, duration: 1000 })
+                        }
+                        // Then start navigation to that stop
+                        setTimeout(() => startNavigationRef.current(selectedStop), 150)
                       }}
                         className={cn('relative h-7 flex-1 flex items-center justify-center rounded-lg transition-all touch-none',
                           isDone ? 'bg-emerald-500/15' : isCurr ? 'bg-cyan-500/20 ring-1 ring-cyan-400/30' : 'bg-white/[0.03] hover:bg-white/[0.06] active:scale-95')}
