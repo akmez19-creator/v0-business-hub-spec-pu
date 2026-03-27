@@ -403,7 +403,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Bain Boeuf': { lat: -19.98560, lng: 57.60690 },
   'Barlow': { lat: -20.05000, lng: 57.64000 },
   'Belle Vue Harel': { lat: -20.08330, lng: 57.63330 },
-  'Belle Vue Maurel': { lat: -20.05000, lng: 57.62000 },
+  'Belle Vue Maurel': { lat: -20.06583, lng: 57.59417 },
   'Bon Espoir': { lat: -20.04000, lng: 57.60000 },
   "Butte a L'Herbe": { lat: -20.06000, lng: 57.65000 },
   'Calodyne': { lat: -20.00300, lng: 57.64200 },
@@ -411,8 +411,8 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Cottage': { lat: -20.05000, lng: 57.63000 },
   'Desjardins': { lat: -20.04000, lng: 57.61000 },
   'Domaine du Moulin': { lat: -20.03000, lng: 57.60000 },
-  'Esperance Piton': { lat: -20.06000, lng: 57.62000 },
-  'Gokhoola': { lat: -20.05000, lng: 57.65000 },
+  'Esperance Piton': { lat: -20.09028, lng: 57.63028 },
+  'Gokhoola': { lat: -20.10667, lng: 57.65500 },
   'Goodlands': { lat: -20.03500, lng: 57.64310 },
   'Grand Bay': { lat: -20.01170, lng: 57.58170 },
   'Grand Gaube': { lat: -20.00830, lng: 57.66190 },
@@ -441,7 +441,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Riviere du Rempart': { lat: -20.10000, lng: 57.63330 },
   'Roche Terre': { lat: -20.07000, lng: 57.64000 },
   'Roches Noires': { lat: -20.11110, lng: 57.72590 },
-  'Sottise': { lat: -20.04000, lng: 57.60000 },
+  'Sottise': { lat: -20.06000, lng: 57.55500 },
   'St Francois North': { lat: -20.06000, lng: 57.63000 },
   'Super U Grand Bay': { lat: -20.01000, lng: 57.58000 },
   'The Vale': { lat: -20.06670, lng: 57.61670 },
@@ -541,7 +541,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Gros Billot': { lat: -20.37000, lng: 57.62000 },
   'Pointe Aux Biches': { lat: -20.05830, lng: 57.54170 },
   'Belle Vue Harel': { lat: -20.08330, lng: 57.63330 },
-  'Belle Vue Maurel': { lat: -20.05000, lng: 57.62000 },
+  'Belle Vue Maurel': { lat: -20.06583, lng: 57.59417 },
 }
 
 /**
