@@ -288,9 +288,9 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Hollyrood No.2': { lat: -20.17000, lng: 57.66500 },
   'Jumbo Phoenix': { lat: -20.28300, lng: 57.49800 },
   'La Brasserie': { lat: -20.32000, lng: 57.53000 },
-  'La Caverne': { lat: -20.31000, lng: 57.50000 },
-  'La Caverne No.1': { lat: -20.31000, lng: 57.50000 },
-  'La Caverne No.2': { lat: -20.31000, lng: 57.50500 },
+  'La Caverne': { lat: -20.30004, lng: 57.47451 },
+  'La Caverne No.1': { lat: -20.30004, lng: 57.47451 },
+  'La Caverne No.2': { lat: -20.30100, lng: 57.47500 },
   'La Louise': { lat: -20.27000, lng: 57.48000 },
   'La Marie': { lat: -20.33500, lng: 57.48500 },
   'La Source': { lat: -20.32000, lng: 57.51000 },
@@ -449,7 +449,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════��═════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.21170, lng: 57.40080 },
