@@ -940,12 +940,16 @@ export function DeliveryMap({
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
+  // Track movement history for better indoor/outdoor detection
+  const movementHistoryRef = useRef<{ speed: number; accuracy: number; timestamp: number }[]>([])
+  
   const startContinuousTracking = useCallback(() => {
     if (!navigator.geolocation) return
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
     
-    // Reset Kalman filter when starting fresh tracking
+    // Reset filters when starting fresh tracking
     kalmanRef.current = null
+    movementHistoryRef.current = []
     
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (p) => {
@@ -955,18 +959,41 @@ export function DeliveryMap({
         let heading = p.coords.heading ?? 0
         const timestamp = p.timestamp || Date.now()
         
-        // Apply Kalman filter for precise position (like Google Maps)
+        // Track movement history (last 5 readings) for indoor/outdoor detection
+        movementHistoryRef.current.push({ speed, accuracy, timestamp })
+        if (movementHistoryRef.current.length > 5) movementHistoryRef.current.shift()
+        
+        // Calculate average speed and accuracy over recent readings
+        const avgSpeed = movementHistoryRef.current.reduce((sum, r) => sum + r.speed, 0) / movementHistoryRef.current.length
+        const avgAccuracy = movementHistoryRef.current.reduce((sum, r) => sum + r.accuracy, 0) / movementHistoryRef.current.length
+        
+        // INDOOR/STATIONARY DETECTION:
+        // - If accuracy is poor (> 20m), likely indoor or obstructed
+        // - If speed is very low (< 3 km/h), likely stationary
+        // - If average metrics show poor signal, don't snap to road
+        const isLikelyIndoor = accuracy > 20 || avgAccuracy > 25
+        const isStationary = speed < 3 && avgSpeed < 5
+        const isDefinitelyMoving = speed > 10 && accuracy < 15 // Clearly driving/riding
+        
+        // Apply Kalman filter for precise position
         const filtered = kalmanFilter(rawLat, rawLng, accuracy, timestamp)
         
         let pos: { lat: number; lng: number }
         
-        // When moving with good accuracy, snap to road for navigation
-        if (speed > 5 && accuracy < 25) {
+        // ONLY snap to road when CLEARLY moving on a road:
+        // - Must be moving fast (>10 km/h) with good accuracy (<15m)
+        // - OR consistently moving (avg speed >8) with decent accuracy (<20m)
+        const shouldSnapToRoad = !isLikelyIndoor && !isStationary && (
+          isDefinitelyMoving || 
+          (avgSpeed > 8 && accuracy < 20)
+        )
+        
+        if (shouldSnapToRoad) {
           const snapped = await snapToRoad(filtered.lat, filtered.lng)
           pos = { lat: snapped.lat, lng: snapped.lng }
           heading = snapped.bearing || heading
         } else {
-          // Use Kalman-filtered position (much more accurate than raw GPS)
+          // Use RAW Kalman-filtered position - shows actual location in building/parking
           pos = filtered
         }
         
