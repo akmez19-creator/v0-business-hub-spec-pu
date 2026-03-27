@@ -864,6 +864,47 @@ export function DeliveryMap({
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, snapToRoad, locating])
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
+  // ══════════════════════════════════════════════════════════════════════════
+  const kalmanRef = useRef<{
+    lat: number; lng: number; 
+    variance: number; // Current uncertainty
+    timestamp: number;
+  } | null>(null)
+  
+  // Kalman filter implementation for GPS smoothing
+  const kalmanFilter = useCallback((lat: number, lng: number, accuracy: number, timestamp: number) => {
+    const Q = 3 // Process noise - how much we expect position to change naturally
+    const minAccuracy = 1 // Minimum accuracy to prevent division issues
+    
+    if (!kalmanRef.current) {
+      // Initialize with first reading
+      kalmanRef.current = { lat, lng, variance: accuracy * accuracy, timestamp }
+      return { lat, lng }
+    }
+    
+    const prev = kalmanRef.current
+    const timeDelta = (timestamp - prev.timestamp) / 1000 // seconds
+    
+    // Prediction step: increase uncertainty over time
+    const predictedVariance = prev.variance + Q * Q * Math.max(timeDelta, 0.1)
+    
+    // Update step: combine prediction with new measurement
+    const measurementVariance = Math.max(accuracy * accuracy, minAccuracy)
+    const kalmanGain = predictedVariance / (predictedVariance + measurementVariance)
+    
+    // Calculate filtered position
+    const filteredLat = prev.lat + kalmanGain * (lat - prev.lat)
+    const filteredLng = prev.lng + kalmanGain * (lng - prev.lng)
+    const newVariance = (1 - kalmanGain) * predictedVariance
+    
+    // Update state
+    kalmanRef.current = { lat: filteredLat, lng: filteredLng, variance: newVariance, timestamp }
+    
+    return { lat: filteredLat, lng: filteredLng }
+  }, [])
+  
   // LERP helper for smooth interpolation
   const lerp = (start: number, end: number, amt: number) => (1 - amt) * start + amt * end
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null)
@@ -879,14 +920,11 @@ export function DeliveryMap({
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime
       const progress = Math.min(elapsed / duration, 1)
-      // Ease out cubic for smooth deceleration
       const eased = 1 - Math.pow(1 - progress, 3)
       
       const currentLat = lerp(startPos.lat, targetPos.lat, eased)
       const currentLng = lerp(startPos.lng, targetPos.lng, eased)
-      const currentPos = { lat: currentLat, lng: currentLng }
       
-      // Update marker position smoothly
       if (driverMarkerRef.current) {
         driverMarkerRef.current.setLngLat([currentLng, currentLat])
       }
@@ -906,31 +944,35 @@ export function DeliveryMap({
     if (!navigator.geolocation) return
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
     
+    // Reset Kalman filter when starting fresh tracking
+    kalmanRef.current = null
+    
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (p) => {
         const rawLat = p.coords.latitude, rawLng = p.coords.longitude
-        const accuracy = p.coords.accuracy || 999
+        const accuracy = p.coords.accuracy || 50
         const speed = p.coords.speed ? p.coords.speed * 3.6 : 0 // km/h
         let heading = p.coords.heading ?? 0
+        const timestamp = p.timestamp || Date.now()
         
-        // Filter out poor accuracy readings (> 100m is unreliable)
-        if (accuracy > 100) return
+        // Apply Kalman filter for precise position (like Google Maps)
+        const filtered = kalmanFilter(rawLat, rawLng, accuracy, timestamp)
         
         let pos: { lat: number; lng: number }
         
-        // Only snap to road if moving (speed > 3 km/h) and good accuracy (< 30m)
-        if (speed > 3 && accuracy < 30) {
-          // Moving - snap to road for better navigation experience
-          const snapped = await snapToRoad(rawLat, rawLng)
+        // When moving with good accuracy, snap to road for navigation
+        if (speed > 5 && accuracy < 25) {
+          const snapped = await snapToRoad(filtered.lat, filtered.lng)
           pos = { lat: snapped.lat, lng: snapped.lng }
           heading = snapped.bearing || heading
         } else {
-          // Stationary or indoor - use raw GPS position
-          pos = { lat: rawLat, lng: rawLng }
+          // Use Kalman-filtered position (much more accurate than raw GPS)
+          pos = filtered
         }
         
-        // Smooth animate marker to new position
-        animateMarkerTo(pos, heading, speed > 5 ? 600 : 1000)
+        // Adaptive animation: faster when moving, slower when stationary
+        const animDuration = speed > 20 ? 400 : speed > 5 ? 700 : 1000
+        animateMarkerTo(pos, heading, animDuration)
         setDriverHeading(heading)
         setSpeed(Math.round(speed))
         
@@ -940,16 +982,16 @@ export function DeliveryMap({
             center: [pos.lng, pos.lat], 
             bearing: heading, 
             pitch: 65, 
-            zoom: 17, 
-            duration: speed > 10 ? 800 : 1200,
+            zoom: speed > 30 ? 16 : 17, // Zoom out a bit when driving fast
+            duration: speed > 15 ? 600 : 1000,
             easing: (t: number) => 1 - Math.pow(1 - t, 3) 
           })
         }
       },
       (err) => { console.log('[v0] GPS error:', err.message) }, 
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 } // Fresh position, faster timeout
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 3000 } // Fastest possible updates
     )
-  }, [updateDriverMarker, navigating, snapToRoad, animateMarkerTo])
+  }, [updateDriverMarker, navigating, snapToRoad, animateMarkerTo, kalmanFilter])
 
   useEffect(() => () => { 
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
