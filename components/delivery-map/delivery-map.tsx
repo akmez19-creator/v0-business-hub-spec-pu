@@ -237,6 +237,7 @@ export function DeliveryMap({
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [driverHeading, setDriverHeading] = useState(0)
   const [navigating, setNavigating] = useState(false)
+  const navigatingRef = useRef(false) // Ref for use inside intervals/callbacks
   const [navTarget, setNavTarget] = useState<DeliveryPin | null>(null)
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
@@ -976,8 +977,8 @@ export function DeliveryMap({
           setDriverHeading(heading)
           setSpeed(Math.round(speed))
           
-          // Smooth camera follow during navigation
-          if (mapRef.current && navigating && !routeOverviewRef.current) {
+          // Smooth camera follow ONLY during active navigation (not when idle/exploring)
+          if (mapRef.current && navigatingRef.current && !routeOverviewRef.current) {
             mapRef.current.easeTo({ 
               center: [lng, lat], 
               bearing: heading, 
@@ -998,7 +999,7 @@ export function DeliveryMap({
     
     // Then poll every 2 seconds for continuous updates (more reliable than watchPosition)
     gpsIntervalRef.current = setInterval(updatePosition, 2000)
-  }, [navigating, animateMarkerTo])
+  }, [animateMarkerTo])
 
   useEffect(() => () => { 
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
@@ -1532,8 +1533,8 @@ export function DeliveryMap({
 
   // ── Navigation ──
   const startNavigation = useCallback(async (pin: DeliveryPin) => {
-    if (!mapRef.current) return
-    setRouteLoading(true); setNavTarget(pin); setNavigating(true); setNavReady(false)
+  if (!mapRef.current) return
+  setRouteLoading(true); setNavTarget(pin); setNavigating(true); navigatingRef.current = true; setNavReady(false)
     setSelectedPin(null); setSelectedRegion(null); setCurrentStepIndex(0)
 
     try {
@@ -1676,8 +1677,8 @@ export function DeliveryMap({
       m.jumpTo({ center: driverCenter, zoom: 17, pitch: 65, bearing: startBearing })
       setNavReady(true)
     } catch (err: any) {
-      alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
-      setNavigating(false); setNavTarget(null); setNavReady(false)
+  alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
+  setNavigating(false); navigatingRef.current = false; setNavTarget(null); setNavReady(false)
     } finally { setRouteLoading(false) }
   }, [driverLocation, mapboxToken, updateDriverMarker, startContinuousTracking, snapToRoad, multiStopNav, optimizedStops])
 
@@ -1685,7 +1686,7 @@ export function DeliveryMap({
   startNavigationRef.current = startNavigation
 
   const stopNavigation = useCallback(() => {
-    setNavigating(false); setNavTarget(null); setRouteInfo(null); setNavReady(false); setCurrentStopIdx(0); setCurrentStepIndex(0); setViewMode('3d'); setNavStopsExpanded(false); setArrivalAlert(null); setRouteOverview(false); routeOverviewRef.current = false; arrivalAlertedRef.current = ''
+  setNavigating(false); navigatingRef.current = false; setNavTarget(null); setRouteInfo(null); setNavReady(false); setCurrentStopIdx(0); setCurrentStepIndex(0); setViewMode('3d'); setNavStopsExpanded(false); setArrivalAlert(null); setRouteOverview(false); routeOverviewRef.current = false; arrivalAlertedRef.current = ''
         stopMarkersRef.current.forEach(m => m.remove()); stopMarkersRef.current = []
     if (watchIdRef.current !== null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null }
     if (mapRef.current) {
@@ -1741,7 +1742,7 @@ export function DeliveryMap({
     }
   }, [navigating, navTarget, distToTarget])
 
-  // ═══════���══════════════════════════════════
+  // ══���════���══════════════════════════════════
   // ██  RENDER
   // ══════════════════════════════════════════
   return (
