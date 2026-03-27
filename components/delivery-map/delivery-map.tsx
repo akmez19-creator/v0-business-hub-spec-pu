@@ -1386,6 +1386,12 @@ export function DeliveryMap({
         setCurrentStopIdx(0)
         setNavTarget(ordered[0].pin) // Set first stop as target but don't zoom yet
         
+        // Hide pole markers during optimization mode for cleaner view
+        setShowPoles(false)
+        if (map && (map as any)._regionPoleMarkers) {
+          (map as any)._regionPoleMarkers.forEach((m: any) => { m.getElement().style.display = 'none' })
+        }
+        
         // Auto-fit to show all stops overview
         const bounds = new (mbgl()).LngLatBounds()
         ordered.forEach(s => bounds.extend([s.pin.lng, s.pin.lat]))
