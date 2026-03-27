@@ -533,6 +533,15 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Surinam': { lat: -20.50000, lng: 57.47970 },
   'Tyack': { lat: -20.47610, lng: 57.55190 },
   'Union Ducray': { lat: -20.49000, lng: 57.55000 },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ADDITIONAL/MISSING REGIONS
+  // ══════════════════════════════════════════════════════════════════════════
+  'Caudan Waterfromt': { lat: -20.16000, lng: 57.50000 },
+  'Gros Billot': { lat: -20.37000, lng: 57.62000 },
+  'Pointe Aux Biches': { lat: -20.05830, lng: 57.54170 },
+  'Belle Vue Harel': { lat: -20.08330, lng: 57.63330 },
+  'Belle Vue Maurel': { lat: -20.05000, lng: 57.62000 },
 }
 
 /**
