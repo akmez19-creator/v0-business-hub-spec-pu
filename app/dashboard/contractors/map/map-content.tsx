@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 
 import { DeliveryMap, type DeliveryPin, type RegionCluster, type DeliveryRegionGroup } from '@/components/delivery-map/delivery-map'
-import { getLocalityCoords } from '@/lib/mauritius-localities'
+import { getRegionCoords } from '@/lib/mauritius-regions'
 import { MapPin, Users, ChevronDown } from 'lucide-react'
 
 const MAPS_URL_REGEX = new RegExp(
@@ -237,7 +237,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
     const regionClusters: RegionCluster[] = []
     const ungeocodedPins: DeliveryPin[] = []
     for (const [key, pins] of Object.entries(localityMap)) {
-      const coords = getLocalityCoords(pins[0].locality || key)
+      const coords = getRegionCoords(pins[0].locality || key)
       if (!coords) {
         // No coords but still have locality — add to ungeocodedPins for region grouping
         ungeocodedPins.push(...pins)
