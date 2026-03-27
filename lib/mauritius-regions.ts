@@ -222,7 +222,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Riche Terre': { lat: -20.13015, lng: 57.52165 },
   'Riche Terre Ind Zone': { lat: -20.12000, lng: 57.52000 },
   'S.S.R.N.Hospital': { lat: -20.10000, lng: 57.57000 },
-  'Solitude': { lat: -20.10390, lng: 57.57030 },
+  'Solitude': { lat: -20.07775, lng: 57.54627 },
   'St Joseph': { lat: -20.12000, lng: 57.57000 },
   'St Malo': { lat: -20.13000, lng: 57.58000 },
   'Terre Rouge': { lat: -20.12800, lng: 57.53500 },
@@ -449,7 +449,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ════════════════════════════════════════════════════════��═════════════════
+  // ════════════════════════════════════════════════════════���═════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.21170, lng: 57.40080 },
