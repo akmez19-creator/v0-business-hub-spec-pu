@@ -943,7 +943,7 @@ export function DeliveryMap({
   // ══════════════════════════════════════════════════════════════════════════
   // SIMPLE RAW GPS TRACKING - Same approach as client location pinning
   // No road snapping, no complex filtering - just accurate raw GPS
-  // ═══════════════════════════════════════════���══════════════════════════════
+  // ═══════════════════════════════════════════���════════════════��═════════════
   const startContinuousTracking = useCallback(() => {
     if (!navigator.geolocation) return
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
@@ -1008,12 +1008,16 @@ export function DeliveryMap({
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        p => placeDriver(p.coords.latitude, p.coords.longitude, p.coords.heading ?? 0, true),
+        p => {
+          placeDriver(p.coords.latitude, p.coords.longitude, p.coords.heading ?? 0, true)
+          // Start continuous live tracking immediately after initial position
+          startContinuousTracking()
+        },
         () => { const c = mapRef.current!.getCenter(); placeDriver(c.lat, c.lng, 0, false) },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 } // Fresh position
       )
     } else { const c = mapRef.current!.getCenter(); placeDriver(c.lat, c.lng, 0, false) }
-  }, [mapLoaded, updateDriverMarker])
+  }, [mapLoaded, updateDriverMarker, startContinuousTracking])
 
   // ── Warehouse marker ──
   useEffect(() => {
