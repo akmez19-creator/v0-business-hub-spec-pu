@@ -176,7 +176,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   // PAMPLEMOUSSES DISTRICT (54 regions)
   // ══════════════════════════════════════════════════════════════════════════
-  'Arsenal': { lat: -20.10560, lng: 57.53530 },
+  'Arsenal': { lat: -20.10950, lng: 57.51600 },
   'Baie Du Tombeau': { lat: -20.11383, lng: 57.50658 },
   'Balaclava': { lat: -20.08330, lng: 57.51560 },
   'Beau Plan': { lat: -20.10000, lng: 57.56000 },
@@ -208,7 +208,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Mont Choisy': { lat: -20.02080, lng: 57.54580 },
   'Mont Choisy Shopping Mall': { lat: -20.02000, lng: 57.55000 },
   'Morcellement Maison Blanche': { lat: -20.10000, lng: 57.55000 },
-  'Morcellement St Andre': { lat: -20.09000, lng: 57.57000 },
+  'Morcellement St Andre': { lat: -20.07199, lng: 57.56833 },
   'Nicoliere': { lat: -20.11670, lng: 57.60000 },
   'Notre Dame': { lat: -20.10000, lng: 57.54000 },
   'Pamplemousses': { lat: -20.10390, lng: 57.57030 },
@@ -225,7 +225,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Solitude': { lat: -20.10390, lng: 57.57030 },
   'St Joseph': { lat: -20.12000, lng: 57.57000 },
   'St Malo': { lat: -20.13000, lng: 57.58000 },
-  'Terre Rouge': { lat: -20.12610, lng: 57.52440 },
+  'Terre Rouge': { lat: -20.12800, lng: 57.53500 },
   'The Mount': { lat: -20.09833, lng: 57.60528 },
   'Triolet': { lat: -20.05760, lng: 57.55025 },
   'Trou Aux Biches': { lat: -20.05000, lng: 57.55000 },
