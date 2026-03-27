@@ -238,6 +238,7 @@ export function DeliveryMap({
   const [driverHeading, setDriverHeading] = useState(0)
   const [navigating, setNavigating] = useState(false)
   const navigatingRef = useRef(false) // Ref for use inside intervals/callbacks
+  const initialFitDoneRef = useRef(false) // Only fit bounds once on initial load
   const [navTarget, setNavTarget] = useState<DeliveryPin | null>(null)
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null)
   const [routeLoading, setRouteLoading] = useState(false)
@@ -836,13 +837,14 @@ export function DeliveryMap({
       ;(map as any)._regionPoleMarkers.push(marker)
     })
 
-    // Fit bounds
+    // Fit bounds ONLY on initial load (not continuously while exploring)
     const bounds = new (mbgl()).LngLatBounds()
     filtered.forEach(p => bounds.extend([p.lng, p.lat]))
     filteredRegions.forEach(r => bounds.extend([r.lng, r.lat]))
     if (driverLocation) bounds.extend([driverLocation.lng, driverLocation.lat])
-    if (!bounds.isEmpty() && !navigating) {
+    if (!bounds.isEmpty() && !navigating && !initialFitDoneRef.current) {
       map.fitBounds(bounds, { padding: 60, duration: 1800, maxZoom: 15, pitch: 60 })
+      initialFitDoneRef.current = true // Only fit once
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap])
 
@@ -941,7 +943,7 @@ export function DeliveryMap({
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ══════════════════════════════════════════════════════════════════════════
+  // ════════════════════════��═════════════════════════════════════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
