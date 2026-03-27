@@ -864,25 +864,97 @@ export function DeliveryMap({
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, snapToRoad, locating])
 
+  // LERP helper for smooth interpolation
+  const lerp = (start: number, end: number, amt: number) => (1 - amt) * start + amt * end
+  const lastPosRef = useRef<{ lat: number; lng: number } | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
+  
+  // Smooth marker animation using requestAnimationFrame
+  const animateMarkerTo = useCallback((targetPos: { lat: number; lng: number }, heading: number, duration = 800) => {
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+    
+    const startPos = lastPosRef.current || targetPos
+    const startTime = performance.now()
+    
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      // Ease out cubic for smooth deceleration
+      const eased = 1 - Math.pow(1 - progress, 3)
+      
+      const currentLat = lerp(startPos.lat, targetPos.lat, eased)
+      const currentLng = lerp(startPos.lng, targetPos.lng, eased)
+      const currentPos = { lat: currentLat, lng: currentLng }
+      
+      // Update marker position smoothly
+      if (driverMarkerRef.current) {
+        driverMarkerRef.current.setLngLat([currentLng, currentLat])
+      }
+      
+      if (progress < 1) {
+        animationFrameRef.current = requestAnimationFrame(animate)
+      } else {
+        lastPosRef.current = targetPos
+        setDriverLocation(targetPos)
+      }
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(animate)
+  }, [])
+  
   const startContinuousTracking = useCallback(() => {
     if (!navigator.geolocation) return
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (p) => {
-        const snapped = await snapToRoad(p.coords.latitude, p.coords.longitude)
-        const pos = { lat: snapped.lat, lng: snapped.lng }
-        const heading = snapped.bearing || (p.coords.heading ?? 0)
-        setDriverLocation(pos); updateDriverMarker(pos, heading)
-        setSpeed(Math.round(p.coords.speed ? p.coords.speed * 3.6 : 0))
+        const rawLat = p.coords.latitude, rawLng = p.coords.longitude
+        const accuracy = p.coords.accuracy || 999
+        const speed = p.coords.speed ? p.coords.speed * 3.6 : 0 // km/h
+        let heading = p.coords.heading ?? 0
+        
+        // Filter out poor accuracy readings (> 100m is unreliable)
+        if (accuracy > 100) return
+        
+        let pos: { lat: number; lng: number }
+        
+        // Only snap to road if moving (speed > 3 km/h) and good accuracy (< 30m)
+        if (speed > 3 && accuracy < 30) {
+          // Moving - snap to road for better navigation experience
+          const snapped = await snapToRoad(rawLat, rawLng)
+          pos = { lat: snapped.lat, lng: snapped.lng }
+          heading = snapped.bearing || heading
+        } else {
+          // Stationary or indoor - use raw GPS position
+          pos = { lat: rawLat, lng: rawLng }
+        }
+        
+        // Smooth animate marker to new position
+        animateMarkerTo(pos, heading, speed > 5 ? 600 : 1000)
+        setDriverHeading(heading)
+        setSpeed(Math.round(speed))
+        
+        // Smooth camera follow during navigation
         if (mapRef.current && navigating && !routeOverviewRef.current) {
-          mapRef.current.easeTo({ center: [pos.lng, pos.lat], bearing: heading, pitch: 65, zoom: 17, duration: 1600, easing: (t: number) => 1 - Math.pow(1 - t, 3) })
+          mapRef.current.easeTo({ 
+            center: [pos.lng, pos.lat], 
+            bearing: heading, 
+            pitch: 65, 
+            zoom: 17, 
+            duration: speed > 10 ? 800 : 1200,
+            easing: (t: number) => 1 - Math.pow(1 - t, 3) 
+          })
         }
       },
-      () => {}, { enableHighAccuracy: true, maximumAge: 2000 }
+      (err) => { console.log('[v0] GPS error:', err.message) }, 
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 } // Fresh position, faster timeout
     )
-  }, [updateDriverMarker, navigating, snapToRoad])
+  }, [updateDriverMarker, navigating, snapToRoad, animateMarkerTo])
 
-  useEffect(() => () => { if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current) }, [])
+  useEffect(() => () => { 
+    if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+  }, [])
 
   // ── Auto-advance nav steps ──
   useEffect(() => {
