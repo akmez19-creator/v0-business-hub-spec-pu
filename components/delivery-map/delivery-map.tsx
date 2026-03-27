@@ -940,64 +940,24 @@ export function DeliveryMap({
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // Track movement history for better indoor/outdoor detection
-  const movementHistoryRef = useRef<{ speed: number; accuracy: number; timestamp: number }[]>([])
-  
+  // ══════════════════════════════════════════════════════════════════════════
+  // SIMPLE RAW GPS TRACKING - Same approach as client location pinning
+  // No road snapping, no complex filtering - just accurate raw GPS
+  // ══════════════════════════════════════════════════════════════════════════
   const startContinuousTracking = useCallback(() => {
     if (!navigator.geolocation) return
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
     
-    // Reset filters when starting fresh tracking
-    kalmanRef.current = null
-    movementHistoryRef.current = []
-    
     watchIdRef.current = navigator.geolocation.watchPosition(
-      async (p) => {
-        const rawLat = p.coords.latitude, rawLng = p.coords.longitude
-        const accuracy = p.coords.accuracy || 50
+      (p) => {
+        // Use RAW GPS coordinates - same as client location pinning
+        const lat = p.coords.latitude
+        const lng = p.coords.longitude
         const speed = p.coords.speed ? p.coords.speed * 3.6 : 0 // km/h
-        let heading = p.coords.heading ?? 0
-        const timestamp = p.timestamp || Date.now()
+        const heading = p.coords.heading ?? 0
+        const pos = { lat, lng }
         
-        // Track movement history (last 5 readings) for indoor/outdoor detection
-        movementHistoryRef.current.push({ speed, accuracy, timestamp })
-        if (movementHistoryRef.current.length > 5) movementHistoryRef.current.shift()
-        
-        // Calculate average speed and accuracy over recent readings
-        const avgSpeed = movementHistoryRef.current.reduce((sum, r) => sum + r.speed, 0) / movementHistoryRef.current.length
-        const avgAccuracy = movementHistoryRef.current.reduce((sum, r) => sum + r.accuracy, 0) / movementHistoryRef.current.length
-        
-        // INDOOR/STATIONARY DETECTION:
-        // - If accuracy is poor (> 20m), likely indoor or obstructed
-        // - If speed is very low (< 3 km/h), likely stationary
-        // - If average metrics show poor signal, don't snap to road
-        const isLikelyIndoor = accuracy > 20 || avgAccuracy > 25
-        const isStationary = speed < 3 && avgSpeed < 5
-        const isDefinitelyMoving = speed > 10 && accuracy < 15 // Clearly driving/riding
-        
-        // Apply Kalman filter for precise position
-        const filtered = kalmanFilter(rawLat, rawLng, accuracy, timestamp)
-        
-        let pos: { lat: number; lng: number }
-        
-        // ONLY snap to road when CLEARLY moving on a road:
-        // - Must be moving fast (>10 km/h) with good accuracy (<15m)
-        // - OR consistently moving (avg speed >8) with decent accuracy (<20m)
-        const shouldSnapToRoad = !isLikelyIndoor && !isStationary && (
-          isDefinitelyMoving || 
-          (avgSpeed > 8 && accuracy < 20)
-        )
-        
-        if (shouldSnapToRoad) {
-          const snapped = await snapToRoad(filtered.lat, filtered.lng)
-          pos = { lat: snapped.lat, lng: snapped.lng }
-          heading = snapped.bearing || heading
-        } else {
-          // Use RAW Kalman-filtered position - shows actual location in building/parking
-          pos = filtered
-        }
-        
-        // Adaptive animation: faster when moving, slower when stationary
+        // Smooth animate marker to actual GPS position
         const animDuration = speed > 20 ? 400 : speed > 5 ? 700 : 1000
         animateMarkerTo(pos, heading, animDuration)
         setDriverHeading(heading)
@@ -1006,19 +966,19 @@ export function DeliveryMap({
         // Smooth camera follow during navigation
         if (mapRef.current && navigating && !routeOverviewRef.current) {
           mapRef.current.easeTo({ 
-            center: [pos.lng, pos.lat], 
+            center: [lng, lat], 
             bearing: heading, 
             pitch: 65, 
-            zoom: speed > 30 ? 16 : 17, // Zoom out a bit when driving fast
+            zoom: speed > 30 ? 16 : 17,
             duration: speed > 15 ? 600 : 1000,
             easing: (t: number) => 1 - Math.pow(1 - t, 3) 
           })
         }
       },
       (err) => { console.log('[v0] GPS error:', err.message) }, 
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 3000 } // Fastest possible updates
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
     )
-  }, [updateDriverMarker, navigating, snapToRoad, animateMarkerTo, kalmanFilter])
+  }, [navigating, animateMarkerTo])
 
   useEffect(() => () => { 
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
