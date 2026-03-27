@@ -1444,19 +1444,23 @@ export function DeliveryMap({
       updateDriverMarker(startPos, startBearing)
       startContinuousTracking()
 
-      // Start marker
-      const startEl = document.createElement('div')
-      startEl.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 4px 12px rgba(251,191,36,0.5));'
-      startEl.innerHTML = `<div style="padding:4px 12px;border-radius:4px;background:#422006;border:2px solid #fbbf24;"><span style="font-size:10px;font-weight:900;color:#fbbf24;letter-spacing:2px;">START</span></div><div style="width:3px;height:30px;background:linear-gradient(to bottom,#fbbf24,transparent);"></div><div style="position:relative;"><div style="width:16px;height:16px;border-radius:50%;background:#fbbf24;border:3px solid #422006;box-shadow:0 0 16px #fbbf24;"></div></div>`
+      // Start marker - only show in single navigation mode, not multi-stop optimization
       if ((mapRef.current as any)._startMarker) (mapRef.current as any)._startMarker.remove()
-      ;(mapRef.current as any)._startMarker = new (mbgl()).Marker({ element: startEl, anchor: 'bottom' }).setLngLat(routeStart).addTo(mapRef.current)
+      if (!multiStopNav) {
+        const startEl = document.createElement('div')
+        startEl.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 4px 12px rgba(251,191,36,0.5));'
+        startEl.innerHTML = `<div style="padding:4px 12px;border-radius:4px;background:#422006;border:2px solid #fbbf24;"><span style="font-size:10px;font-weight:900;color:#fbbf24;letter-spacing:2px;">START</span></div><div style="width:3px;height:30px;background:linear-gradient(to bottom,#fbbf24,transparent);"></div><div style="position:relative;"><div style="width:16px;height:16px;border-radius:50%;background:#fbbf24;border:3px solid #422006;box-shadow:0 0 16px #fbbf24;"></div></div>`
+        ;(mapRef.current as any)._startMarker = new (mbgl()).Marker({ element: startEl, anchor: 'bottom' }).setLngLat(routeStart).addTo(mapRef.current)
+      }
 
-      // Destination marker
-      const destEl = document.createElement('div')
-      destEl.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 4px 12px rgba(34,197,94,0.5));'
-      destEl.innerHTML = `<div style="padding:4px 12px;border-radius:4px;background:#052e16;border:2px solid #22c55e;"><div style="display:flex;align-items:center;gap:4px;"><svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15" stroke="#22c55e" stroke-width="2"/></svg><span style="font-size:10px;font-weight:900;color:#22c55e;letter-spacing:2px;">${pin.customerName?.split(' ')[0]?.toUpperCase() || 'DEST'}</span></div></div><div style="width:3px;height:30px;background:linear-gradient(to bottom,#22c55e,transparent);"></div><div style="position:relative;"><div style="width:16px;height:16px;border-radius:50%;background:#22c55e;border:3px solid #052e16;box-shadow:0 0 16px #22c55e;"></div></div>`
+      // Destination marker - only show in single navigation mode, not multi-stop optimization
       if ((mapRef.current as any)._destMarker) (mapRef.current as any)._destMarker.remove()
-      ;(mapRef.current as any)._destMarker = new (mbgl()).Marker({ element: destEl, anchor: 'bottom' }).setLngLat(routeEnd).addTo(mapRef.current)
+      if (!multiStopNav) {
+        const destEl = document.createElement('div')
+        destEl.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 4px 12px rgba(34,197,94,0.5));'
+        destEl.innerHTML = `<div style="padding:4px 12px;border-radius:4px;background:#052e16;border:2px solid #22c55e;"><div style="display:flex;align-items:center;gap:4px;"><svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15" stroke="#22c55e" stroke-width="2"/></svg><span style="font-size:10px;font-weight:900;color:#22c55e;letter-spacing:2px;">${pin.customerName?.split(' ')[0]?.toUpperCase() || 'DEST'}</span></div></div><div style="width:3px;height:30px;background:linear-gradient(to bottom,#22c55e,transparent);"></div><div style="position:relative;"><div style="width:16px;height:16px;border-radius:50%;background:#22c55e;border:3px solid #052e16;box-shadow:0 0 16px #22c55e;"></div></div>`
+        ;(mapRef.current as any)._destMarker = new (mbgl()).Marker({ element: destEl, anchor: 'bottom' }).setLngLat(routeEnd).addTo(mapRef.current)
+      }
 
       // Add numbered 3D stop markers for all stops
       stopMarkersRef.current.forEach(m => m.remove())
