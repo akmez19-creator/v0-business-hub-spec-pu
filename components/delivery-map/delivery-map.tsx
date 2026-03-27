@@ -1379,11 +1379,20 @@ export function DeliveryMap({
         try { map.addLayer({ id: 'opt-route-core', type: 'line', source: 'opt-route', layout: lo, paint: { 'line-color': '#fef3c7', 'line-width': 2, 'line-opacity': 0.7 } } as any) } catch {}
       }
 
-      // Auto-start navigation to first stop immediately
+      // Show route overview with all stops visible (don't auto-zoom to first stop)
       if (ordered.length > 0) {
         setMultiStopNav(true)
-        // Small delay to let state settle, then start nav to first stop
-        setTimeout(() => startNavigationRef.current(ordered[0].pin), 50)
+        setRouteOverview(true)
+        setCurrentStopIdx(0)
+        setNavTarget(ordered[0].pin) // Set first stop as target but don't zoom yet
+        
+        // Auto-fit to show all stops overview
+        const bounds = new (mbgl()).LngLatBounds()
+        ordered.forEach(s => bounds.extend([s.pin.lng, s.pin.lat]))
+        if (driverLocation) bounds.extend([driverLocation.lng, driverLocation.lat])
+        map.fitBounds(bounds, { padding: { top: 80, bottom: 300, left: 50, right: 50 }, pitch: 20, bearing: 0, duration: 1500 })
+        
+        // Keep overview visible - user can tap a stop or "Start" to begin navigation
       }
     } catch (e) { console.error('Optimize failed:', e) }
     finally { setOptimizing(false) }
