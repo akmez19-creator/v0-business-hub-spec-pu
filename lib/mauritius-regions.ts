@@ -176,7 +176,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   // PAMPLEMOUSSES DISTRICT (54 regions)
   // ══════════════════════════════════════════════════════════════════════════
-  'Arsenal': { lat: -20.10560, lng: 57.53530 },
+  'Arsenal': { lat: -20.10950, lng: 57.51600 },
   'Baie Du Tombeau': { lat: -20.11383, lng: 57.50658 },
   'Balaclava': { lat: -20.08330, lng: 57.51560 },
   'Beau Plan': { lat: -20.10000, lng: 57.56000 },
