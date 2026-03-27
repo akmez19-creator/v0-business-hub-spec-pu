@@ -3,7 +3,7 @@
 // Coordinates verified from multiple sources for accurate pole marker placement
 // ══════════════════════════════════════════════════════════════════════════════
 
-export const MAURITIUS_REGIONS: Record&lt;string, { lat: number; lng: number }&gt; = {
+export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   // SAVANNE DISTRICT (37 regions)
   // ══════════════════════════════════════════════════════════════════════════
