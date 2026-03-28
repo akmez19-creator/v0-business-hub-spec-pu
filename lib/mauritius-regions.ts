@@ -452,7 +452,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ═���════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.20849, lng: 57.40893 },
@@ -501,7 +501,6 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   'African Town Squatters': { lat: -20.48000, lng: 57.54000 },
   'Baie Du Cap': { lat: -20.49258, lng: 57.37958 },
-  
   'Bel Ombre': { lat: -20.50417, lng: 57.41389 },
   'Benares': { lat: -20.48000, lng: 57.55000 },
   'Bois Cheri South': { lat: -20.43000, lng: 57.50000 },
@@ -513,7 +512,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Choisy': { lat: -20.50000, lng: 57.50000 },
   'Cite Gris Gris': { lat: -20.52000, lng: 57.54000 },
   'Cite Tyack': { lat: -20.48000, lng: 57.55000 },
-  'Grand Bassin': { lat: -20.41750, lng: 57.48850 },
+  'Grand Bassin': { lat: -20.41806, lng: 57.49194 },
   'Grand Bois': { lat: -20.42007, lng: 57.54903 },
   'Gris Gris': { lat: -20.52500, lng: 57.53056 },
   'Gros Bois': { lat: -20.44000, lng: 57.54000 },
