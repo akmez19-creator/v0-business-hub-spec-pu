@@ -225,7 +225,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Solitude': { lat: -20.07775, lng: 57.54627 },
   'St Joseph': { lat: -20.12000, lng: 57.57000 },
   'St Malo': { lat: -20.13000, lng: 57.58000 },
-  'Terre Rouge': { lat: -20.12800, lng: 57.53500 },
+  'Terre Rouge': { lat: -20.12610, lng: 57.52440 },
   'The Mount': { lat: -20.09833, lng: 57.60528 },
   'Triolet': { lat: -20.05760, lng: 57.55025 },
   'Trou Aux Biches': { lat: -20.03301, lng: 57.55033 },
@@ -392,7 +392,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'SVICC': { lat: -20.16100, lng: 57.50100 },
   'Tranquebar': { lat: -20.16500, lng: 57.50500 },
   'Vallee Des Pretes': { lat: -20.16861, lng: 57.53639 },
-  'Vallee Pitot': { lat: -20.17150, lng: 57.51910 },
+  'Vallee Pitot': { lat: -20.16472, lng: 57.51306 },
   'Venus': { lat: -20.16800, lng: 57.48300 },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -402,7 +402,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Batimarais': { lat: -20.06500, lng: 57.66000 },
   'Esperance Trebuchet': { lat: -20.06972, lng: 57.64194 },
   'Amitie': { lat: -20.03000, lng: 57.58000 },
-  'Anse La Raie': { lat: -20.00830, lng: 57.65830 },
+  'Anse La Raie': { lat: -19.99358, lng: 57.63621 },
   'Bain Boeuf': { lat: -19.98556, lng: 57.60694 },
   'Barlow': { lat: -20.05000, lng: 57.64000 },
   'Belle Vue Harel': { lat: -20.08330, lng: 57.63330 },
