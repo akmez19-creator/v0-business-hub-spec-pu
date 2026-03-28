@@ -440,7 +440,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   "Poudre D'Or Hamlet": { lat: -20.07690, lng: 57.64780 },
   "Poudre D'Or Village": { lat: -20.06180, lng: 57.68380 },
   'Riverside': { lat: -20.04000, lng: 57.61000 },
-  'Riviere du Rempart': { lat: -20.10000, lng: 57.63330 },
+  'Riviere du Rempart': { lat: -20.05000, lng: 57.63333 },
   'Roche Terre': { lat: -20.07000, lng: 57.64000 },
   'Roches Noires': { lat: -20.11111, lng: 57.72592 },
   'Sottise': { lat: -20.06000, lng: 57.55500 },
