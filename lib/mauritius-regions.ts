@@ -85,7 +85,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Carreau Esnouf': { lat: -20.39000, lng: 57.56000 },
   "Cite Mare D'Albert": { lat: -20.41600, lng: 57.62500 },
   'Cite Mont Fertile': { lat: -20.40000, lng: 57.59000 },
-  'Cluny': { lat: -20.34000, lng: 57.58000 },
+  'Cluny': { lat: -20.37056, lng: 57.59778 },
   'Deux Bras': { lat: -20.26500, lng: 57.70500 },
   'Eau Bleu': { lat: -20.39000, lng: 57.56000 },
   'Ferney': { lat: -20.38333, lng: 57.70833 },
@@ -161,7 +161,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Petit Verger': { lat: -20.23500, lng: 57.53000 },
   'Providence': { lat: -20.23330, lng: 57.55000 },
   'Quartier Militaire': { lat: -20.24790, lng: 57.59740 },
-  'Reduit': { lat: -20.23300, lng: 57.49700 },
+  'Reduit': { lat: -20.23436, lng: 57.49386 },
   'Ripailles': { lat: -20.23500, lng: 57.55500 },
   'Saint Pierre': { lat: -20.21750, lng: 57.52083 },
   'Sans Souci': { lat: -20.24000, lng: 57.60000 },
@@ -335,7 +335,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Tres Bon No. 2': { lat: -20.27000, lng: 57.48500 },
   'Tres Bon No. 3': { lat: -20.27000, lng: 57.48000 },
   'Tres Bon No. 4': { lat: -20.27000, lng: 57.47500 },
-  'Trianon': { lat: -20.26123, lng: 57.48988 },
+  'Trianon': { lat: -20.25767, lng: 57.49074 },
   'Tribecca Mall': { lat: -20.26200, lng: 57.48900 },
   'Trou Aux Cerfs': { lat: -20.31500, lng: 57.50500 },
   'Vacoas': { lat: -20.30005, lng: 57.47452 },
@@ -452,7 +452,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ═���════════════════════════════════════════════════════════════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.20849, lng: 57.40893 },
