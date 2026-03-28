@@ -511,8 +511,9 @@ export function DeliveryMap({
             show3dObjects: true, 
             showPlaceLabels: true, 
             showRoadLabels: true, 
-            showPointOfInterestLabels: false, // Reduce labels during zoom
-            showTransitLabels: false 
+            showPointOfInterestLabels: true, // Show POIs for better navigation
+            showTransitLabels: true,
+            // Road labels now show at all zoom levels for better rider navigation
           } 
         },
       })
@@ -589,12 +590,28 @@ export function DeliveryMap({
       
       map.once('idle', preloadTiles)
 
-      // ── Static dusk lighting (no weather effects) ──
+      // ── Static dusk lighting with enhanced road labels for rider navigation ──
       map.on('style.load', () => {
         try { map.setConfigProperty('basemap', 'showPlaceLabels', true) } catch {}
         try { map.setConfigProperty('basemap', 'showRoadLabels', true) } catch {}
         try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', true) } catch {}
         try { map.setConfigProperty('basemap', 'showTransitLabels', true) } catch {}
+        
+        // Enhanced road label visibility for rider navigation in dusk mode
+        // Make street names more prominent at all zoom levels
+        try {
+          // Boost road label text size and halo for better visibility
+          const roadLabelLayers = ['road-label', 'road-label-simple', 'road-number-shield', 'road-exit-shield']
+          roadLabelLayers.forEach(layerId => {
+            if (map.getLayer(layerId)) {
+              try {
+                map.setPaintProperty(layerId, 'text-halo-width', 2)
+                map.setPaintProperty(layerId, 'text-halo-color', 'rgba(0,0,0,0.9)')
+                map.setPaintProperty(layerId, 'text-opacity', 1)
+              } catch {}
+            }
+          })
+        } catch {}
       })
 
       // ── Map loaded ──
