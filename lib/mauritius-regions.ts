@@ -205,7 +205,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Les Mariannes': { lat: -20.12000, lng: 57.59000 },
   'Long Mountain': { lat: -20.15000, lng: 57.54000 },
   'Mon Gout': { lat: -20.22500, lng: 57.53500 },
-  'Mont Choisy': { lat: -20.02080, lng: 57.54580 },
+  'Mont Choisy': { lat: -20.01652, lng: 57.55694 },
   'Mont Choisy Shopping Mall': { lat: -20.02000, lng: 57.55000 },
   'Morcellement Maison Blanche': { lat: -20.10000, lng: 57.55000 },
   'Morcellement St Andre': { lat: -20.07199, lng: 57.56833 },
@@ -228,7 +228,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Terre Rouge': { lat: -20.12800, lng: 57.53500 },
   'The Mount': { lat: -20.09833, lng: 57.60528 },
   'Triolet': { lat: -20.05760, lng: 57.55025 },
-  'Trou Aux Biches': { lat: -20.05000, lng: 57.55000 },
+  'Trou Aux Biches': { lat: -20.03301, lng: 57.55033 },
   'Valton': { lat: -20.12000, lng: 57.59000 },
   'Ville Bague': { lat: -20.13612, lng: 57.61029 },
 
@@ -399,6 +399,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // RIVIERE DU REMPART DISTRICT (56 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Amaury': { lat: -20.13083, lng: 57.65917 },
+  'Batimarais': { lat: -20.06500, lng: 57.66000 },
   'Esperance Trebuchet': { lat: -20.06972, lng: 57.64194 },
   'Amitie': { lat: -20.03000, lng: 57.58000 },
   'Anse La Raie': { lat: -20.00830, lng: 57.65830 },
@@ -451,7 +452,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ══════════════════��═════════════════════════════════════�����═════════════════
+  // ══════════════════���═════════════════════════════════════�����═════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.20849, lng: 57.40893 },
@@ -476,7 +477,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'La Ferme': { lat: -20.35000, lng: 57.40000 },
   'La Gaulette': { lat: -20.41727, lng: 57.36611 },
   'La Pirogue': { lat: -20.28000, lng: 57.37000 },
-  'La Preneuse': { lat: -20.35000, lng: 57.36500 },
+  'La Preneuse': { lat: -20.35400, lng: 57.36600 },
   'La Tour Koenig': { lat: -20.16190, lng: 57.49890 },
   'La Tour Koenig Industrial Zone': { lat: -20.16190, lng: 57.49890 },
   'Le Morne': { lat: -20.45194, lng: 57.32833 },
@@ -484,7 +485,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Le Morne Village': { lat: -20.45000, lng: 57.33000 },
   'Petite Riviere': { lat: -20.19365, lng: 57.44717 },
   'Petite Riviere Noire': { lat: -20.36670, lng: 57.38330 },
-  'Pointe Aux Sables': { lat: -20.18330, lng: 57.46670 },
+  'Pointe Aux Sables': { lat: -20.17194, lng: 57.42472 },
   'Richelieu': { lat: -20.22500, lng: 57.42080 },
   'Ruisseau Creole Complex': { lat: -20.37000, lng: 57.38000 },
   'Sofitel Hotel': { lat: -20.29000, lng: 57.37000 },
@@ -493,14 +494,14 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Tamarin Golf': { lat: -20.32000, lng: 57.38000 },
   'Terrasson': { lat: -20.27000, lng: 57.41000 },
   'Terre 7 Couleurs': { lat: -20.42000, lng: 57.38000 },
-  'Wolmar': { lat: -20.28000, lng: 57.37000 },
+  'Wolmar': { lat: -20.27420, lng: 57.36310 },
 
   // ══════════════════════════════════════════════════════════════════════════
   // SAVANNE DISTRICT (37 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'African Town Squatters': { lat: -20.48000, lng: 57.54000 },
   'Baie Du Cap': { lat: -20.49258, lng: 57.37958 },
-  'Batimarais': { lat: -20.06500, lng: 57.66000 },
+  
   'Bel Ombre': { lat: -20.50417, lng: 57.41389 },
   'Benares': { lat: -20.48000, lng: 57.55000 },
   'Bois Cheri South': { lat: -20.43000, lng: 57.50000 },
