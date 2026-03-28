@@ -159,7 +159,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Nouvelle Decouverte': { lat: -20.18787, lng: 57.58936 },
   'Petit Paquet': { lat: -20.24000, lng: 57.55000 },
   'Petit Verger': { lat: -20.23500, lng: 57.53000 },
-  'Providence': { lat: -20.23330, lng: 57.55000 },
+  'Providence': { lat: -20.24470, lng: 57.61220 },
   'Quartier Militaire': { lat: -20.24790, lng: 57.59740 },
   'Reduit': { lat: -20.23436, lng: 57.49386 },
   'Ripailles': { lat: -20.23500, lng: 57.55500 },
@@ -170,7 +170,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'University Of Mauritius': { lat: -20.23275, lng: 57.49755 },
   'Upper Dagotiere': { lat: -20.24000, lng: 57.55500 },
   'Valetta': { lat: -20.25194, lng: 57.56139 },
-  'Verdun': { lat: -20.21000, lng: 57.58000 },
+  'Verdun': { lat: -20.21889, lng: 57.49583 },
   'Vuillemin': { lat: -20.22000, lng: 57.52000 },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -249,7 +249,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Camp Caval': { lat: -20.32000, lng: 57.50167 },
   'Camp Fouquereaux': { lat: -20.28333, lng: 57.53333 },
   'Camp Le Juge': { lat: -20.23500, lng: 57.48500 },
-  'Camp Levieux': { lat: -20.24277, lng: 57.45478 },
+  'Camp Levieux': { lat: -20.22303, lng: 57.46838 },
   'Camp Madras': { lat: -20.24500, lng: 57.47500 },
   'Candos': { lat: -20.27837, lng: 57.47936 },
   'Carreau Lalianne': { lat: -20.28060, lng: 57.47640 },
@@ -346,7 +346,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Vingta No. 2': { lat: -20.29400, lng: 57.47600 },
   'Vingta No. 3': { lat: -20.29500, lng: 57.47400 },
   'Visitation': { lat: -20.23500, lng: 57.46800 },
-  'Wooton': { lat: -20.33000, lng: 57.55000 },
+  'Wooton': { lat: -20.28333, lng: 57.55000 },
 
   // ══════════════════════════════════════════════════════════════════════════
   // PORT LOUIS DISTRICT (43 regions)
