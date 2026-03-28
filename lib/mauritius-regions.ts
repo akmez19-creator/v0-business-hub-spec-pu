@@ -249,7 +249,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Camp Caval': { lat: -20.32000, lng: 57.50167 },
   'Camp Fouquereaux': { lat: -20.30000, lng: 57.51670 },
   'Camp Le Juge': { lat: -20.23500, lng: 57.48500 },
-  'Camp Levieux': { lat: -20.24000, lng: 57.46500 },
+  'Camp Levieux': { lat: -20.24277, lng: 57.45478 },
   'Camp Madras': { lat: -20.24500, lng: 57.47500 },
   'Candos': { lat: -20.27837, lng: 57.47936 },
   'Carreau Lalianne': { lat: -20.28060, lng: 57.47640 },
@@ -291,7 +291,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'La Caverne': { lat: -20.29389, lng: 57.47389 },
   'La Caverne No.1': { lat: -20.29350, lng: 57.47350 },
   'La Caverne No.2': { lat: -20.29400, lng: 57.47420 },
-  'La Louise': { lat: -20.26728, lng: 57.47322 },
+  'La Louise': { lat: -20.27000, lng: 57.47500 },
   'La Marie': { lat: -20.33500, lng: 57.48500 },
   'La Source': { lat: -20.28500, lng: 57.47900 },
   'Les Casernes Curepipe': { lat: -20.32500, lng: 57.52500 },
@@ -330,7 +330,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'St Jean': { lat: -20.26633, lng: 57.47843 },
   'St Paul': { lat: -20.25000, lng: 57.47000 },
   'Stanley': { lat: -20.24789, lng: 57.46645 },
-  'Trefles': { lat: -20.27600, lng: 57.47200 },
+  'Trefles': { lat: -20.24500, lng: 57.47000 },
   'Tres Bon No. 1': { lat: -20.27000, lng: 57.49000 },
   'Tres Bon No. 2': { lat: -20.27000, lng: 57.48500 },
   'Tres Bon No. 3': { lat: -20.27000, lng: 57.48000 },
@@ -449,7 +449,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ════════════════════════════════════════════════════════����═════════════════
+  // ════════════════════════════════════════════════════════�����═════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.21170, lng: 57.40080 },
