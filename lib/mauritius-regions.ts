@@ -307,7 +307,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Paillotte': { lat: -20.28200, lng: 57.47500 },
   'Palma': { lat: -20.27917, lng: 57.44417 },
   'Petit Camp': { lat: -20.29000, lng: 57.50000 },
-  'Phoenix': { lat: -20.29000, lng: 57.50000 },
+  'Phoenix': { lat: -20.28667, lng: 57.50194 },
   'Plaisance': { lat: -20.24212, lng: 57.46095 },
   'Pont Fer': { lat: -20.18000, lng: 57.53000 },
   'Quatre Bornes': { lat: -20.26536, lng: 57.47905 },
@@ -396,9 +396,10 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Venus': { lat: -20.16800, lng: 57.48300 },
 
   // ══════════════════════════════════════════════════════════════════════════
-  // RIVIERE DU REMPART DISTRICT (55 regions)
+  // RIVIERE DU REMPART DISTRICT (56 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Amaury': { lat: -20.13083, lng: 57.65917 },
+  'Esperance Trebuchet': { lat: -20.06972, lng: 57.64194 },
   'Amitie': { lat: -20.03000, lng: 57.58000 },
   'Anse La Raie': { lat: -20.00830, lng: 57.65830 },
   'Bain Boeuf': { lat: -19.98556, lng: 57.60694 },
@@ -466,7 +467,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Coteau Raffin': { lat: -20.28000, lng: 57.41000 },
   'Flic En Flac': { lat: -20.27978, lng: 57.36645 },
   'Geoffroy': { lat: -20.26000, lng: 57.41000 },
-  'Grande Riviere Noire': { lat: -20.36670, lng: 57.37500 },
+  'Grande Riviere Noire': { lat: -20.36248, lng: 57.37367 },
   'GRNW': { lat: -20.37000, lng: 57.38000 },
   'Gros Cailloux': { lat: -20.20720, lng: 57.43000 },
   'Hilton Hotel': { lat: -20.28000, lng: 57.37000 },
@@ -481,7 +482,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Le Morne': { lat: -20.45194, lng: 57.32833 },
   'Le Morne Brabant': { lat: -20.45690, lng: 57.31750 },
   'Le Morne Village': { lat: -20.45000, lng: 57.33000 },
-  'Petite Riviere': { lat: -20.28330, lng: 57.41670 },
+  'Petite Riviere': { lat: -20.19365, lng: 57.44717 },
   'Petite Riviere Noire': { lat: -20.36670, lng: 57.38330 },
   'Pointe Aux Sables': { lat: -20.18330, lng: 57.46670 },
   'Richelieu': { lat: -20.22500, lng: 57.42080 },
@@ -506,7 +507,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Britannia': { lat: -20.47000, lng: 57.53000 },
   'Camp Bananes': { lat: -20.49000, lng: 57.56000 },
   'Camp Diable': { lat: -20.46860, lng: 57.58540 },
-  'Chamouny': { lat: -20.48000, lng: 57.52000 },
+  'Chamouny': { lat: -20.47804, lng: 57.47970 },
   'Chemin Grenier': { lat: -20.49673, lng: 57.46838 },
   'Choisy': { lat: -20.50000, lng: 57.50000 },
   'Cite Gris Gris': { lat: -20.52000, lng: 57.54000 },
@@ -530,7 +531,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Saint Felix': { lat: -20.48330, lng: 57.43330 },
   'Saint Martin Bel Ombre': { lat: -20.50000, lng: 57.42000 },
   'Souillac': { lat: -20.51670, lng: 57.51670 },
-  'St Aubin': { lat: -20.50160, lng: 57.54460 },
+  'St Aubin': { lat: -20.50254, lng: 57.54395 },
   'Surinam': { lat: -20.51222, lng: 57.50967 },
   'Tyack': { lat: -20.47610, lng: 57.55190 },
   'Union Ducray': { lat: -20.49000, lng: 57.55000 },
