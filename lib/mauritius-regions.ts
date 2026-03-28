@@ -83,7 +83,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Camp Carol': { lat: -20.40000, lng: 57.68000 },
   'Carreau Accacia': { lat: -20.42000, lng: 57.62000 },
   'Carreau Esnouf': { lat: -20.39000, lng: 57.56000 },
-  "Cite Mare D'Albert": { lat: -20.38000, lng: 57.57000 },
+  "Cite Mare D'Albert": { lat: -20.41600, lng: 57.62500 },
   'Cite Mont Fertile': { lat: -20.40000, lng: 57.59000 },
   'Cluny': { lat: -20.34000, lng: 57.58000 },
   'Deux Bras': { lat: -20.26500, lng: 57.70500 },
@@ -100,7 +100,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Mahebourg': { lat: -20.40810, lng: 57.70000 },
   'Malakoff': { lat: -20.41000, lng: 57.69000 },
   'Mare Chicose': { lat: -20.40000, lng: 57.60000 },
-  "Mare D'Albert": { lat: -20.38330, lng: 57.56670 },
+  "Mare D'Albert": { lat: -20.41611, lng: 57.62560 },
   'Mon Desert Mon Tresor': { lat: -20.43000, lng: 57.68000 },
   'Mont Fertille': { lat: -20.40000, lng: 57.59000 },
   'New Grove': { lat: -20.37060, lng: 57.56110 },
@@ -452,7 +452,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ══════════════════���═════════════════════════════════════�����═════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.20849, lng: 57.40893 },
