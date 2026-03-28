@@ -21,7 +21,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Bramsthan': { lat: -20.15556, lng: 57.66667 },
   "Bras d'Eau": { lat: -20.14560, lng: 57.76280 },
   'Brisee Verdiere': { lat: -20.22159, lng: 57.72266 },
-  'Camp De Masque': { lat: -20.23610, lng: 57.67610 },
+  'Camp De Masque': { lat: -20.23611, lng: 57.67611 },
   'Camp De Masque Pave': { lat: -20.24000, lng: 57.67000 },
   'Camp Ithier': { lat: -20.21780, lng: 57.75000 },
   'Caroline': { lat: -20.20000, lng: 57.70000 },
@@ -77,8 +77,8 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Balisson': { lat: -20.38000, lng: 57.58000 },
   'Bambous Virieux': { lat: -20.33352, lng: 57.74809 },
   'Bananes': { lat: -20.41111, lng: 57.62222 },
-  'Beau Vallon': { lat: -20.40278, lng: 57.65000 },
-  'Blue Bay': { lat: -20.44098, lng: 57.71907 },
+  'Beau Vallon': { lat: -20.42494, lng: 57.70271 },
+  'Blue Bay': { lat: -20.44511, lng: 57.71738 },
   'Bois Des Amourettes': { lat: -20.36306, lng: 57.73111 },
   'Camp Carol': { lat: -20.40000, lng: 57.68000 },
   'Carreau Accacia': { lat: -20.42000, lng: 57.62000 },
@@ -451,7 +451,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Union Daruty': { lat: -20.05000, lng: 57.63000 },
   'Upper Vale': { lat: -20.06000, lng: 57.62000 },
 
-  // ════════════════════════════════════════════════════════�����═════════════════
+  // ══════════════════��═════════════════════════════════════�����═════════════════
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.20849, lng: 57.40893 },
