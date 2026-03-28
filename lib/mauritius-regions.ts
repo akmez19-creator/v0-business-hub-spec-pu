@@ -247,7 +247,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Boundary': { lat: -20.26500, lng: 57.47000 },
   'Brown Sequard Hospital': { lat: -20.22500, lng: 57.47500 },
   'Camp Caval': { lat: -20.32000, lng: 57.50167 },
-  'Camp Fouquereaux': { lat: -20.30000, lng: 57.51670 },
+  'Camp Fouquereaux': { lat: -20.28333, lng: 57.53333 },
   'Camp Le Juge': { lat: -20.23500, lng: 57.48500 },
   'Camp Levieux': { lat: -20.24277, lng: 57.45478 },
   'Camp Madras': { lat: -20.24500, lng: 57.47500 },
@@ -281,7 +281,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Forest Side': { lat: -20.31670, lng: 57.51670 },
   'Glen Park': { lat: -20.32111, lng: 57.47833 },
   'Gymkhana': { lat: -20.30000, lng: 57.47400 },
-  'Henrietta': { lat: -20.29500, lng: 57.48500 },
+  'Henrietta': { lat: -20.29731, lng: 57.49667 },
   'Hermitage': { lat: -20.26083, lng: 57.70250 },
   'Highlands': { lat: -20.27833, lng: 57.51444 },
   'Hollyrood No.1': { lat: -20.17000, lng: 57.67000 },
@@ -298,7 +298,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Ligne Berthaud': { lat: -20.26250, lng: 57.46830 },
   'Malherbes': { lat: -20.30917, lng: 57.52417 },
   'Mare Gravier': { lat: -20.30500, lng: 57.51500 },
-  'Mesnil': { lat: -20.29028, lng: 57.51167 },
+  'Mesnil': { lat: -20.29078, lng: 57.51653 },
   'Midlands': { lat: -20.33870, lng: 57.56770 },
   'Modern': { lat: -20.29500, lng: 57.48000 },
   'Mont Roches': { lat: -20.21800, lng: 57.45200 },
@@ -537,14 +537,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Tyack': { lat: -20.47610, lng: 57.55190 },
   'Union Ducray': { lat: -20.49000, lng: 57.55000 },
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ADDITIONAL/MISSING REGIONS
-  // ══════════════════════════════════════════════════════════════════════════
-  'Gros Billot': { lat: -20.37000, lng: 57.62000 },
-  'Pointe Aux Biches': { lat: -20.05830, lng: 57.54170 },
-  'Belle Vue Harel': { lat: -20.08330, lng: 57.63330 },
-  'Belle Vue Maurel': { lat: -20.06583, lng: 57.59417 },
-}
+  }
 
 /**
  * Get coordinates for a region name
