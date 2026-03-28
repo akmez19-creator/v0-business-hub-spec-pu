@@ -351,17 +351,17 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   // PORT LOUIS DISTRICT (42 regions)
   // ══════════════════════════════════════════════════════════════════════════
-  'Bain des Dames': { lat: -20.15000, lng: 57.50000 },
+  'Bain des Dames': { lat: -20.15917, lng: 57.47556 },
   'Bell Village': { lat: -20.17029, lng: 57.48511 },
   'Briquetterie': { lat: -20.16000, lng: 57.50000 },
-  'Camp Chapelon': { lat: -20.17000, lng: 57.68500 },
-  'Camp Yoloff': { lat: -20.16000, lng: 57.50000 },
+  'Camp Chapelon': { lat: -20.17613, lng: 57.46914 },
+  'Camp Yoloff': { lat: -20.15563, lng: 57.50731 },
   'Canal Dayot': { lat: -20.15000, lng: 57.50000 },
   'Carreau Lalo': { lat: -20.15652, lng: 57.52736 },
-  'Cassis': { lat: -20.17500, lng: 57.49170 },
-  'Caudan': { lat: -20.16000, lng: 57.50000 },
-  'Caudan Waterfromt': { lat: -20.16000, lng: 57.50000 },
-  'Champ De Mars': { lat: -20.15830, lng: 57.50830 },
+  'Cassis': { lat: -20.17341, lng: 57.47971 },
+  'Caudan': { lat: -20.16151, lng: 57.49845 },
+  'Caudan Waterfromt': { lat: -20.16151, lng: 57.49845 },
+  'Champ De Mars': { lat: -20.16830, lng: 57.50580 },
   'Cite Borstal': { lat: -20.17000, lng: 57.50000 },
   'Cite La Cure': { lat: -20.15583, lng: 57.52778 },
   'Cite Martial': { lat: -20.16000, lng: 57.50000 },
@@ -371,19 +371,19 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Domaine Les Pailles': { lat: -20.18330, lng: 57.48330 },
   'Dr. A. G. Jeetoo Hospital': { lat: -20.16900, lng: 57.50216 },
   'Guibies': { lat: -20.18000, lng: 57.49000 },
-  'La Butte': { lat: -20.16000, lng: 57.50000 },
+  'La Butte': { lat: -20.17200, lng: 57.48500 },
   'La Cure': { lat: -20.18750, lng: 57.51670 },
-  'Les Salines': { lat: -20.15000, lng: 57.49000 },
-  'Line Barracks': { lat: -20.16000, lng: 57.50000 },
-  'Marie Reine de la Paix': { lat: -20.17000, lng: 57.51000 },
+  'Les Salines': { lat: -20.16032, lng: 57.48960 },
+  'Line Barracks': { lat: -20.16434, lng: 57.49780 },
+  'Marie Reine de la Paix': { lat: -20.17018, lng: 57.49768 },
   'Mer Rouge': { lat: -20.15000, lng: 57.50000 },
   'Montebello': { lat: -20.17000, lng: 57.49000 },
   'Pailles': { lat: -20.19622, lng: 57.48625 },
   'Pailles East': { lat: -20.19000, lng: 57.49000 },
   'Pailles West': { lat: -20.19000, lng: 57.48000 },
-  'Plaine Lauzun': { lat: -20.16000, lng: 57.49000 },
+  'Plaine Lauzun': { lat: -20.17322, lng: 57.48012 },
   'Plaine Verte': { lat: -20.15941, lng: 57.51277 },
-  'Port Louis': { lat: -20.16190, lng: 57.49890 },
+  'Port Louis': { lat: -20.16089, lng: 57.50122 },
   'Quay D': { lat: -20.15500, lng: 57.50000 },
   'Roche Bois': { lat: -20.14920, lng: 57.51224 },
   'Soreze': { lat: -20.16000, lng: 57.51000 },
@@ -392,7 +392,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Tranquebar': { lat: -20.16500, lng: 57.50500 },
   'Vallee Des Pretes': { lat: -20.16861, lng: 57.53639 },
   'Vallee Pitot': { lat: -20.17150, lng: 57.51910 },
-  'Venus': { lat: -20.15000, lng: 57.50000 },
+  'Venus': { lat: -20.16800, lng: 57.48300 },
 
   // ══════════════════════════════════════════════════════════════════════════
   // RIVIERE DU REMPART DISTRICT (55 regions)
@@ -537,7 +537,6 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // ══════════════════════════════════════════════════════════════════════════
   // ADDITIONAL/MISSING REGIONS
   // ══════════════════════════════════════════════════════════════════════════
-  'Caudan Waterfromt': { lat: -20.16000, lng: 57.50000 },
   'Gros Billot': { lat: -20.37000, lng: 57.62000 },
   'Pointe Aux Biches': { lat: -20.05830, lng: 57.54170 },
   'Belle Vue Harel': { lat: -20.08330, lng: 57.63330 },
