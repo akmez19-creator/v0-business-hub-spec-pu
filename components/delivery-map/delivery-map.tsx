@@ -210,7 +210,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ═════════������════════════════════════════════════════════════
+// ================================================================
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -280,12 +280,14 @@ export function DeliveryMap({
   
   // Fetch Mauritius POIs on mount
   useEffect(() => {
+    console.log('[v0] Fetching Mauritius POIs...')
     fetch('/api/mauritius-pois')
       .then(res => res.json())
       .then(data => {
+        console.log('[v0] POI data received:', data.pois?.length || 0, 'POIs')
         if (data.pois) setPois(data.pois)
       })
-      .catch(() => {})
+      .catch((err) => console.error('[v0] POI fetch error:', err))
   }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
@@ -513,7 +515,7 @@ export function DeliveryMap({
 
       // ══════════════════════════════════════════════════════════════════════════
       // ULTIMATE MAPBOX PERFORMANCE CONFIG - Based on official Mapbox docs + research
-      // ══��═══════════════════════════════════════════════════════════════════════
+      // ============================================================================
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
@@ -566,7 +568,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ════════════════════════════════════════════════════════════���═════════════
+      // ============================================================================
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -621,10 +623,10 @@ export function DeliveryMap({
       
       map.once('idle', preloadTiles)
 
-      // ── Static dusk lighting with enhanced road labels for rider navigation ──
-// dark-v11 has POIs enabled by default
-          
-          // Enhance POI labels visibility - make them brighter and more visible
+      // ── Map loaded ──
+      map.on('load', () => {
+        // Enhance POI labels visibility
+        try {
           const poiLayers = ['poi-label']
           poiLayers.forEach(layerId => {
             if (map.getLayer(layerId)) {
@@ -639,22 +641,19 @@ export function DeliveryMap({
             }
           })
         } catch {}
-      })
-
-      // ── Map loaded ──
-map.on('load', () => {
-  if (cancelled) return
-  
-  // FORCE 2D mode on load - set pitch to 0
-  map.setPitch(0)
-  map.setBearing(0)
-  
-  // Disable pitch/rotation controls for 2D mode
-  map.touchPitch.disable()
-  map.dragRotate.disable()
-  map.touchZoomRotate.disableRotation()
-  
-  // GeoJSON delivery pins source
+        
+        if (cancelled) return
+        
+        // FORCE 2D mode on load - set pitch to 0
+        map.setPitch(0)
+        map.setBearing(0)
+        
+        // Disable pitch/rotation controls for 2D mode
+        map.touchPitch.disable()
+        map.dragRotate.disable()
+        map.touchZoomRotate.disableRotation()
+        
+        // GeoJSON delivery pins source
         if (map.getSource('delivery-pins')) {
           try { ['pins-glow','pins-circle','pins-pulse','pins-waypoint','pins-label'].forEach(l => { if (map.getLayer(l)) map.removeLayer(l) }); map.removeSource('delivery-pins') } catch {}
         }
@@ -921,6 +920,7 @@ map.on('load', () => {
   // ── POI Markers from OpenStreetMap ──
   useEffect(() => {
     const map = mapRef.current
+    console.log('[v0] POI render effect - map:', !!map, 'mapLoaded:', mapLoaded, 'showPOIs:', showPOIs, 'pois:', pois.length)
     if (!map || !mapLoaded || !showPOIs || pois.length === 0) return
     
     // Clear existing POI markers
@@ -928,7 +928,7 @@ map.on('load', () => {
     poiMarkersRef.current = []
     
     const mbgl = mbglRef.current
-    if (!mbgl) return
+    if (!mbgl) { console.log('[v0] No mbgl ref'); return }
     
     // Icon colors by type
     const typeColors: Record<string, string> = {
@@ -945,16 +945,16 @@ map.on('load', () => {
     
     // Icon symbols by category
     const categorySymbols: Record<string, string> = {
-      school: '🏫', mosque: '🕌', temple: '🛕', church: '⛪',
-      restaurant: '🍽️', cafe: '☕', fast_food: '🍔',
-      supermarket: '🛒', convenience: '🏪', shop: '🛍️',
-      hospital: '🏥', clinic: '🏥', pharmacy: '💊',
-      bank: '🏦', petrol: '⛽', police: '👮'
+      school: 'S', mosque: 'M', temple: 'T', church: 'C',
+      restaurant: 'R', cafe: 'F', fast_food: 'F',
+      supermarket: 'G', convenience: 'G', shop: 'S',
+      hospital: 'H', clinic: 'H', pharmacy: 'P',
+      bank: 'B', petrol: 'G', police: 'P'
     }
     
     pois.forEach(poi => {
       const color = typeColors[poi.type] || typeColors.other
-      const symbol = categorySymbols[poi.category] || '📍'
+      const symbol = categorySymbols[poi.category] || 'X'
       
       const el = document.createElement('div')
       el.className = 'poi-marker'
@@ -982,7 +982,7 @@ map.on('load', () => {
           border-radius: 8px; font-size: 12px; font-weight: 500; z-index: 9999;
           box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         `
-        popup.textContent = `${symbol} ${poi.name}`
+        popup.textContent = poi.name
         document.body.appendChild(popup)
         setTimeout(() => popup.remove(), 2500)
       })
@@ -1019,9 +1019,9 @@ map.on('load', () => {
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, locating])
 
-  // ════════════════���═════════════════════════════════════════════════════════
+  // ============================================================================
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ═══���═════════��════════════════════════════════════════════════════════════
+  // ============================================================================
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
@@ -1095,7 +1095,7 @@ map.on('load', () => {
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ════════════════════════��════════════════════════════════��════════════════
+  // ============================================================================
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
@@ -1436,7 +1436,7 @@ map.on('load', () => {
     setExporting(null)
   }, [safeRegionGroups, customTemplates, markRegionExported])
 
-  // ── Status change + Payment ─���
+  // -- Status change + Payment --
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
     // Exchange / Trade-in / Refund: show protocol popup via paymentPopup with protocol flag
     if (isReturnOrder(pin)) {
@@ -2062,9 +2062,9 @@ router.refresh()
     }
   }, [navigating, navTarget, distToTarget])
 
-  // ══���════���══════════════════════════════════
-  // ██  RENDER
-  // ══��═══════════════════════════════════════
+// ==========================================
+// RENDER
+// ==========================================
   return (
     <div ref={mapContainerParentRef} className={cn('flex flex-col h-full bg-black relative overflow-hidden', className)}>
       <style dangerouslySetInnerHTML={{ __html: `
@@ -3324,7 +3324,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               const isExpandedCard = expandedRegions.has(`card-${d.id}`)
                               return (
                               <div key={d.id} className="client-card client-card-need overflow-hidden">
-                                {/* ── Main Row: Avatar + Full name/product + chevron ��─ */}
+                                {/* -- Main Row: Avatar + Full name/product + chevron -- */}
                                 <button onClick={() => setExpandedRegions(prev => { const next = new Set(prev); const key = `card-${d.id}`; next.has(key) ? next.delete(key) : next.add(key); return next })}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 text-left">
                                   <div className="relative shrink-0">
