@@ -292,6 +292,20 @@ export function DeliveryMap({
       })
       .catch(() => {})
   }, [])
+  
+  // Update POI coordinates when map moves while adding
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !addingPoi) return
+    
+    const updateCoords = () => {
+      const center = map.getCenter()
+      setNewPoiCoords({ lat: center.lat, lng: center.lng })
+    }
+    
+    map.on('move', updateCoords)
+    return () => { map.off('move', updateCoords) }
+  }, [addingPoi])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -2216,6 +2230,19 @@ router.refresh()
 
       {/* Map container - GPU accelerated for smooth zoom */}
       <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
+      
+      {/* Center pin marker when adding POI */}
+      {addingPoi && (
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-30">
+          <div className="flex flex-direction column items-center" style={{ marginBottom: '24px' }}>
+            <div className="w-8 h-8 bg-amber-500 border-2 border-white rounded-full flex items-center justify-center shadow-lg" style={{ borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)' }}>
+              <MapPin className="w-4 h-4 text-white" style={{ transform: 'rotate(45deg)' }} />
+            </div>
+            <div className="w-0.5 h-6 bg-amber-500/70 -mt-1" />
+            <div className="w-3 h-3 rounded-full bg-amber-500/30 border border-amber-400 animate-ping" />
+          </div>
+        </div>
+      )}
 
       {/* Mini-map radar */}
       <div className="absolute bottom-24 left-3 z-20 w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden border-2 border-cyan-400/30 shadow-lg shadow-cyan-500/10">
