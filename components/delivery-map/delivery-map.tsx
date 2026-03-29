@@ -257,6 +257,7 @@ export function DeliveryMap({
   const [showPoles, setShowPoles] = useState(true)
   const [locating, setLocating] = useState(false)
   const [placingPin, setPlacingPin] = useState<DeliveryPin | null>(null)
+  const [placingRegion, setPlacingRegion] = useState<{ locality: string; lat: number; lng: number } | null>(null)
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -867,21 +868,16 @@ map.on('load', () => {
         <div style="width:3px;height:${poleH}px;background:linear-gradient(180deg,${topColor}cc,${topColor}33,transparent);border-radius:1.5px;box-shadow:1px 0 4px rgba(0,0,0,0.4),-1px 0 4px rgba(0,0,0,0.4);"></div>
         <div style="width:10px;height:4px;border-radius:50%;background:radial-gradient(ellipse,${topColor}66,transparent);filter:blur(1px);"></div>
       `
-      // Edit button click handler
+      // Edit button click handler - enters drag placement mode
       const editBtn = el.querySelector('.edit-pole-btn') as HTMLButtonElement
       if (editBtn) {
         editBtn.addEventListener('click', (e) => {
           e.stopPropagation()
-          const locality = editBtn.dataset.locality
-          const lat = editBtn.dataset.lat
-          const lng = editBtn.dataset.lng
-          const coords = prompt(`Edit coordinates for ${locality}\n\nCurrent: ${lat}, ${lng}\n\nEnter new coordinates as: lat, lng`)
-          if (coords) {
-            const [newLat, newLng] = coords.split(',').map(s => parseFloat(s.trim()))
-            if (!isNaN(newLat) && !isNaN(newLng)) {
-              alert(`Update "${locality}" to:\n\n'${locality}': { lat: ${newLat}, lng: ${newLng} }\n\nTell me these coordinates to update the file.`)
-            }
-          }
+          const locality = editBtn.dataset.locality || ''
+          const lat = parseFloat(editBtn.dataset.lat || '0')
+          const lng = parseFloat(editBtn.dataset.lng || '0')
+          setPlacingRegion({ locality, lat, lng })
+          mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 800 })
         })
       }
       el.addEventListener('click', () => {
@@ -3458,6 +3454,47 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 text-cyan-400 font-bold text-sm active:scale-95 transition disabled:opacity-50">
               {savingPin ? <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
               Confirm Pin
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Region Pole Placement Mode */}
+      {placingRegion && (
+        <>
+          <div className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center">
+            <div className="relative">
+              <div className="w-10 h-10 border-2 border-orange-400 rounded-lg opacity-60" />
+              <div className="absolute inset-0 flex items-center justify-center"><div className="w-2 h-2 rounded-sm bg-orange-400" /></div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-px bg-orange-400/40" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-px h-14 bg-orange-400/40" />
+            </div>
+          </div>
+          <div className="absolute top-3 left-3 right-3 z-40">
+            <div className="bg-orange-500/20 backdrop-blur-xl border border-orange-400/30 rounded-xl px-4 py-3 text-center pointer-events-none">
+              <p className="text-xs font-bold text-orange-400">Moving region pole</p>
+              <p className="text-lg font-black text-white">{placingRegion.locality}</p>
+              <p className="text-[10px] text-white/40 mt-1">Drag the map to position the crosshair, then confirm</p>
+            </div>
+          </div>
+          <div className="absolute bottom-6 left-3 right-3 z-40 flex gap-2">
+            <button onClick={() => setPlacingRegion(null)}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition">
+              <X className="w-4 h-4" /> Cancel
+            </button>
+            <button onClick={() => {
+              const map = mapRef.current
+              if (map && placingRegion) {
+                const center = map.getCenter()
+                const newLat = center.lat.toFixed(6)
+                const newLng = center.lng.toFixed(6)
+                navigator.clipboard.writeText(`'${placingRegion.locality}': { lat: ${newLat}, lng: ${newLng} },`)
+                alert(`Coordinates copied!\n\n'${placingRegion.locality}': { lat: ${newLat}, lng: ${newLng} }\n\nPaste this to me to update the regions file.`)
+                setPlacingRegion(null)
+              }
+            }}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500/20 backdrop-blur-xl border border-orange-400/30 text-orange-400 font-bold text-sm active:scale-95 transition">
+              <Check className="w-4 h-4" /> Confirm & Copy
             </button>
           </div>
         </>
