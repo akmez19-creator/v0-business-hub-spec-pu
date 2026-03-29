@@ -249,6 +249,7 @@ export function DeliveryMap({
   const arrivalAlertedRef = useRef<string>('')
   const startNavigationRef = useRef<(pin: DeliveryPin) => void>(() => {})
   const [viewMode, setViewMode] = useState<'overview' | '3d'>('3d')
+  const viewModeRef = useRef<'overview' | '3d'>('3d')
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [speed, setSpeed] = useState(0)
 
@@ -1426,11 +1427,10 @@ export function DeliveryMap({
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
-  // Respect current viewMode - use pitch 60 only if in 3D mode
-  const currentPitch = viewMode === '3d' ? 60 : 0
-  console.log('[v0] startPlacingPin - viewMode:', viewMode, 'currentPitch:', currentPitch, 'regionMatch:', regionMatch?.locality)
+  // Use ref to get current viewMode (avoids stale closure)
+  const currentPitch = viewModeRef.current === '3d' ? 60 : 0
   if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
-  }, [regions, viewMode])
+  }, [regions])
 
 const confirmPinPlacement = useCallback(async () => {
   if (!mapRef.current || !placingPin) return; setSavingPin(true)
@@ -1456,21 +1456,16 @@ router.refresh()
     }
     setStreetSearching(true)
     try {
-      // Get region coordinates for bounding box
+      // Get region coordinates for proximity search
       const regionMatch = regions.find(r => r.locality === placingPin.locality)
       const lat = regionMatch?.lat ?? -20.2
       const lng = regionMatch?.lng ?? 57.5
       
-      // Create a ~5km bounding box around the region center to restrict results
-      const delta = 0.045 // ~5km radius
-      const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`
-      
-      // Use Mapbox Geocoding API - ONLY streets, addresses, POIs (NO localities/regions)
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&bbox=${bbox}&limit=8&types=address,poi`
-      console.log('[v0] Street search URL:', url)
+      // Use Mapbox Geocoding API - streets, addresses, POIs with proximity to region
+      const proximity = `${lng},${lat}`
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=8&types=address,poi`
       const res = await fetch(url)
       const data = await res.json()
-      console.log('[v0] Street search results:', data.features?.length || 0, 'features', data)
       
       if (data.features) {
         setStreetResults(data.features.map((f: any) => ({
@@ -1495,12 +1490,12 @@ router.refresh()
   // Select a street result and fly to it
   const selectStreetResult = useCallback((result: { center: [number, number]; place_name: string }) => {
     if (!mapRef.current) return
-    // Respect current viewMode - use pitch 60 only if in 3D mode
-    const currentPitch = viewMode === '3d' ? 60 : 0
+    // Use ref to get current viewMode (avoids stale closure)
+    const currentPitch = viewModeRef.current === '3d' ? 60 : 0
     mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: currentPitch, duration: 1200, essential: true })
     setStreetResults([])
     setStreetSearch('')
-  }, [viewMode])
+  }, [])
   
   // ── Paste location link handler ──
   const extractCoordsFromLink = useCallback((url: string): { lat: number; lng: number } | null => {
@@ -2520,7 +2515,7 @@ router.refresh()
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
           <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5">
 <button onClick={() => {
-  const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next)
+  const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next); viewModeRef.current = next
   if (mapRef.current) {
     const map = mapRef.current
     map.easeTo({ pitch: next === '3d' ? 60 : 0, bearing: next === '3d' ? map.getBearing() : 0, duration: 1200, easing: (t: number) => 1 - Math.pow(1 - t, 3) })
