@@ -276,7 +276,7 @@ export function DeliveryMap({
   // POI data from OpenStreetMap
   const [showPOIs, setShowPOIs] = useState(true)
   const [pois, setPois] = useState<{ id: string; name: string; type: string; category: string; lat: number; lng: number; icon: string }[]>([])
-  const poiMarkersRef = useRef<mapboxgl.Marker[]>([])
+  const poiMarkersRef = useRef<{ remove: () => void; getElement: () => HTMLElement }[]>([])
   
   // Fetch Mauritius POIs on mount
   useEffect(() => {
