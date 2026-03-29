@@ -1018,7 +1018,7 @@ map.on('load', () => {
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ════════════════════════��═════════════════════════════════════════════════
+  // ════════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
@@ -2719,6 +2719,16 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             <button onClick={toggleNightMode}
               className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', nightMode ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
               {nightMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button onClick={() => {
+              const map = mapRef.current
+              if (!map) return
+              const center = map.getCenter()
+              const zoom = Math.round(map.getZoom())
+              window.open(`https://www.google.com/maps/@${center.lat},${center.lng},${zoom}z`, '_blank')
+            }} className="btn-holo w-11 h-11 flex items-center justify-center transition text-white/40 hover:text-green-400"
+              title="Open in Google Maps (for detailed POIs)">
+              <ExternalLink className="w-4 h-4" />
             </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
