@@ -760,7 +760,14 @@ map.on('load', () => {
           const f = e.features?.[0]
           if (f) {
             const pin = deliveries.find(d => d.id === f.properties.id) || filtered.find(d => d.id === f.properties.id)
-            if (pin) { setSelectedPin(pin); setSelectedRegion(null); map.flyTo({ center: [pin.lng, pin.lat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) }
+            if (pin) { 
+              setSelectedPin(pin); setSelectedRegion(null); 
+              // Use region override coordinates if available, otherwise use pin's original coords
+              const override = regionOverrides[pin.locality]
+              const flyLng = override ? override.lng : pin.lng
+              const flyLat = override ? override.lat : pin.lat
+              map.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) 
+            }
           }
         })
         map.on('mouseenter', 'pins-circle', () => { map.getCanvas().style.cursor = 'pointer' })
@@ -1927,11 +1934,16 @@ router.refresh()
         }
       }
 
+      // Use region override coordinates if available for destination
+      const destOverride = regionOverrides[pin.locality]
+      const destLng = destOverride ? destOverride.lng : pin.lng
+      const destLat = destOverride ? destOverride.lat : pin.lat
+      
       // Fire API request immediately
-      const trafficUrl = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${rawPos.lng},${rawPos.lat};${pin.lng},${pin.lat}?steps=true&geometries=geojson&overview=full&banner_instructions=true&roundabout_exits=true&language=en&annotations=congestion,speed,duration&access_token=${mapboxToken}`
+      const trafficUrl = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${rawPos.lng},${rawPos.lat};${destLng},${destLat}?steps=true&geometries=geojson&overview=full&banner_instructions=true&roundabout_exits=true&language=en&annotations=congestion,speed,duration&access_token=${mapboxToken}`
       let data: any = await fetch(trafficUrl).then(r => r.json())
       if (!data.routes?.[0]) {
-        data = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${rawPos.lng},${rawPos.lat};${pin.lng},${pin.lat}?steps=true&geometries=geojson&overview=full&banner_instructions=true&roundabout_exits=true&language=en&annotations=speed,duration&access_token=${mapboxToken}`).then(r => r.json())
+        data = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${rawPos.lng},${rawPos.lat};${destLng},${destLat}?steps=true&geometries=geojson&overview=full&banner_instructions=true&roundabout_exits=true&language=en&annotations=speed,duration&access_token=${mapboxToken}`).then(r => r.json())
       }
       if (!data.routes?.[0]) throw new Error(`No route found: ${data.code} ${data.message || ''}`)
 
@@ -2047,7 +2059,7 @@ router.refresh()
   alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
   setNavigating(false); navigatingRef.current = false; setNavTarget(null); setNavReady(false)
     } finally { setRouteLoading(false) }
-  }, [driverLocation, mapboxToken, updateDriverMarker, startContinuousTracking, snapToRoad, multiStopNav, optimizedStops])
+  }, [driverLocation, mapboxToken, updateDriverMarker, startContinuousTracking, snapToRoad, multiStopNav, optimizedStops, regionOverrides])
 
   // Keep ref in sync so drag handlers can call startNavigation without circular deps
   startNavigationRef.current = startNavigation
@@ -3370,7 +3382,13 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   <div className="px-3 pb-3 pt-2 border-t border-white/[0.03] space-y-2">
                                     {/* Contact row */}
                                     <div className="flex items-center gap-2">
-                                      <button onClick={() => { setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); mapRef.current?.flyTo({ center: [d.lng, d.lat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) }}
+                                      <button onClick={() => { 
+                                        setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); 
+                                        const override = regionOverrides[d.locality]
+                                        const flyLng = override ? override.lng : d.lng
+                                        const flyLat = override ? override.lat : d.lat
+                                        mapRef.current?.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
+                                      }}
                                         className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
                                         <Navigation className="w-3.5 h-3.5" />Fly to
                                       </button>
