@@ -930,6 +930,12 @@ export function DeliveryMap({
     const mapboxgl = (window as any).mapboxgl
     if (!mapboxgl) { console.log('[v0] No mapboxgl'); return }
     
+    console.log('[v0] Creating POI markers...')
+    
+    // Limit POIs to prevent performance issues (max 500)
+    const limitedPois = pois.slice(0, 500)
+    console.log('[v0] Rendering', limitedPois.length, 'POIs (limited from', pois.length, ')')
+    
     // Icon colors by type
     const typeColors: Record<string, string> = {
       education: '#4ade80', // green
@@ -952,18 +958,19 @@ export function DeliveryMap({
       bank: 'B', petrol: 'G', police: 'P'
     }
     
-    pois.forEach(poi => {
+    limitedPois.forEach((poi, idx) => {
       const color = typeColors[poi.type] || typeColors.other
       const symbol = categorySymbols[poi.category] || 'X'
+      if (idx === 0) console.log('[v0] First POI:', poi.name, poi.lat, poi.lng)
       
       const el = document.createElement('div')
       el.className = 'poi-marker'
       el.style.cssText = `
         display: flex; align-items: center; justify-content: center;
         width: 22px; height: 22px; border-radius: 50%;
-        background: ${color}33; border: 1.5px solid ${color}99;
-        font-size: 11px; cursor: pointer;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        background: ${color}; border: 2px solid white;
+        font-size: 10px; font-weight: bold; color: white; cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
         transition: transform 0.15s;
       `
       el.innerHTML = symbol
@@ -993,6 +1000,8 @@ export function DeliveryMap({
       
       poiMarkersRef.current.push(marker)
     })
+    
+    console.log('[v0] Created', poiMarkersRef.current.length, 'POI markers')
     
     return () => {
       poiMarkersRef.current.forEach(m => m.remove())
