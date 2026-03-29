@@ -55,6 +55,38 @@ export async function POST(request: Request) {
   }
 }
 
+// PATCH - Update POI name/category
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createClient()
+    const body = await request.json()
+    
+    const { id, name, category } = body
+    
+    if (!id) {
+      return NextResponse.json({ error: 'POI ID is required' }, { status: 400 })
+    }
+    
+    const updates: { name?: string; category?: string; updated_at: string } = { updated_at: new Date().toISOString() }
+    if (name) updates.name = name.trim()
+    if (category) updates.category = category
+    
+    const { data: poi, error } = await supabase
+      .from('rider_pois')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) throw error
+    
+    return NextResponse.json({ poi, success: true })
+  } catch (error) {
+    console.error('Error updating POI:', error)
+    return NextResponse.json({ error: 'Failed to update POI' }, { status: 500 })
+  }
+}
+
 // DELETE - Remove POI (admin only)
 export async function DELETE(request: Request) {
   try {

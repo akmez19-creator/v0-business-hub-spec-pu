@@ -7,7 +7,7 @@ import {
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
   Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
-  Camera, Loader2, ImageIcon, Pencil,
+  Camera, Loader2, ImageIcon, Pencil, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof } from '@/lib/delivery-actions'
@@ -282,6 +282,9 @@ export function DeliveryMap({
   const [newPoiCategory, setNewPoiCategory] = useState('landmark')
   const [savingPoi, setSavingPoi] = useState(false)
   const poiMarkersRef = useRef<{ remove: () => void; getElement: () => HTMLElement }[]>([])
+  const [selectedPoi, setSelectedPoi] = useState<{ id: string; name: string; category: string; latitude: number; longitude: number } | null>(null)
+  const [editingPoiName, setEditingPoiName] = useState('')
+  const [poiMenuPos, setPoiMenuPos] = useState<{ x: number; y: number } | null>(null)
   
   // Fetch rider POIs on mount
   useEffect(() => {
@@ -1020,6 +1023,15 @@ map.on('load', () => {
         container.style.filter = 'none';
         container.style.zIndex = '5'
         label.style.background = color
+      })
+      
+      // Click to show menu with Edit/Delete/Remark options
+      container.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const rect = container.getBoundingClientRect()
+        setSelectedPoi({ id: poi.id, name: poi.name, category: poi.category, latitude: poi.latitude, longitude: poi.longitude })
+        setEditingPoiName(poi.name)
+        setPoiMenuPos({ x: rect.left + rect.width / 2, y: rect.top })
       })
       
       const marker = new mapboxgl.Marker({ element: container, anchor: 'bottom' })
@@ -3710,6 +3722,82 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             </button>
           </div>
         </>
+      )}
+
+      {/* POI Options Menu - Edit/Delete/Remark */}
+      {selectedPoi && poiMenuPos && (
+        <div className="fixed inset-0 z-[80]" onClick={() => { setSelectedPoi(null); setPoiMenuPos(null) }}>
+          <div 
+            onClick={e => e.stopPropagation()}
+            className="absolute bg-[#1a1a2e]/95 backdrop-blur-md rounded-xl border border-amber-500/40 shadow-2xl overflow-hidden"
+            style={{ left: poiMenuPos.x, top: poiMenuPos.y, transform: 'translate(-50%, -100%) translateY(-10px)', minWidth: '200px' }}
+          >
+            {/* Header with name */}
+            <div className="px-3 py-2 bg-amber-500/20 border-b border-amber-500/20">
+              <div className="text-xs text-white/60">Location</div>
+              <div className="text-sm font-bold text-white truncate">{selectedPoi.name}</div>
+            </div>
+            
+            {/* Edit name input */}
+            <div className="p-2 border-b border-white/10">
+              <input 
+                type="text" 
+                value={editingPoiName} 
+                onChange={e => setEditingPoiName(e.target.value)}
+                placeholder="Edit name..."
+                className="w-full px-2 py-1.5 rounded bg-white/10 border border-white/10 text-white text-sm focus:outline-none focus:border-amber-400/50"
+              />
+            </div>
+            
+            {/* Action buttons */}
+            <div className="p-2 space-y-1">
+              {/* Save/Rename button */}
+              <button 
+                onClick={async () => {
+                  if (!editingPoiName.trim() || editingPoiName === selectedPoi.name) {
+                    setSelectedPoi(null); setPoiMenuPos(null)
+                    return
+                  }
+                  try {
+                    await fetch('/api/rider-pois', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ id: selectedPoi.id, name: editingPoiName.trim() })
+                    })
+                    setRiderPois(prev => prev.map(p => p.id === selectedPoi.id ? { ...p, name: editingPoiName.trim() } : p))
+                  } catch (e) { console.error('Failed to update POI:', e) }
+                  setSelectedPoi(null); setPoiMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/20 text-green-400 text-sm font-medium hover:bg-green-500/30 transition"
+              >
+                <Check className="w-4 h-4" /> Save Name
+              </button>
+              
+              {/* Delete button */}
+              <button 
+                onClick={async () => {
+                  if (!confirm('Delete this location?')) return
+                  try {
+                    await fetch(`/api/rider-pois?id=${selectedPoi.id}`, { method: 'DELETE' })
+                    setRiderPois(prev => prev.filter(p => p.id !== selectedPoi.id))
+                  } catch (e) { console.error('Failed to delete POI:', e) }
+                  setSelectedPoi(null); setPoiMenuPos(null)
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm font-medium hover:bg-red-500/30 transition"
+              >
+                <Trash2 className="w-4 h-4" /> Delete
+              </button>
+              
+              {/* Cancel */}
+              <button 
+                onClick={() => { setSelectedPoi(null); setPoiMenuPos(null) }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-white/10 text-white/60 text-sm font-medium hover:bg-white/20 transition"
+              >
+                <X className="w-4 h-4" /> Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add POI Modal - positioned at bottom so map/pin is visible */}
