@@ -272,6 +272,21 @@ export function DeliveryMap({
       })
       .catch(() => {})
   }, [])
+  
+  // POI data from OpenStreetMap
+  const [showPOIs, setShowPOIs] = useState(true)
+  const [pois, setPois] = useState<{ id: string; name: string; type: string; category: string; lat: number; lng: number; icon: string }[]>([])
+  const poiMarkersRef = useRef<mapboxgl.Marker[]>([])
+  
+  // Fetch Mauritius POIs on mount
+  useEffect(() => {
+    fetch('/api/mauritius-pois')
+      .then(res => res.json())
+      .then(data => {
+        if (data.pois) setPois(data.pois)
+      })
+      .catch(() => {})
+  }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -905,6 +920,88 @@ map.on('load', () => {
       initialFitDoneRef.current = true // Only fit once
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap, regionOverrides])
+
+  // ── POI Markers from OpenStreetMap ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapLoaded || !showPOIs || pois.length === 0) return
+    
+    // Clear existing POI markers
+    poiMarkersRef.current.forEach(m => m.remove())
+    poiMarkersRef.current = []
+    
+    const mbgl = mbglRef.current
+    if (!mbgl) return
+    
+    // Icon colors by type
+    const typeColors: Record<string, string> = {
+      education: '#4ade80', // green
+      worship: '#f59e0b', // amber  
+      food: '#ef4444', // red
+      shop: '#3b82f6', // blue
+      health: '#ec4899', // pink
+      finance: '#8b5cf6', // purple
+      fuel: '#f97316', // orange
+      emergency: '#dc2626', // red
+      other: '#6b7280' // gray
+    }
+    
+    // Icon symbols by category
+    const categorySymbols: Record<string, string> = {
+      school: '🏫', mosque: '🕌', temple: '🛕', church: '⛪',
+      restaurant: '🍽️', cafe: '☕', fast_food: '🍔',
+      supermarket: '🛒', convenience: '🏪', shop: '🛍️',
+      hospital: '🏥', clinic: '🏥', pharmacy: '💊',
+      bank: '🏦', petrol: '⛽', police: '👮'
+    }
+    
+    pois.forEach(poi => {
+      const color = typeColors[poi.type] || typeColors.other
+      const symbol = categorySymbols[poi.category] || '📍'
+      
+      const el = document.createElement('div')
+      el.className = 'poi-marker'
+      el.style.cssText = `
+        display: flex; align-items: center; justify-content: center;
+        width: 22px; height: 22px; border-radius: 50%;
+        background: ${color}33; border: 1.5px solid ${color}99;
+        font-size: 11px; cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        transition: transform 0.15s;
+      `
+      el.innerHTML = symbol
+      el.title = `${poi.name} (${poi.category})`
+      
+      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.3)'; el.style.zIndex = '100' })
+      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '' })
+      
+      // Show name on click
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const popup = document.createElement('div')
+        popup.style.cssText = `
+          position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%);
+          background: rgba(0,0,0,0.9); color: white; padding: 8px 16px;
+          border-radius: 8px; font-size: 12px; font-weight: 500; z-index: 9999;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        `
+        popup.textContent = `${symbol} ${poi.name}`
+        document.body.appendChild(popup)
+        setTimeout(() => popup.remove(), 2500)
+      })
+      
+      const marker = new mbgl.Marker({ element: el })
+        .setLngLat([poi.lng, poi.lat])
+        .addTo(map)
+      
+      poiMarkersRef.current.push(marker)
+    })
+    
+    return () => {
+      poiMarkersRef.current.forEach(m => m.remove())
+      poiMarkersRef.current = []
+    }
+  }, [pois, mapLoaded, showPOIs])
 
   // ── GPS Tracking - RAW GPS, no road snapping ──
   const startTracking = useCallback(() => {
@@ -2700,6 +2797,13 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             <button onClick={toggleNightMode}
               className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', nightMode ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
               {nightMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button onClick={() => {
+              const next = !showPOIs; setShowPOIs(next)
+              poiMarkersRef.current.forEach(m => { m.getElement().style.display = next ? '' : 'none' })
+            }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition text-[10px] font-bold', showPOIs ? 'text-green-400' : 'text-white/40 hover:text-green-400')}
+              title="Toggle POIs (shops, schools, mosques...)">
+              POI
             </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
