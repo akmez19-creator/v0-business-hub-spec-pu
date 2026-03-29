@@ -878,7 +878,7 @@ map.on('load', () => {
           <div style="padding:4px 7px 2px;display:flex;align-items:center;justify-content:space-between;gap:4px;">
             <div style="font-size:8px;font-weight:900;color:rgba(255,255,255,0.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.5px;text-transform:uppercase;text-shadow:0 1px 3px rgba(0,0,0,0.8);flex:1;">${r.locality}</div>
             <button class="edit-pole-btn" data-locality="${r.locality}" data-lat="${r.lat}" data-lng="${r.lng}" style="width:16px;height:16px;border-radius:4px;background:rgba(34,211,238,0.3);border:1px solid rgba(34,211,238,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
             </button>
           </div>
           <div style="display:flex;height:14px;margin:2px 4px 4px;border-radius:3px;overflow:hidden;gap:1px;">${barHtml}</div>
@@ -2861,7 +2861,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               <button onClick={() => { 
                 setPlacingRegion({ locality: selectedRegion.locality, lat: selectedRegion.lat, lng: selectedRegion.lng });
                 setSelectedRegion(null);
-              }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all" title="Edit pole location"><Pencil className="w-4 h-4" /></button>
+              }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all" title="Edit pole location"><Crosshair className="w-4 h-4" /></button>
               <button onClick={() => setSelectedRegion(null)} className="shrink-0 text-white/30 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/5 overflow-x-auto no-scrollbar">
