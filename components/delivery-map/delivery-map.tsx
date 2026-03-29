@@ -927,8 +927,8 @@ export function DeliveryMap({
     poiMarkersRef.current.forEach(m => m.remove())
     poiMarkersRef.current = []
     
-    const mbgl = mbglRef.current
-    if (!mbgl) { console.log('[v0] No mbgl ref'); return }
+    const mapboxgl = (window as any).mapboxgl
+    if (!mapboxgl) { console.log('[v0] No mapboxgl'); return }
     
     // Icon colors by type
     const typeColors: Record<string, string> = {
@@ -987,7 +987,7 @@ export function DeliveryMap({
         setTimeout(() => popup.remove(), 2500)
       })
       
-      const marker = new mbgl.Marker({ element: el })
+      const marker = new mapboxgl.Marker({ element: el })
         .setLngLat([poi.lng, poi.lat])
         .addTo(map)
       
