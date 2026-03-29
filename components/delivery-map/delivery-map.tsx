@@ -893,7 +893,7 @@ map.on('load', () => {
         // Use RAW GPS position - no road snapping for accurate location
         const rawPos = { lat: p.coords.latitude, lng: p.coords.longitude }
         setDriverLocation(rawPos); updateDriverMarker(rawPos, p.coords.heading ?? 0)
-        mapRef.current?.flyTo({ center: [rawPos.lng, rawPos.lat], zoom: 17, pitch: 60, bearing: p.coords.heading ?? 0, duration: 1800, essential: true })
+        mapRef.current?.flyTo({ center: [rawPos.lng, rawPos.lat], zoom: 17, pitch: mapRef.current?.getPitch() || 0, bearing: p.coords.heading ?? 0, duration: 1800, essential: true })
       },
       () => { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 } // maximumAge: 0 for fresh position
@@ -1062,7 +1062,7 @@ map.on('load', () => {
     const placeDriver = (lat: number, lng: number, heading = 0, flyTo = false) => {
       // Use RAW GPS position - no road snapping for accurate location
       setDriverLocation({ lat, lng }); updateDriverMarker({ lat, lng }, heading)
-      if (flyTo && mapRef.current) mapRef.current.flyTo({ center: [lng, lat], zoom: 16.5, pitch: 60, bearing: heading, duration: 1500 })
+      if (flyTo && mapRef.current) mapRef.current.flyTo({ center: [lng, lat], zoom: 16.5, pitch: 0, bearing: 0, duration: 1500 })
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -1084,7 +1084,7 @@ map.on('load', () => {
     const el = document.createElement('div')
     el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;'
     el.innerHTML = `<div style="position:relative;"><div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#ff6b00,#ff8c00);display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px rgba(255,107,0,0.5),0 4px 12px rgba(0,0,0,0.4);border:2px solid rgba(255,255,255,0.3);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg></div><div style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:#22c55e;border:2px solid #0a1628;"></div></div><div style="margin-top:4px;padding:2px 8px;border-radius:8px;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);border:1px solid rgba(255,107,0,0.3);"><span style="font-size:9px;font-weight:800;color:#ff8c00;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">${warehouseName}</span></div>`
-    el.addEventListener('click', () => { mapRef.current?.flyTo({ center: [warehouseLng!, warehouseLat!], zoom: 17, pitch: 60, duration: 1500 }) })
+    el.addEventListener('click', () => { mapRef.current?.flyTo({ center: [warehouseLng!, warehouseLat!], zoom: 17, pitch: mapRef.current?.getPitch() || 0, duration: 1500 }) })
     warehouseMarkerRef.current = new (mbgl()).Marker({ element: el, anchor: 'bottom' }).setLngLat([warehouseLng, warehouseLat]).addTo(mapRef.current)
     return () => { warehouseMarkerRef.current?.remove() }
   }, [mapLoaded, warehouseLat, warehouseLng, warehouseName])
@@ -1725,7 +1725,7 @@ router.refresh()
         const bounds = new (mbgl()).LngLatBounds()
         ordered.forEach(s => bounds.extend([s.pin.lng, s.pin.lat]))
         if (driverLocation) bounds.extend([driverLocation.lng, driverLocation.lat])
-        map.fitBounds(bounds, { padding: { top: 80, bottom: 300, left: 50, right: 50 }, pitch: 20, bearing: 0, duration: 1500 })
+        map.fitBounds(bounds, { padding: { top: 80, bottom: 300, left: 50, right: 50 }, pitch: 0, bearing: 0, duration: 1500 })
         
         // Keep overview visible - user can tap a stop or "Start" to begin navigation
       }
@@ -1897,7 +1897,7 @@ router.refresh()
       ;['route','route-congestion'].forEach(s => { try { if (m.getSource(s)) m.removeSource(s) } catch {} })
       if ((m as any)._startMarker) { (m as any)._startMarker.remove(); (m as any)._startMarker = null }
       if ((m as any)._destMarker) { (m as any)._destMarker.remove(); (m as any)._destMarker = null }
-      m.flyTo({ pitch: 60, bearing: -20, zoom: 15, duration: 800, essential: true })
+      m.flyTo({ pitch: 0, bearing: 0, zoom: 15, duration: 800, essential: true })
     }
   }, [])
   stopNavRef.current = stopNavigation
@@ -2106,7 +2106,7 @@ router.refresh()
                 optimizedStops.forEach(s => bounds.extend([s.pin.lng, s.pin.lat]))
               }
               if (driverLocation) bounds.extend([driverLocation.lng, driverLocation.lat])
-              mapRef.current.fitBounds(bounds, { padding: { top: 60, bottom: 140, left: 40, right: 40 }, pitch: 20, bearing: 0, duration: 2000 })
+              mapRef.current.fitBounds(bounds, { padding: { top: 60, bottom: 140, left: 40, right: 40 }, pitch: 0, bearing: 0, duration: 2000 })
             }
           }}
             className={cn('w-10 h-10 rounded-xl backdrop-blur-xl border flex items-center justify-center active:scale-95 transition-all shadow-lg',
@@ -2199,7 +2199,7 @@ router.refresh()
                         // Fly to the selected stop location first
                         const map = mapRef.current
                         if (map && selectedStop.latitude && selectedStop.longitude) {
-                          map.flyTo({ center: [selectedStop.longitude, selectedStop.latitude], zoom: 16, pitch: 60, duration: 1000 })
+                          map.flyTo({ center: [selectedStop.longitude, selectedStop.latitude], zoom: 16, pitch: map.getPitch(), duration: 1000 })
                         }
                         // Then start navigation to that stop
                         setTimeout(() => startNavigationRef.current(selectedStop), 150)
