@@ -258,6 +258,8 @@ export function DeliveryMap({
   const [locating, setLocating] = useState(false)
   const [placingPin, setPlacingPin] = useState<DeliveryPin | null>(null)
   const [placingRegion, setPlacingRegion] = useState<{ locality: string; lat: number; lng: number } | null>(null)
+  const setPlacingRegionRef = useRef(setPlacingRegion)
+  setPlacingRegionRef.current = setPlacingRegion
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -876,7 +878,7 @@ map.on('load', () => {
           const locality = editBtn.dataset.locality || ''
           const lat = parseFloat(editBtn.dataset.lat || '0')
           const lng = parseFloat(editBtn.dataset.lng || '0')
-          setPlacingRegion({ locality, lat, lng })
+          setPlacingRegionRef.current({ locality, lat, lng })
           mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 800 })
         })
       }
@@ -924,7 +926,7 @@ map.on('load', () => {
 
   // ══════════════════════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ══════════════════════════════════════════════════════════════════════════
+  // ═════════════��════════════════════════════════════════════════════════════
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
