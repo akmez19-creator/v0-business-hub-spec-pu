@@ -456,7 +456,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.20849, lng: 57.40893 },
-  'Bambous': { lat: -20.25667, lng: 57.40611 },
+  'Bambous': { lat: -20.26187, lng: 57.41465 },
   'Bambous Medine': { lat: -20.26000, lng: 57.39500 },
   'Bassin': { lat: -20.28500, lng: 57.47300 },
   'Beau Songes': { lat: -20.26000, lng: 57.40000 },
