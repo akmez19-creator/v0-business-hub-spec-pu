@@ -1464,16 +1464,20 @@ router.refresh()
   }
   
   const searchStreet = useCallback(async (query: string) => {
+    console.log('[v0] searchStreet called with:', query, 'mapboxToken:', !!mapboxToken, 'placingPin:', !!placingPin)
     if (!query.trim() || !mapboxToken || !placingPin) {
+      console.log('[v0] searchStreet early return - missing data')
       setStreetResults([])
       setNoStreetResults(false)
       return
     }
     if (query.length < 2) {
+      console.log('[v0] searchStreet early return - query too short')
       setStreetResults([])
       setNoStreetResults(false)
       return
     }
+    console.log('[v0] searchStreet proceeding with search')
     setStreetSearching(true)
     setNoStreetResults(false)
     
@@ -1491,8 +1495,10 @@ router.refresh()
       // 1. Use Mapbox Tilequery API to search ALL POIs in the region (not just visible ones)
       // This finds all POIs within 5km radius of the region center
       const tilequeryUrl = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${regionLng},${regionLat}.json?radius=5000&limit=50&layers=poi_label&access_token=${mapboxToken}`
+      console.log('[v0] Tilequery URL:', tilequeryUrl)
       const tqRes = await fetch(tilequeryUrl)
       const tqData = await tqRes.json()
+      console.log('[v0] Tilequery response:', tqData.features?.length || 0, 'features', tqData.message || '')
       
       if (tqData.features) {
         tqData.features.forEach((f: any) => {
@@ -1571,6 +1577,7 @@ router.refresh()
       
       // Sort by distance (closest first)
       allResults.sort((a, b) => a.distance - b.distance)
+      console.log('[v0] Total results found:', allResults.length, allResults.map(r => r.text))
       
       if (allResults.length > 0) {
         setStreetResults(allResults.slice(0, 10).map(r => ({ text: r.text, place_name: r.place_name, center: r.center })))
