@@ -1,6 +1,6 @@
 'use client'
-// DeliveryMap v2.1 — No weather effects, no neon animations. Clean Mapbox-native route display.
-// Dusk lighting, styled DOM driver marker, GeoJSON pins.
+// DeliveryMap v2.2 — Using dark-v11 style with built-in POIs
+// Clean Mapbox-native route display with better location details
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
@@ -498,7 +498,7 @@ export function DeliveryMap({
 
       // ══════════════════════════════════════════════════════════════════════════
       // ULTIMATE MAPBOX PERFORMANCE CONFIG - Based on official Mapbox docs + research
-      // ══════════════════════════════════════════════════════════════════════════
+      // ══��═══════════════════════════════════════════════════════════════════════
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
