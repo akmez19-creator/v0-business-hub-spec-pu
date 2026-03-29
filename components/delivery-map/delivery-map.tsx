@@ -789,9 +789,6 @@ map.on('load', () => {
     const map = mapRef.current
 
     // Update pins
-    if (riderColorMap) {
-  
-    }
     const pinFeatures = filtered.map(pin => {
       // Use rider color when riderColorMap is provided, otherwise use status color
       const pinColor = (riderColorMap && pin.riderId && riderColorMap[pin.riderId])
