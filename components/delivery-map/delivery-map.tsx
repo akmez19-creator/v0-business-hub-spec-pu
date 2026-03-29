@@ -2457,10 +2457,23 @@ export function DeliveryMap({
       {!navigating && (
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
           <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5">
-            <button onClick={() => {
-              const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next)
-              if (mapRef.current) mapRef.current.easeTo({ pitch: next === '3d' ? 60 : 0, bearing: next === '3d' ? mapRef.current.getBearing() : 0, duration: 1200, easing: (t: number) => 1 - Math.pow(1 - t, 3) })
-            }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', viewMode === '3d' ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
+<button onClick={() => {
+  const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next)
+  if (mapRef.current) {
+    const map = mapRef.current
+    map.easeTo({ pitch: next === '3d' ? 60 : 0, bearing: next === '3d' ? map.getBearing() : 0, duration: 1200, easing: (t: number) => 1 - Math.pow(1 - t, 3) })
+    // Lock/unlock pitch and rotation based on view mode
+    if (next === '3d') {
+      map.touchPitch.enable()
+      map.dragRotate.enable()
+      map.touchZoomRotate.enableRotation()
+    } else {
+      map.touchPitch.disable()
+      map.dragRotate.disable()
+      map.touchZoomRotate.disableRotation()
+    }
+  }
+}} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', viewMode === '3d' ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
               <span className="text-[10px] font-black leading-none font-mono" style={viewMode === '3d' ? { textShadow: '0 0 10px rgba(0,200,255,0.5)' } : {}}>{viewMode === '3d' ? '3D' : '2D'}</span>
             </button>
             <button onClick={() => { mapRef.current?.easeTo({ bearing: 0, pitch: viewMode === '3d' ? 60 : 0, duration: 1200, easing: (t: number) => 1 - Math.pow(1 - t, 3) }) }}
