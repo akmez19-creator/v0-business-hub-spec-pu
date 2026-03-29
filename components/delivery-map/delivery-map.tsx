@@ -568,11 +568,11 @@ export function DeliveryMap({
           })
         }
         
-        // Return to original view
+        // Return to original view - STAY IN 2D MODE
         map.setCenter(center)
         map.setZoom(15)
-        map.setPitch(60)
-        map.setBearing(-20)
+        map.setPitch(0)
+        map.setBearing(0)
         
         // Wait for final render
         await new Promise<void>(resolve => {
