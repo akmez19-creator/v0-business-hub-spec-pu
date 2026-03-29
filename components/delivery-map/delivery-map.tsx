@@ -2,6 +2,7 @@
 // DeliveryMap v2.1 — No weather effects, no neon animations. Clean Mapbox-native route display.
 // Dusk lighting, styled DOM driver marker, GeoJSON pins.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
@@ -2231,10 +2232,14 @@ router.refresh()
       {/* Map container - GPU accelerated for smooth zoom */}
       <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
       
-      {/* Center pin marker when adding POI - truly fixed in screen center */}
-      {addingPoi && (
-        <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', marginTop: '-80px', pointerEvents: 'none', zIndex: 70 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      {/* Center pin marker when adding POI - rendered via portal to document.body */}
+      {addingPoi && typeof document !== 'undefined' && createPortal(
+        <div style={{ 
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none', zIndex: 9999
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '160px' }}>
             {/* Name label above pin */}
             <div style={{ 
               marginBottom: '8px', padding: '6px 12px', borderRadius: '8px', 
@@ -2261,7 +2266,8 @@ router.refresh()
             {/* Ground dot */}
             <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.4)', border: '2px solid #f59e0b' }} />
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Mini-map radar */}
