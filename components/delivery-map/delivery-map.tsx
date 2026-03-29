@@ -1426,8 +1426,10 @@ export function DeliveryMap({
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
-  if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: 60, duration: 1400, essential: true })
-  }, [regions])
+  // Respect current viewMode - use pitch 60 only if in 3D mode
+  const currentPitch = viewMode === '3d' ? 60 : 0
+  if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
+  }, [regions, viewMode])
 
 const confirmPinPlacement = useCallback(async () => {
   if (!mapRef.current || !placingPin) return; setSavingPin(true)
@@ -1490,10 +1492,12 @@ router.refresh()
   // Select a street result and fly to it
   const selectStreetResult = useCallback((result: { center: [number, number]; place_name: string }) => {
     if (!mapRef.current) return
-    mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: 60, duration: 1200, essential: true })
+    // Respect current viewMode - use pitch 60 only if in 3D mode
+    const currentPitch = viewMode === '3d' ? 60 : 0
+    mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: currentPitch, duration: 1200, essential: true })
     setStreetResults([])
     setStreetSearch('')
-  }, [])
+  }, [viewMode])
   
   // ── Paste location link handler ──
   const extractCoordsFromLink = useCallback((url: string): { lat: number; lng: number } | null => {
@@ -3066,7 +3070,7 @@ router.refresh()
                               const isExpandedCard = expandedRegions.has(`card-${d.id}`)
                               return (
                               <div key={d.id} className="client-card client-card-need overflow-hidden">
-                                {/* ── Main Row: Avatar + Full name/product + chevron ── */}
+                                {/* ── Main Row: Avatar + Full name/product + chevron ��─ */}
                                 <button onClick={() => setExpandedRegions(prev => { const next = new Set(prev); const key = `card-${d.id}`; next.has(key) ? next.delete(key) : next.add(key); return next })}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 text-left">
                                   <div className="relative shrink-0">
