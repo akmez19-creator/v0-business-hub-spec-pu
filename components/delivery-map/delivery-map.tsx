@@ -970,69 +970,56 @@ map.on('load', () => {
     const mapboxgl = (window as any).mapboxgl
     if (!mapboxgl) return
     
-    // Category colors
+    // Category colors - amber for landmark (default), others by type
     const catColors: Record<string, string> = {
       school: '#22c55e', mosque: '#f59e0b', temple: '#a855f7', church: '#3b82f6',
       supermarket: '#06b6d4', shop: '#06b6d4', petrol: '#f97316', hospital: '#ec4899',
-      bank: '#8b5cf6', police: '#ef4444', landmark: '#6b7280'
-    }
-    
-    // Category letters
-    const catLetters: Record<string, string> = {
-      school: 'S', mosque: 'M', temple: 'T', church: 'C',
-      supermarket: 'G', shop: 'G', petrol: 'P', hospital: 'H',
-      bank: 'B', police: 'X', landmark: 'L'
+      bank: '#8b5cf6', police: '#ef4444', landmark: '#f59e0b'
     }
     
     riderPois.forEach(poi => {
-      const color = catColors[poi.category] || catColors.landmark
-      const letter = catLetters[poi.category] || 'L'
+      const color = catColors[poi.category] || '#f59e0b'
       
-      // Simple Mapbox-style pin marker
-      const el = document.createElement('div')
-      el.className = 'rider-poi-marker'
-      el.style.cssText = `
-        width: 24px; height: 24px; cursor: pointer; z-index: 5;
-        display: flex; align-items: center; justify-content: center;
-        background: ${color}; border: 2px solid white; border-radius: 50% 50% 50% 0;
-        transform: rotate(-45deg); box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-        transition: transform 0.15s, box-shadow 0.15s;
+      // Create container with label + pin
+      const container = document.createElement('div')
+      container.className = 'rider-poi-container'
+      container.style.cssText = `
+        display: flex; flex-direction: column; align-items: center;
+        cursor: pointer; z-index: 5;
       `
       
-      const inner = document.createElement('span')
-      inner.style.cssText = `transform: rotate(45deg); font-size: 10px; font-weight: 700; color: white;`
-      inner.textContent = letter
-      el.appendChild(inner)
+      // Name label above pin
+      const label = document.createElement('div')
+      label.style.cssText = `
+        padding: 3px 8px; border-radius: 4px; margin-bottom: 4px;
+        background: ${color}; color: white; font-size: 10px; font-weight: 700;
+        white-space: nowrap; max-width: 100px; overflow: hidden; text-overflow: ellipsis;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.3);
+      `
+      label.textContent = poi.name
+      container.appendChild(label)
       
-      el.title = `${poi.name} - ${poi.category}`
+      // Pin marker
+      const pin = document.createElement('div')
+      pin.innerHTML = `
+        <svg width="24" height="32" viewBox="0 0 24 32">
+          <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z" fill="${color}" stroke="white" stroke-width="2"/>
+          <circle cx="12" cy="12" r="4" fill="white"/>
+        </svg>
+      `
+      pin.style.cssText = 'filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));'
+      container.appendChild(pin)
       
-      el.addEventListener('mouseenter', () => { 
-        el.style.transform = 'rotate(-45deg) scale(1.2)'; 
-        el.style.zIndex = '50'
-        el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)'
+      container.addEventListener('mouseenter', () => { 
+        container.style.transform = 'scale(1.1)'; 
+        container.style.zIndex = '50'
       })
-      el.addEventListener('mouseleave', () => { 
-        el.style.transform = 'rotate(-45deg) scale(1)'; 
-        el.style.zIndex = '5'
-        el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.4)'
-      })
-      
-      // Show name on click
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const toast = document.createElement('div')
-        toast.style.cssText = `
-          position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%);
-          background: rgba(0,0,0,0.9); color: white; padding: 10px 16px;
-          border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-        `
-        toast.textContent = poi.name
-        document.body.appendChild(toast)
-        setTimeout(() => toast.remove(), 2500)
+      container.addEventListener('mouseleave', () => { 
+        container.style.transform = 'scale(1)'; 
+        container.style.zIndex = '5'
       })
       
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+      const marker = new mapboxgl.Marker({ element: container, anchor: 'bottom' })
         .setLngLat([poi.longitude, poi.latitude])
         .addTo(map)
       
