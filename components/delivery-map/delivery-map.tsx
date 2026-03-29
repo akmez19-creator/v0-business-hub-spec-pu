@@ -623,10 +623,10 @@ export function DeliveryMap({
       
       map.once('idle', preloadTiles)
 
-      // ── Static dusk lighting with enhanced road labels for rider navigation ──
-// dark-v11 has POIs enabled by default
-          
-          // Enhance POI labels visibility - make them brighter and more visible
+      // ── Map loaded ──
+      map.on('load', () => {
+        // Enhance POI labels visibility
+        try {
           const poiLayers = ['poi-label']
           poiLayers.forEach(layerId => {
             if (map.getLayer(layerId)) {
@@ -641,22 +641,19 @@ export function DeliveryMap({
             }
           })
         } catch {}
-      })
-
-      // ── Map loaded ──
-map.on('load', () => {
-  if (cancelled) return
-  
-  // FORCE 2D mode on load - set pitch to 0
-  map.setPitch(0)
-  map.setBearing(0)
-  
-  // Disable pitch/rotation controls for 2D mode
-  map.touchPitch.disable()
-  map.dragRotate.disable()
-  map.touchZoomRotate.disableRotation()
-  
-  // GeoJSON delivery pins source
+        
+        if (cancelled) return
+        
+        // FORCE 2D mode on load - set pitch to 0
+        map.setPitch(0)
+        map.setBearing(0)
+        
+        // Disable pitch/rotation controls for 2D mode
+        map.touchPitch.disable()
+        map.dragRotate.disable()
+        map.touchZoomRotate.disableRotation()
+        
+        // GeoJSON delivery pins source
         if (map.getSource('delivery-pins')) {
           try { ['pins-glow','pins-circle','pins-pulse','pins-waypoint','pins-label'].forEach(l => { if (map.getLayer(l)) map.removeLayer(l) }); map.removeSource('delivery-pins') } catch {}
         }
