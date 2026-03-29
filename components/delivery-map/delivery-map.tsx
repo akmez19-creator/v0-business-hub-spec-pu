@@ -500,8 +500,8 @@ export function DeliveryMap({
         renderWorldCopies: false, // Only render one world
         
         // ── Interaction ──
-        projection: 'globe',
-        touchZoomRotate: true, touchPitch: true, dragRotate: true,
+        projection: 'mercator',
+        touchZoomRotate: true, touchPitch: false, dragRotate: false,
         cooperativeGestures: false,
         boxZoom: false, doubleClickZoom: false,
         
@@ -520,7 +520,7 @@ export function DeliveryMap({
         config: { 
           basemap: { 
             lightPreset: 'dusk', 
-            show3dObjects: true, 
+            show3dObjects: false, 
             showPlaceLabels: true, 
             showRoadLabels: true, 
             showPointOfInterestLabels: true, // Show POIs for better navigation
@@ -533,8 +533,8 @@ export function DeliveryMap({
       // ══════════════════════════════════════════════════════════════════════════
       // SMOOTH INTERACTION SETTINGS
       // ══════════════════════════════════════════════════════════════════════════
-      map.touchZoomRotate.enableRotation()
-      map.touchPitch.enable()
+      map.touchZoomRotate.disableRotation()
+      map.touchPitch.disable()
       
       // Buttery smooth scroll zoom (lower = smoother but slower)
       map.scrollZoom.setWheelZoomRate(1/350)
@@ -2650,10 +2650,12 @@ router.refresh()
       map.touchPitch.enable()
       map.dragRotate.enable()
       map.touchZoomRotate.enableRotation()
+      map.setConfigProperty('basemap', 'show3dObjects', true)
     } else {
       map.touchPitch.disable()
       map.dragRotate.disable()
       map.touchZoomRotate.disableRotation()
+      map.setConfigProperty('basemap', 'show3dObjects', false)
     }
   }
 }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', viewMode === '3d' ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
