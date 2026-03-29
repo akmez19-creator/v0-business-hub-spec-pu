@@ -210,7 +210,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ═════════������════════════════════════════════════════════════
+// ================================================================
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -515,7 +515,7 @@ export function DeliveryMap({
 
       // ══════════════════════════════════════════════════════════════════════════
       // ULTIMATE MAPBOX PERFORMANCE CONFIG - Based on official Mapbox docs + research
-      // ══��═══════════════════════════════════════════════════════════════════════
+      // ============================================================================
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
@@ -568,7 +568,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ════════════════════════════════════════════════════════════���═════════════
+      // ============================================================================
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -1022,9 +1022,9 @@ map.on('load', () => {
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, locating])
 
-  // ════════════════���═════════════════════════════════════════════════════════
+  // ============================================================================
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ═══���═════════��════════════════════════════════════════════════════════════
+  // ============================================================================
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
@@ -1098,7 +1098,7 @@ map.on('load', () => {
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ════════════════════════��════════════════════════════════��════════════════
+  // ============================================================================
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
@@ -1439,7 +1439,7 @@ map.on('load', () => {
     setExporting(null)
   }, [safeRegionGroups, customTemplates, markRegionExported])
 
-  // ── Status change + Payment ─���
+  // -- Status change + Payment --
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
     // Exchange / Trade-in / Refund: show protocol popup via paymentPopup with protocol flag
     if (isReturnOrder(pin)) {
@@ -2065,9 +2065,9 @@ router.refresh()
     }
   }, [navigating, navTarget, distToTarget])
 
-  // ══���════���══════════════════════════════════
-  // ██  RENDER
-  // ══��═══════════════════════════════════════
+// ==========================================
+// RENDER
+// ==========================================
   return (
     <div ref={mapContainerParentRef} className={cn('flex flex-col h-full bg-black relative overflow-hidden', className)}>
       <style dangerouslySetInnerHTML={{ __html: `
@@ -3327,7 +3327,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               const isExpandedCard = expandedRegions.has(`card-${d.id}`)
                               return (
                               <div key={d.id} className="client-card client-card-need overflow-hidden">
-                                {/* ── Main Row: Avatar + Full name/product + chevron ��─ */}
+                                {/* -- Main Row: Avatar + Full name/product + chevron -- */}
                                 <button onClick={() => setExpandedRegions(prev => { const next = new Set(prev); const key = `card-${d.id}`; next.has(key) ? next.delete(key) : next.add(key); return next })}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 text-left">
                                   <div className="relative shrink-0">
