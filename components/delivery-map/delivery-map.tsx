@@ -630,7 +630,12 @@ export function DeliveryMap({
 map.on('load', () => {
   if (cancelled) return
   
-  // Start in 2D mode - disable pitch/rotation controls
+  // FORCE 2D mode on load - set pitch to 0 and disable 3D buildings
+  map.setPitch(0)
+  map.setBearing(0)
+  map.setConfigProperty('basemap', 'show3dObjects', false)
+  
+  // Disable pitch/rotation controls for 2D mode
   map.touchPitch.disable()
   map.dragRotate.disable()
   map.touchZoomRotate.disableRotation()
@@ -1888,7 +1893,7 @@ router.refresh()
   startNavigationRef.current = startNavigation
 
   const stopNavigation = useCallback(() => {
-  setNavigating(false); navigatingRef.current = false; setNavTarget(null); setRouteInfo(null); setNavReady(false); setCurrentStopIdx(0); setCurrentStepIndex(0); setViewMode('3d'); setNavStopsExpanded(false); setArrivalAlert(null); setRouteOverview(false); routeOverviewRef.current = false; arrivalAlertedRef.current = ''
+  setNavigating(false); navigatingRef.current = false; setNavTarget(null); setRouteInfo(null); setNavReady(false); setCurrentStopIdx(0); setCurrentStepIndex(0); setViewMode('overview'); setNavStopsExpanded(false); setArrivalAlert(null); setRouteOverview(false); routeOverviewRef.current = false; arrivalAlertedRef.current = ''
         stopMarkersRef.current.forEach(m => m.remove()); stopMarkersRef.current = []
     if (watchIdRef.current !== null) { navigator.geolocation.clearWatch(watchIdRef.current); watchIdRef.current = null }
     if (mapRef.current) {
@@ -2719,8 +2724,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 {selectedPin.source === 'geocoded' && <p className="text-[9px] text-orange-400 flex items-center gap-1 mt-0.5 font-mono"><MapPin className="w-2.5 h-2.5" />Approximate</p>}
                 {selectedPin.locationFlagged && <p className="text-[9px] text-red-400 font-bold flex items-center gap-1 mt-0.5 animate-pulse text-glow"><Ban className="w-2.5 h-2.5" />Location flagged</p>}
               </div>
-              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition" title="Edit pin location"><Pencil className="w-4 h-4" /></button>
-              <button onClick={() => setSelectedPin(null)} className="text-white/20 hover:text-cyan-400 transition"><X className="w-4 h-4" /></button>
+              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all active:scale-95" title="Edit pin location"><Pencil className="w-5 h-5" /></button>
+              <button onClick={() => setSelectedPin(null)} className="p-1.5 text-white/40 hover:text-red-400 transition"><X className="w-5 h-5" /></button>
             </div>
             <div className="glow-line" />
             <div className="px-4 py-2.5">
