@@ -124,7 +124,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
 
   // ══════════════════════════════════════════════════════════════════════════
   // MOKA DISTRICT (47 regions)
-  // ═══════════════════════════════════════════════════════════════���══════════
+  // ══════════════════════��════════════════════════════════════════���══════════
   'Alma': { lat: -20.240900, lng: 57.574580 },
   'Bagatelle': { lat: -20.22400, lng: 57.49770 },
   'Bagatelle Mall': { lat: -20.224451, lng: 57.497144 },
@@ -290,7 +290,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'La Brasserie': { lat: -20.335877, lng: 57.513178 },
   'La Caverne': { lat: -20.301370, lng: 57.480160 },
   'La Caverne No.1': { lat: -20.301740, lng: 57.477160 },
-  'La Caverne No.2': { lat: -20.305000, lng: 57.482500 },
+  'La Caverne No.2': { lat: -20.303500, lng: 57.473800 },
   'La Louise': { lat: -20.270833, lng: 57.474722 },
   'La Marie': { lat: -20.335000, lng: 57.485000 },
   'La Source': { lat: -20.28500, lng: 57.47900 },
@@ -311,8 +311,8 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Plaisance': { lat: -20.242800, lng: 57.455700 },
   'Pont Fer': { lat: -20.273870, lng: 57.497310 },
   'Quatre Bornes': { lat: -20.263810, lng: 57.479100 },
-  'Quinze Cantons No.1': { lat: -20.300800, lng: 57.472500 },
-  'Quinze Cantons No.2': { lat: -20.300800, lng: 57.472500 },
+  'Quinze Cantons No.1': { lat: -20.308333, lng: 57.476667 },
+  'Quinze Cantons No.2': { lat: -20.310000, lng: 57.478333 },
   'Residence Cybervillage': { lat: -20.240640, lng: 57.488160 },
   'Reunion': { lat: -20.298060, lng: 57.478330 },
   'Robinson': { lat: -20.328611, lng: 57.504167 },
@@ -338,7 +338,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Trianon': { lat: -20.247780, lng: 57.486670 },
   'Tribecca Mall': { lat: -20.247780, lng: 57.486670 },
   'Trou Aux Cerfs': { lat: -20.317790, lng: 57.510570 },
-  'Vacoas': { lat: -20.298060, lng: 57.478330 },
+  'Vacoas': { lat: -20.298333, lng: 57.483889 },
   'Valentina': { lat: -20.275700, lng: 57.505600 },
   'Vandermeersch': { lat: -20.241850, lng: 57.475930 },
   'Victoria Hospital': { lat: -20.278460, lng: 57.476560 },
