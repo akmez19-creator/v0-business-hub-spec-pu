@@ -2724,8 +2724,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 {selectedPin.source === 'geocoded' && <p className="text-[9px] text-orange-400 flex items-center gap-1 mt-0.5 font-mono"><MapPin className="w-2.5 h-2.5" />Approximate</p>}
                 {selectedPin.locationFlagged && <p className="text-[9px] text-red-400 font-bold flex items-center gap-1 mt-0.5 animate-pulse text-glow"><Ban className="w-2.5 h-2.5" />Location flagged</p>}
               </div>
-              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all active:scale-95" title="Edit pin location"><Pencil className="w-5 h-5" /></button>
-              <button onClick={() => setSelectedPin(null)} className="p-1.5 text-white/40 hover:text-red-400 transition"><X className="w-5 h-5" /></button>
+              <button onClick={() => { console.log('[v0] Edit pin clicked', selectedPin); setPlacingPin(selectedPin); setSelectedPin(null); }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all active:scale-95" title="Edit pin location"><Pencil className="w-5 h-5" /></button>
+              <button onClick={() => setSelectedPin(null)} className="shrink-0 p-1.5 text-white/40 hover:text-red-400 transition"><X className="w-5 h-5" /></button>
             </div>
             <div className="glow-line" />
             <div className="px-4 py-2.5">
