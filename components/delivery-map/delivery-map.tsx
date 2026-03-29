@@ -704,7 +704,7 @@ map.on('load', () => {
           const f = e.features?.[0]
           if (f) {
             const pin = deliveries.find(d => d.id === f.properties.id) || filtered.find(d => d.id === f.properties.id)
-            if (pin) { setSelectedPin(pin); setSelectedRegion(null); map.flyTo({ center: [pin.lng, pin.lat], zoom: 16, pitch: 60, duration: 1400, essential: true }) }
+            if (pin) { setSelectedPin(pin); setSelectedRegion(null); map.flyTo({ center: [pin.lng, pin.lat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) }
           }
         })
         map.on('mouseenter', 'pins-circle', () => { map.getCanvas().style.cursor = 'pointer' })
@@ -865,7 +865,7 @@ map.on('load', () => {
         setClientSearch(r.locality)
         setShowClientList(true)
         setExpandedRegions(prev => { const next = new Set(prev); next.add(r.locality); return next })
-        map.flyTo({ center: [r.lng, r.lat], zoom: 15.5, pitch: 60, bearing: map.getBearing(), duration: 1400, essential: true })
+        map.flyTo({ center: [r.lng, r.lat], zoom: 15.5, pitch: map.getPitch(), bearing: map.getBearing(), duration: 1400, essential: true })
       })
       const marker = new mb.Marker({ element: el, anchor: 'bottom' }).setLngLat([r.lng, r.lat]).addTo(map)
       ;(map as any)._regionPoleMarkers.push(marker)
@@ -2717,7 +2717,7 @@ router.refresh()
                 {selectedPin.source === 'geocoded' && <p className="text-[9px] text-orange-400 flex items-center gap-1 mt-0.5 font-mono"><MapPin className="w-2.5 h-2.5" />Approximate</p>}
                 {selectedPin.locationFlagged && <p className="text-[9px] text-red-400 font-bold flex items-center gap-1 mt-0.5 animate-pulse text-glow"><Ban className="w-2.5 h-2.5" />Location flagged</p>}
               </div>
-              <button onClick={() => { startPinPlacement(selectedPin); }} className="text-white/20 hover:text-cyan-400 transition" title="Edit pin location"><Pencil className="w-3.5 h-3.5" /></button>
+              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="text-white/20 hover:text-cyan-400 transition" title="Edit pin location"><Pencil className="w-3.5 h-3.5" /></button>
               <button onClick={() => setSelectedPin(null)} className="text-white/20 hover:text-cyan-400 transition"><X className="w-4 h-4" /></button>
             </div>
             <div className="glow-line" />
@@ -3128,7 +3128,7 @@ router.refresh()
                                   <div className="px-3 pb-3 pt-2 border-t border-white/[0.03] space-y-2">
                                     {/* Contact row */}
                                     <div className="flex items-center gap-2">
-                                      <button onClick={() => { setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); mapRef.current?.flyTo({ center: [d.lng, d.lat], zoom: 16, pitch: 60, duration: 1400, essential: true }) }}
+                                      <button onClick={() => { setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); mapRef.current?.flyTo({ center: [d.lng, d.lat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) }}
                                         className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
                                         <Navigation className="w-3.5 h-3.5" />Fly to
                                       </button>
