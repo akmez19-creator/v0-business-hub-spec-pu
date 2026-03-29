@@ -264,6 +264,13 @@ export function DeliveryMap({
   const [streetResults, setStreetResults] = useState<{ place_name: string; center: [number, number]; text: string }[]>([])
   const [streetSearching, setStreetSearching] = useState(false)
   const streetSearchTimeout = useRef<NodeJS.Timeout | null>(null)
+  
+  // General map search (all Mauritius)
+  const [showMapSearch, setShowMapSearch] = useState(false)
+  const [mapSearchQuery, setMapSearchQuery] = useState('')
+  const [mapSearchResults, setMapSearchResults] = useState<{ place_name: string; center: [number, number]; text: string }[]>([])
+  const [mapSearching, setMapSearching] = useState(false)
+  const mapSearchTimeout = useRef<NodeJS.Timeout | null>(null)
   const [clientSearch, setClientSearch] = useState('')
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
   const [optimizedStops, setOptimizedStops] = useState<OptimizedStop[]>([])
