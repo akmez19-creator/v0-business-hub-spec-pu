@@ -269,12 +269,14 @@ export function DeliveryMap({
     fetch('/api/region-overrides')
       .then(res => res.json())
       .then(data => {
+        console.log('[v0] Region overrides API response:', data)
         if (data.overrides) {
+          console.log('[v0] Setting overrides:', JSON.stringify(data.overrides))
           setRegionOverrides(data.overrides)
           regionOverridesRef.current = data.overrides
         }
       })
-      .catch(() => {})
+      .catch((err) => console.error('[v0] Failed to load overrides:', err))
   }, [])
   
   // Keep ref in sync with state
