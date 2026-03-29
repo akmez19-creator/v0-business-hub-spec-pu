@@ -540,7 +540,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ══════════════════════════════════════════════════════════════════════════
+      // ════════════════════════════════════════════════════════════���═════════════
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -1425,10 +1425,11 @@ export function DeliveryMap({
 // ── Pin placement ──
   const startPlacingPin = useCallback((pin: DeliveryPin) => {
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
-  setStreetSearch(''); setStreetResults([]) // Clear street search
+  setStreetSearch(''); setStreetResults([]); setNoStreetResults(false) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
-  // Use ref to get current viewMode (avoids stale closure)
-  const currentPitch = viewModeRef.current === '3d' ? 60 : 0
+  // Get current pitch from the map itself (most reliable)
+  const currentPitch = mapRef.current?.getPitch() ?? 0
+  console.log('[v0] startPlacingPin - mapPitch:', currentPitch, 'viewModeRef:', viewModeRef.current)
   if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
   }, [regions])
 
@@ -1449,33 +1450,83 @@ router.refresh()
   }, [placingPin, router])
   
   // ── Street/Building search for pin placement ──
+  const [noStreetResults, setNoStreetResults] = useState(false)
   const searchStreet = useCallback(async (query: string) => {
     if (!query.trim() || !mapboxToken || !placingPin) {
       setStreetResults([])
+      setNoStreetResults(false)
+      return
+    }
+    if (query.length < 2) {
+      setStreetResults([])
+      setNoStreetResults(false)
       return
     }
     setStreetSearching(true)
+    setNoStreetResults(false)
+    
+    const queryLower = query.toLowerCase()
+    const allResults: { place_name: string; center: [number, number]; text: string }[] = []
+    
     try {
-      // Get region coordinates for proximity search
+      // 1. Search POIs directly from rendered map features (finds PKL Autoparts, etc.)
+      if (mapRef.current) {
+        const features = mapRef.current.queryRenderedFeatures(undefined, {
+          layers: ['poi-label', 'poi-label-minor', 'road-label', 'road-label-simple']
+        })
+        
+        const seen = new Set<string>()
+        features.forEach((f: any) => {
+          const name = f.properties?.name || f.properties?.name_en || ''
+          if (name && name.toLowerCase().includes(queryLower) && !seen.has(name.toLowerCase())) {
+            seen.add(name.toLowerCase())
+            const coords = f.geometry?.coordinates
+            if (coords && coords.length >= 2) {
+              allResults.push({
+                text: name,
+                place_name: `${name}, Mauritius`,
+                center: [coords[0], coords[1]] as [number, number]
+              })
+            }
+          }
+        })
+      }
+      
+      // 2. Also search via Mapbox Geocoding API for addresses/streets
       const regionMatch = regions.find(r => r.locality === placingPin.locality)
       const lat = regionMatch?.lat ?? -20.2
       const lng = regionMatch?.lng ?? 57.5
-      
-      // Use Mapbox Geocoding API - streets, addresses, POIs with proximity to region
       const proximity = `${lng},${lat}`
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=8&types=address,poi`
+      const bbox = '57.3,-20.6,57.85,-19.95'
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&bbox=${bbox}&proximity=${proximity}&limit=8&types=address,poi,place`
       const res = await fetch(url)
       const data = await res.json()
       
       if (data.features) {
-        setStreetResults(data.features.map((f: any) => ({
-          place_name: f.place_name,
-          center: f.center as [number, number],
-          text: f.text || f.place_name.split(',')[0]
-        })))
+        data.features.forEach((f: any) => {
+          const text = f.text || f.place_name.split(',')[0]
+          // Avoid duplicates
+          if (!allResults.some(r => r.text.toLowerCase() === text.toLowerCase())) {
+            allResults.push({
+              place_name: f.place_name,
+              center: f.center as [number, number],
+              text
+            })
+          }
+        })
+      }
+      
+      if (allResults.length > 0) {
+        setStreetResults(allResults.slice(0, 10))
+        setNoStreetResults(false)
+      } else {
+        setStreetResults([])
+        setNoStreetResults(true)
       }
     } catch (e) {
       console.error('[v0] Street search error:', e)
+      setStreetResults([])
+      setNoStreetResults(true)
     }
     setStreetSearching(false)
   }, [mapboxToken, placingPin, regions])
@@ -1490,8 +1541,8 @@ router.refresh()
   // Select a street result and fly to it
   const selectStreetResult = useCallback((result: { center: [number, number]; place_name: string }) => {
     if (!mapRef.current) return
-    // Use ref to get current viewMode (avoids stale closure)
-    const currentPitch = viewModeRef.current === '3d' ? 60 : 0
+    // Get current pitch from the map itself (most reliable)
+    const currentPitch = mapRef.current.getPitch()
     mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: currentPitch, duration: 1200, essential: true })
     setStreetResults([])
     setStreetSearch('')
@@ -1820,7 +1871,7 @@ router.refresh()
 
   // ══���════���══════════════════════════════════
   // ██  RENDER
-  // ══════════════════════════════════════════
+  // ══��═══════════════════════════════════════
   return (
     <div ref={mapContainerParentRef} className={cn('flex flex-col h-full bg-black relative overflow-hidden', className)}>
       <style dangerouslySetInnerHTML={{ __html: `
@@ -3262,21 +3313,28 @@ router.refresh()
                   <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
                 )}
               </div>
-              {/* Search Results Dropdown */}
-              {streetResults.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto">
-                  {streetResults.map((result, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => selectStreetResult(result)}
-                      className="w-full px-3 py-2.5 text-left hover:bg-white/10 active:bg-white/20 transition border-b border-white/5 last:border-0"
-                    >
-                      <p className="text-sm font-semibold text-white truncate">{result.text}</p>
-                      <p className="text-[10px] text-white/50 truncate">{result.place_name}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
+{/* Search Results Dropdown */}
+  {streetResults.length > 0 && (
+  <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto z-50">
+  {streetResults.map((result, idx) => (
+  <button
+  key={idx}
+  onClick={() => selectStreetResult(result)}
+  className="w-full px-3 py-2.5 text-left hover:bg-white/10 active:bg-white/20 transition border-b border-white/5 last:border-0"
+  >
+  <p className="text-sm font-semibold text-white truncate">{result.text}</p>
+  <p className="text-[10px] text-white/50 truncate">{result.place_name}</p>
+  </button>
+  ))}
+  </div>
+  )}
+  {/* No Results Message */}
+  {noStreetResults && streetSearch.length >= 2 && !streetSearching && (
+  <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl p-3 z-50">
+  <p className="text-sm text-white/50 text-center">No results for "{streetSearch}"</p>
+  <p className="text-[10px] text-white/30 text-center mt-1">Try a different street or building name</p>
+  </div>
+  )}
             </div>
           </div>
           <div className="absolute bottom-6 left-3 right-3 z-40 flex gap-2">
