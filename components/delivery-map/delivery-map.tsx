@@ -3401,9 +3401,13 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                     <div className="flex items-center gap-2">
                                       <button onClick={() => { 
                                         setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); 
+                                        console.log('[v0] Fly button clicked - locality:', d.locality, 'pin coords:', d.lat, d.lng)
+                                        console.log('[v0] REGION_OVERRIDES at click time:', JSON.stringify(REGION_OVERRIDES))
                                         const override = REGION_OVERRIDES[d.locality]
+                                        console.log('[v0] Found override:', override)
                                         const flyLng = override ? override.lng : d.lng
                                         const flyLat = override ? override.lat : d.lat
+                                        console.log('[v0] Flying to:', flyLat, flyLng)
                                         mapRef.current?.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
                                       }}
                                         className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
@@ -3740,12 +3744,17 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ locality: placingRegion.locality, lat: newLat, lng: newLng })
                   })
+                  const resData = await res.json()
+                  console.log('[v0] Save response:', res.ok, resData)
                   if (res.ok) {
                     // Update GLOBAL, ref, AND state immediately so flyTo uses new coords right away
                     const newOverride = { lat: newLat, lng: newLng }
                     REGION_OVERRIDES[placingRegion.locality] = newOverride
                     regionOverridesRef.current = { ...regionOverridesRef.current, [placingRegion.locality]: newOverride }
                     setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: newOverride }))
+                    console.log('[v0] Updated REGION_OVERRIDES:', JSON.stringify(REGION_OVERRIDES))
+                  } else {
+                    console.error('[v0] Save failed:', resData)
                   }
                 } catch (e) {
                   console.error('Failed to save region override:', e)
