@@ -318,7 +318,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Robinson': { lat: -20.328611, lng: 57.504167 },
   'Roches Brunes': { lat: -20.234900, lng: 57.455700 },
   'Rose Hill': { lat: -20.243478, lng: 57.469855 },
-  'Sadally': { lat: -20.298060, lng: 57.478330 },
+  'Sadally': { lat: -20.291111, lng: 57.488889 },
   'Saint Martin Beau Bassin': { lat: -20.223030, lng: 57.468383 },
   'Seizieme Mille': { lat: -20.34000, lng: 57.52000 },
   'Sodnac': { lat: -20.271435, lng: 57.491391 },
