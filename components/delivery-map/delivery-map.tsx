@@ -259,6 +259,10 @@ export function DeliveryMap({
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
+  const [streetSearch, setStreetSearch] = useState('')
+  const [streetResults, setStreetResults] = useState<{ place_name: string; center: [number, number]; text: string }[]>([])
+  const [streetSearching, setStreetSearching] = useState(false)
+  const streetSearchTimeout = useRef<NodeJS.Timeout | null>(null)
   const [clientSearch, setClientSearch] = useState('')
   const [activeRegion, setActiveRegion] = useState<string | null>(null)
   const [optimizedStops, setOptimizedStops] = useState<OptimizedStop[]>([])
@@ -1417,29 +1421,75 @@ export function DeliveryMap({
     await handleMapStatusChange(pin, 'cms', reason, true)
   }, [cmsPopup, handleMapStatusChange])
 
-  // ── Pin placement ──
+// ── Pin placement ──
   const startPlacingPin = useCallback((pin: DeliveryPin) => {
-    setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
-    const regionMatch = regions.find(r => r.locality === pin.locality)
-    if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: 60, duration: 1400, essential: true })
+  setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
+  setStreetSearch(''); setStreetResults([]) // Clear street search
+  const regionMatch = regions.find(r => r.locality === pin.locality)
+  if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: 60, duration: 1400, essential: true })
   }, [regions])
 
-  const confirmPinPlacement = useCallback(async () => {
-    if (!mapRef.current || !placingPin) return; setSavingPin(true)
-    const center = mapRef.current.getCenter()
-    const ids = placingPin.itemIds?.length ? placingPin.itemIds : [placingPin.id]
-    const pinLocality = placingPin.locality // Save the region before clearing
-    await Promise.all(ids.map(id => updateDeliveryLocation(id, center.lat, center.lng, 'manual_pin')))
-    setSavingPin(false); setPlacingPin(null)
+const confirmPinPlacement = useCallback(async () => {
+  if (!mapRef.current || !placingPin) return; setSavingPin(true)
+  const center = mapRef.current.getCenter()
+  const ids = placingPin.itemIds?.length ? placingPin.itemIds : [placingPin.id]
+  const pinLocality = placingPin.locality // Save the region before clearing
+  await Promise.all(ids.map(id => updateDeliveryLocation(id, center.lat, center.lng, 'manual_pin')))
+  setSavingPin(false); setPlacingPin(null); setStreetSearch(''); setStreetResults([])
     // Re-open client list with the same region expanded so user can continue with next client
     if (pinLocality) {
       setClientSearch(pinLocality)
       setExpandedRegions(new Set([pinLocality]))
     }
     setShowClientList(true)
-    router.refresh()
+router.refresh()
   }, [placingPin, router])
-
+  
+  // ── Street/Building search for pin placement ──
+  const searchStreet = useCallback(async (query: string) => {
+    if (!query.trim() || !mapboxToken || !placingPin) {
+      setStreetResults([])
+      return
+    }
+    setStreetSearching(true)
+    try {
+      // Get region bounds for proximity bias
+      const regionMatch = regions.find(r => r.locality === placingPin.locality)
+      const proximity = regionMatch ? `${regionMatch.lng},${regionMatch.lat}` : '57.5,-20.2'
+      
+      // Use Mapbox Geocoding API with Mauritius country filter
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=6&types=address,poi,neighborhood,locality`
+      const res = await fetch(url)
+      const data = await res.json()
+      
+      if (data.features) {
+        setStreetResults(data.features.map((f: any) => ({
+          place_name: f.place_name,
+          center: f.center as [number, number],
+          text: f.text || f.place_name.split(',')[0]
+        })))
+      }
+    } catch (e) {
+      console.error('[v0] Street search error:', e)
+    }
+    setStreetSearching(false)
+  }, [mapboxToken, placingPin, regions])
+  
+  // Debounced street search
+  const handleStreetSearchChange = useCallback((value: string) => {
+    setStreetSearch(value)
+    if (streetSearchTimeout.current) clearTimeout(streetSearchTimeout.current)
+    streetSearchTimeout.current = setTimeout(() => searchStreet(value), 300)
+  }, [searchStreet])
+  
+  // Select a street result and fly to it
+  const selectStreetResult = useCallback((result: { center: [number, number]; place_name: string }) => {
+    if (!mapRef.current) return
+    mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: 60, duration: 1200, essential: true })
+    setStreetResults([])
+    setStreetSearch('')
+  }, [])
+  
   // ── Paste location link handler ──
   const extractCoordsFromLink = useCallback((url: string): { lat: number; lng: number } | null => {
     const qMatch = url.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/)
@@ -3183,17 +3233,49 @@ export function DeliveryMap({
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-px h-12 bg-cyan-400/40" />
             </div>
           </div>
-          <div className="absolute top-3 left-3 right-3 z-40 pointer-events-none">
-            <div className="bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 rounded-xl px-4 py-2.5 text-center">
+          <div className="absolute top-3 left-3 right-3 z-40 flex flex-col gap-2">
+            <div className="bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 rounded-xl px-4 py-2.5 text-center pointer-events-none">
               <p className="text-xs font-bold text-cyan-400">Placing pin for</p>
               <p className="text-sm font-black text-white">{placingPin.customerName}</p>
               <p className="text-[10px] text-white/40">{placingPin.locality} - {placingPin.products}</p>
             </div>
+            {/* Street/Building Search */}
+            <div className="relative">
+              <div className="flex items-center gap-2 bg-black/80 backdrop-blur-xl border border-white/20 rounded-xl px-3 py-2.5">
+                <Search className="w-4 h-4 text-white/50 flex-shrink-0" />
+                <input
+                  type="text"
+                  value={streetSearch}
+                  onChange={(e) => handleStreetSearchChange(e.target.value)}
+                  placeholder="Search street, building..."
+                  className="flex-1 bg-transparent text-white text-sm placeholder:text-white/40 outline-none"
+                  autoComplete="off"
+                />
+                {streetSearching && (
+                  <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+                )}
+              </div>
+              {/* Search Results Dropdown */}
+              {streetResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto">
+                  {streetResults.map((result, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => selectStreetResult(result)}
+                      className="w-full px-3 py-2.5 text-left hover:bg-white/10 active:bg-white/20 transition border-b border-white/5 last:border-0"
+                    >
+                      <p className="text-sm font-semibold text-white truncate">{result.text}</p>
+                      <p className="text-[10px] text-white/50 truncate">{result.place_name}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="absolute bottom-6 left-3 right-3 z-40 flex gap-2">
-            <button onClick={() => setPlacingPin(null)}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition">
-              <X className="w-4 h-4" /> Cancel
+<button onClick={() => { setPlacingPin(null); setStreetSearch(''); setStreetResults([]) }}
+  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition">
+  <X className="w-4 h-4" /> Cancel
             </button>
             <button onClick={confirmPinPlacement} disabled={savingPin}
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 text-cyan-400 font-bold text-sm active:scale-95 transition disabled:opacity-50">
