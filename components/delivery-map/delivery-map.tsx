@@ -638,6 +638,21 @@ export function DeliveryMap({
               } catch {}
             }
           })
+          
+          // Enhance POI labels visibility - make them brighter and more visible
+          const poiLayers = ['poi-label']
+          poiLayers.forEach(layerId => {
+            if (map.getLayer(layerId)) {
+              try {
+                map.setPaintProperty(layerId, 'text-color', 'rgba(255,255,255,0.85)')
+                map.setPaintProperty(layerId, 'text-halo-width', 1.5)
+                map.setPaintProperty(layerId, 'text-halo-color', 'rgba(0,0,0,0.9)')
+                map.setPaintProperty(layerId, 'text-opacity', 1)
+                map.setPaintProperty(layerId, 'icon-opacity', 1)
+                map.setLayoutProperty(layerId, 'text-size', 11)
+              } catch {}
+            }
+          })
         } catch {}
       })
 
@@ -1018,7 +1033,7 @@ map.on('load', () => {
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ════════════════════════��═════════════════════════════════════════════════
+  // ════════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
