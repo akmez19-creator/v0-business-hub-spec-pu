@@ -1,6 +1,6 @@
 'use client'
-// DeliveryMap v2.1 — No weather effects, no neon animations. Clean Mapbox-native route display.
-// Dusk lighting, styled DOM driver marker, GeoJSON pins.
+// DeliveryMap v2.2 — Using dark-v11 style with built-in POIs
+// Clean Mapbox-native route display with better location details
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
@@ -332,7 +332,7 @@ export function DeliveryMap({
     const next = !nightMode
     setNightMode(next)
     if (mapRef.current) {
-      try { mapRef.current.setConfigProperty('basemap', 'lightPreset', next ? 'night' : 'dusk') } catch {}
+      // dark-v11 style is always dark
     }
   }, [nightMode])
 
@@ -498,10 +498,10 @@ export function DeliveryMap({
 
       // ══════════════════════════════════════════════════════════════════════════
       // ULTIMATE MAPBOX PERFORMANCE CONFIG - Based on official Mapbox docs + research
-      // ══════════════════════════════════════════════════════════════════════════
+      // ══��═══════════════════════════════════════════════════════════════════════
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/standard?optimize=true', // style-optimized vector tiles
+        style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
         center, zoom: 15, maxZoom: 20, pitch: 0, bearing: 0,
         
         // ── GPU / Rendering ──
@@ -531,18 +531,7 @@ export function DeliveryMap({
         logoPosition: 'bottom-left',
         attributionControl: false,
         
-        // ── Style Config ──
-        config: { 
-          basemap: { 
-            lightPreset: 'dusk', 
-            show3dObjects: false, 
-            showPlaceLabels: true, 
-            showRoadLabels: true, 
-            showPointOfInterestLabels: true, // Show POIs for better navigation
-            showTransitLabels: true,
-            // Road labels now show at all zoom levels for better rider navigation
-          } 
-        },
+        // dark-v11 style has POIs built-in
       })
       
       // ══════════════════════════════════════════════════════════════════════════
@@ -618,26 +607,7 @@ export function DeliveryMap({
       map.once('idle', preloadTiles)
 
       // ── Static dusk lighting with enhanced road labels for rider navigation ──
-      map.on('style.load', () => {
-        try { map.setConfigProperty('basemap', 'showPlaceLabels', true) } catch {}
-        try { map.setConfigProperty('basemap', 'showRoadLabels', true) } catch {}
-        try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', true) } catch {}
-        try { map.setConfigProperty('basemap', 'showTransitLabels', true) } catch {}
-        
-        // Enhanced road label visibility for rider navigation in dusk mode
-        // Make street names more prominent at all zoom levels
-        try {
-          // Boost road label text size and halo for better visibility
-          const roadLabelLayers = ['road-label', 'road-label-simple', 'road-number-shield', 'road-exit-shield']
-          roadLabelLayers.forEach(layerId => {
-            if (map.getLayer(layerId)) {
-              try {
-                map.setPaintProperty(layerId, 'text-halo-width', 2)
-                map.setPaintProperty(layerId, 'text-halo-color', 'rgba(0,0,0,0.9)')
-                map.setPaintProperty(layerId, 'text-opacity', 1)
-              } catch {}
-            }
-          })
+// dark-v11 has POIs enabled by default
           
           // Enhance POI labels visibility - make them brighter and more visible
           const poiLayers = ['poi-label']
@@ -660,10 +630,9 @@ export function DeliveryMap({
 map.on('load', () => {
   if (cancelled) return
   
-  // FORCE 2D mode on load - set pitch to 0 and disable 3D buildings
+  // FORCE 2D mode on load - set pitch to 0
   map.setPitch(0)
   map.setBearing(0)
-  map.setConfigProperty('basemap', 'show3dObjects', false)
   
   // Disable pitch/rotation controls for 2D mode
   map.touchPitch.disable()
@@ -761,9 +730,8 @@ map.on('load', () => {
       // Mini-map
       if (miniMapRef.current) {
         const mini = new (mbgl()).Map({
-          container: miniMapRef.current, style: 'mapbox://styles/mapbox/standard',
+          container: miniMapRef.current, style: 'mapbox://styles/mapbox/dark-v11',
           center, zoom: 14, interactive: false, attributionControl: false,
-          config: { basemap: { lightPreset: 'dusk', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
         })
         miniMapInstance.current = mini
         // RAF-batched mini-map sync - zero jank
@@ -957,9 +925,9 @@ map.on('load', () => {
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, locating])
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ════════════════���═════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ═════════════��════════════════════════════════════════════════════════════
+  // ═══���═════════��════════════════════════════════════════════════════════════
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
@@ -2706,12 +2674,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
       map.touchPitch.enable()
       map.dragRotate.enable()
       map.touchZoomRotate.enableRotation()
-      map.setConfigProperty('basemap', 'show3dObjects', true)
     } else {
       map.touchPitch.disable()
       map.dragRotate.disable()
       map.touchZoomRotate.disableRotation()
-      map.setConfigProperty('basemap', 'show3dObjects', false)
     }
   }
 }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', viewMode === '3d' ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
