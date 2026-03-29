@@ -260,6 +260,18 @@ export function DeliveryMap({
   const [placingRegion, setPlacingRegion] = useState<{ locality: string; lat: number; lng: number } | null>(null)
   const setPlacingRegionRef = useRef(setPlacingRegion)
   setPlacingRegionRef.current = setPlacingRegion
+  const [regionOverrides, setRegionOverrides] = useState<Record<string, { lat: number; lng: number }>>({})
+  const [savingRegion, setSavingRegion] = useState(false)
+  
+  // Fetch region coordinate overrides on mount
+  useEffect(() => {
+    fetch('/api/region-overrides')
+      .then(res => res.json())
+      .then(data => {
+        if (data.overrides) setRegionOverrides(data.overrides)
+      })
+      .catch(() => {})
+  }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -803,7 +815,14 @@ map.on('load', () => {
     ;(map as any)._regionPoleMarkers = []
 
     const mb = mbgl()
-    const filteredRegions = regions
+    const filteredRegions = regions.map(r => {
+      // Apply coordinate overrides if available
+      const override = regionOverrides[r.locality]
+      if (override) {
+        return { ...r, lat: override.lat, lng: override.lng }
+      }
+      return r
+    })
     if (showPoles && mb) filteredRegions.forEach(r => {
       const count = r.count
       const isHigh = count > 5
@@ -903,7 +922,7 @@ map.on('load', () => {
       map.fitBounds(bounds, { padding: 60, duration: 1800, maxZoom: 15, pitch: 0 })
       initialFitDoneRef.current = true // Only fit once
     }
-  }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap])
+  }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap, regionOverrides])
 
   // ── GPS Tracking - RAW GPS, no road snapping ──
   const startTracking = useCallback(() => {
@@ -3479,19 +3498,33 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition">
               <X className="w-4 h-4" /> Cancel
             </button>
-            <button onClick={() => {
+            <button onClick={async () => {
               const map = mapRef.current
               if (map && placingRegion) {
                 const center = map.getCenter()
-                const newLat = center.lat.toFixed(6)
-                const newLng = center.lng.toFixed(6)
-                navigator.clipboard.writeText(`'${placingRegion.locality}': { lat: ${newLat}, lng: ${newLng} },`)
-                alert(`Coordinates copied!\n\n'${placingRegion.locality}': { lat: ${newLat}, lng: ${newLng} }\n\nPaste this to me to update the regions file.`)
+                const newLat = parseFloat(center.lat.toFixed(6))
+                const newLng = parseFloat(center.lng.toFixed(6))
+                setSavingRegion(true)
+                try {
+                  const res = await fetch('/api/region-overrides', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ locality: placingRegion.locality, lat: newLat, lng: newLng })
+                  })
+                  if (res.ok) {
+                    // Update local state to immediately reflect the change
+                    setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: { lat: newLat, lng: newLng } }))
+                  }
+                } catch (e) {
+                  console.error('Failed to save region override:', e)
+                }
+                setSavingRegion(false)
                 setPlacingRegion(null)
               }
             }}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500/20 backdrop-blur-xl border border-orange-400/30 text-orange-400 font-bold text-sm active:scale-95 transition">
-              <Check className="w-4 h-4" /> Confirm & Copy
+              disabled={savingRegion}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-orange-500/20 backdrop-blur-xl border border-orange-400/30 text-orange-400 font-bold text-sm active:scale-95 transition disabled:opacity-50">
+              {savingRegion ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} {savingRegion ? 'Saving...' : 'Confirm'}
             </button>
           </div>
         </>
