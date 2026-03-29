@@ -1485,24 +1485,25 @@ router.refresh()
     
     const queryLower = query.toLowerCase()
     const allResults: { place_name: string; center: [number, number]; text: string; distance: number }[] = []
+    const seen = new Set<string>()
     
     try {
-      // 1. Search POIs directly from rendered map features (finds PKL Autoparts, etc.)
-      if (mapRef.current) {
-        const features = mapRef.current.queryRenderedFeatures(undefined, {
-          layers: ['poi-label', 'poi-label-minor', 'road-label', 'road-label-simple']
-        })
-        
-        const seen = new Set<string>()
-        features.forEach((f: any) => {
+      // 1. Use Mapbox Tilequery API to search ALL POIs in the region (not just visible ones)
+      // This finds all POIs within 5km radius of the region center
+      const tilequeryUrl = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${regionLng},${regionLat}.json?radius=5000&limit=50&layers=poi_label&access_token=${mapboxToken}`
+      const tqRes = await fetch(tilequeryUrl)
+      const tqData = await tqRes.json()
+      
+      if (tqData.features) {
+        tqData.features.forEach((f: any) => {
           const name = f.properties?.name || f.properties?.name_en || ''
-          if (name && name.toLowerCase().includes(queryLower) && !seen.has(name.toLowerCase())) {
+          const nameKey = name.toLowerCase()
+          if (name && nameKey.includes(queryLower) && !seen.has(nameKey)) {
             const coords = f.geometry?.coordinates
             if (coords && coords.length >= 2) {
               const dist = getDistanceKm(regionLat, regionLng, coords[1], coords[0])
-              // Only include if within region radius
               if (dist <= MAX_DISTANCE_KM) {
-                seen.add(name.toLowerCase())
+                seen.add(nameKey)
                 allResults.push({
                   text: name,
                   place_name: `${name}, ${placingPin.locality}`,
@@ -1515,7 +1516,34 @@ router.refresh()
         })
       }
       
-      // 2. Also search via Mapbox Geocoding API - use tight bbox around region
+      // 2. Also search visible map features (backup for any missed POIs)
+      if (mapRef.current) {
+        const features = mapRef.current.queryRenderedFeatures(undefined, {
+          layers: ['poi-label', 'poi-label-minor', 'road-label', 'road-label-simple']
+        })
+        
+        features.forEach((f: any) => {
+          const name = f.properties?.name || f.properties?.name_en || ''
+          const nameKey = name.toLowerCase()
+          if (name && nameKey.includes(queryLower) && !seen.has(nameKey)) {
+            const coords = f.geometry?.coordinates
+            if (coords && coords.length >= 2) {
+              const dist = getDistanceKm(regionLat, regionLng, coords[1], coords[0])
+              if (dist <= MAX_DISTANCE_KM) {
+                seen.add(nameKey)
+                allResults.push({
+                  text: name,
+                  place_name: `${name}, ${placingPin.locality}`,
+                  center: [coords[0], coords[1]] as [number, number],
+                  distance: dist
+                })
+              }
+            }
+          }
+        })
+      }
+      
+      // 3. Also search via Mapbox Geocoding API for addresses/streets
       const delta = 0.05 // ~5km radius bbox
       const bbox = `${regionLng - delta},${regionLat - delta},${regionLng + delta},${regionLat + delta}`
       const proximity = `${regionLng},${regionLat}`
@@ -1526,10 +1554,11 @@ router.refresh()
       if (data.features) {
         data.features.forEach((f: any) => {
           const text = f.text || f.place_name.split(',')[0]
+          const textKey = text.toLowerCase()
           const [lng, lat] = f.center
           const dist = getDistanceKm(regionLat, regionLng, lat, lng)
-          // Only include if within region radius and not duplicate
-          if (dist <= MAX_DISTANCE_KM && !allResults.some(r => r.text.toLowerCase() === text.toLowerCase())) {
+          if (dist <= MAX_DISTANCE_KM && !seen.has(textKey)) {
+            seen.add(textKey)
             allResults.push({
               place_name: f.place_name,
               center: f.center as [number, number],
