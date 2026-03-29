@@ -1,6 +1,6 @@
 'use client'
-// DeliveryMap v2.2 — Using dark-v11 style with built-in POIs
-// Clean Mapbox-native route display with better location details
+// DeliveryMap v2.1 — No weather effects, no neon animations. Clean Mapbox-native route display.
+// Dusk lighting, styled DOM driver marker, GeoJSON pins.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
@@ -210,7 +210,7 @@ function getManeuverIcon(type: string, modifier: string) {
 
 
 
-// ================================================================
+// ═════════������════════════════════════════════════════════════
 // ██  DELIVERY MAP v2.0
 // ══════════════════════════════════════════════════════════
 export function DeliveryMap({
@@ -272,23 +272,6 @@ export function DeliveryMap({
       })
       .catch(() => {})
   }, [])
-  
-  // POI data from OpenStreetMap
-  const [showPOIs, setShowPOIs] = useState(true)
-  const [pois, setPois] = useState<{ id: string; name: string; type: string; category: string; lat: number; lng: number; icon: string }[]>([])
-  const poiMarkersRef = useRef<{ remove: () => void; getElement: () => HTMLElement }[]>([])
-  
-  // Fetch Mauritius POIs on mount
-  useEffect(() => {
-    console.log('[v0] Fetching Mauritius POIs...')
-    fetch('/api/mauritius-pois')
-      .then(res => res.json())
-      .then(data => {
-        console.log('[v0] POI data received:', data.pois?.length || 0, 'POIs')
-        if (data.pois) setPois(data.pois)
-      })
-      .catch((err) => console.error('[v0] POI fetch error:', err))
-  }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -349,7 +332,7 @@ export function DeliveryMap({
     const next = !nightMode
     setNightMode(next)
     if (mapRef.current) {
-      // dark-v11 style is always dark
+      try { mapRef.current.setConfigProperty('basemap', 'lightPreset', next ? 'night' : 'dusk') } catch {}
     }
   }, [nightMode])
 
@@ -515,10 +498,10 @@ export function DeliveryMap({
 
       // ══════════════════════════════════════════════════════════════════════════
       // ULTIMATE MAPBOX PERFORMANCE CONFIG - Based on official Mapbox docs + research
-      // ============================================================================
+      // ══════════════════════════════════════════════════════════════════════════
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
+        style: 'mapbox://styles/mapbox/standard?optimize=true', // style-optimized vector tiles
         center, zoom: 15, maxZoom: 20, pitch: 0, bearing: 0,
         
         // ── GPU / Rendering ──
@@ -548,7 +531,18 @@ export function DeliveryMap({
         logoPosition: 'bottom-left',
         attributionControl: false,
         
-        // dark-v11 style has POIs built-in
+        // ── Style Config ──
+        config: { 
+          basemap: { 
+            lightPreset: 'dusk', 
+            show3dObjects: false, 
+            showPlaceLabels: true, 
+            showRoadLabels: true, 
+            showPointOfInterestLabels: true, // Show POIs for better navigation
+            showTransitLabels: true,
+            // Road labels now show at all zoom levels for better rider navigation
+          } 
+        },
       })
       
       // ══════════════════════════════════════════════════════════════════════════
@@ -568,7 +562,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ============================================================================
+      // ════════════════════════════════════════════════════════════���═════════════
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -623,37 +617,45 @@ export function DeliveryMap({
       
       map.once('idle', preloadTiles)
 
-      // ── Map loaded ──
-      map.on('load', () => {
-        // Enhance POI labels visibility
+      // ── Static dusk lighting with enhanced road labels for rider navigation ──
+      map.on('style.load', () => {
+        try { map.setConfigProperty('basemap', 'showPlaceLabels', true) } catch {}
+        try { map.setConfigProperty('basemap', 'showRoadLabels', true) } catch {}
+        try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', true) } catch {}
+        try { map.setConfigProperty('basemap', 'showTransitLabels', true) } catch {}
+        
+        // Enhanced road label visibility for rider navigation in dusk mode
+        // Make street names more prominent at all zoom levels
         try {
-          const poiLayers = ['poi-label']
-          poiLayers.forEach(layerId => {
+          // Boost road label text size and halo for better visibility
+          const roadLabelLayers = ['road-label', 'road-label-simple', 'road-number-shield', 'road-exit-shield']
+          roadLabelLayers.forEach(layerId => {
             if (map.getLayer(layerId)) {
               try {
-                map.setPaintProperty(layerId, 'text-color', 'rgba(255,255,255,0.85)')
-                map.setPaintProperty(layerId, 'text-halo-width', 1.5)
+                map.setPaintProperty(layerId, 'text-halo-width', 2)
                 map.setPaintProperty(layerId, 'text-halo-color', 'rgba(0,0,0,0.9)')
                 map.setPaintProperty(layerId, 'text-opacity', 1)
-                map.setPaintProperty(layerId, 'icon-opacity', 1)
-                map.setLayoutProperty(layerId, 'text-size', 11)
               } catch {}
             }
           })
         } catch {}
-        
-        if (cancelled) return
-        
-        // FORCE 2D mode on load - set pitch to 0
-        map.setPitch(0)
-        map.setBearing(0)
-        
-        // Disable pitch/rotation controls for 2D mode
-        map.touchPitch.disable()
-        map.dragRotate.disable()
-        map.touchZoomRotate.disableRotation()
-        
-        // GeoJSON delivery pins source
+      })
+
+      // ── Map loaded ──
+map.on('load', () => {
+  if (cancelled) return
+  
+  // FORCE 2D mode on load - set pitch to 0 and disable 3D buildings
+  map.setPitch(0)
+  map.setBearing(0)
+  map.setConfigProperty('basemap', 'show3dObjects', false)
+  
+  // Disable pitch/rotation controls for 2D mode
+  map.touchPitch.disable()
+  map.dragRotate.disable()
+  map.touchZoomRotate.disableRotation()
+  
+  // GeoJSON delivery pins source
         if (map.getSource('delivery-pins')) {
           try { ['pins-glow','pins-circle','pins-pulse','pins-waypoint','pins-label'].forEach(l => { if (map.getLayer(l)) map.removeLayer(l) }); map.removeSource('delivery-pins') } catch {}
         }
@@ -744,8 +746,9 @@ export function DeliveryMap({
       // Mini-map
       if (miniMapRef.current) {
         const mini = new (mbgl()).Map({
-          container: miniMapRef.current, style: 'mapbox://styles/mapbox/dark-v11',
+          container: miniMapRef.current, style: 'mapbox://styles/mapbox/standard',
           center, zoom: 14, interactive: false, attributionControl: false,
+          config: { basemap: { lightPreset: 'dusk', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
         })
         miniMapInstance.current = mini
         // RAF-batched mini-map sync - zero jank
@@ -788,6 +791,9 @@ export function DeliveryMap({
     const map = mapRef.current
 
     // Update pins
+    if (riderColorMap) {
+  
+    }
     const pinFeatures = filtered.map(pin => {
       // Use rider color when riderColorMap is provided, otherwise use status color
       const pinColor = (riderColorMap && pin.riderId && riderColorMap[pin.riderId])
@@ -917,89 +923,6 @@ export function DeliveryMap({
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap, regionOverrides])
 
-  // ── POI Markers from OpenStreetMap ──
-  useEffect(() => {
-    const map = mapRef.current
-    console.log('[v0] POI render effect - map:', !!map, 'mapLoaded:', mapLoaded, 'showPOIs:', showPOIs, 'pois:', pois.length)
-    if (!map || !mapLoaded || !showPOIs || pois.length === 0) return
-    
-    // Clear existing POI markers
-    poiMarkersRef.current.forEach(m => m.remove())
-    poiMarkersRef.current = []
-    
-    const mapboxgl = (window as any).mapboxgl
-    if (!mapboxgl) { console.log('[v0] No mapboxgl'); return }
-    
-    // Icon colors by type
-    const typeColors: Record<string, string> = {
-      education: '#4ade80', // green
-      worship: '#f59e0b', // amber  
-      food: '#ef4444', // red
-      shop: '#3b82f6', // blue
-      health: '#ec4899', // pink
-      finance: '#8b5cf6', // purple
-      fuel: '#f97316', // orange
-      emergency: '#dc2626', // red
-      other: '#6b7280' // gray
-    }
-    
-    // Icon symbols by category
-    const categorySymbols: Record<string, string> = {
-      school: 'S', mosque: 'M', temple: 'T', church: 'C',
-      restaurant: 'R', cafe: 'F', fast_food: 'F',
-      supermarket: 'G', convenience: 'G', shop: 'S',
-      hospital: 'H', clinic: 'H', pharmacy: 'P',
-      bank: 'B', petrol: 'G', police: 'P'
-    }
-    
-    pois.forEach(poi => {
-      const color = typeColors[poi.type] || typeColors.other
-      const symbol = categorySymbols[poi.category] || 'X'
-      
-      const el = document.createElement('div')
-      el.className = 'poi-marker'
-      el.style.cssText = `
-        display: flex; align-items: center; justify-content: center;
-        width: 22px; height: 22px; border-radius: 50%;
-        background: ${color}33; border: 1.5px solid ${color}99;
-        font-size: 11px; cursor: pointer;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        transition: transform 0.15s;
-      `
-      el.innerHTML = symbol
-      el.title = `${poi.name} (${poi.category})`
-      
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.3)'; el.style.zIndex = '100' })
-      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '' })
-      
-      // Show name on click
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const popup = document.createElement('div')
-        popup.style.cssText = `
-          position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%);
-          background: rgba(0,0,0,0.9); color: white; padding: 8px 16px;
-          border-radius: 8px; font-size: 12px; font-weight: 500; z-index: 9999;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-        `
-        popup.textContent = poi.name
-        document.body.appendChild(popup)
-        setTimeout(() => popup.remove(), 2500)
-      })
-      
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([poi.lng, poi.lat])
-        .addTo(map)
-      
-      poiMarkersRef.current.push(marker)
-    })
-    
-    return () => {
-      poiMarkersRef.current.forEach(m => m.remove())
-      poiMarkersRef.current = []
-    }
-  }, [pois, mapLoaded, showPOIs])
-
   // ── GPS Tracking - RAW GPS, no road snapping ──
   const startTracking = useCallback(() => {
     if (!navigator.geolocation || locating) return
@@ -1019,9 +942,9 @@ export function DeliveryMap({
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, locating])
 
-  // ============================================================================
+  // ══════════════════════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ============================================================================
+  // ═════════════��════════════════════════════════════════════════════════════
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
@@ -1095,7 +1018,7 @@ export function DeliveryMap({
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ============================================================================
+  // ════════════════════════��═════════════════════════════════════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
@@ -1436,7 +1359,7 @@ export function DeliveryMap({
     setExporting(null)
   }, [safeRegionGroups, customTemplates, markRegionExported])
 
-  // -- Status change + Payment --
+  // ── Status change + Payment ─���
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
     // Exchange / Trade-in / Refund: show protocol popup via paymentPopup with protocol flag
     if (isReturnOrder(pin)) {
@@ -2062,9 +1985,9 @@ router.refresh()
     }
   }, [navigating, navTarget, distToTarget])
 
-// ==========================================
-// RENDER
-// ==========================================
+  // ══���════���══════════════════════════════════
+  // ██  RENDER
+  // ══��═══════════════════════════════════════
   return (
     <div ref={mapContainerParentRef} className={cn('flex flex-col h-full bg-black relative overflow-hidden', className)}>
       <style dangerouslySetInnerHTML={{ __html: `
@@ -2768,10 +2691,12 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
       map.touchPitch.enable()
       map.dragRotate.enable()
       map.touchZoomRotate.enableRotation()
+      map.setConfigProperty('basemap', 'show3dObjects', true)
     } else {
       map.touchPitch.disable()
       map.dragRotate.disable()
       map.touchZoomRotate.disableRotation()
+      map.setConfigProperty('basemap', 'show3dObjects', false)
     }
   }
 }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', viewMode === '3d' ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
@@ -2794,13 +2719,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             <button onClick={toggleNightMode}
               className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', nightMode ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
               {nightMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button onClick={() => {
-              const next = !showPOIs; setShowPOIs(next)
-              poiMarkersRef.current.forEach(m => { m.getElement().style.display = next ? '' : 'none' })
-            }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition text-[10px] font-bold', showPOIs ? 'text-green-400' : 'text-white/40 hover:text-green-400')}
-              title="Toggle POIs (shops, schools, mosques...)">
-              POI
             </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
@@ -3324,7 +3242,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               const isExpandedCard = expandedRegions.has(`card-${d.id}`)
                               return (
                               <div key={d.id} className="client-card client-card-need overflow-hidden">
-                                {/* -- Main Row: Avatar + Full name/product + chevron -- */}
+                                {/* ── Main Row: Avatar + Full name/product + chevron ��─ */}
                                 <button onClick={() => setExpandedRegions(prev => { const next = new Set(prev); const key = `card-${d.id}`; next.has(key) ? next.delete(key) : next.add(key); return next })}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 text-left">
                                   <div className="relative shrink-0">
