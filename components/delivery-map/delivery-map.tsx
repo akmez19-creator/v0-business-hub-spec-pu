@@ -1453,12 +1453,17 @@ router.refresh()
     }
     setStreetSearching(true)
     try {
-      // Get region bounds for proximity bias
+      // Get region coordinates for bounding box
       const regionMatch = regions.find(r => r.locality === placingPin.locality)
-      const proximity = regionMatch ? `${regionMatch.lng},${regionMatch.lat}` : '57.5,-20.2'
+      const lat = regionMatch?.lat ?? -20.2
+      const lng = regionMatch?.lng ?? 57.5
       
-      // Use Mapbox Geocoding API with Mauritius country filter
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=6&types=address,poi,neighborhood,locality`
+      // Create a ~5km bounding box around the region center to restrict results
+      const delta = 0.045 // ~5km radius
+      const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`
+      
+      // Use Mapbox Geocoding API - ONLY streets, addresses, POIs (NO localities/regions)
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&bbox=${bbox}&limit=8&types=address,poi`
       const res = await fetch(url)
       const data = await res.json()
       
