@@ -853,8 +853,11 @@ map.on('load', () => {
       el.style.cssText = `display:flex;flex-direction:column;align-items:center;cursor:pointer;perspective:200px;`
       el.innerHTML = `
         <div style="transform:rotateX(15deg);transform-origin:bottom center;display:flex;flex-direction:column;align-items:stretch;min-width:52px;max-width:120px;border-radius:6px;overflow:hidden;background:linear-gradient(180deg,rgba(20,20,30,0.95),rgba(10,10,18,0.98));border:1px solid rgba(255,255,255,0.08);box-shadow:0 8px 24px rgba(0,0,0,0.7),0 2px 6px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.06)${isHigh ? ',0 0 20px ' + topColor + '30' : ''};">
-          <div style="padding:4px 7px 2px;text-align:center;">
-            <div style="font-size:8px;font-weight:900;color:rgba(255,255,255,0.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.5px;text-transform:uppercase;text-shadow:0 1px 3px rgba(0,0,0,0.8);">${r.locality}</div>
+          <div style="padding:4px 7px 2px;display:flex;align-items:center;justify-content:space-between;gap:4px;">
+            <div style="font-size:8px;font-weight:900;color:rgba(255,255,255,0.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.5px;text-transform:uppercase;text-shadow:0 1px 3px rgba(0,0,0,0.8);flex:1;">${r.locality}</div>
+            <button class="edit-pole-btn" data-locality="${r.locality}" data-lat="${r.lat}" data-lng="${r.lng}" style="width:16px;height:16px;border-radius:4px;background:rgba(34,211,238,0.3);border:1px solid rgba(34,211,238,0.4);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </button>
           </div>
           <div style="display:flex;height:14px;margin:2px 4px 4px;border-radius:3px;overflow:hidden;gap:1px;">${barHtml}</div>
           <div style="padding:0 7px 3px;text-align:center;">
@@ -864,6 +867,23 @@ map.on('load', () => {
         <div style="width:3px;height:${poleH}px;background:linear-gradient(180deg,${topColor}cc,${topColor}33,transparent);border-radius:1.5px;box-shadow:1px 0 4px rgba(0,0,0,0.4),-1px 0 4px rgba(0,0,0,0.4);"></div>
         <div style="width:10px;height:4px;border-radius:50%;background:radial-gradient(ellipse,${topColor}66,transparent);filter:blur(1px);"></div>
       `
+      // Edit button click handler
+      const editBtn = el.querySelector('.edit-pole-btn') as HTMLButtonElement
+      if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          const locality = editBtn.dataset.locality
+          const lat = editBtn.dataset.lat
+          const lng = editBtn.dataset.lng
+          const coords = prompt(`Edit coordinates for ${locality}\n\nCurrent: ${lat}, ${lng}\n\nEnter new coordinates as: lat, lng`)
+          if (coords) {
+            const [newLat, newLng] = coords.split(',').map(s => parseFloat(s.trim()))
+            if (!isNaN(newLat) && !isNaN(newLng)) {
+              alert(`Update "${locality}" to:\n\n'${locality}': { lat: ${newLat}, lng: ${newLng} }\n\nTell me these coordinates to update the file.`)
+            }
+          }
+        })
+      }
       el.addEventListener('click', () => {
         // Open All Deliveries panel filtered to & expanded for this region
         setSelectedPin(null); setSelectedRegion(null)
