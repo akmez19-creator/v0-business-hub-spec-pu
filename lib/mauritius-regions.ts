@@ -124,7 +124,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
 
   // ══════════════════════════════════════════════════════════════════════════
   // MOKA DISTRICT (47 regions)
-  // ═══════════════════════════════════════════════════════════════���══════════
+  // ══════════════════════��════════════════════════════════════════���══════════
   'Alma': { lat: -20.240900, lng: 57.574580 },
   'Bagatelle': { lat: -20.22400, lng: 57.49770 },
   'Bagatelle Mall': { lat: -20.224451, lng: 57.497144 },
@@ -338,7 +338,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Trianon': { lat: -20.247780, lng: 57.486670 },
   'Tribecca Mall': { lat: -20.247780, lng: 57.486670 },
   'Trou Aux Cerfs': { lat: -20.317790, lng: 57.510570 },
-  'Vacoas': { lat: -20.298060, lng: 57.478330 },
+  'Vacoas': { lat: -20.298333, lng: 57.483889 },
   'Valentina': { lat: -20.275700, lng: 57.505600 },
   'Vandermeersch': { lat: -20.241850, lng: 57.475930 },
   'Victoria Hospital': { lat: -20.278460, lng: 57.476560 },
