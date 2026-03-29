@@ -272,6 +272,26 @@ export function DeliveryMap({
       })
       .catch(() => {})
   }, [])
+  
+  // Rider POIs - crowdsourced landmarks
+  const [riderPois, setRiderPois] = useState<{ id: string; name: string; category: string; latitude: number; longitude: number; locality: string; verified: boolean }[]>([])
+  const [showRiderPois, setShowRiderPois] = useState(true)
+  const [addingPoi, setAddingPoi] = useState(false)
+  const [newPoiCoords, setNewPoiCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [newPoiName, setNewPoiName] = useState('')
+  const [newPoiCategory, setNewPoiCategory] = useState('landmark')
+  const [savingPoi, setSavingPoi] = useState(false)
+  const poiMarkersRef = useRef<{ remove: () => void; getElement: () => HTMLElement }[]>([])
+  
+  // Fetch rider POIs on mount
+  useEffect(() => {
+    fetch('/api/rider-pois')
+      .then(res => res.json())
+      .then(data => {
+        if (data.pois) setRiderPois(data.pois)
+      })
+      .catch(() => {})
+  }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -922,6 +942,81 @@ map.on('load', () => {
       initialFitDoneRef.current = true // Only fit once
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap, regionOverrides])
+
+  // ── Rider POI Markers ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapLoaded || !showRiderPois) return
+    
+    // Clear existing POI markers
+    poiMarkersRef.current.forEach(m => m.remove())
+    poiMarkersRef.current = []
+    
+    if (riderPois.length === 0) return
+    
+    const mapboxgl = (window as any).mapboxgl
+    if (!mapboxgl) return
+    
+    // Category colors
+    const catColors: Record<string, string> = {
+      school: '#22c55e', mosque: '#f59e0b', temple: '#a855f7', church: '#3b82f6',
+      supermarket: '#06b6d4', shop: '#06b6d4', petrol: '#f97316', hospital: '#ec4899',
+      bank: '#8b5cf6', police: '#ef4444', landmark: '#6b7280'
+    }
+    
+    // Category letters
+    const catLetters: Record<string, string> = {
+      school: 'S', mosque: 'M', temple: 'T', church: 'C',
+      supermarket: 'G', shop: 'G', petrol: 'P', hospital: 'H',
+      bank: 'B', police: 'X', landmark: 'L'
+    }
+    
+    riderPois.forEach(poi => {
+      const color = catColors[poi.category] || catColors.landmark
+      const letter = catLetters[poi.category] || 'L'
+      
+      const el = document.createElement('div')
+      el.className = 'rider-poi-marker'
+      el.style.cssText = `
+        display: flex; align-items: center; justify-content: center;
+        width: 20px; height: 20px; border-radius: 50%;
+        background: ${color}; border: 2px solid white;
+        font-size: 9px; font-weight: bold; color: white; cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        transition: transform 0.15s; z-index: 5;
+      `
+      el.textContent = letter
+      el.title = poi.name
+      
+      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.4)'; el.style.zIndex = '50' })
+      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '5' })
+      
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const toast = document.createElement('div')
+        toast.style.cssText = `
+          position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%);
+          background: rgba(0,0,0,0.9); color: white; padding: 10px 20px;
+          border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4); text-align: center;
+        `
+        toast.innerHTML = `<div style="font-weight:600">${poi.name}</div><div style="font-size:11px;opacity:0.7;margin-top:2px">${poi.locality || poi.category}</div>`
+        document.body.appendChild(toast)
+        setTimeout(() => toast.remove(), 3000)
+      })
+      
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([poi.longitude, poi.latitude])
+        .addTo(map)
+      
+      poiMarkersRef.current.push(marker)
+    })
+    
+    return () => {
+      poiMarkersRef.current.forEach(m => m.remove())
+      poiMarkersRef.current = []
+    }
+  }, [riderPois, mapLoaded, showRiderPois])
 
   // ── GPS Tracking - RAW GPS, no road snapping ──
   const startTracking = useCallback(() => {
@@ -2730,6 +2825,23 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               title="Open in Google Maps (for detailed POIs)">
               <ExternalLink className="w-4 h-4" />
             </button>
+            <button onClick={() => setShowRiderPois(!showRiderPois)}
+              className={cn('btn-holo w-11 h-11 flex items-center justify-center transition text-[9px] font-bold', showRiderPois ? 'text-green-400' : 'text-white/40 hover:text-green-400')}
+              title="Toggle POI markers">
+              POI
+            </button>
+            <button onClick={() => {
+              setAddingPoi(true)
+              const map = mapRef.current
+              if (map) {
+                const center = map.getCenter()
+                setNewPoiCoords({ lat: center.lat, lng: center.lng })
+              }
+            }}
+              className="btn-holo w-11 h-11 flex items-center justify-center transition text-white/40 hover:text-amber-400"
+              title="Add new POI location">
+              <MapPin className="w-4 h-4" />
+            </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
             className="w-11 h-11 rounded-xl flex items-center justify-center text-white/70 hover:text-cyan-400 transition relative active:scale-95"
@@ -3537,6 +3649,94 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             </button>
           </div>
         </>
+      )}
+
+      {/* Add POI Modal */}
+      {addingPoi && (
+        <div className="absolute inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={() => { setAddingPoi(false); setNewPoiCoords(null); setNewPoiName(''); setNewPoiCategory('landmark') }}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-[380px] rounded-2xl overflow-hidden bg-[#1a1a2e] border border-amber-500/30">
+            <div className="flex items-center gap-2.5 p-4 bg-amber-500/20">
+              <MapPin className="w-6 h-6 text-amber-400" />
+              <div>
+                <div className="font-bold text-white">Add Location</div>
+                <div className="text-xs text-white/60">Pin a landmark for other riders</div>
+              </div>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="text-xs text-white/50 mb-1 block">Name *</label>
+                <input type="text" value={newPoiName} onChange={e => setNewPoiName(e.target.value)}
+                  placeholder="e.g. Amaury Government School"
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/10 border border-white/10 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-amber-400/50" />
+              </div>
+              <div>
+                <label className="text-xs text-white/50 mb-1 block">Category</label>
+                <select value={newPoiCategory} onChange={e => setNewPoiCategory(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg bg-white/10 border border-white/10 text-white text-sm focus:outline-none focus:border-amber-400/50">
+                  <option value="landmark">Landmark</option>
+                  <option value="school">School</option>
+                  <option value="mosque">Mosque</option>
+                  <option value="temple">Temple</option>
+                  <option value="church">Church</option>
+                  <option value="supermarket">Supermarket</option>
+                  <option value="shop">Shop</option>
+                  <option value="petrol">Petrol Station</option>
+                  <option value="hospital">Hospital</option>
+                  <option value="bank">Bank</option>
+                  <option value="police">Police Station</option>
+                </select>
+              </div>
+              <div className="text-xs text-white/40 bg-white/5 rounded-lg p-3">
+                <div className="font-medium text-white/60 mb-1">Location</div>
+                <div>Lat: {newPoiCoords?.lat.toFixed(6)}</div>
+                <div>Lng: {newPoiCoords?.lng.toFixed(6)}</div>
+                <div className="mt-2 text-amber-400/70">Move the map to adjust position, then confirm</div>
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 pt-0">
+              <button onClick={() => { setAddingPoi(false); setNewPoiCoords(null); setNewPoiName(''); setNewPoiCategory('landmark') }}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition">
+                <X className="w-4 h-4" /> Cancel
+              </button>
+              <button onClick={async () => {
+                if (!newPoiName.trim() || !newPoiCoords) return
+                setSavingPoi(true)
+                try {
+                  const map = mapRef.current
+                  const center = map?.getCenter()
+                  const lat = center?.lat || newPoiCoords.lat
+                  const lng = center?.lng || newPoiCoords.lng
+                  
+                  const res = await fetch('/api/rider-pois', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      name: newPoiName.trim(),
+                      category: newPoiCategory,
+                      latitude: lat,
+                      longitude: lng,
+                      added_by: 'rider'
+                    })
+                  })
+                  if (res.ok) {
+                    const data = await res.json()
+                    if (data.poi) setRiderPois(prev => [data.poi, ...prev])
+                  }
+                } catch (e) {
+                  console.error('Failed to add POI:', e)
+                }
+                setSavingPoi(false)
+                setAddingPoi(false)
+                setNewPoiCoords(null)
+                setNewPoiName('')
+                setNewPoiCategory('landmark')
+              }} disabled={savingPoi || !newPoiName.trim()}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-amber-500/20 border border-amber-400/30 text-amber-400 font-bold text-sm active:scale-95 transition disabled:opacity-50">
+                {savingPoi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} {savingPoi ? 'Saving...' : 'Add Location'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Payment Method / Protocol Popup */}
