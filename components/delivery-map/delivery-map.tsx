@@ -540,7 +540,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ══════════════════════════════════════════════════════════════════════════
+      // ════════════════════════════════════════════════════════════���═════════════
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -1425,7 +1425,7 @@ export function DeliveryMap({
 // ── Pin placement ──
   const startPlacingPin = useCallback((pin: DeliveryPin) => {
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
-  setStreetSearch(''); setStreetResults([]) // Clear street search
+  setStreetSearch(''); setStreetResults([]); setNoStreetResults(false) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
   // Get current pitch from the map itself (most reliable)
   const currentPitch = mapRef.current?.getPitch() ?? 0
@@ -1450,35 +1450,49 @@ router.refresh()
   }, [placingPin, router])
   
   // ── Street/Building search for pin placement ──
+  const [noStreetResults, setNoStreetResults] = useState(false)
   const searchStreet = useCallback(async (query: string) => {
     if (!query.trim() || !mapboxToken || !placingPin) {
       setStreetResults([])
+      setNoStreetResults(false)
+      return
+    }
+    if (query.length < 2) {
+      setStreetResults([])
+      setNoStreetResults(false)
       return
     }
     setStreetSearching(true)
+    setNoStreetResults(false)
     try {
       // Get region coordinates for proximity search
       const regionMatch = regions.find(r => r.locality === placingPin.locality)
       const lat = regionMatch?.lat ?? -20.2
       const lng = regionMatch?.lng ?? 57.5
       
-      // Use Mapbox Geocoding API - streets, addresses, POIs with proximity to region
+      // Use Mapbox Geocoding API with bbox around Mauritius and proximity to region
       const proximity = `${lng},${lat}`
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=8&types=address,poi`
-      console.log('[v0] Street search - query:', query, 'region:', placingPin.locality, 'proximity:', proximity)
+      // Bbox covers Mauritius island
+      const bbox = '57.3,-20.6,57.85,-19.95'
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&bbox=${bbox}&proximity=${proximity}&limit=10&types=address,poi,place,neighborhood`
       const res = await fetch(url)
       const data = await res.json()
-      console.log('[v0] Street search results:', data.features?.length || 0, data.message || '')
       
-      if (data.features) {
+      if (data.features && data.features.length > 0) {
         setStreetResults(data.features.map((f: any) => ({
           place_name: f.place_name,
           center: f.center as [number, number],
           text: f.text || f.place_name.split(',')[0]
         })))
+        setNoStreetResults(false)
+      } else {
+        setStreetResults([])
+        setNoStreetResults(true)
       }
     } catch (e) {
       console.error('[v0] Street search error:', e)
+      setStreetResults([])
+      setNoStreetResults(true)
     }
     setStreetSearching(false)
   }, [mapboxToken, placingPin, regions])
@@ -1823,7 +1837,7 @@ router.refresh()
 
   // ══���════���══════════════════════════════════
   // ██  RENDER
-  // ══════════════════════════════════════════
+  // ══��═══════════════════════════════════════
   return (
     <div ref={mapContainerParentRef} className={cn('flex flex-col h-full bg-black relative overflow-hidden', className)}>
       <style dangerouslySetInnerHTML={{ __html: `
@@ -3265,21 +3279,28 @@ router.refresh()
                   <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
                 )}
               </div>
-              {/* Search Results Dropdown */}
-              {streetResults.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto">
-                  {streetResults.map((result, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => selectStreetResult(result)}
-                      className="w-full px-3 py-2.5 text-left hover:bg-white/10 active:bg-white/20 transition border-b border-white/5 last:border-0"
-                    >
-                      <p className="text-sm font-semibold text-white truncate">{result.text}</p>
-                      <p className="text-[10px] text-white/50 truncate">{result.place_name}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
+{/* Search Results Dropdown */}
+  {streetResults.length > 0 && (
+  <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto z-50">
+  {streetResults.map((result, idx) => (
+  <button
+  key={idx}
+  onClick={() => selectStreetResult(result)}
+  className="w-full px-3 py-2.5 text-left hover:bg-white/10 active:bg-white/20 transition border-b border-white/5 last:border-0"
+  >
+  <p className="text-sm font-semibold text-white truncate">{result.text}</p>
+  <p className="text-[10px] text-white/50 truncate">{result.place_name}</p>
+  </button>
+  ))}
+  </div>
+  )}
+  {/* No Results Message */}
+  {noStreetResults && streetSearch.length >= 2 && !streetSearching && (
+  <div className="absolute top-full left-0 right-0 mt-1 bg-black/95 backdrop-blur-xl border border-white/20 rounded-xl p-3 z-50">
+  <p className="text-sm text-white/50 text-center">No results for "{streetSearch}"</p>
+  <p className="text-[10px] text-white/30 text-center mt-1">Try a different street or building name</p>
+  </div>
+  )}
             </div>
           </div>
           <div className="absolute bottom-6 left-3 right-3 z-40 flex gap-2">
