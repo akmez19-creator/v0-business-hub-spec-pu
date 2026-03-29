@@ -975,25 +975,49 @@ map.on('load', () => {
       const color = catColors[poi.category] || catColors.landmark
       const letter = catLetters[poi.category] || 'L'
       
-      // Create a pole-style marker like region poles
+      // Simple Mapbox-style pin marker
       const el = document.createElement('div')
       el.className = 'rider-poi-marker'
-      el.style.cssText = `display:flex;flex-direction:column;align-items:center;cursor:pointer;perspective:200px;z-index:5;`
-      el.innerHTML = `
-        <div style="transform:rotateX(15deg);transform-origin:bottom center;display:flex;flex-direction:column;align-items:stretch;min-width:48px;max-width:110px;border-radius:5px;overflow:hidden;background:linear-gradient(180deg,${color}ee,${color}cc);border:1px solid rgba(255,255,255,0.2);box-shadow:0 6px 16px rgba(0,0,0,0.5),0 2px 4px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.15);">
-          <div style="padding:4px 6px 3px;text-align:center;">
-            <div style="font-size:9px;font-weight:800;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.5);">${poi.name}</div>
-          </div>
-          <div style="padding:0 6px 4px;text-align:center;">
-            <span style="font-size:7px;font-weight:600;color:rgba(255,255,255,0.7);letter-spacing:0.2px;text-transform:uppercase;">${poi.category}</span>
-          </div>
-        </div>
-        <div style="width:2px;height:20px;background:linear-gradient(180deg,${color}cc,${color}44,transparent);border-radius:1px;box-shadow:1px 0 3px rgba(0,0,0,0.3),-1px 0 3px rgba(0,0,0,0.3);"></div>
+      el.style.cssText = `
+        width: 24px; height: 24px; cursor: pointer; z-index: 5;
+        display: flex; align-items: center; justify-content: center;
+        background: ${color}; border: 2px solid white; border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg); box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        transition: transform 0.15s, box-shadow 0.15s;
       `
-      el.title = `${poi.name} (${poi.category})`
       
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.1)'; el.style.zIndex = '50' })
-      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '5' })
+      const inner = document.createElement('span')
+      inner.style.cssText = `transform: rotate(45deg); font-size: 10px; font-weight: 700; color: white;`
+      inner.textContent = letter
+      el.appendChild(inner)
+      
+      el.title = `${poi.name} - ${poi.category}`
+      
+      el.addEventListener('mouseenter', () => { 
+        el.style.transform = 'rotate(-45deg) scale(1.2)'; 
+        el.style.zIndex = '50'
+        el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)'
+      })
+      el.addEventListener('mouseleave', () => { 
+        el.style.transform = 'rotate(-45deg) scale(1)'; 
+        el.style.zIndex = '5'
+        el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.4)'
+      })
+      
+      // Show name on click
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const toast = document.createElement('div')
+        toast.style.cssText = `
+          position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%);
+          background: rgba(0,0,0,0.9); color: white; padding: 10px 16px;
+          border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        `
+        toast.textContent = poi.name
+        document.body.appendChild(toast)
+        setTimeout(() => toast.remove(), 2500)
+      })
       
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([poi.longitude, poi.latitude])
