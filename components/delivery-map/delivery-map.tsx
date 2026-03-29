@@ -1018,7 +1018,7 @@ map.on('load', () => {
             mapRef.current.easeTo({ 
               center: [lng, lat], 
               bearing: heading, 
-              pitch: 65, 
+              pitch: viewMode === '3d' ? 65 : 0, 
               zoom: speed > 30 ? 16 : 17,
               duration: speed > 15 ? 600 : 1000,
               easing: (t: number) => 1 - Math.pow(1 - t, 3) 
@@ -1876,7 +1876,7 @@ router.refresh()
 
       // Instant camera: jump straight to driver position, ready immediately
       const driverCenter: [number, number] = routeStart
-      m.jumpTo({ center: driverCenter, zoom: 17, pitch: 65, bearing: startBearing })
+      m.jumpTo({ center: driverCenter, zoom: 17, pitch: viewMode === '3d' ? 65 : 0, bearing: viewMode === '3d' ? startBearing : 0 })
       setNavReady(true)
     } catch (err: any) {
   alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
@@ -2092,7 +2092,7 @@ router.refresh()
               // Back to driver view
               setRouteOverview(false); routeOverviewRef.current = false
               if (driverLocation) {
-                mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 17, pitch: 65, bearing: driverHeading || 0, duration: 1800, essential: true })
+mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 17, pitch: viewMode === '3d' ? 65 : 0, bearing: viewMode === '3d' ? (driverHeading || 0) : 0, duration: 1800, essential: true })
               }
             } else {
               // Show full route overview with all stops
@@ -2116,7 +2116,7 @@ router.refresh()
           <button onClick={() => {
             if (!mapRef.current || !driverLocation) return
             setRouteOverview(false); routeOverviewRef.current = false
-            mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 17, pitch: 65, bearing: driverHeading || 0, duration: 1800, essential: true })
+            mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 17, pitch: viewMode === '3d' ? 65 : 0, bearing: viewMode === '3d' ? (driverHeading || 0) : 0, duration: 1800, essential: true })
           }}
             className="w-10 h-10 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center text-white/50 hover:text-cyan-400 active:scale-95 transition-all shadow-lg">
             <Locate className="w-4 h-4" />
@@ -2719,7 +2719,7 @@ router.refresh()
                 {selectedPin.source === 'geocoded' && <p className="text-[9px] text-orange-400 flex items-center gap-1 mt-0.5 font-mono"><MapPin className="w-2.5 h-2.5" />Approximate</p>}
                 {selectedPin.locationFlagged && <p className="text-[9px] text-red-400 font-bold flex items-center gap-1 mt-0.5 animate-pulse text-glow"><Ban className="w-2.5 h-2.5" />Location flagged</p>}
               </div>
-              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="text-white/20 hover:text-cyan-400 transition" title="Edit pin location"><Pencil className="w-3.5 h-3.5" /></button>
+              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition" title="Edit pin location"><Pencil className="w-4 h-4" /></button>
               <button onClick={() => setSelectedPin(null)} className="text-white/20 hover:text-cyan-400 transition"><X className="w-4 h-4" /></button>
             </div>
             <div className="glow-line" />
