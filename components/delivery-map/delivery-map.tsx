@@ -772,7 +772,8 @@ map.on('load', () => {
             if (pin) { 
               setSelectedPin(pin); setSelectedRegion(null); 
               // Use region override coordinates if available, otherwise use pin's original coords
-              const override = regionOverridesRef.current[pin.locality]
+              const locality = pin.locality || ''
+              const override = regionOverridesRef.current[locality]
               const flyLng = override ? override.lng : pin.lng
               const flyLat = override ? override.lat : pin.lat
               map.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) 
