@@ -1428,6 +1428,7 @@ export function DeliveryMap({
   const regionMatch = regions.find(r => r.locality === pin.locality)
   // Respect current viewMode - use pitch 60 only if in 3D mode
   const currentPitch = viewMode === '3d' ? 60 : 0
+  console.log('[v0] startPlacingPin - viewMode:', viewMode, 'currentPitch:', currentPitch, 'regionMatch:', regionMatch?.locality)
   if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
   }, [regions, viewMode])
 
@@ -1466,8 +1467,10 @@ router.refresh()
       
       // Use Mapbox Geocoding API - ONLY streets, addresses, POIs (NO localities/regions)
       const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&bbox=${bbox}&limit=8&types=address,poi`
+      console.log('[v0] Street search URL:', url)
       const res = await fetch(url)
       const data = await res.json()
+      console.log('[v0] Street search results:', data.features?.length || 0, 'features', data)
       
       if (data.features) {
         setStreetResults(data.features.map((f: any) => ({
