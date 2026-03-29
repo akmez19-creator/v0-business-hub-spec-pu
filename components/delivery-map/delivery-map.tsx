@@ -2231,30 +2231,35 @@ router.refresh()
       {/* Map container - GPU accelerated for smooth zoom */}
       <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
       
-      {/* Center pin marker when adding POI - fixed position in viewport center */}
+      {/* Center pin marker when adding POI - truly fixed in screen center */}
       {addingPoi && (
-        <div className="fixed inset-0 pointer-events-none z-[70]" style={{ top: 0, left: 0, right: 0, bottom: 0 }}>
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 flex flex-col items-center" style={{ marginTop: '-160px' }}>
+        <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', marginTop: '-80px', pointerEvents: 'none', zIndex: 70 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             {/* Name label above pin */}
-            {newPoiName && (
-              <div className="mb-2 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold shadow-lg whitespace-nowrap max-w-[150px] truncate">
-                {newPoiName}
-              </div>
-            )}
-            {!newPoiName && (
-              <div className="mb-2 px-3 py-1.5 rounded-lg bg-white/20 text-white/60 text-xs italic shadow-lg">
-                Enter name below
-              </div>
-            )}
+            <div style={{ 
+              marginBottom: '8px', padding: '6px 12px', borderRadius: '8px', 
+              background: newPoiName ? '#f59e0b' : 'rgba(255,255,255,0.2)', 
+              color: newPoiName ? 'white' : 'rgba(255,255,255,0.6)',
+              fontSize: '12px', fontWeight: newPoiName ? '700' : '400',
+              fontStyle: newPoiName ? 'normal' : 'italic',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+            }}>
+              {newPoiName || 'Enter name below'}
+            </div>
             {/* Pin marker */}
-            <div className="w-10 h-10 bg-amber-500 border-2 border-white flex items-center justify-center shadow-xl" 
-              style={{ borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)', boxShadow: '0 4px 20px rgba(245, 158, 11, 0.5)' }}>
-              <MapPin className="w-5 h-5 text-white" style={{ transform: 'rotate(45deg)' }} />
+            <div style={{ 
+              width: '40px', height: '40px', background: '#f59e0b', border: '3px solid white',
+              borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 20px rgba(245, 158, 11, 0.5)'
+            }}>
+              <MapPin style={{ width: '20px', height: '20px', color: 'white', transform: 'rotate(45deg)' }} />
             </div>
             {/* Pole */}
-            <div className="w-1 h-10 bg-gradient-to-b from-amber-500 to-transparent -mt-1" />
-            {/* Ground pulse */}
-            <div className="w-4 h-4 rounded-full bg-amber-500/40 border-2 border-amber-400 animate-ping" />
+            <div style={{ width: '3px', height: '40px', background: 'linear-gradient(180deg, #f59e0b, transparent)', marginTop: '-2px' }} />
+            {/* Ground dot */}
+            <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.4)', border: '2px solid #f59e0b' }} />
           </div>
         </div>
       )}
