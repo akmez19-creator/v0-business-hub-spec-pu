@@ -975,38 +975,24 @@ map.on('load', () => {
       const color = catColors[poi.category] || catColors.landmark
       const letter = catLetters[poi.category] || 'L'
       
-      // Create a pin-style marker with name label
+      // Create a pole-style marker like region poles
       const el = document.createElement('div')
       el.className = 'rider-poi-marker'
-      el.style.cssText = `
-        display: flex; flex-direction: column; align-items: center;
-        cursor: pointer; z-index: 5; transition: transform 0.15s;
+      el.style.cssText = `display:flex;flex-direction:column;align-items:center;cursor:pointer;perspective:200px;z-index:5;`
+      el.innerHTML = `
+        <div style="transform:rotateX(15deg);transform-origin:bottom center;display:flex;flex-direction:column;align-items:stretch;min-width:48px;max-width:110px;border-radius:5px;overflow:hidden;background:linear-gradient(180deg,${color}ee,${color}cc);border:1px solid rgba(255,255,255,0.2);box-shadow:0 6px 16px rgba(0,0,0,0.5),0 2px 4px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.15);">
+          <div style="padding:4px 6px 3px;text-align:center;">
+            <div style="font-size:9px;font-weight:800;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.5);">${poi.name}</div>
+          </div>
+          <div style="padding:0 6px 4px;text-align:center;">
+            <span style="font-size:7px;font-weight:600;color:rgba(255,255,255,0.7);letter-spacing:0.2px;text-transform:uppercase;">${poi.category}</span>
+          </div>
+        </div>
+        <div style="width:2px;height:20px;background:linear-gradient(180deg,${color}cc,${color}44,transparent);border-radius:1px;box-shadow:1px 0 3px rgba(0,0,0,0.3),-1px 0 3px rgba(0,0,0,0.3);"></div>
       `
-      
-      // Name label (always visible)
-      const label = document.createElement('div')
-      label.style.cssText = `
-        background: ${color}; color: white; padding: 2px 6px;
-        border-radius: 4px; font-size: 10px; font-weight: 600;
-        white-space: nowrap; max-width: 120px; overflow: hidden;
-        text-overflow: ellipsis; box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-        border: 1px solid rgba(255,255,255,0.3);
-      `
-      label.textContent = poi.name
-      
-      // Pin dot below the label
-      const pin = document.createElement('div')
-      pin.style.cssText = `
-        width: 8px; height: 8px; border-radius: 50%;
-        background: ${color}; border: 2px solid white;
-        margin-top: 2px; box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-      `
-      
-      el.appendChild(label)
-      el.appendChild(pin)
       el.title = `${poi.name} (${poi.category})`
       
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.15)'; el.style.zIndex = '50' })
+      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.1)'; el.style.zIndex = '50' })
       el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '5' })
       
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
