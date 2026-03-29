@@ -6,7 +6,7 @@ import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
-  Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw,
+  Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
   Camera, Loader2, ImageIcon, Pencil,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -975,37 +975,27 @@ map.on('load', () => {
       const color = catColors[poi.category] || catColors.landmark
       const letter = catLetters[poi.category] || 'L'
       
+      // Create a pole-style marker like region poles
       const el = document.createElement('div')
       el.className = 'rider-poi-marker'
-      el.style.cssText = `
-        display: flex; align-items: center; justify-content: center;
-        width: 20px; height: 20px; border-radius: 50%;
-        background: ${color}; border: 2px solid white;
-        font-size: 9px; font-weight: bold; color: white; cursor: pointer;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-        transition: transform 0.15s; z-index: 5;
+      el.style.cssText = `display:flex;flex-direction:column;align-items:center;cursor:pointer;perspective:200px;z-index:5;`
+      el.innerHTML = `
+        <div style="transform:rotateX(15deg);transform-origin:bottom center;display:flex;flex-direction:column;align-items:stretch;min-width:48px;max-width:110px;border-radius:5px;overflow:hidden;background:linear-gradient(180deg,${color}ee,${color}cc);border:1px solid rgba(255,255,255,0.2);box-shadow:0 6px 16px rgba(0,0,0,0.5),0 2px 4px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.15);">
+          <div style="padding:4px 6px 3px;text-align:center;">
+            <div style="font-size:9px;font-weight:800;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.3px;text-shadow:0 1px 2px rgba(0,0,0,0.5);">${poi.name}</div>
+          </div>
+          <div style="padding:0 6px 4px;text-align:center;">
+            <span style="font-size:7px;font-weight:600;color:rgba(255,255,255,0.7);letter-spacing:0.2px;text-transform:uppercase;">${poi.category}</span>
+          </div>
+        </div>
+        <div style="width:2px;height:20px;background:linear-gradient(180deg,${color}cc,${color}44,transparent);border-radius:1px;box-shadow:1px 0 3px rgba(0,0,0,0.3),-1px 0 3px rgba(0,0,0,0.3);"></div>
       `
-      el.textContent = letter
-      el.title = poi.name
+      el.title = `${poi.name} (${poi.category})`
       
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.4)'; el.style.zIndex = '50' })
+      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.1)'; el.style.zIndex = '50' })
       el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '5' })
       
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const toast = document.createElement('div')
-        toast.style.cssText = `
-          position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%);
-          background: rgba(0,0,0,0.9); color: white; padding: 10px 20px;
-          border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4); text-align: center;
-        `
-        toast.innerHTML = `<div style="font-weight:600">${poi.name}</div><div style="font-size:11px;opacity:0.7;margin-top:2px">${poi.locality || poi.category}</div>`
-        document.body.appendChild(toast)
-        setTimeout(() => toast.remove(), 3000)
-      })
-      
-      const marker = new mapboxgl.Marker({ element: el })
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([poi.longitude, poi.latitude])
         .addTo(map)
       
@@ -2826,9 +2816,11 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               <ExternalLink className="w-4 h-4" />
             </button>
             <button onClick={() => setShowRiderPois(!showRiderPois)}
-              className={cn('btn-holo w-11 h-11 flex items-center justify-center transition text-[9px] font-bold', showRiderPois ? 'text-green-400' : 'text-white/40 hover:text-green-400')}
-              title="Toggle POI markers">
-              POI
+              className={cn('btn-holo h-11 px-3 flex items-center justify-center gap-1.5 transition rounded-xl', 
+                showRiderPois ? 'bg-green-500/20 border-green-400/40 text-green-400' : 'text-white/40 hover:text-green-400')}
+              title="Show/Hide landmarks">
+              <Eye className={cn("w-4 h-4", !showRiderPois && "opacity-50")} />
+              <span className="text-[10px] font-bold">{showRiderPois ? 'ON' : 'OFF'}</span>
             </button>
             <button onClick={() => {
               setAddingPoi(true)
@@ -2838,9 +2830,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 setNewPoiCoords({ lat: center.lat, lng: center.lng })
               }
             }}
-              className="btn-holo w-11 h-11 flex items-center justify-center transition text-white/40 hover:text-amber-400"
-              title="Add new POI location">
+              className="btn-holo h-11 px-3 flex items-center justify-center gap-1.5 transition rounded-xl text-white/40 hover:text-amber-400 hover:bg-amber-500/10 hover:border-amber-400/30"
+              title="Pin a new location">
               <MapPin className="w-4 h-4" />
+              <span className="text-[10px] font-bold">PIN</span>
             </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
