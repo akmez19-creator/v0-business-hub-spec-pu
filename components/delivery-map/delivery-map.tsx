@@ -1464,26 +1464,60 @@ router.refresh()
     }
     setStreetSearching(true)
     setNoStreetResults(false)
+    
+    const queryLower = query.toLowerCase()
+    const allResults: { place_name: string; center: [number, number]; text: string }[] = []
+    
     try {
-      // Get region coordinates for proximity search
+      // 1. Search POIs directly from rendered map features (finds PKL Autoparts, etc.)
+      if (mapRef.current) {
+        const features = mapRef.current.queryRenderedFeatures(undefined, {
+          layers: ['poi-label', 'poi-label-minor', 'road-label', 'road-label-simple']
+        })
+        
+        const seen = new Set<string>()
+        features.forEach((f: any) => {
+          const name = f.properties?.name || f.properties?.name_en || ''
+          if (name && name.toLowerCase().includes(queryLower) && !seen.has(name.toLowerCase())) {
+            seen.add(name.toLowerCase())
+            const coords = f.geometry?.coordinates
+            if (coords && coords.length >= 2) {
+              allResults.push({
+                text: name,
+                place_name: `${name}, Mauritius`,
+                center: [coords[0], coords[1]] as [number, number]
+              })
+            }
+          }
+        })
+      }
+      
+      // 2. Also search via Mapbox Geocoding API for addresses/streets
       const regionMatch = regions.find(r => r.locality === placingPin.locality)
       const lat = regionMatch?.lat ?? -20.2
       const lng = regionMatch?.lng ?? 57.5
-      
-      // Use Mapbox Geocoding API with bbox around Mauritius and proximity to region
       const proximity = `${lng},${lat}`
-      // Bbox covers Mauritius island
       const bbox = '57.3,-20.6,57.85,-19.95'
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&bbox=${bbox}&proximity=${proximity}&limit=10&types=address,poi,place,neighborhood`
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&bbox=${bbox}&proximity=${proximity}&limit=8&types=address,poi,place`
       const res = await fetch(url)
       const data = await res.json()
       
-      if (data.features && data.features.length > 0) {
-        setStreetResults(data.features.map((f: any) => ({
-          place_name: f.place_name,
-          center: f.center as [number, number],
-          text: f.text || f.place_name.split(',')[0]
-        })))
+      if (data.features) {
+        data.features.forEach((f: any) => {
+          const text = f.text || f.place_name.split(',')[0]
+          // Avoid duplicates
+          if (!allResults.some(r => r.text.toLowerCase() === text.toLowerCase())) {
+            allResults.push({
+              place_name: f.place_name,
+              center: f.center as [number, number],
+              text
+            })
+          }
+        })
+      }
+      
+      if (allResults.length > 0) {
+        setStreetResults(allResults.slice(0, 10))
         setNoStreetResults(false)
       } else {
         setStreetResults([])
