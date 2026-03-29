@@ -1427,8 +1427,9 @@ export function DeliveryMap({
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
-  // Use ref to get current viewMode (avoids stale closure)
-  const currentPitch = viewModeRef.current === '3d' ? 60 : 0
+  // Get current pitch from the map itself (most reliable)
+  const currentPitch = mapRef.current?.getPitch() ?? 0
+  console.log('[v0] startPlacingPin - mapPitch:', currentPitch, 'viewModeRef:', viewModeRef.current)
   if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
   }, [regions])
 
@@ -1464,8 +1465,10 @@ router.refresh()
       // Use Mapbox Geocoding API - streets, addresses, POIs with proximity to region
       const proximity = `${lng},${lat}`
       const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=8&types=address,poi`
+      console.log('[v0] Street search - query:', query, 'region:', placingPin.locality, 'proximity:', proximity)
       const res = await fetch(url)
       const data = await res.json()
+      console.log('[v0] Street search results:', data.features?.length || 0, data.message || '')
       
       if (data.features) {
         setStreetResults(data.features.map((f: any) => ({
@@ -1490,8 +1493,8 @@ router.refresh()
   // Select a street result and fly to it
   const selectStreetResult = useCallback((result: { center: [number, number]; place_name: string }) => {
     if (!mapRef.current) return
-    // Use ref to get current viewMode (avoids stale closure)
-    const currentPitch = viewModeRef.current === '3d' ? 60 : 0
+    // Get current pitch from the map itself (most reliable)
+    const currentPitch = mapRef.current.getPitch()
     mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: currentPitch, duration: 1200, essential: true })
     setStreetResults([])
     setStreetSearch('')
