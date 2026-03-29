@@ -124,7 +124,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
 
   // ══════════════════════════════════════════════════════════════════════════
   // MOKA DISTRICT (47 regions)
-  // ══════════════════════�����════════════════════════════════════════���══════════
+  // ══════════════════════������════════════════════════════════════════���══════════
   'Alma': { lat: -20.240900, lng: 57.574580 },
   'Bagatelle': { lat: -20.22400, lng: 57.49770 },
   'Bagatelle Mall': { lat: -20.224451, lng: 57.497144 },
@@ -456,7 +456,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   // RIVIERE NOIRE DISTRICT (40 regions)
   // ══════════════════════════════════════════════════════════════════════════
   'Albion': { lat: -20.211700, lng: 57.400800 },
-  'Bambous': { lat: -20.256670, lng: 57.406110 },
+  'Bambous': { lat: -20.265564, lng: 57.416365 },
   'Bambous Medine': { lat: -20.256670, lng: 57.406110 },
   'Bassin': { lat: -20.28500, lng: 57.47300 },
   'Beau Songes': { lat: -20.278060, lng: 57.419440 },
