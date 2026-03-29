@@ -261,6 +261,7 @@ export function DeliveryMap({
   const setPlacingRegionRef = useRef(setPlacingRegion)
   setPlacingRegionRef.current = setPlacingRegion
   const [regionOverrides, setRegionOverrides] = useState<Record<string, { lat: number; lng: number }>>({})
+  const regionOverridesRef = useRef<Record<string, { lat: number; lng: number }>>({})
   const [savingRegion, setSavingRegion] = useState(false)
   
   // Fetch region coordinate overrides on mount
@@ -268,10 +269,18 @@ export function DeliveryMap({
     fetch('/api/region-overrides')
       .then(res => res.json())
       .then(data => {
-        if (data.overrides) setRegionOverrides(data.overrides)
+        if (data.overrides) {
+          setRegionOverrides(data.overrides)
+          regionOverridesRef.current = data.overrides
+        }
       })
       .catch(() => {})
   }, [])
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    regionOverridesRef.current = regionOverrides
+  }, [regionOverrides])
   
   // Rider POIs - crowdsourced landmarks
   const [riderPois, setRiderPois] = useState<{ id: string; name: string; category: string; latitude: number; longitude: number; locality: string; verified: boolean }[]>([])
@@ -763,7 +772,7 @@ map.on('load', () => {
             if (pin) { 
               setSelectedPin(pin); setSelectedRegion(null); 
               // Use region override coordinates if available, otherwise use pin's original coords
-              const override = regionOverrides[pin.locality]
+              const override = regionOverridesRef.current[pin.locality]
               const flyLng = override ? override.lng : pin.lng
               const flyLat = override ? override.lat : pin.lat
               map.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) 
