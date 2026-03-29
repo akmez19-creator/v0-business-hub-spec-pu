@@ -7,7 +7,7 @@ import {
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
   Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw,
-  Camera, Loader2, ImageIcon,
+  Camera, Loader2, ImageIcon, Pencil,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof } from '@/lib/delivery-actions'
@@ -2717,6 +2717,7 @@ router.refresh()
                 {selectedPin.source === 'geocoded' && <p className="text-[9px] text-orange-400 flex items-center gap-1 mt-0.5 font-mono"><MapPin className="w-2.5 h-2.5" />Approximate</p>}
                 {selectedPin.locationFlagged && <p className="text-[9px] text-red-400 font-bold flex items-center gap-1 mt-0.5 animate-pulse text-glow"><Ban className="w-2.5 h-2.5" />Location flagged</p>}
               </div>
+              <button onClick={() => { startPinPlacement(selectedPin); }} className="text-white/20 hover:text-cyan-400 transition" title="Edit pin location"><Pencil className="w-3.5 h-3.5" /></button>
               <button onClick={() => setSelectedPin(null)} className="text-white/20 hover:text-cyan-400 transition"><X className="w-4 h-4" /></button>
             </div>
             <div className="glow-line" />
