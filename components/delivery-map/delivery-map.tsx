@@ -531,18 +531,7 @@ export function DeliveryMap({
         logoPosition: 'bottom-left',
         attributionControl: false,
         
-        // ── Style Config ──
-        config: { 
-          basemap: { 
-            lightPreset: 'dusk', 
-            show3dObjects: false, 
-            showPlaceLabels: true, 
-            showRoadLabels: true, 
-            showPointOfInterestLabels: true, // Show POIs for better navigation
-            showTransitLabels: true,
-            // Road labels now show at all zoom levels for better rider navigation
-          } 
-        },
+        // dark-v11 style has POIs built-in
       })
       
       // ══════════════════════════════════════════════════════════════════════════
@@ -618,26 +607,7 @@ export function DeliveryMap({
       map.once('idle', preloadTiles)
 
       // ── Static dusk lighting with enhanced road labels for rider navigation ──
-      map.on('style.load', () => {
-        try { map.setConfigProperty('basemap', 'showPlaceLabels', true) } catch {}
-        try { map.setConfigProperty('basemap', 'showRoadLabels', true) } catch {}
-        try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', true) } catch {}
-        try { map.setConfigProperty('basemap', 'showTransitLabels', true) } catch {}
-        
-        // Enhanced road label visibility for rider navigation in dusk mode
-        // Make street names more prominent at all zoom levels
-        try {
-          // Boost road label text size and halo for better visibility
-          const roadLabelLayers = ['road-label', 'road-label-simple', 'road-number-shield', 'road-exit-shield']
-          roadLabelLayers.forEach(layerId => {
-            if (map.getLayer(layerId)) {
-              try {
-                map.setPaintProperty(layerId, 'text-halo-width', 2)
-                map.setPaintProperty(layerId, 'text-halo-color', 'rgba(0,0,0,0.9)')
-                map.setPaintProperty(layerId, 'text-opacity', 1)
-              } catch {}
-            }
-          })
+// dark-v11 has POIs enabled by default
           
           // Enhance POI labels visibility - make them brighter and more visible
           const poiLayers = ['poi-label']
@@ -761,7 +731,7 @@ map.on('load', () => {
       // Mini-map
       if (miniMapRef.current) {
         const mini = new (mbgl()).Map({
-          container: miniMapRef.current, style: 'mapbox://styles/mapbox/standard',
+          container: miniMapRef.current, style: 'mapbox://styles/mapbox/dark-v11',
           center, zoom: 14, interactive: false, attributionControl: false,
           config: { basemap: { lightPreset: 'dusk', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
         })
