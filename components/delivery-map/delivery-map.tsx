@@ -269,14 +269,12 @@ export function DeliveryMap({
     fetch('/api/region-overrides')
       .then(res => res.json())
       .then(data => {
-        console.log('[v0] Region overrides API response:', data)
         if (data.overrides) {
-          console.log('[v0] Setting overrides:', JSON.stringify(data.overrides))
           setRegionOverrides(data.overrides)
           regionOverridesRef.current = data.overrides
         }
       })
-      .catch((err) => console.error('[v0] Failed to load overrides:', err))
+      .catch(() => {})
   }, [])
   
   // Keep ref in sync with state
@@ -776,12 +774,8 @@ map.on('load', () => {
               // Use region override coordinates if available, otherwise use pin's original coords
               const locality = pin.locality || ''
               const override = regionOverridesRef.current[locality]
-              console.log('[v0] Pin clicked - locality:', locality)
-              console.log('[v0] All overrides:', JSON.stringify(regionOverridesRef.current))
-              console.log('[v0] Found override:', override)
               const flyLng = override ? override.lng : pin.lng
               const flyLat = override ? override.lat : pin.lat
-              console.log('[v0] Flying to:', flyLat, flyLng, 'usingOverride:', !!override)
               map.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) 
             }
           }
@@ -3740,8 +3734,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     body: JSON.stringify({ locality: placingRegion.locality, lat: newLat, lng: newLng })
                   })
                   if (res.ok) {
-                    // Update local state to immediately reflect the change
-                    setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: { lat: newLat, lng: newLng } }))
+                    // Update BOTH state AND ref immediately so flyTo uses new coords right away
+                    const newOverride = { lat: newLat, lng: newLng }
+                    regionOverridesRef.current = { ...regionOverridesRef.current, [placingRegion.locality]: newOverride }
+                    setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: newOverride }))
                   }
                 } catch (e) {
                   console.error('Failed to save region override:', e)

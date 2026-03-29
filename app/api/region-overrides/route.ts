@@ -13,9 +13,6 @@ export async function GET() {
       .from('region_coordinate_overrides')
       .select('locality, lat, lng')
     
-    console.log('[region-overrides] Raw data from DB:', JSON.stringify(data))
-    console.log('[region-overrides] Error:', error)
-    
     if (error) {
       // Table might not exist, return empty
       if (error.code === '42P01') {
@@ -29,8 +26,6 @@ export async function GET() {
     for (const row of data || []) {
       overrides[row.locality] = { lat: row.lat, lng: row.lng }
     }
-    
-    console.log('[region-overrides] Returning overrides:', JSON.stringify(overrides))
     
     return NextResponse.json({ overrides }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
