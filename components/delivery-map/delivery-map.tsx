@@ -542,13 +542,13 @@ export function DeliveryMap({
         // ── UI ──
         logoPosition: 'bottom-left',
         attributionControl: false,
-        
-        map.on('style.load', () => {
+      })
+      
+      map.on('style.load', () => {
         try { map.setConfigProperty('basemap', 'showPlaceLabels', true) } catch {}
         try { map.setConfigProperty('basemap', 'showRoadLabels', true) } catch {}
         try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', true) } catch {}
         try { map.setConfigProperty('basemap', 'showTransitLabels', true) } catch {}
-      })
       })
       
       // ══════════════════════════════════════════════════════════════════════════
