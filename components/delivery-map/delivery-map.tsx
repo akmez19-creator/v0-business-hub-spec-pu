@@ -948,16 +948,16 @@ map.on('load', () => {
     
     // Icon symbols by category
     const categorySymbols: Record<string, string> = {
-      school: '🏫', mosque: '🕌', temple: '🛕', church: '⛪',
-      restaurant: '🍽️', cafe: '☕', fast_food: '🍔',
-      supermarket: '🛒', convenience: '🏪', shop: '🛍️',
-      hospital: '🏥', clinic: '🏥', pharmacy: '💊',
-      bank: '🏦', petrol: '⛽', police: '👮'
+      school: 'S', mosque: 'M', temple: 'T', church: 'C',
+      restaurant: 'R', cafe: 'F', fast_food: 'F',
+      supermarket: 'G', convenience: 'G', shop: 'S',
+      hospital: 'H', clinic: 'H', pharmacy: 'P',
+      bank: 'B', petrol: 'G', police: 'P'
     }
     
     pois.forEach(poi => {
       const color = typeColors[poi.type] || typeColors.other
-      const symbol = categorySymbols[poi.category] || '📍'
+      const symbol = categorySymbols[poi.category] || 'X'
       
       const el = document.createElement('div')
       el.className = 'poi-marker'
@@ -985,7 +985,7 @@ map.on('load', () => {
           border-radius: 8px; font-size: 12px; font-weight: 500; z-index: 9999;
           box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         `
-        popup.textContent = `${symbol} ${poi.name}`
+        popup.textContent = poi.name
         document.body.appendChild(popup)
         setTimeout(() => popup.remove(), 2500)
       })
