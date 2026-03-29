@@ -258,6 +258,8 @@ export function DeliveryMap({
   const [locating, setLocating] = useState(false)
   const [placingPin, setPlacingPin] = useState<DeliveryPin | null>(null)
   const [placingRegion, setPlacingRegion] = useState<{ locality: string; lat: number; lng: number } | null>(null)
+  const setPlacingRegionRef = useRef(setPlacingRegion)
+  setPlacingRegionRef.current = setPlacingRegion
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -876,7 +878,7 @@ map.on('load', () => {
           const locality = editBtn.dataset.locality || ''
           const lat = parseFloat(editBtn.dataset.lat || '0')
           const lng = parseFloat(editBtn.dataset.lng || '0')
-          setPlacingRegion({ locality, lat, lng })
+          setPlacingRegionRef.current({ locality, lat, lng })
           mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 800 })
         })
       }
@@ -924,7 +926,7 @@ map.on('load', () => {
 
   // ══════════════════════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ══════════════════════════════════════════════════════════════════════════
+  // ═════════════��════════════════════════════════════════════════════════════
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
@@ -2838,13 +2840,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 <p className="text-[11px] text-white/40">{selectedRegion.count} deliveries</p>
               </div>
               <button onClick={() => { 
-                const coords = prompt(`Edit coordinates for ${selectedRegion.locality}\n\nCurrent: ${selectedRegion.lat}, ${selectedRegion.lng}\n\nTo get new coordinates:\n1. Right-click on the map at the desired location\n2. Copy coordinates from there\n3. Or enter manually as: lat, lng`);
-                if (coords) {
-                  const [lat, lng] = coords.split(',').map(s => parseFloat(s.trim()));
-                  if (!isNaN(lat) && !isNaN(lng)) {
-                    alert(`New coordinates for "${selectedRegion.locality}":\n\nLat: ${lat}\nLng: ${lng}\n\nPlease tell me to update these coordinates in the regions file.`);
-                  }
-                }
+                setPlacingRegion({ locality: selectedRegion.locality, lat: selectedRegion.lat, lng: selectedRegion.lng });
+                setSelectedRegion(null);
               }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all" title="Edit pole location"><Pencil className="w-4 h-4" /></button>
               <button onClick={() => setSelectedRegion(null)} className="shrink-0 text-white/30 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
