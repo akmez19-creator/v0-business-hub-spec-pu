@@ -732,7 +732,6 @@ map.on('load', () => {
         const mini = new (mbgl()).Map({
           container: miniMapRef.current, style: 'mapbox://styles/mapbox/dark-v11',
           center, zoom: 14, interactive: false, attributionControl: false,
-          config: { basemap: { lightPreset: 'dusk', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false } },
         })
         miniMapInstance.current = mini
         // RAF-batched mini-map sync - zero jank
@@ -926,7 +925,7 @@ map.on('load', () => {
     setTimeout(() => { if (!done) { setLocating(false); done = true; navigator.geolocation.clearWatch(wid) } }, 8000)
   }, [updateDriverMarker, locating])
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ════════════════���═════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
   // ═══���═════════��════════════════════════════════════════════════════════════
   const kalmanRef = useRef<{
