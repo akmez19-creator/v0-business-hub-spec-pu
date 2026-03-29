@@ -2,7 +2,6 @@
 // DeliveryMap v2.1 — No weather effects, no neon animations. Clean Mapbox-native route display.
 // Dusk lighting, styled DOM driver marker, GeoJSON pins.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
@@ -307,6 +306,7 @@ export function DeliveryMap({
     map.on('move', updateCoords)
     return () => { map.off('move', updateCoords) }
   }, [addingPoi])
+  
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -2232,42 +2232,26 @@ router.refresh()
       {/* Map container - GPU accelerated for smooth zoom */}
       <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
       
-      {/* Center pin marker when adding POI - rendered via portal to document.body */}
-      {addingPoi && typeof document !== 'undefined' && createPortal(
-        <div style={{ 
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 9999
-        }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '160px' }}>
-            {/* Name label above pin */}
-            <div style={{ 
-              marginBottom: '8px', padding: '6px 12px', borderRadius: '8px', 
-              background: newPoiName ? '#f59e0b' : 'rgba(255,255,255,0.2)', 
-              color: newPoiName ? 'white' : 'rgba(255,255,255,0.6)',
-              fontSize: '12px', fontWeight: newPoiName ? '700' : '400',
-              fontStyle: newPoiName ? 'normal' : 'italic',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-            }}>
-              {newPoiName || 'Enter name below'}
+      {/* Center pin when adding POI - simple crosshair approach */}
+      {addingPoi && (
+        <div className="absolute inset-0 pointer-events-none z-40 flex items-center justify-center" style={{ paddingBottom: '200px' }}>
+          <div className="flex flex-col items-center">
+            {/* Name label */}
+            <div className={`mb-2 px-3 py-1.5 rounded-lg shadow-lg text-xs font-semibold ${newPoiName ? 'bg-amber-500 text-white' : 'bg-black/60 text-white/60 italic'}`}>
+              {newPoiName || 'Type name below'}
             </div>
-            {/* Pin marker */}
-            <div style={{ 
-              width: '40px', height: '40px', background: '#f59e0b', border: '3px solid white',
-              borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 20px rgba(245, 158, 11, 0.5)'
-            }}>
-              <MapPin style={{ width: '20px', height: '20px', color: 'white', transform: 'rotate(45deg)' }} />
-            </div>
-            {/* Pole */}
-            <div style={{ width: '3px', height: '40px', background: 'linear-gradient(180deg, #f59e0b, transparent)', marginTop: '-2px' }} />
-            {/* Ground dot */}
-            <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.4)', border: '2px solid #f59e0b' }} />
+            {/* Simple pin icon */}
+            <svg width="32" height="42" viewBox="0 0 32 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 26 16 26s16-14 16-26c0-8.84-7.16-16-16-16z" fill="#f59e0b"/>
+              <circle cx="16" cy="16" r="8" fill="white"/>
+              <circle cx="16" cy="16" r="4" fill="#f59e0b"/>
+            </svg>
+            {/* Vertical line to ground */}
+            <div className="w-0.5 h-8 bg-gradient-to-b from-amber-500 to-transparent" />
+            {/* Ground pulse */}
+            <div className="w-3 h-3 rounded-full bg-amber-500/50 border-2 border-amber-400 animate-pulse" />
           </div>
-        </div>,
-        document.body
+        </div>
       )}
 
       {/* Mini-map radar */}
