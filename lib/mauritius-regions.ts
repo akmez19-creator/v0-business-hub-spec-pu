@@ -124,7 +124,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
 
   // ══════════════════════════════════════════════════════════════════════════
   // MOKA DISTRICT (47 regions)
-  // ══════════════════════��════════════════════════════════════════���══════════
+  // ══════════════════════���════════════════════════════════════════���══════════
   'Alma': { lat: -20.240900, lng: 57.574580 },
   'Bagatelle': { lat: -20.22400, lng: 57.49770 },
   'Bagatelle Mall': { lat: -20.224451, lng: 57.497144 },
@@ -285,7 +285,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'Hermitage': { lat: -20.280000, lng: 57.530000 },
   'Highlands': { lat: -20.279230, lng: 57.518020 },
   'Hollyrood No.1': { lat: -20.309720, lng: 57.467500 },
-  'Hollyrood No.2': { lat: -20.309720, lng: 57.467500 },
+  'Hollyrood No.2': { lat: -20.311111, lng: 57.468889 },
   'Jumbo Phoenix': { lat: -20.298730, lng: 57.504880 },
   'La Brasserie': { lat: -20.335877, lng: 57.513178 },
   'La Caverne': { lat: -20.301370, lng: 57.480160 },
