@@ -975,37 +975,41 @@ map.on('load', () => {
       const color = catColors[poi.category] || catColors.landmark
       const letter = catLetters[poi.category] || 'L'
       
+      // Create a pin-style marker with name label
       const el = document.createElement('div')
       el.className = 'rider-poi-marker'
       el.style.cssText = `
-        display: flex; align-items: center; justify-content: center;
-        width: 20px; height: 20px; border-radius: 50%;
-        background: ${color}; border: 2px solid white;
-        font-size: 9px; font-weight: bold; color: white; cursor: pointer;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-        transition: transform 0.15s; z-index: 5;
+        display: flex; flex-direction: column; align-items: center;
+        cursor: pointer; z-index: 5; transition: transform 0.15s;
       `
-      el.textContent = letter
-      el.title = poi.name
       
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.4)'; el.style.zIndex = '50' })
+      // Name label (always visible)
+      const label = document.createElement('div')
+      label.style.cssText = `
+        background: ${color}; color: white; padding: 2px 6px;
+        border-radius: 4px; font-size: 10px; font-weight: 600;
+        white-space: nowrap; max-width: 120px; overflow: hidden;
+        text-overflow: ellipsis; box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        border: 1px solid rgba(255,255,255,0.3);
+      `
+      label.textContent = poi.name
+      
+      // Pin dot below the label
+      const pin = document.createElement('div')
+      pin.style.cssText = `
+        width: 8px; height: 8px; border-radius: 50%;
+        background: ${color}; border: 2px solid white;
+        margin-top: 2px; box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+      `
+      
+      el.appendChild(label)
+      el.appendChild(pin)
+      el.title = `${poi.name} (${poi.category})`
+      
+      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.15)'; el.style.zIndex = '50' })
       el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '5' })
       
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const toast = document.createElement('div')
-        toast.style.cssText = `
-          position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%);
-          background: rgba(0,0,0,0.9); color: white; padding: 10px 20px;
-          border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4); text-align: center;
-        `
-        toast.innerHTML = `<div style="font-weight:600">${poi.name}</div><div style="font-size:11px;opacity:0.7;margin-top:2px">${poi.locality || poi.category}</div>`
-        document.body.appendChild(toast)
-        setTimeout(() => toast.remove(), 3000)
-      })
-      
-      const marker = new mapboxgl.Marker({ element: el })
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([poi.longitude, poi.latitude])
         .addTo(map)
       
