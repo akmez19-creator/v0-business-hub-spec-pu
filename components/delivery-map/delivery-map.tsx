@@ -781,7 +781,6 @@ map.on('load', () => {
               const locality = pin.locality || ''
               // Use GLOBAL object to avoid any stale closure issues
               const override = REGION_OVERRIDES[locality]
-              console.log('[v0] Click - locality:', locality, 'override:', override, 'REGION_OVERRIDES:', JSON.stringify(REGION_OVERRIDES))
               const flyLng = override ? override.lng : pin.lng
               const flyLat = override ? override.lat : pin.lat
               map.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) 
@@ -878,7 +877,7 @@ map.on('load', () => {
     const mb = mbgl()
     const filteredRegions = regions.map(r => {
       // Apply coordinate overrides if available
-      const override = regionOverrides[r.locality]
+      const override = REGION_OVERRIDES[r.locality]
       if (override) {
         return { ...r, lat: override.lat, lng: override.lng }
       }
@@ -1953,7 +1952,7 @@ router.refresh()
       }
 
       // Use region override coordinates if available for destination
-      const destOverride = regionOverrides[pin.locality]
+      const destOverride = REGION_OVERRIDES[pin.locality]
       const destLng = destOverride ? destOverride.lng : pin.lng
       const destLat = destOverride ? destOverride.lat : pin.lat
       
@@ -3402,7 +3401,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                     <div className="flex items-center gap-2">
                                       <button onClick={() => { 
                                         setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); 
-                                        const override = regionOverrides[d.locality]
+                                        const override = REGION_OVERRIDES[d.locality]
                                         const flyLng = override ? override.lng : d.lng
                                         const flyLat = override ? override.lat : d.lat
                                         mapRef.current?.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
@@ -3747,7 +3746,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     REGION_OVERRIDES[placingRegion.locality] = newOverride
                     regionOverridesRef.current = { ...regionOverridesRef.current, [placingRegion.locality]: newOverride }
                     setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: newOverride }))
-                    console.log('[v0] Saved override for', placingRegion.locality, ':', newOverride, 'REGION_OVERRIDES:', JSON.stringify(REGION_OVERRIDES))
                   }
                 } catch (e) {
                   console.error('Failed to save region override:', e)
