@@ -280,12 +280,14 @@ export function DeliveryMap({
   
   // Fetch Mauritius POIs on mount
   useEffect(() => {
+    console.log('[v0] Fetching Mauritius POIs...')
     fetch('/api/mauritius-pois')
       .then(res => res.json())
       .then(data => {
+        console.log('[v0] POI data received:', data.pois?.length || 0, 'POIs')
         if (data.pois) setPois(data.pois)
       })
-      .catch(() => {})
+      .catch((err) => console.error('[v0] POI fetch error:', err))
   }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
@@ -921,6 +923,7 @@ map.on('load', () => {
   // ── POI Markers from OpenStreetMap ──
   useEffect(() => {
     const map = mapRef.current
+    console.log('[v0] POI render effect - map:', !!map, 'mapLoaded:', mapLoaded, 'showPOIs:', showPOIs, 'pois:', pois.length)
     if (!map || !mapLoaded || !showPOIs || pois.length === 0) return
     
     // Clear existing POI markers
@@ -928,7 +931,7 @@ map.on('load', () => {
     poiMarkersRef.current = []
     
     const mbgl = mbglRef.current
-    if (!mbgl) return
+    if (!mbgl) { console.log('[v0] No mbgl ref'); return }
     
     // Icon colors by type
     const typeColors: Record<string, string> = {
