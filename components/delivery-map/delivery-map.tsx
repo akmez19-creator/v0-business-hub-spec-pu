@@ -249,6 +249,7 @@ export function DeliveryMap({
   const arrivalAlertedRef = useRef<string>('')
   const startNavigationRef = useRef<(pin: DeliveryPin) => void>(() => {})
   const [viewMode, setViewMode] = useState<'overview' | '3d'>('3d')
+  const viewModeRef = useRef<'overview' | '3d'>('3d')
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [speed, setSpeed] = useState(0)
 
@@ -1426,7 +1427,9 @@ export function DeliveryMap({
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
-  if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: 60, duration: 1400, essential: true })
+  // Use ref to get current viewMode (avoids stale closure)
+  const currentPitch = viewModeRef.current === '3d' ? 60 : 0
+  if (regionMatch && mapRef.current) mapRef.current.flyTo({ center: [regionMatch.lng, regionMatch.lat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
   }, [regions])
 
 const confirmPinPlacement = useCallback(async () => {
@@ -1453,17 +1456,14 @@ router.refresh()
     }
     setStreetSearching(true)
     try {
-      // Get region coordinates for bounding box
+      // Get region coordinates for proximity search
       const regionMatch = regions.find(r => r.locality === placingPin.locality)
       const lat = regionMatch?.lat ?? -20.2
       const lng = regionMatch?.lng ?? 57.5
       
-      // Create a ~5km bounding box around the region center to restrict results
-      const delta = 0.045 // ~5km radius
-      const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`
-      
-      // Use Mapbox Geocoding API - ONLY streets, addresses, POIs (NO localities/regions)
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&bbox=${bbox}&limit=8&types=address,poi`
+      // Use Mapbox Geocoding API - streets, addresses, POIs with proximity to region
+      const proximity = `${lng},${lat}`
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&country=mu&proximity=${proximity}&limit=8&types=address,poi`
       const res = await fetch(url)
       const data = await res.json()
       
@@ -1490,7 +1490,9 @@ router.refresh()
   // Select a street result and fly to it
   const selectStreetResult = useCallback((result: { center: [number, number]; place_name: string }) => {
     if (!mapRef.current) return
-    mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: 60, duration: 1200, essential: true })
+    // Use ref to get current viewMode (avoids stale closure)
+    const currentPitch = viewModeRef.current === '3d' ? 60 : 0
+    mapRef.current.flyTo({ center: result.center, zoom: 18, pitch: currentPitch, duration: 1200, essential: true })
     setStreetResults([])
     setStreetSearch('')
   }, [])
@@ -2513,7 +2515,7 @@ router.refresh()
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
           <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5">
 <button onClick={() => {
-  const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next)
+  const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next); viewModeRef.current = next
   if (mapRef.current) {
     const map = mapRef.current
     map.easeTo({ pitch: next === '3d' ? 60 : 0, bearing: next === '3d' ? map.getBearing() : 0, duration: 1200, easing: (t: number) => 1 - Math.pow(1 - t, 3) })
@@ -3066,7 +3068,7 @@ router.refresh()
                               const isExpandedCard = expandedRegions.has(`card-${d.id}`)
                               return (
                               <div key={d.id} className="client-card client-card-need overflow-hidden">
-                                {/* ── Main Row: Avatar + Full name/product + chevron ── */}
+                                {/* ── Main Row: Avatar + Full name/product + chevron ��─ */}
                                 <button onClick={() => setExpandedRegions(prev => { const next = new Set(prev); const key = `card-${d.id}`; next.has(key) ? next.delete(key) : next.add(key); return next })}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 text-left">
                                   <div className="relative shrink-0">
