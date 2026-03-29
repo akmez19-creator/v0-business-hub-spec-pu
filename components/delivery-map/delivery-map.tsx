@@ -6,7 +6,7 @@ import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
-  Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw,
+  Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
   Camera, Loader2, ImageIcon, Pencil,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -2830,9 +2830,11 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               <ExternalLink className="w-4 h-4" />
             </button>
             <button onClick={() => setShowRiderPois(!showRiderPois)}
-              className={cn('btn-holo w-11 h-11 flex items-center justify-center transition text-[9px] font-bold', showRiderPois ? 'text-green-400' : 'text-white/40 hover:text-green-400')}
-              title="Toggle POI markers">
-              POI
+              className={cn('btn-holo h-11 px-3 flex items-center justify-center gap-1.5 transition rounded-xl', 
+                showRiderPois ? 'bg-green-500/20 border-green-400/40 text-green-400' : 'text-white/40 hover:text-green-400')}
+              title="Show/Hide landmarks">
+              <Eye className={cn("w-4 h-4", !showRiderPois && "opacity-50")} />
+              <span className="text-[10px] font-bold">{showRiderPois ? 'ON' : 'OFF'}</span>
             </button>
             <button onClick={() => {
               setAddingPoi(true)
@@ -2842,9 +2844,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 setNewPoiCoords({ lat: center.lat, lng: center.lng })
               }
             }}
-              className="btn-holo w-11 h-11 flex items-center justify-center transition text-white/40 hover:text-amber-400"
-              title="Add new POI location">
+              className="btn-holo h-11 px-3 flex items-center justify-center gap-1.5 transition rounded-xl text-white/40 hover:text-amber-400 hover:bg-amber-500/10 hover:border-amber-400/30"
+              title="Pin a new location">
               <MapPin className="w-4 h-4" />
+              <span className="text-[10px] font-bold">PIN</span>
             </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
