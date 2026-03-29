@@ -332,7 +332,7 @@ export function DeliveryMap({
     const next = !nightMode
     setNightMode(next)
     if (mapRef.current) {
-      try { mapRef.current.setConfigProperty('basemap', 'lightPreset', next ? 'night' : 'dusk') } catch {}
+      // dark-v11 style is always dark
     }
   }, [nightMode])
 
@@ -501,7 +501,7 @@ export function DeliveryMap({
       // ══════════════════════════════════════════════════════════════════════════
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/standard?optimize=true', // style-optimized vector tiles
+        style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
         center, zoom: 15, maxZoom: 20, pitch: 0, bearing: 0,
         
         // ── GPU / Rendering ──
@@ -630,10 +630,9 @@ export function DeliveryMap({
 map.on('load', () => {
   if (cancelled) return
   
-  // FORCE 2D mode on load - set pitch to 0 and disable 3D buildings
+  // FORCE 2D mode on load - set pitch to 0
   map.setPitch(0)
   map.setBearing(0)
-  map.setConfigProperty('basemap', 'show3dObjects', false)
   
   // Disable pitch/rotation controls for 2D mode
   map.touchPitch.disable()
@@ -929,7 +928,7 @@ map.on('load', () => {
 
   // ══════════════════════════════════════════════════════════════════════════
   // KALMAN FILTER - For precise GPS like Google Maps / Navigation apps
-  // ═════════════��════════════════════════════════════════════════════════════
+  // ═══���═════════��════════════════════════════════════════════════════════════
   const kalmanRef = useRef<{
     lat: number; lng: number; 
     variance: number; // Current uncertainty
@@ -2676,12 +2675,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
       map.touchPitch.enable()
       map.dragRotate.enable()
       map.touchZoomRotate.enableRotation()
-      map.setConfigProperty('basemap', 'show3dObjects', true)
     } else {
       map.touchPitch.disable()
       map.dragRotate.disable()
       map.touchZoomRotate.disableRotation()
-      map.setConfigProperty('basemap', 'show3dObjects', false)
     }
   }
 }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', viewMode === '3d' ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
