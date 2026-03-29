@@ -248,8 +248,8 @@ export function DeliveryMap({
   const [arrivalAlert, setArrivalAlert] = useState<string | null>(null)
   const arrivalAlertedRef = useRef<string>('')
   const startNavigationRef = useRef<(pin: DeliveryPin) => void>(() => {})
-  const [viewMode, setViewMode] = useState<'overview' | '3d'>('3d')
-  const viewModeRef = useRef<'overview' | '3d'>('3d')
+  const [viewMode, setViewMode] = useState<'overview' | '3d'>('overview')
+  const viewModeRef = useRef<'overview' | '3d'>('overview')
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [speed, setSpeed] = useState(0)
 
@@ -487,7 +487,7 @@ export function DeliveryMap({
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/standard?optimize=true', // style-optimized vector tiles
-        center, zoom: 15, maxZoom: 20, pitch: 60, bearing: -20,
+        center, zoom: 15, maxZoom: 20, pitch: 0, bearing: 0,
         
         // ── GPU / Rendering ──
         antialias: false, // Huge GPU savings, minimal visual impact
@@ -627,10 +627,15 @@ export function DeliveryMap({
       })
 
       // ── Map loaded ──
-      map.on('load', () => {
-        if (cancelled) return
-
-        // GeoJSON delivery pins source
+map.on('load', () => {
+  if (cancelled) return
+  
+  // Start in 2D mode - disable pitch/rotation controls
+  map.touchPitch.disable()
+  map.dragRotate.disable()
+  map.touchZoomRotate.disableRotation()
+  
+  // GeoJSON delivery pins source
         if (map.getSource('delivery-pins')) {
           try { ['pins-glow','pins-circle','pins-pulse','pins-waypoint','pins-label'].forEach(l => { if (map.getLayer(l)) map.removeLayer(l) }); map.removeSource('delivery-pins') } catch {}
         }
@@ -872,7 +877,7 @@ export function DeliveryMap({
     filteredRegions.forEach(r => bounds.extend([r.lng, r.lat]))
     if (driverLocation) bounds.extend([driverLocation.lng, driverLocation.lat])
     if (!bounds.isEmpty() && !navigating && !initialFitDoneRef.current) {
-      map.fitBounds(bounds, { padding: 60, duration: 1800, maxZoom: 15, pitch: 60 })
+      map.fitBounds(bounds, { padding: 60, duration: 1800, maxZoom: 15, pitch: 0 })
       initialFitDoneRef.current = true // Only fit once
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap])
