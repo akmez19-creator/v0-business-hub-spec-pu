@@ -2840,13 +2840,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 <p className="text-[11px] text-white/40">{selectedRegion.count} deliveries</p>
               </div>
               <button onClick={() => { 
-                const coords = prompt(`Edit coordinates for ${selectedRegion.locality}\n\nCurrent: ${selectedRegion.lat}, ${selectedRegion.lng}\n\nTo get new coordinates:\n1. Right-click on the map at the desired location\n2. Copy coordinates from there\n3. Or enter manually as: lat, lng`);
-                if (coords) {
-                  const [lat, lng] = coords.split(',').map(s => parseFloat(s.trim()));
-                  if (!isNaN(lat) && !isNaN(lng)) {
-                    alert(`New coordinates for "${selectedRegion.locality}":\n\nLat: ${lat}\nLng: ${lng}\n\nPlease tell me to update these coordinates in the regions file.`);
-                  }
-                }
+                setPlacingRegion({ locality: selectedRegion.locality, lat: selectedRegion.lat, lng: selectedRegion.lng });
+                setSelectedRegion(null);
               }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all" title="Edit pole location"><Pencil className="w-4 h-4" /></button>
               <button onClick={() => setSelectedRegion(null)} className="shrink-0 text-white/30 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
