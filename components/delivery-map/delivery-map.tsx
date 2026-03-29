@@ -1,6 +1,6 @@
 'use client'
-// DeliveryMap v2.2 — Using dark-v11 style with built-in POIs
-// Clean Mapbox-native route display with better location details
+// DeliveryMap v2.3 — Mapbox Standard style with dusk lighting
+// Clean Mapbox-native route display
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
@@ -273,22 +273,7 @@ export function DeliveryMap({
       .catch(() => {})
   }, [])
   
-  // POI data from OpenStreetMap
-  const [showPOIs, setShowPOIs] = useState(true)
-  const [pois, setPois] = useState<{ id: string; name: string; type: string; category: string; lat: number; lng: number; icon: string }[]>([])
-  const poiMarkersRef = useRef<{ remove: () => void; getElement: () => HTMLElement }[]>([])
   
-  // Fetch Mauritius POIs on mount
-  useEffect(() => {
-    console.log('[v0] Fetching Mauritius POIs...')
-    fetch('/api/mauritius-pois')
-      .then(res => res.json())
-      .then(data => {
-        console.log('[v0] POI data received:', data.pois?.length || 0, 'POIs')
-        if (data.pois) setPois(data.pois)
-      })
-      .catch((err) => console.error('[v0] POI fetch error:', err))
-  }, [])
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
   const [savingPin, setSavingPin] = useState(false)
@@ -349,7 +334,7 @@ export function DeliveryMap({
     const next = !nightMode
     setNightMode(next)
     if (mapRef.current) {
-      // dark-v11 style is always dark
+      try { mapRef.current.setConfigProperty('basemap', 'lightPreset', next ? 'night' : 'dusk') } catch {}
     }
   }, [nightMode])
 
@@ -518,7 +503,17 @@ export function DeliveryMap({
       // ============================================================================
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/dark-v11', // dark style with POIs (schools, mosques, shops)
+        style: 'mapbox://styles/mapbox/standard',
+        config: { 
+          basemap: { 
+            lightPreset: 'dusk', 
+            show3dObjects: false, 
+            showPlaceLabels: true, 
+            showRoadLabels: true, 
+            showPointOfInterestLabels: true,
+            showTransitLabels: true,
+          } 
+        },
         center, zoom: 15, maxZoom: 20, pitch: 0, bearing: 0,
         
         // ── GPU / Rendering ──
@@ -548,7 +543,12 @@ export function DeliveryMap({
         logoPosition: 'bottom-left',
         attributionControl: false,
         
-        // dark-v11 style has POIs built-in
+        map.on('style.load', () => {
+        try { map.setConfigProperty('basemap', 'showPlaceLabels', true) } catch {}
+        try { map.setConfigProperty('basemap', 'showRoadLabels', true) } catch {}
+        try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', true) } catch {}
+        try { map.setConfigProperty('basemap', 'showTransitLabels', true) } catch {}
+      })
       })
       
       // ══════════════════════════════════════════════════════════════════════════
@@ -744,7 +744,8 @@ export function DeliveryMap({
       // Mini-map
       if (miniMapRef.current) {
         const mini = new (mbgl()).Map({
-          container: miniMapRef.current, style: 'mapbox://styles/mapbox/dark-v11',
+          container: miniMapRef.current, style: 'mapbox://styles/mapbox/standard',
+          config: { basemap: { lightPreset: 'dusk', show3dObjects: false } },
           center, zoom: 14, interactive: false, attributionControl: false,
         })
         miniMapInstance.current = mini
@@ -916,98 +917,6 @@ export function DeliveryMap({
       initialFitDoneRef.current = true // Only fit once
     }
   }, [filtered, regions, mapLoaded, navigating, showPoles, newPinIds, driverLocation, riderColorMap, regionOverrides])
-
-  // ── POI Markers from OpenStreetMap ──
-  useEffect(() => {
-    const map = mapRef.current
-    console.log('[v0] POI render effect - map:', !!map, 'mapLoaded:', mapLoaded, 'showPOIs:', showPOIs, 'pois:', pois.length)
-    if (!map || !mapLoaded || !showPOIs || pois.length === 0) return
-    
-    // Clear existing POI markers
-    poiMarkersRef.current.forEach(m => m.remove())
-    poiMarkersRef.current = []
-    
-    const mapboxgl = (window as any).mapboxgl
-    if (!mapboxgl) { console.log('[v0] No mapboxgl'); return }
-    
-    console.log('[v0] Creating POI markers...')
-    
-    // Limit POIs to prevent performance issues (max 500)
-    const limitedPois = pois.slice(0, 500)
-    console.log('[v0] Rendering', limitedPois.length, 'POIs (limited from', pois.length, ')')
-    
-    // Icon colors by type
-    const typeColors: Record<string, string> = {
-      education: '#4ade80', // green
-      worship: '#f59e0b', // amber  
-      food: '#ef4444', // red
-      shop: '#3b82f6', // blue
-      health: '#ec4899', // pink
-      finance: '#8b5cf6', // purple
-      fuel: '#f97316', // orange
-      emergency: '#dc2626', // red
-      other: '#6b7280' // gray
-    }
-    
-    // Icon symbols by category
-    const categorySymbols: Record<string, string> = {
-      school: 'S', mosque: 'M', temple: 'T', church: 'C',
-      restaurant: 'R', cafe: 'F', fast_food: 'F',
-      supermarket: 'G', convenience: 'G', shop: 'S',
-      hospital: 'H', clinic: 'H', pharmacy: 'P',
-      bank: 'B', petrol: 'G', police: 'P'
-    }
-    
-    limitedPois.forEach((poi, idx) => {
-      const color = typeColors[poi.type] || typeColors.other
-      const symbol = categorySymbols[poi.category] || 'X'
-      if (idx === 0) console.log('[v0] First POI:', poi.name, poi.lat, poi.lng)
-      
-      const el = document.createElement('div')
-      el.className = 'poi-marker'
-      el.style.cssText = `
-        display: flex; align-items: center; justify-content: center;
-        width: 22px; height: 22px; border-radius: 50%;
-        background: ${color}; border: 2px solid white;
-        font-size: 10px; font-weight: bold; color: white; cursor: pointer;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-        transition: transform 0.15s;
-      `
-      el.innerHTML = symbol
-      el.title = `${poi.name} (${poi.category})`
-      
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.3)'; el.style.zIndex = '100' })
-      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; el.style.zIndex = '' })
-      
-      // Show name on click
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const popup = document.createElement('div')
-        popup.style.cssText = `
-          position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%);
-          background: rgba(0,0,0,0.9); color: white; padding: 8px 16px;
-          border-radius: 8px; font-size: 12px; font-weight: 500; z-index: 9999;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-        `
-        popup.textContent = poi.name
-        document.body.appendChild(popup)
-        setTimeout(() => popup.remove(), 2500)
-      })
-      
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([poi.lng, poi.lat])
-        .addTo(map)
-      
-      poiMarkersRef.current.push(marker)
-    })
-    
-    console.log('[v0] Created', poiMarkersRef.current.length, 'POI markers')
-    
-    return () => {
-      poiMarkersRef.current.forEach(m => m.remove())
-      poiMarkersRef.current = []
-    }
-  }, [pois, mapLoaded, showPOIs])
 
   // ── GPS Tracking - RAW GPS, no road snapping ──
   const startTracking = useCallback(() => {
@@ -2803,13 +2712,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             <button onClick={toggleNightMode}
               className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', nightMode ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
               {nightMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button onClick={() => {
-              const next = !showPOIs; setShowPOIs(next)
-              poiMarkersRef.current.forEach(m => { m.getElement().style.display = next ? '' : 'none' })
-            }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition text-[10px] font-bold', showPOIs ? 'text-green-400' : 'text-white/40 hover:text-green-400')}
-              title="Toggle POIs (shops, schools, mosques...)">
-              POI
             </button>
           </div>
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
