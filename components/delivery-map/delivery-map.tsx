@@ -1010,13 +1010,16 @@ map.on('load', () => {
       pin.style.cssText = 'filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));'
       container.appendChild(pin)
       
+      // Hover effect - use filter instead of transform to avoid position issues
       container.addEventListener('mouseenter', () => { 
-        container.style.transform = 'scale(1.1)'; 
+        container.style.filter = 'brightness(1.2) drop-shadow(0 4px 8px rgba(0,0,0,0.5))';
         container.style.zIndex = '50'
+        label.style.background = '#fbbf24'
       })
       container.addEventListener('mouseleave', () => { 
-        container.style.transform = 'scale(1)'; 
+        container.style.filter = 'none';
         container.style.zIndex = '5'
+        label.style.background = color
       })
       
       const marker = new mapboxgl.Marker({ element: container, anchor: 'bottom' })
