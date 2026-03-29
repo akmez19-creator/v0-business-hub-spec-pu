@@ -1451,6 +1451,18 @@ router.refresh()
   
   // ── Street/Building search for pin placement ──
   const [noStreetResults, setNoStreetResults] = useState(false)
+  
+  // Helper: calculate distance between two points in km
+  const getDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const R = 6371 // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180
+    const dLng = (lng2 - lng1) * Math.PI / 180
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2)
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  }
+  
   const searchStreet = useCallback(async (query: string) => {
     if (!query.trim() || !mapboxToken || !placingPin) {
       setStreetResults([])
@@ -1465,59 +1477,103 @@ router.refresh()
     setStreetSearching(true)
     setNoStreetResults(false)
     
+    // Get region center coordinates
+    const regionMatch = regions.find(r => r.locality === placingPin.locality)
+    const regionLat = regionMatch?.lat ?? -20.2
+    const regionLng = regionMatch?.lng ?? 57.5
+    const MAX_DISTANCE_KM = 5 // Only show results within 5km of region
+    
     const queryLower = query.toLowerCase()
-    const allResults: { place_name: string; center: [number, number]; text: string }[] = []
+    const allResults: { place_name: string; center: [number, number]; text: string; distance: number }[] = []
+    const seen = new Set<string>()
     
     try {
-      // 1. Search POIs directly from rendered map features (finds PKL Autoparts, etc.)
-      if (mapRef.current) {
-        const features = mapRef.current.queryRenderedFeatures(undefined, {
-          layers: ['poi-label', 'poi-label-minor', 'road-label', 'road-label-simple']
-        })
-        
-        const seen = new Set<string>()
-        features.forEach((f: any) => {
+      // 1. Use Mapbox Tilequery API to search ALL POIs in the region (not just visible ones)
+      // This finds all POIs within 5km radius of the region center
+      const tilequeryUrl = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${regionLng},${regionLat}.json?radius=5000&limit=50&layers=poi_label&access_token=${mapboxToken}`
+      const tqRes = await fetch(tilequeryUrl)
+      const tqData = await tqRes.json()
+      
+      if (tqData.features) {
+        tqData.features.forEach((f: any) => {
           const name = f.properties?.name || f.properties?.name_en || ''
-          if (name && name.toLowerCase().includes(queryLower) && !seen.has(name.toLowerCase())) {
-            seen.add(name.toLowerCase())
+          const nameKey = name.toLowerCase()
+          if (name && nameKey.includes(queryLower) && !seen.has(nameKey)) {
             const coords = f.geometry?.coordinates
             if (coords && coords.length >= 2) {
-              allResults.push({
-                text: name,
-                place_name: `${name}, Mauritius`,
-                center: [coords[0], coords[1]] as [number, number]
-              })
+              const dist = getDistanceKm(regionLat, regionLng, coords[1], coords[0])
+              if (dist <= MAX_DISTANCE_KM) {
+                seen.add(nameKey)
+                allResults.push({
+                  text: name,
+                  place_name: `${name}, ${placingPin.locality}`,
+                  center: [coords[0], coords[1]] as [number, number],
+                  distance: dist
+                })
+              }
             }
           }
         })
       }
       
-      // 2. Also search via Mapbox Geocoding API for addresses/streets
-      const regionMatch = regions.find(r => r.locality === placingPin.locality)
-      const lat = regionMatch?.lat ?? -20.2
-      const lng = regionMatch?.lng ?? 57.5
-      const proximity = `${lng},${lat}`
-      const bbox = '57.3,-20.6,57.85,-19.95'
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&bbox=${bbox}&proximity=${proximity}&limit=8&types=address,poi,place`
+      // 2. Also search visible map features (backup for any missed POIs)
+      if (mapRef.current) {
+        const features = mapRef.current.queryRenderedFeatures(undefined, {
+          layers: ['poi-label', 'poi-label-minor', 'road-label', 'road-label-simple']
+        })
+        
+        features.forEach((f: any) => {
+          const name = f.properties?.name || f.properties?.name_en || ''
+          const nameKey = name.toLowerCase()
+          if (name && nameKey.includes(queryLower) && !seen.has(nameKey)) {
+            const coords = f.geometry?.coordinates
+            if (coords && coords.length >= 2) {
+              const dist = getDistanceKm(regionLat, regionLng, coords[1], coords[0])
+              if (dist <= MAX_DISTANCE_KM) {
+                seen.add(nameKey)
+                allResults.push({
+                  text: name,
+                  place_name: `${name}, ${placingPin.locality}`,
+                  center: [coords[0], coords[1]] as [number, number],
+                  distance: dist
+                })
+              }
+            }
+          }
+        })
+      }
+      
+      // 3. Also search via Mapbox Geocoding API for addresses/streets
+      const delta = 0.05 // ~5km radius bbox
+      const bbox = `${regionLng - delta},${regionLat - delta},${regionLng + delta},${regionLat + delta}`
+      const proximity = `${regionLng},${regionLat}`
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&bbox=${bbox}&proximity=${proximity}&limit=8&types=address,poi`
       const res = await fetch(url)
       const data = await res.json()
       
       if (data.features) {
         data.features.forEach((f: any) => {
           const text = f.text || f.place_name.split(',')[0]
-          // Avoid duplicates
-          if (!allResults.some(r => r.text.toLowerCase() === text.toLowerCase())) {
+          const textKey = text.toLowerCase()
+          const [lng, lat] = f.center
+          const dist = getDistanceKm(regionLat, regionLng, lat, lng)
+          if (dist <= MAX_DISTANCE_KM && !seen.has(textKey)) {
+            seen.add(textKey)
             allResults.push({
               place_name: f.place_name,
               center: f.center as [number, number],
-              text
+              text,
+              distance: dist
             })
           }
         })
       }
       
+      // Sort by distance (closest first)
+      allResults.sort((a, b) => a.distance - b.distance)
+      
       if (allResults.length > 0) {
-        setStreetResults(allResults.slice(0, 10))
+        setStreetResults(allResults.slice(0, 10).map(r => ({ text: r.text, place_name: r.place_name, center: r.center })))
         setNoStreetResults(false)
       } else {
         setStreetResults([])
