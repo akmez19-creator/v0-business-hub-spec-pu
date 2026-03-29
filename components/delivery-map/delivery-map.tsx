@@ -15,6 +15,9 @@ import { ModifyOrderSheet } from './modify-order-sheet'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
+// ── Global storage for region overrides (avoids stale closure issues) ──
+const REGION_OVERRIDES: Record<string, { lat: number; lng: number }> = {}
+
 // ── Helpers ──
 function formatPhone(phone: string): string {
   const cleaned = phone.replace(/\D/g, '')
@@ -270,6 +273,8 @@ export function DeliveryMap({
       .then(res => res.json())
       .then(data => {
         if (data.overrides) {
+          // Update global object, state, and ref
+          Object.assign(REGION_OVERRIDES, data.overrides)
           setRegionOverrides(data.overrides)
           regionOverridesRef.current = data.overrides
         }
@@ -277,9 +282,10 @@ export function DeliveryMap({
       .catch(() => {})
   }, [])
   
-  // Keep ref in sync with state
+  // Keep ref and global in sync with state
   useEffect(() => {
     regionOverridesRef.current = regionOverrides
+    Object.keys(regionOverrides).forEach(k => { REGION_OVERRIDES[k] = regionOverrides[k] })
   }, [regionOverrides])
   
   // Rider POIs - crowdsourced landmarks
@@ -773,7 +779,9 @@ map.on('load', () => {
               setSelectedPin(pin); setSelectedRegion(null); 
               // Use region override coordinates if available, otherwise use pin's original coords
               const locality = pin.locality || ''
-              const override = regionOverridesRef.current[locality]
+              // Use GLOBAL object to avoid any stale closure issues
+              const override = REGION_OVERRIDES[locality]
+              console.log('[v0] Click - locality:', locality, 'override:', override, 'REGION_OVERRIDES:', JSON.stringify(REGION_OVERRIDES))
               const flyLng = override ? override.lng : pin.lng
               const flyLat = override ? override.lat : pin.lat
               map.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: map.getPitch(), duration: 1400, essential: true }) 
@@ -3734,10 +3742,12 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     body: JSON.stringify({ locality: placingRegion.locality, lat: newLat, lng: newLng })
                   })
                   if (res.ok) {
-                    // Update BOTH state AND ref immediately so flyTo uses new coords right away
+                    // Update GLOBAL, ref, AND state immediately so flyTo uses new coords right away
                     const newOverride = { lat: newLat, lng: newLng }
+                    REGION_OVERRIDES[placingRegion.locality] = newOverride
                     regionOverridesRef.current = { ...regionOverridesRef.current, [placingRegion.locality]: newOverride }
                     setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: newOverride }))
+                    console.log('[v0] Saved override for', placingRegion.locality, ':', newOverride, 'REGION_OVERRIDES:', JSON.stringify(REGION_OVERRIDES))
                   }
                 } catch (e) {
                   console.error('Failed to save region override:', e)
