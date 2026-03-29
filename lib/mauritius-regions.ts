@@ -290,7 +290,7 @@ export const MAURITIUS_REGIONS: Record<string, { lat: number; lng: number }> = {
   'La Brasserie': { lat: -20.335877, lng: 57.513178 },
   'La Caverne': { lat: -20.301370, lng: 57.480160 },
   'La Caverne No.1': { lat: -20.301740, lng: 57.477160 },
-  'La Caverne No.2': { lat: -20.305000, lng: 57.482500 },
+  'La Caverne No.2': { lat: -20.303500, lng: 57.473800 },
   'La Louise': { lat: -20.270833, lng: 57.474722 },
   'La Marie': { lat: -20.335000, lng: 57.485000 },
   'La Source': { lat: -20.28500, lng: 57.47900 },
