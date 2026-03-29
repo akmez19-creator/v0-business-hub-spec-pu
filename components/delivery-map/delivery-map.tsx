@@ -293,86 +293,17 @@ export function DeliveryMap({
       .catch(() => {})
   }, [])
   
-  // Center marker when adding POI - using real Mapbox marker
-  const centerMarkerRef = useRef<{ remove: () => void; setLngLat: (lnglat: [number, number]) => void } | null>(null)
-  const centerLabelRef = useRef<HTMLDivElement | null>(null)
-  
+  // Update coordinates when map moves while adding POI
   useEffect(() => {
     const map = mapRef.current
-    const mapboxgl = (window as any).mapboxgl
-    if (!map || !mapboxgl || !addingPoi) {
-      // Clean up if not adding
-      if (centerMarkerRef.current) { centerMarkerRef.current.remove(); centerMarkerRef.current = null }
-      if (centerLabelRef.current) { centerLabelRef.current.remove(); centerLabelRef.current = null }
-      return
-    }
-    
-    // Create marker element
-    const el = document.createElement('div')
-    el.innerHTML = `
-      <svg width="40" height="52" viewBox="0 0 40 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M20 0C8.95 0 0 8.95 0 20c0 15 20 32 20 32s20-17 20-32c0-11.05-8.95-20-20-20z" fill="#f59e0b" stroke="white" stroke-width="2"/>
-        <circle cx="20" cy="20" r="8" fill="white"/>
-        <circle cx="20" cy="20" r="4" fill="#f59e0b"/>
-      </svg>
-    `
-    el.style.cssText = 'cursor: move; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));'
-    
-    // Create label element
-    const label = document.createElement('div')
-    label.style.cssText = `
-      position: absolute; left: 50%; transform: translateX(-50%);
-      bottom: 60px; padding: 6px 12px; border-radius: 8px;
-      background: #f59e0b; color: white; font-size: 12px; font-weight: 700;
-      white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      pointer-events: none; z-index: 100;
-    `
-    label.textContent = newPoiName || 'Enter name below'
-    if (!newPoiName) {
-      label.style.background = 'rgba(0,0,0,0.7)'
-      label.style.fontStyle = 'italic'
-      label.style.fontWeight = '400'
-    }
-    el.appendChild(label)
-    centerLabelRef.current = label
-    
-    const center = map.getCenter()
-    const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-      .setLngLat([center.lng, center.lat])
-      .addTo(map)
-    centerMarkerRef.current = marker
-    
-    // Update marker position when map moves
-    const updatePos = () => {
+    if (!map || !addingPoi) return
+    const updateCoords = () => {
       const c = map.getCenter()
-      marker.setLngLat([c.lng, c.lat])
       setNewPoiCoords({ lat: c.lat, lng: c.lng })
     }
-    map.on('move', updatePos)
-    
-    return () => {
-      map.off('move', updatePos)
-      marker.remove()
-      centerMarkerRef.current = null
-      centerLabelRef.current = null
-    }
+    map.on('move', updateCoords)
+    return () => { map.off('move', updateCoords) }
   }, [addingPoi])
-  
-  // Update label text when name changes
-  useEffect(() => {
-    if (centerLabelRef.current) {
-      centerLabelRef.current.textContent = newPoiName || 'Enter name below'
-      if (newPoiName) {
-        centerLabelRef.current.style.background = '#f59e0b'
-        centerLabelRef.current.style.fontStyle = 'normal'
-        centerLabelRef.current.style.fontWeight = '700'
-      } else {
-        centerLabelRef.current.style.background = 'rgba(0,0,0,0.7)'
-        centerLabelRef.current.style.fontStyle = 'italic'
-        centerLabelRef.current.style.fontWeight = '400'
-      }
-    }
-  }, [newPoiName])
   
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
@@ -2298,8 +2229,47 @@ router.refresh()
 
       {/* Map container - GPU accelerated for smooth zoom */}
       <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
-      
-      
+
+      {/* Center pin for adding POI - uses viewport units to stay centered */}
+      {addingPoi && (
+        <div style={{
+          position: 'fixed',
+          top: 'calc(50vh - 120px)',
+          left: '50vw',
+          transform: 'translateX(-50%)',
+          pointerEvents: 'none',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center'
+        }}>
+          <div style={{
+            marginBottom: '8px',
+            padding: '8px 14px',
+            borderRadius: '8px',
+            background: newPoiName ? '#f59e0b' : 'rgba(0,0,0,0.8)',
+            color: 'white',
+            fontSize: '13px',
+            fontWeight: newPoiName ? 700 : 400,
+            fontStyle: newPoiName ? 'normal' : 'italic',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            maxWidth: '180px',
+            textAlign: 'center',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }}>
+            {newPoiName || 'Enter name below'}
+          </div>
+          <svg width="44" height="56" viewBox="0 0 44 56" style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.5))' }}>
+            <path d="M22 2C11.5 2 3 10.5 3 21c0 14 19 33 19 33s19-19 19-33c0-10.5-8.5-19-19-19z" fill="#f59e0b" stroke="white" strokeWidth="3"/>
+            <circle cx="22" cy="21" r="9" fill="white"/>
+            <circle cx="22" cy="21" r="5" fill="#f59e0b"/>
+          </svg>
+          <div style={{ width: '3px', height: '30px', background: 'linear-gradient(180deg, #f59e0b, transparent)', marginTop: '-4px' }} />
+          <div style={{ width: '14px', height: '14px', borderRadius: '50%', background: 'rgba(245,158,11,0.4)', border: '2px solid #f59e0b', animation: 'pulse 1.5s infinite' }} />
+        </div>
+      )}
 
       {/* Mini-map radar */}
       <div className="absolute bottom-24 left-3 z-20 w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden border-2 border-cyan-400/30 shadow-lg shadow-cyan-500/10">
