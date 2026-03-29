@@ -2,7 +2,6 @@
 // DeliveryMap v2.1 — No weather effects, no neon animations. Clean Mapbox-native route display.
 // Dusk lighting, styled DOM driver marker, GeoJSON pins.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
@@ -307,58 +306,6 @@ export function DeliveryMap({
     map.on('move', updateCoords)
     return () => { map.off('move', updateCoords) }
   }, [addingPoi])
-  
-  // Center pin element - rendered directly to document.body via DOM API
-  useEffect(() => {
-    if (!addingPoi) return
-    
-    const pinContainer = document.createElement('div')
-    pinContainer.id = 'poi-center-pin'
-    pinContainer.style.cssText = `
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      display: flex; align-items: center; justify-content: center;
-      pointer-events: none; z-index: 99999;
-    `
-    
-    const updatePin = () => {
-      pinContainer.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; margin-bottom: 160px;">
-          <div style="
-            margin-bottom: 8px; padding: 6px 12px; border-radius: 8px;
-            background: ${newPoiName ? '#f59e0b' : 'rgba(255,255,255,0.2)'};
-            color: ${newPoiName ? 'white' : 'rgba(255,255,255,0.6)'};
-            font-size: 12px; font-weight: ${newPoiName ? '700' : '400'};
-            font-style: ${newPoiName ? 'normal' : 'italic'};
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-          ">${newPoiName || 'Enter name below'}</div>
-          <div style="
-            width: 40px; height: 40px; background: #f59e0b; border: 3px solid white;
-            border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.5);
-          ">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg);">
-              <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
-            </svg>
-          </div>
-          <div style="width: 3px; height: 40px; background: linear-gradient(180deg, #f59e0b, transparent); margin-top: -2px;"></div>
-          <div style="width: 12px; height: 12px; border-radius: 50%; background: rgba(245, 158, 11, 0.4); border: 2px solid #f59e0b;"></div>
-        </div>
-      `
-    }
-    
-    updatePin()
-    document.body.appendChild(pinContainer)
-    
-    // Update when name changes
-    const interval = setInterval(updatePin, 100)
-    
-    return () => {
-      clearInterval(interval)
-      pinContainer.remove()
-    }
-  }, [addingPoi, newPoiName])
   
   const [locationLinkInput, setLocationLinkInput] = useState<string | null>(null) // pin id being edited
   const [locationLinkValue, setLocationLinkValue] = useState('')
@@ -2285,7 +2232,27 @@ router.refresh()
       {/* Map container - GPU accelerated for smooth zoom */}
       <div ref={mapContainerRef} className="flex-1 w-full transform-gpu" style={{ willChange: 'transform', backfaceVisibility: 'hidden' }} />
       
-      {/* Center pin marker when adding POI - use a separate div that's a sibling, not inside transform containers */}
+      {/* Center pin when adding POI - simple crosshair approach */}
+      {addingPoi && (
+        <div className="absolute inset-0 pointer-events-none z-40 flex items-center justify-center" style={{ paddingBottom: '200px' }}>
+          <div className="flex flex-col items-center">
+            {/* Name label */}
+            <div className={`mb-2 px-3 py-1.5 rounded-lg shadow-lg text-xs font-semibold ${newPoiName ? 'bg-amber-500 text-white' : 'bg-black/60 text-white/60 italic'}`}>
+              {newPoiName || 'Type name below'}
+            </div>
+            {/* Simple pin icon */}
+            <svg width="32" height="42" viewBox="0 0 32 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 26 16 26s16-14 16-26c0-8.84-7.16-16-16-16z" fill="#f59e0b"/>
+              <circle cx="16" cy="16" r="8" fill="white"/>
+              <circle cx="16" cy="16" r="4" fill="#f59e0b"/>
+            </svg>
+            {/* Vertical line to ground */}
+            <div className="w-0.5 h-8 bg-gradient-to-b from-amber-500 to-transparent" />
+            {/* Ground pulse */}
+            <div className="w-3 h-3 rounded-full bg-amber-500/50 border-2 border-amber-400 animate-pulse" />
+          </div>
+        </div>
+      )}
 
       {/* Mini-map radar */}
       <div className="absolute bottom-24 left-3 z-20 w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden border-2 border-cyan-400/30 shadow-lg shadow-cyan-500/10">
