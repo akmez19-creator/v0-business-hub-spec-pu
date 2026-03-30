@@ -966,7 +966,11 @@ map.on('load', () => {
         setClientSearch(r.locality)
         setShowClientList(true)
         setExpandedRegions(prev => { const next = new Set(prev); next.add(r.locality); return next })
-        map.flyTo({ center: [r.lng, r.lat], zoom: 15.5, pitch: map.getPitch(), bearing: map.getBearing(), duration: 1400, essential: true })
+        // Look up override AT CLICK TIME to get latest coordinates
+        const clickOverride = getRegionOverride(r.locality)
+        const flyLng = clickOverride ? clickOverride.lng : r.lng
+        const flyLat = clickOverride ? clickOverride.lat : r.lat
+        map.flyTo({ center: [flyLng, flyLat], zoom: 15.5, pitch: map.getPitch(), bearing: map.getBearing(), duration: 1400, essential: true })
       })
       const marker = new mb.Marker({ element: el, anchor: 'bottom' }).setLngLat([r.lng, r.lat]).addTo(map)
       ;(map as any)._regionPoleMarkers.push(marker)
@@ -3744,17 +3748,12 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ locality: placingRegion.locality, lat: newLat, lng: newLng })
                   })
-                  const resData = await res.json()
-                  console.log('[v0] Save response:', res.ok, resData)
                   if (res.ok) {
                     // Update GLOBAL, ref, AND state immediately so flyTo uses new coords right away
                     const newOverride = { lat: newLat, lng: newLng }
                     REGION_OVERRIDES[placingRegion.locality] = newOverride
                     regionOverridesRef.current = { ...regionOverridesRef.current, [placingRegion.locality]: newOverride }
                     setRegionOverrides(prev => ({ ...prev, [placingRegion.locality]: newOverride }))
-                    console.log('[v0] Updated REGION_OVERRIDES:', JSON.stringify(REGION_OVERRIDES))
-                  } else {
-                    console.error('[v0] Save failed:', resData)
                   }
                 } catch (e) {
                   console.error('Failed to save region override:', e)
