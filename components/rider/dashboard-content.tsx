@@ -14,7 +14,7 @@ import {
   AlertTriangle,
   ChevronRight,
   ArrowDownLeft,
-
+  MapPin,
   BarChart3,
   Boxes,
 } from 'lucide-react'
@@ -166,15 +166,15 @@ export function RiderDashboardContent({
       {/* Quick Links */}
       <div className="grid grid-cols-2 gap-3">
         <Link
-          href="/dashboard/riders/deliveries"
+          href="/dashboard/riders/map"
           className="glass-card rounded-xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
         >
           <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-            <Bike className="w-5 h-5 text-primary" />
+            <MapPin className="w-5 h-5 text-primary" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">Orders</p>
-            <p className="text-[10px] text-muted-foreground">{stats.todayLeft} left today</p>
+            <p className="text-sm font-medium">Map</p>
+            <p className="text-[10px] text-muted-foreground">{stats.todayLeft} deliveries left</p>
           </div>
           <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
         </Link>
