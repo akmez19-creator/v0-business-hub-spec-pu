@@ -1088,7 +1088,7 @@ export function OrdersContent({
                 </button>
 
                 {/* Region Actions Bar */}
-                {isExpanded && (
+                {isExpanded && !readOnly && (
                   <div className="border-t border-border bg-muted/30">
                     {/* Top row: Message + Log replies - always full width */}
                     {contactable > 0 && (
@@ -1233,30 +1233,34 @@ export function OrdersContent({
                                   <Phone className="w-3 h-3" />
                                   {order.contact1}
                                 </a>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); sendSingleMessage(order, 'whatsapp') }}
-                                  disabled={singleSending === order.key}
-                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-medium hover:bg-emerald-500/25 transition-colors disabled:opacity-50"
-                                >
-                                  {singleSending === order.key ? (
-                                    <div className="w-3 h-3 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <MessageCircle className="w-3 h-3" />
-                                  )}
-                                  WA
-                                </button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); sendSingleMessage(order, 'sms') }}
-                                  disabled={singleSending === order.key}
-                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-medium hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                                >
-                                  {singleSending === order.key ? (
-                                    <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <MessageCircle className="w-3 h-3" />
-                                  )}
-                                  SMS
-                                </button>
+                                {!readOnly && (
+                                  <>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); sendSingleMessage(order, 'whatsapp') }}
+                                      disabled={singleSending === order.key}
+                                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-medium hover:bg-emerald-500/25 transition-colors disabled:opacity-50"
+                                    >
+                                      {singleSending === order.key ? (
+                                        <div className="w-3 h-3 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                                      ) : (
+                                        <MessageCircle className="w-3 h-3" />
+                                      )}
+                                      WA
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); sendSingleMessage(order, 'sms') }}
+                                      disabled={singleSending === order.key}
+                                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-medium hover:bg-blue-500/25 transition-colors disabled:opacity-50"
+                                    >
+                                      {singleSending === order.key ? (
+                                        <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                      ) : (
+                                        <MessageCircle className="w-3 h-3" />
+                                      )}
+                                      SMS
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1340,7 +1344,8 @@ export function OrdersContent({
                           </div>
                         )}
 
-                        {/* Quick action buttons */}
+                        {/* Quick action buttons - hidden in readOnly mode */}
+                        {!readOnly && (
                         <div className="flex items-center gap-2 pt-0.5">
                           <button
                             onClick={() => setReplyPanel({ order, reply: order.clientResponse || '' })}
@@ -1367,6 +1372,7 @@ export function OrdersContent({
                             {order.deliveryNotes ? 'Edit note' : 'Add note'}
                           </button>
                         </div>
+                        )}
 
                         {/* Footer: total + rider + actions */}
                         <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/30">
@@ -1389,8 +1395,8 @@ export function OrdersContent({
                           </div>
                         </div>
 
-                        {/* Quick status actions */}
-                        {!['delivered', 'nwd', 'cms'].includes(order.status) && (
+                        {/* Quick status actions - hidden in readOnly mode */}
+                        {!readOnly && !['delivered', 'nwd', 'cms'].includes(order.status) && (
                           <div className="flex items-center gap-2 mt-0.5">
                             <button
                               disabled={updatingKey === order.key}
