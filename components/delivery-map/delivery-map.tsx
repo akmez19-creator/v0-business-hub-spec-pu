@@ -1633,11 +1633,21 @@ map.on('load', () => {
   const regionMatch = regions.find(r => r.locality === pin.locality)
   // Get current pitch from the map itself (most reliable)
   const currentPitch = mapRef.current?.getPitch() ?? 0
-  // Use override coordinates if available
+  // ALWAYS prioritize: 1) region override, 2) region original coords, 3) pin coords as last resort
   const override = getRegionOverride(pin.locality)
-  const flyLng = override ? override.lng : (regionMatch?.lng ?? pin.lng)
-  const flyLat = override ? override.lat : (regionMatch?.lat ?? pin.lat)
-  if (mapRef.current) mapRef.current.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
+  let flyLng: number, flyLat: number
+  if (override) {
+    flyLng = override.lng
+    flyLat = override.lat
+  } else if (regionMatch) {
+    flyLng = regionMatch.lng
+    flyLat = regionMatch.lat
+  } else {
+    // Last resort - use pin's own coords if no region found
+    flyLng = pin.lng
+    flyLat = pin.lat
+  }
+  if (mapRef.current && flyLng && flyLat) mapRef.current.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
   }, [regions])
 
 const confirmPinPlacement = useCallback(async () => {
