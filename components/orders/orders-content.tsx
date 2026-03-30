@@ -86,6 +86,7 @@ interface OrdersContentProps {
   contractorAsRiderId?: string | null
   customTemplates?: Record<string, string> | null
   riderJuicePolicies?: Record<string, string>
+  readOnly?: boolean // View-only mode - no status changes, no reset, no editing
 }
 
 // ── Constants ──
@@ -285,7 +286,8 @@ export function OrdersContent({
   contractorAsRiderId,
   customTemplates,
   riderJuicePolicies = {},
-}: OrdersContentProps) {
+  readOnly = false,
+  }: OrdersContentProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -485,6 +487,7 @@ export function OrdersContent({
   } | null>(null)
 
   function handleDeliveredClick(order: ClientOrder) {
+    if (readOnly) return // View-only mode
     const salesType = order.items[0]?.sales_type
 
     // Exchange / Trade-in / Refund: show protocol confirmation first
@@ -532,6 +535,7 @@ export function OrdersContent({
   }
 
   function handleRegionDeliveredClick(region: string, orders: ClientOrder[]) {
+    if (readOnly) return // View-only mode
     const pending = orders.filter(o => !['delivered', 'nwd', 'cms'].includes(o.status))
     if (pending.length === 0) return
 
@@ -621,6 +625,7 @@ export function OrdersContent({
 
   // Status update (for non-delivered statuses)
   async function handleStatusChange(order: ClientOrder, newStatus: DeliveryStatus) {
+    if (readOnly) return // View-only mode
     setUpdatingKey(order.key)
     const ids = order.items.map(d => d.id)
     await updateDeliveryStatusBulk(ids, newStatus)
@@ -631,6 +636,7 @@ export function OrdersContent({
   // Batch status for entire region
   const [updatingRegion, setUpdatingRegion] = useState<string | null>(null)
   async function handleRegionStatusChange(region: string, orders: ClientOrder[], newStatus: DeliveryStatus) {
+    if (readOnly) return // View-only mode
     setUpdatingRegion(region)
     const pendingOrders = orders.filter(o => !['delivered', 'nwd', 'cms'].includes(o.status))
     const allIds = pendingOrders.flatMap(o => o.items.map(d => d.id))
@@ -872,7 +878,7 @@ export function OrdersContent({
       </div>
 
       {/* ── Reset All for Contractor ── */}
-      {contractorId && totalCount > 0 && !showResetConfirm && (
+      {contractorId && totalCount > 0 && !showResetConfirm && !readOnly && (
         <div className="flex justify-end">
           <button
             onClick={() => setShowResetConfirm(true)}

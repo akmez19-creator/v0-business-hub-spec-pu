@@ -214,6 +214,7 @@ export default async function ContractorOrdersPage({
         contractorAsRiderId={contractorAsRider?.id || null}
         customTemplates={profile?.message_templates || null}
         riderJuicePolicies={riderJuicePolicies}
+        readOnly={true}
       />
     </ContractorMobileLayout>
   )
