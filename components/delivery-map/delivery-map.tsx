@@ -18,6 +18,22 @@ import { useRouter } from 'next/navigation'
 // ── Global storage for region overrides (avoids stale closure issues) ──
 const REGION_OVERRIDES: Record<string, { lat: number; lng: number }> = {}
 
+// Case-insensitive lookup for region overrides
+function getRegionOverride(locality: string | null | undefined): { lat: number; lng: number } | undefined {
+  if (!locality) return undefined
+  const trimmed = locality.trim()
+  // Try exact match first
+  if (REGION_OVERRIDES[trimmed]) return REGION_OVERRIDES[trimmed]
+  // Try case-insensitive match
+  const lowerLocality = trimmed.toLowerCase()
+  for (const key of Object.keys(REGION_OVERRIDES)) {
+    if (key.toLowerCase() === lowerLocality) {
+      return REGION_OVERRIDES[key]
+    }
+  }
+  return undefined
+}
+
 // ── Helpers ──
 function formatPhone(phone: string): string {
   const cleaned = phone.replace(/\D/g, '')
