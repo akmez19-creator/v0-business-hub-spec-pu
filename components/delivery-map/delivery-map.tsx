@@ -3468,18 +3468,21 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                     <div className="flex items-center gap-2">
                                       <button onClick={() => { 
                                         setSelectedPin(d); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); 
-                                        console.log('[v0] Fly button clicked - locality:', d.locality, 'pin coords:', d.lat, d.lng)
-                                        console.log('[v0] REGION_OVERRIDES at click time:', JSON.stringify(REGION_OVERRIDES))
                                         const override = REGION_OVERRIDES[d.locality]
-                                        console.log('[v0] Found override:', override)
                                         const flyLng = override ? override.lng : d.lng
                                         const flyLat = override ? override.lat : d.lat
-                                        console.log('[v0] Flying to:', flyLat, flyLng)
                                         mapRef.current?.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
                                       }}
                                         className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
                                         <Navigation className="w-3.5 h-3.5" />Fly to
                                       </button>
+                                      {/* Pin on Map - only for CMS and NWD, not delivered */}
+                                      {d.status !== 'delivered' && (
+                                        <button onClick={() => startPlacingPin(d)}
+                                          className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
+                                          <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                        </button>
+                                      )}
                                       <div className="flex-1" />
                                       {d.contact1 && (
                                         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
