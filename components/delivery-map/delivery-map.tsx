@@ -1670,6 +1670,11 @@ map.on('load', () => {
 
 // ── Pin placement ──
   const startPlacingPin = useCallback((pin: DeliveryPin) => {
+  // Cannot edit pin location for delivered orders
+  if (pin.status === 'delivered') {
+    alert('Cannot edit pin location for delivered orders')
+    return
+  }
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]); setNoStreetResults(false) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
@@ -2627,8 +2632,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                             </div>
                           )}
                         </div>
-                        {/* ── Expanded: Update location (re-pin/paste link only for GPS clients) ── */}
-                        {isStopExpanded && !isDone && (
+                        {/* ── Expanded: Update location (not for delivered orders) ── */}
+                        {isStopExpanded && p.status !== 'delivered' && (
                           <div className="px-3 pb-2.5 border-t border-white/[0.04] bg-white/[0.02]">
                             <div className="flex items-center gap-2 py-2">
                               <span className="text-[9px] text-white/25 font-mono uppercase tracking-wider">Update Location</span>
@@ -2713,8 +2718,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               </a>
                             </div>
                           </div>
-                          {/* Expanded: Location update for nearby */}
-                          {isNExpanded && (
+                          {/* Expanded: Location update for nearby (not for delivered) */}
+                          {isNExpanded && n.status !== 'delivered' && (
                             <div className="px-3 pb-2.5 border-t border-white/[0.04] bg-white/[0.02]">
                               <div className="flex items-center gap-2 py-2">
                                 <span className="text-[9px] text-white/25 font-mono uppercase tracking-wider">Update Location</span>
@@ -2818,10 +2823,12 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                     <Mail className="w-3.5 h-3.5" />SMS Location
                                   </button>
                                 )}
-                                <button onClick={() => { startPlacingPin(u); setNavStopsExpanded(false) }}
-                                  className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
-                                  <Crosshair className="w-3.5 h-3.5" />Pin on Map
-                                </button>
+                                {u.status !== 'delivered' && (
+                                  <button onClick={() => { startPlacingPin(u); setNavStopsExpanded(false) }}
+                                    className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
+                                    <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                  </button>
+                                )}
                               </div>
                               {/* Paste link */}
                               <div className="mt-2">
@@ -3042,7 +3049,9 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 {selectedPin.source === 'geocoded' && <p className="text-[9px] text-orange-400 flex items-center gap-1 mt-0.5 font-mono"><MapPin className="w-2.5 h-2.5" />Approximate</p>}
                 {selectedPin.locationFlagged && <p className="text-[9px] text-red-400 font-bold flex items-center gap-1 mt-0.5 animate-pulse text-glow"><Ban className="w-2.5 h-2.5" />Location flagged</p>}
               </div>
-              <button onClick={() => { console.log('[v0] Edit pin clicked', selectedPin); setPlacingPin(selectedPin); setSelectedPin(null); }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all active:scale-95" title="Edit pin location"><Pencil className="w-5 h-5" /></button>
+              {selectedPin.status !== 'delivered' && (
+              <button onClick={() => { setPlacingPin(selectedPin); setSelectedPin(null); }} className="shrink-0 p-2 rounded-xl bg-cyan-500/30 text-cyan-400 hover:bg-cyan-500/50 border border-cyan-400/30 transition-all active:scale-95" title="Edit pin location"><Pencil className="w-5 h-5" /></button>
+              )}
               <button onClick={() => setSelectedPin(null)} className="shrink-0 p-1.5 text-white/40 hover:text-red-400 transition"><X className="w-5 h-5" /></button>
             </div>
             <div className="glow-line" />
@@ -3564,10 +3573,12 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   <div className="px-3 pb-3 pt-2 border-t border-white/[0.03] space-y-2">
                                     {/* Contact + Pin row */}
                                     <div className="flex items-center gap-2">
-                                      <button onClick={() => startPlacingPin(d)}
-                                        className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
-                                        <Crosshair className="w-3.5 h-3.5" />Pin on Map
-                                      </button>
+                                      {d.status !== 'delivered' && (
+                                        <button onClick={() => startPlacingPin(d)}
+                                          className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
+                                          <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                        </button>
+                                      )}
                                       <div className="flex-1" />
                                       {d.contact1 && (
                                         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
