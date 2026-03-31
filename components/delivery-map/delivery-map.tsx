@@ -2632,7 +2632,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                             </div>
                           )}
                         </div>
-                        {/* ── Expanded: Update location (re-pin/paste link only for non-delivered) ── */}
+                        {/* ── Expanded: Update location (not for delivered orders) ── */}
                         {isStopExpanded && p.status !== 'delivered' && (
                           <div className="px-3 pb-2.5 border-t border-white/[0.04] bg-white/[0.02]">
                             <div className="flex items-center gap-2 py-2">
@@ -2824,10 +2824,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   </button>
                                 )}
                                 {u.status !== 'delivered' && (
-                                <button onClick={() => { startPlacingPin(u); setNavStopsExpanded(false) }}
-                                  className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
-                                  <Crosshair className="w-3.5 h-3.5" />Pin on Map
-                                </button>
+                                  <button onClick={() => { startPlacingPin(u); setNavStopsExpanded(false) }}
+                                    className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
+                                    <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                  </button>
                                 )}
                               </div>
                               {/* Paste link */}
@@ -3574,10 +3574,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                     {/* Contact + Pin row */}
                                     <div className="flex items-center gap-2">
                                       {d.status !== 'delivered' && (
-                                      <button onClick={() => startPlacingPin(d)}
-                                        className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
-                                        <Crosshair className="w-3.5 h-3.5" />Pin on Map
-                                      </button>
+                                        <button onClick={() => startPlacingPin(d)}
+                                          className="action-pill h-9 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[11px] text-cyan-400 font-mono font-bold">
+                                          <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                        </button>
                                       )}
                                       <div className="flex-1" />
                                       {d.contact1 && (
