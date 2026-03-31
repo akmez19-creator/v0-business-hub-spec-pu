@@ -35,6 +35,17 @@ function getRegionOverride(locality: string | null | undefined): { lat: number; 
 }
 
 // ── Helpers ──
+
+// Check if a delivered order can be changed back to CMS/NWD (within 5 minutes)
+function canChangeDeliveredStatus(pin: { status: string; deliveredAt?: string | null }): boolean {
+  if (pin.status !== 'delivered') return true // Non-delivered can always be changed
+  if (!pin.deliveredAt) return false // No timestamp means delivered long ago
+  const deliveredTime = new Date(pin.deliveredAt).getTime()
+  const now = Date.now()
+  const fiveMinutes = 5 * 60 * 1000
+  return (now - deliveredTime) <= fiveMinutes
+}
+
 function formatPhone(phone: string): string {
   const cleaned = phone.replace(/\D/g, '')
   if (cleaned.startsWith('230')) return `+${cleaned}`
@@ -86,10 +97,11 @@ export interface DeliveryPin {
   locationSource?: string | null
   isModified?: boolean
   modificationCount?: number
-  items?: { name: string; qty: number; amount: number }[]
+items?: { name: string; qty: number; amount: number }[]
   salesType?: string | null
   returnProduct?: string | null
-}
+  deliveredAt?: string | null // Timestamp when status was set to delivered
+  }
 
 export interface RegionCluster {
   locality: string
@@ -667,7 +679,7 @@ export function DeliveryMap({
       
       // ══════════════════════════════════════════════════════════════════════════
       // THROTTLE EXPENSIVE OPERATIONS DURING INTERACTION
-      // ══════════════════════════════════════════════════════════════════════════
+      // ════════════════════════════════════════════��═════════════════════════════
       let interactionThrottle: number | null = null
       
       map.on('movestart', () => {
@@ -1618,6 +1630,13 @@ map.on('load', () => {
   }, [mapProofStep, mapProofFile, router, multiStopNav, navigating])
 
   const handleMapStatusChange = useCallback(async (pin: DeliveryPin, status: string, notes?: string, autoAdvance = false) => {
+    // Check 5-minute rule: delivered->other only allowed within 5 min
+    if (pin.status === 'delivered' && status !== 'delivered') {
+      if (!canChangeDeliveredStatus(pin)) {
+        alert('Cannot change status - more than 5 minutes have passed since delivery')
+        return
+      }
+    }
     setUpdatingPinId(pin.id)
     await updateDeliveryStatusBulk(pin.itemIds, status, notes)
     setUpdatingPinId(null); setSelectedPin(null)
@@ -1638,7 +1657,14 @@ map.on('load', () => {
 
   const confirmCmsReason = useCallback(async (reason: string) => {
     if (!cmsPopup) return
-    const { pin } = cmsPopup; setCmsPopup(null)
+    const { pin } = cmsPopup
+    // Check 5-minute rule before processing
+    if (pin.status === 'delivered' && !canChangeDeliveredStatus(pin)) {
+      alert('Cannot change status - more than 5 minutes have passed since delivery')
+      setCmsPopup(null)
+      return
+    }
+    setCmsPopup(null)
     await handleMapStatusChange(pin, 'cms', reason, true)
   }, [cmsPopup, handleMapStatusChange])
 

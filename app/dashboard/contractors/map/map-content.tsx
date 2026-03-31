@@ -219,6 +219,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
         items: items.map(d => parseProductItem(d.products, d.qty || 1, d.amount || 0)),
         salesType: first.sales_type || null,
         returnProduct: first.return_product || null,
+        deliveredAt: first.delivered_at || null,
       }
 
 

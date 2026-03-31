@@ -219,6 +219,27 @@ export async function updateDeliveryStatus(deliveryId: string, status: DeliveryS
 export async function updateDeliveryStatusBulk(deliveryIds: string[], status: DeliveryStatus, notes?: string, paymentMethod?: string, paymentProofUrl?: string) {
   const supabase = await createClient()
   
+  // If changing FROM delivered to another status, check 5-minute rule
+  if (status !== 'delivered' && deliveryIds.length > 0) {
+    const { data: currentDeliveries } = await supabase
+      .from('deliveries')
+      .select('id, status, delivered_at')
+      .in('id', deliveryIds)
+    
+    if (currentDeliveries) {
+      const fiveMinutes = 5 * 60 * 1000
+      const now = Date.now()
+      for (const d of currentDeliveries) {
+        if (d.status === 'delivered' && d.delivered_at) {
+          const deliveredTime = new Date(d.delivered_at).getTime()
+          if ((now - deliveredTime) > fiveMinutes) {
+            return { error: 'Cannot change status - more than 5 minutes have passed since delivery' }
+          }
+        }
+      }
+    }
+  }
+  
   const updateData: Record<string, unknown> = {
     status,
     status_updated_at: new Date().toISOString(),
