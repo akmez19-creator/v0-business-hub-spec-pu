@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import {
@@ -10,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Search, X, CalendarDays } from 'lucide-react'
+import { Search, X, CalendarDays, Loader2 } from 'lucide-react'
 import { STATUS_LABELS } from '@/lib/types'
 import { Label } from '@/components/ui/label'
 
@@ -30,6 +31,44 @@ export function DeliveryFilters({ regions, riders }: Props) {
   const currentEntryDate = searchParams.get('entry_date') || ''
   const currentDeliveryDate = searchParams.get('delivery_date') || ''
   const currentSearch = searchParams.get('search') || ''
+  
+  // Local state for debounced search
+  const [searchValue, setSearchValue] = useState(currentSearch)
+  const [isSearching, setIsSearching] = useState(false)
+  const debounceRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Sync local search state when URL changes externally
+  useEffect(() => {
+    setSearchValue(currentSearch)
+  }, [currentSearch])
+  
+  // Debounced search effect
+  useEffect(() => {
+    // Clear any existing timeout
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+    }
+    
+    // Don't search if value matches current URL param
+    if (searchValue === currentSearch) {
+      setIsSearching(false)
+      return
+    }
+    
+    setIsSearching(true)
+    
+    // Set new timeout for 400ms delay
+    debounceRef.current = setTimeout(() => {
+      updateFilter('search', searchValue)
+      setIsSearching(false)
+    }, 400)
+    
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+    }
+  }, [searchValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function updateFilter(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -42,23 +81,28 @@ export function DeliveryFilters({ regions, riders }: Props) {
   }
 
   function clearFilters() {
+    setSearchValue('') // Clear local search state
     router.push(pathname)
   }
 
-  const hasFilters = currentStatus !== 'all' || currentRegion !== 'all' || currentRider !== 'all' || currentEntryDate || currentDeliveryDate || currentSearch
+  const hasFilters = currentStatus !== 'all' || currentRegion !== 'all' || currentRider !== 'all' || currentEntryDate || currentDeliveryDate || currentSearch || searchValue
 
   return (
     <div className="space-y-4 p-4 bg-card rounded-lg border">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-        {/* Search */}
+        {/* Search with debouncing */}
         <div className="flex-1 space-y-1.5">
           <Label className="text-xs text-muted-foreground">Search</Label>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            {isSearching ? (
+              <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
+            ) : (
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            )}
             <Input
               placeholder="Customer, contact, region, product..."
-              value={currentSearch}
-              onChange={(e) => updateFilter('search', e.target.value)}
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
               className="pl-9"
             />
           </div>
