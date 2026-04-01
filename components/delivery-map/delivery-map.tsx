@@ -681,7 +681,7 @@ export function DeliveryMap({
       
       // ════════════════════════════════════════════════════════════����═���═══��═══��═══
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
-      // ══════════════════════════════════════════════════════════════════════════
+      // ��═════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
       const zoomLevels = [10, 12, 13, 14, 15, 16, 17, 18] // All zoom levels rider will use
       
@@ -1235,7 +1235,7 @@ map.on('load', () => {
     animationFrameRef.current = requestAnimationFrame(animate)
   }, [])
   
-  // ════════════════════════��════════════════════════════════��════════════════
+  // ═��══════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
   // ══════════════════════════════════════════════════════════════════════════
@@ -3554,39 +3554,48 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                         </div>
                                       )}
                                     </div>
-                                    {/* Status row */}
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <button onClick={() => handleMapDelivered(d)} disabled={updatingPinId === d.id}
-                                        className={cn("status-chip disabled:opacity-30 text-xs px-3.5 py-2 gap-1.5",
-                                          isReturnOrder(d) ? "bg-violet-500/12 text-violet-400 border-violet-400/12" : "bg-emerald-500/12 text-emerald-400 border-emerald-400/12")}>
-                                        <Check className="w-4 h-4" />{isReturnOrder(d) ? 'Collected' : 'Done'}
-                                      </button>
-                                      <button onClick={() => setCmsPopup({ pin: d })} disabled={updatingPinId === d.id}
-                                        className="status-chip bg-amber-500/12 text-amber-400 border-amber-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
-                                        CMS
-                                      </button>
-                                      <button onClick={() => handleMapStatusChange(d, 'nwd', 'Next working day', false)} disabled={updatingPinId === d.id}
-                                        className="status-chip bg-red-500/12 text-red-400 border-red-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
-                                        NWD
-                                      </button>
-                                      <button onClick={() => setModifyTarget(d)}
-                                        className="status-chip bg-purple-500/12 text-purple-400 border-purple-400/12 text-xs px-3.5 py-2 gap-1">
-                                        <Package className="w-3.5 h-3.5" />Mod
-                                      </button>
-                                      {d.pendingModificationId && (
-                                        <button 
-                                          onClick={() => handleCancelPendingModification(d)}
-                                          disabled={cancellingModificationId === d.id}
-                                          className="status-chip bg-orange-500/12 text-orange-400 border-orange-400/12 text-xs px-3.5 py-2 gap-1 disabled:opacity-30">
-                                          {cancellingModificationId === d.id ? (
-                                            <div className="w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full animate-spin" />
-                                          ) : (
-                                            <RotateCcw className="w-3.5 h-3.5" />
-                                          )}
-                                          Undo
+                                    {/* Status row - show different UI if pending review */}
+                                    {d.pendingModificationId ? (
+                                      <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2 p-2 rounded-lg bg-purple-500/10 border border-purple-400/20">
+                                          <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                                          <span className="text-xs text-purple-400 font-medium">Awaiting Admin Approval</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button 
+                                            onClick={() => handleCancelPendingModification(d)}
+                                            disabled={cancellingModificationId === d.id}
+                                            className="status-chip bg-orange-500/12 text-orange-400 border-orange-400/12 text-xs px-3.5 py-2 gap-1 disabled:opacity-30 flex-1">
+                                            {cancellingModificationId === d.id ? (
+                                              <div className="w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full animate-spin" />
+                                            ) : (
+                                              <RotateCcw className="w-3.5 h-3.5" />
+                                            )}
+                                            Undo CMS & Restore Original
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <button onClick={() => handleMapDelivered(d)} disabled={updatingPinId === d.id}
+                                          className={cn("status-chip disabled:opacity-30 text-xs px-3.5 py-2 gap-1.5",
+                                            isReturnOrder(d) ? "bg-violet-500/12 text-violet-400 border-violet-400/12" : "bg-emerald-500/12 text-emerald-400 border-emerald-400/12")}>
+                                          <Check className="w-4 h-4" />{isReturnOrder(d) ? 'Collected' : 'Done'}
                                         </button>
-                                      )}
-                                    </div>
+                                        <button onClick={() => setCmsPopup({ pin: d })} disabled={updatingPinId === d.id}
+                                          className="status-chip bg-amber-500/12 text-amber-400 border-amber-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
+                                          CMS
+                                        </button>
+                                        <button onClick={() => handleMapStatusChange(d, 'nwd', 'Next working day', false)} disabled={updatingPinId === d.id}
+                                          className="status-chip bg-red-500/12 text-red-400 border-red-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
+                                          NWD
+                                        </button>
+                                        <button onClick={() => setModifyTarget(d)}
+                                          className="status-chip bg-purple-500/12 text-purple-400 border-purple-400/12 text-xs px-3.5 py-2 gap-1">
+                                          <Package className="w-3.5 h-3.5" />Mod
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
