@@ -36,14 +36,14 @@ function getRegionOverride(locality: string | null | undefined): { lat: number; 
 
 // ── Helpers ──
 
-// Check if a delivered order can be changed back to CMS/NWD (within 5 minutes)
+// Check if a delivered order can be changed back to CMS/NWD (within 30 minutes)
 function canChangeDeliveredStatus(pin: { status: string; deliveredAt?: string | null }): boolean {
   if (pin.status !== 'delivered') return true // Non-delivered can always be changed
   if (!pin.deliveredAt) return false // No timestamp means delivered long ago
   const deliveredTime = new Date(pin.deliveredAt).getTime()
   const now = Date.now()
-  const fiveMinutes = 5 * 60 * 1000
-  return (now - deliveredTime) <= fiveMinutes
+  const thirtyMinutes = 30 * 60 * 1000
+  return (now - deliveredTime) <= thirtyMinutes
 }
 
 function formatPhone(phone: string): string {
@@ -53,16 +53,16 @@ function formatPhone(phone: string): string {
   return phone
 }
 
-// Countdown timer component for 5-minute edit window
+// Countdown timer component for 30-minute edit window
 function CountdownTimer({ deliveredAt }: { deliveredAt: string }) {
   const [timeLeft, setTimeLeft] = useState<number>(0)
   
   useEffect(() => {
     const updateTime = () => {
       const deliveredTime = new Date(deliveredAt).getTime()
-      const fiveMinutes = 5 * 60 * 1000
+      const thirtyMinutes = 30 * 60 * 1000
       const elapsed = Date.now() - deliveredTime
-      const remaining = Math.max(0, fiveMinutes - elapsed)
+      const remaining = Math.max(0, thirtyMinutes - elapsed)
       setTimeLeft(remaining)
     }
     updateTime()
@@ -676,7 +676,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ════════════════════════════════════════════════════════════���═════════════
+      // ════════════════════════════════════════════════════════════���═════════��═══
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -1668,7 +1668,7 @@ map.on('load', () => {
     // Check 5-minute rule: delivered->other only allowed within 5 min
     if (pin.status === 'delivered' && status !== 'delivered') {
       if (!canChangeDeliveredStatus(pin)) {
-        alert('Cannot change status - more than 5 minutes have passed since delivery')
+        alert('Cannot change status - more than 30 minutes have passed since delivery')
         return
       }
     }
@@ -1695,7 +1695,7 @@ map.on('load', () => {
     const { pin } = cmsPopup
     // Check 5-minute rule before processing
     if (pin.status === 'delivered' && !canChangeDeliveredStatus(pin)) {
-      alert('Cannot change status - more than 5 minutes have passed since delivery')
+      alert('Cannot change status - more than 30 minutes have passed since delivery')
       setCmsPopup(null)
       return
     }
@@ -3767,9 +3767,9 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             disabled={updatingPinId === d.id}
             className="action-pill h-8 px-3 gap-1.5 bg-blue-500/8 border border-blue-400/10 text-[10px] text-blue-400 font-mono font-bold disabled:opacity-50">
             {updatingPinId === d.id ? <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-            Assigned
+            Reset
           </button>
-          {/* CMS/NWD buttons for delivered within 5 min */}
+          {/* CMS/NWD buttons for delivered within 30 min */}
           {d.status === 'delivered' && (
             <>
               <button 
