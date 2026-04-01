@@ -786,12 +786,14 @@ export async function markProductAsCms(params: {
   productName: string
   qty: number // How many units to mark as CMS
   cmsReason: string
+  newPrice?: number // Custom price for remaining items (if provided)
+  needsReview?: boolean // Flag if custom price needs admin review
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
-  const { deliveryId, productName, qty, cmsReason } = params
+  const { deliveryId, productName, qty, cmsReason, newPrice, needsReview } = params
   const admin = createAdminClient()
 
   // Get the delivery
@@ -858,8 +860,10 @@ export async function markProductAsCms(params: {
   for (const [, v] of productMap) {
     newTotalQty += v.qty
   }
-  const priceReduction = actualCmsQty * avgUnitPrice
-  const newAmount = Math.max(0, Math.round((totalAmount - priceReduction) * 100) / 100)
+  
+  // Use custom price if provided, otherwise auto-calculate
+  const autoCalculatedPrice = Math.max(0, Math.round((totalAmount - actualCmsQty * avgUnitPrice) * 100) / 100)
+  const newAmount = newPrice !== undefined ? newPrice : autoCalculatedPrice
 
   // Build new products string
   const newProducts = productMap.size > 0
@@ -916,7 +920,7 @@ export async function markProductAsCms(params: {
 
   if (updateError) return { error: updateError.message }
 
-  // Log the CMS modification
+  // Log the CMS modification - pending review if custom price was entered
   await admin.from('order_modifications').insert({
     target_delivery_id: deliveryId,
     rider_id: delivery.rider_id,
@@ -927,7 +931,9 @@ export async function markProductAsCms(params: {
     total_price: actualCmsQty * avgUnitPrice,
     reason: 'product_cms',
     notes: cmsReason,
-    status: 'approved', // Auto-approved since rider is marking it
+    status: needsReview ? 'pending' : 'approved', // Pending review if custom price
+    new_price: newAmount, // Store the new price for admin review
+    original_price: totalAmount, // Store original price for comparison
   })
 
   return {
