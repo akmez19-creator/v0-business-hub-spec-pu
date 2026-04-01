@@ -5,6 +5,44 @@ import { revalidatePath } from 'next/cache'
 import { notify } from '@/lib/notifications'
 import { syncContractorStock, getContractorIdFromDelivery } from '@/lib/stock-actions'
 
+// ── Get items from multiple delivery IDs (for grouped orders) ──
+export async function getItemsFromDeliveryIds(deliveryIds: string[]) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated', items: [] }
+
+  const admin = createAdminClient()
+  
+  const { data: deliveries, error } = await admin
+    .from('deliveries')
+    .select('id, products, qty, amount')
+    .in('id', deliveryIds)
+
+  if (error || !deliveries) return { error: error?.message || 'Failed to fetch deliveries', items: [] }
+
+  const items: { name: string; qty: number; unitPrice: number; deliveryId: string }[] = []
+  
+  for (const d of deliveries) {
+    const totalAmount = Number(d.amount || 0)
+    const totalQty = Number(d.qty || 1)
+    const avgPrice = totalQty > 0 ? totalAmount / totalQty : 0
+    
+    if (d.products) {
+      const parts = d.products.split(',').map((s: string) => s.trim())
+      for (const part of parts) {
+        const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
+        if (match) {
+          items.push({ name: match[2].trim(), qty: parseInt(match[1], 10), unitPrice: avgPrice, deliveryId: d.id })
+        } else if (part) {
+          items.push({ name: part, qty: 1, unitPrice: avgPrice, deliveryId: d.id })
+        }
+      }
+    }
+  }
+  
+  return { items }
+}
+
 // ── Get rider's stock from contractor_daily_stock + delivery context ──
 export async function getAvailableProducts(deliveryId: string) {
   const supabase = await createClient()
