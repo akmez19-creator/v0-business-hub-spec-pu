@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, Package, Plus, Minus, ChevronDown, ChevronUp, AlertTriangle, Check, Loader2, Users, Trash2, Edit3, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getAvailableProducts, modifyOrder, reduceOrderItem, replaceOrderProduct } from '@/lib/modification-actions'
+import { getAvailableProducts, modifyOrder, reduceOrderItem, replaceOrderProduct, markProductAsCms } from '@/lib/modification-actions'
 
 interface StockSource {
   deliveryId: string
@@ -56,6 +56,11 @@ export function ModifyOrderSheet({
   const [replacingWith, setReplacingWith] = useState<{ productName: string; source: StockSource } | null>(null)
   const [replacePrice, setReplacePrice] = useState('')
   const [isReplacing, setIsReplacing] = useState(false)
+  
+  // CMS mode - for marking individual products as CMS
+  const [cmsProduct, setCmsProduct] = useState<{ name: string; qty: number } | null>(null)
+  const [cmsReason, setCmsReason] = useState('')
+  const [isMarkingCms, setIsMarkingCms] = useState(false)
 
   // Selection state
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
@@ -127,6 +132,9 @@ export function ModifyOrderSheet({
     setReplacingWith(null)
     setReplacePrice('')
     setIsReplacing(false)
+    setCmsProduct(null)
+    setCmsReason('')
+    setIsMarkingCms(false)
   }, [])
 
   const selectSource = (src: StockSource) => {
@@ -176,6 +184,56 @@ export function ModifyOrderSheet({
         newProducts: result.newProducts,
       })
       setTimeout(() => { onClose(); resetForm(); setSuccess(false) }, 1500)
+    }
+  }
+
+  const handleMarkProductCms = async () => {
+    if (!cmsProduct || !cmsReason) return
+    setIsMarkingCms(true)
+    setError(null)
+    
+    const result = await markProductAsCms({
+      deliveryId,
+      productName: cmsProduct.name,
+      qty: cmsProduct.qty,
+      cmsReason,
+    })
+    
+    setIsMarkingCms(false)
+    
+    if (result.error) {
+      setError(result.error)
+    } else {
+      if (result.fullyCms) {
+        // Entire delivery is now CMS
+        setSuccess(true)
+        onModified?.({
+          newAmount: 0,
+          newQty: 0,
+          newProducts: '',
+        })
+        setTimeout(() => { onClose(); resetForm(); setSuccess(false) }, 1500)
+      } else {
+        // Update local state
+        setCurrentItems(prev => {
+          const updated = prev.map(item => {
+            if (item.name === cmsProduct.name) {
+              const newQty = item.qty - cmsProduct.qty
+              return newQty > 0 ? { ...item, qty: newQty } : null
+            }
+            return item
+          }).filter(Boolean) as typeof prev
+          return updated
+        })
+        setCmsProduct(null)
+        setCmsReason('')
+        
+        onModified?.({
+          newAmount: result.newAmount!,
+          newQty: result.newQty!,
+          newProducts: result.newProducts,
+        })
+      }
     }
   }
 
@@ -323,6 +381,13 @@ const handleSubmit = async () => {
                         <span className="text-[11px] text-white/70 flex-1 truncate">{item.name}</span>
                         <span className="text-[10px] text-white/30">Rs {Math.round(item.qty * item.unitPrice)}</span>
                         <button 
+                          onClick={() => setCmsProduct({ name: item.name, qty: item.qty })}
+                          className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition"
+                          title="Mark as CMS"
+                        >
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        </button>
+                        <button 
                           onClick={() => { setEditingItem(item.name); setPendingQty(p => ({ ...p, [item.name]: 0 })) }}
                           className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
                         >
@@ -449,6 +514,59 @@ const handleSubmit = async () => {
           <div className="mx-4 mb-3 p-3 rounded-xl bg-red-500/10 border border-red-400/20 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
             <p className="text-xs text-red-400">{error}</p>
+          </div>
+        )}
+
+        {/* CMS Product Popup */}
+        {cmsProduct && (
+          <div className="mx-4 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-400/20">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                <span className="text-[11px] font-bold text-amber-400 font-mono">MARK AS CMS</span>
+              </div>
+              <button onClick={() => { setCmsProduct(null); setCmsReason('') }}
+                className="p-1 rounded hover:bg-white/10">
+                <X className="w-3.5 h-3.5 text-white/40" />
+              </button>
+            </div>
+            
+            <p className="text-[11px] text-white/60 mb-3">
+              <span className="text-amber-400 font-bold">{cmsProduct.qty}x {cmsProduct.name}</span> will be marked as CMS
+            </p>
+            
+            <p className="text-[9px] text-white/40 font-mono mb-2">SELECT REASON</p>
+            <div className="grid grid-cols-2 gap-1.5 mb-3">
+              {['Client Refused', 'Wrong Number', 'Not Reachable', 'Changed Mind', 'Product Issue', 'Other'].map(reason => (
+                <button
+                  key={reason}
+                  onClick={() => setCmsReason(reason)}
+                  className={cn(
+                    "px-2.5 py-2 rounded-lg text-[10px] font-bold font-mono border transition-all",
+                    cmsReason === reason
+                      ? "bg-amber-500/20 border-amber-400/30 text-amber-400"
+                      : "bg-white/3 border-white/10 text-white/50 hover:bg-white/5"
+                  )}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            
+            <button
+              onClick={handleMarkProductCms}
+              disabled={!cmsReason || isMarkingCms}
+              className="w-full h-10 rounded-lg bg-amber-500/20 border border-amber-400/30 text-amber-400 text-[11px] font-bold font-mono flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-500/30"
+            >
+              {isMarkingCms ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <AlertTriangle className="w-4 h-4" />
+                  CONFIRM CMS
+                </>
+              )}
+            </button>
           </div>
         )}
 

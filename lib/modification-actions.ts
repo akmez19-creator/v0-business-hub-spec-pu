@@ -737,6 +737,148 @@ export async function reduceOrderItem(params: {
   }
 }
 
+// ── Mark a specific product as CMS (client refused one item) ──
+export async function markProductAsCms(params: {
+  deliveryId: string
+  productName: string
+  qty: number // How many units to mark as CMS
+  cmsReason: string
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { deliveryId, productName, qty, cmsReason } = params
+  const admin = createAdminClient()
+
+  // Get the delivery
+  const { data: delivery } = await admin
+    .from('deliveries')
+    .select('id, customer_name, products, qty, amount, rider_id, contractor_id, delivery_date, is_modified, modification_count, original_amount, delivery_notes')
+    .eq('id', deliveryId)
+    .single()
+
+  if (!delivery) return { error: 'Delivery not found' }
+
+  // Parse current products
+  const productMap = new Map<string, { qty: number; unitPrice: number }>()
+  const totalAmount = Number(delivery.amount || 0)
+  const totalQty = Number(delivery.qty || 1)
+  const avgUnitPrice = totalQty > 0 ? totalAmount / totalQty : 0
+
+  if (delivery.products) {
+    const items = delivery.products.split(',').map((s: string) => s.trim())
+    for (const item of items) {
+      const match = item.match(/^(\d+)\s*x\s*(.+)$/i)
+      if (match) {
+        const itemQty = parseInt(match[1], 10)
+        const itemName = match[2].trim()
+        productMap.set(itemName, { qty: itemQty, unitPrice: avgUnitPrice })
+      } else if (item) {
+        productMap.set(item, { qty: 1, unitPrice: avgUnitPrice })
+      }
+    }
+  }
+
+  // Find the product to mark as CMS
+  const existing = productMap.get(productName)
+  if (!existing) return { error: `Product "${productName}" not found in order` }
+
+  const actualCmsQty = Math.min(qty, existing.qty)
+  const newQtyForProduct = existing.qty - actualCmsQty
+
+  if (newQtyForProduct <= 0) {
+    productMap.delete(productName)
+  } else {
+    productMap.set(productName, { ...existing, qty: newQtyForProduct })
+  }
+
+  // Calculate new totals
+  let newTotalQty = 0
+  for (const [, v] of productMap) {
+    newTotalQty += v.qty
+  }
+  const priceReduction = actualCmsQty * avgUnitPrice
+  const newAmount = Math.max(0, Math.round((totalAmount - priceReduction) * 100) / 100)
+
+  // Build new products string
+  const newProducts = productMap.size > 0
+    ? Array.from(productMap.entries()).map(([name, v]) => `${v.qty}x ${name}`).join(', ')
+    : ''
+
+  // Store original amount if first modification
+  const originalAmount = delivery.is_modified ? delivery.original_amount : totalAmount
+
+  // Build notes - append CMS reason for this product
+  const cmsNote = `CMS: ${productName} (${actualCmsQty}x) - ${cmsReason}`
+  const existingNotes = delivery.delivery_notes || ''
+  const newNotes = existingNotes ? `${existingNotes}\n${cmsNote}` : cmsNote
+
+  // If all products are now CMS, mark entire delivery as CMS
+  if (productMap.size === 0) {
+    const { error: updateError } = await admin
+      .from('deliveries')
+      .update({
+        status: 'cms',
+        delivery_notes: newNotes,
+        status_updated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', deliveryId)
+
+    if (updateError) return { error: updateError.message }
+
+    return {
+      success: true,
+      newAmount: 0,
+      newQty: 0,
+      newProducts: '',
+      markedCmsQty: actualCmsQty,
+      fullyCms: true, // Entire delivery is now CMS
+    }
+  }
+
+  // Update delivery with reduced products
+  const { error: updateError } = await admin
+    .from('deliveries')
+    .update({
+      products: newProducts,
+      qty: newTotalQty,
+      amount: newAmount,
+      is_modified: true,
+      modification_count: (delivery.modification_count || 0) + 1,
+      original_amount: originalAmount,
+      delivery_notes: newNotes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', deliveryId)
+
+  if (updateError) return { error: updateError.message }
+
+  // Log the CMS modification
+  await admin.from('order_modifications').insert({
+    target_delivery_id: deliveryId,
+    rider_id: delivery.rider_id,
+    contractor_id: delivery.contractor_id,
+    product_name: productName,
+    qty: actualCmsQty,
+    unit_price: avgUnitPrice,
+    total_price: actualCmsQty * avgUnitPrice,
+    reason: 'product_cms',
+    notes: cmsReason,
+    status: 'approved', // Auto-approved since rider is marking it
+  })
+
+  return {
+    success: true,
+    newAmount,
+    newQty: newTotalQty,
+    newProducts,
+    markedCmsQty: actualCmsQty,
+    fullyCms: false,
+  }
+}
+
 // ── Get all pending modifications for contractor/admin ──
 export async function getPendingModifications(contractorId?: string) {
   const supabase = await createClient()
