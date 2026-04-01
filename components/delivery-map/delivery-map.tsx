@@ -2701,8 +2701,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                             </div>
                           )}
                         </div>
-                        {/* ── Expanded: Compact location update ── */}
-                        {isStopExpanded && p.status !== 'delivered' && (
+                        {/* ── Expanded: Compact location update (only show if no good location yet) ── */}
+                        {isStopExpanded && p.status !== 'delivered' && (!p.lat || !p.lng || p.source === 'geocoded') && (
                           <div className="px-3 py-1.5 border-t border-white/[0.04]">
                             {locationLinkInput === p.id ? (
                               <div className="flex items-center gap-1.5">
@@ -2779,8 +2779,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               </a>
                             </div>
                           </div>
-                          {/* Expanded: Compact location update for nearby */}
-                          {isNExpanded && n.status !== 'delivered' && (
+                          {/* Expanded: Compact location update for nearby (only show if no good location) */}
+                          {isNExpanded && n.status !== 'delivered' && (!n.lat || !n.lng || n.source === 'geocoded') && (
                             <div className="px-3 py-1.5 border-t border-white/[0.04]">
                               {locationLinkInput === n.id ? (
                                 <div className="flex items-center gap-1.5">
