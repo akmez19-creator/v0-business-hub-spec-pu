@@ -29,12 +29,17 @@ export async function getItemsFromDeliveryIds(deliveryIds: string[]) {
     
     if (d.products) {
       const parts = d.products.split(',').map((s: string) => s.trim())
+      // If there's only one product and no qty prefix, use the delivery's qty field
+      const isSingleProduct = parts.length === 1 && !parts[0].match(/^\d+\s*x\s*/i)
+      
       for (const part of parts) {
         const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
         if (match) {
           items.push({ name: match[2].trim(), qty: parseInt(match[1], 10), unitPrice: avgPrice, deliveryId: d.id })
         } else if (part) {
-          items.push({ name: part, qty: 1, unitPrice: avgPrice, deliveryId: d.id })
+          // Use delivery's qty field for single products without prefix, otherwise default to 1
+          const itemQty = isSingleProduct ? totalQty : 1
+          items.push({ name: part, qty: itemQty, unitPrice: avgPrice, deliveryId: d.id })
         }
       }
     }
@@ -355,7 +360,7 @@ export async function modifyOrder(params: {
       const isActiveSource = ['pending', 'assigned', 'picked_up'].includes(source.status)
       const allProductsTaken = srcQty === 0
 
-      // If active client lost ALL their products → auto-mark as NWD
+      // If active client lost ALL their products ��� auto-mark as NWD
       // If they still have items → shortage note + continue delivery
       const shortageNote = isActiveSource
         ? allProductsTaken

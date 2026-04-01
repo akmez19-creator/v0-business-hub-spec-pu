@@ -32,12 +32,13 @@ interface ModifyOrderSheetProps {
   itemIds?: string[] // Array of all delivery IDs for grouped orders
   customerName: string
   currentProducts: string
+  currentQty: number // Total qty from the delivery
   currentAmount: number
   onModified?: (result: { newAmount: number; newQty: number; newProducts?: string; cmsDeliveryId?: string; affectedClient?: { deliveryId: string; name: string; markedNwd: boolean; remainingQty: number } | null }) => void
 }
 
 export function ModifyOrderSheet({
-  open, onClose, deliveryId, itemIds, customerName, currentProducts, currentAmount, onModified
+  open, onClose, deliveryId, itemIds, customerName, currentProducts, currentQty, currentAmount, onModified
 }: ModifyOrderSheetProps) {
   const [stockProducts, setStockProducts] = useState<StockProduct[]>([])
   const [loading, setLoading] = useState(false)
@@ -104,22 +105,19 @@ export function ModifyOrderSheet({
       const items: { name: string; qty: number; unitPrice: number; deliveryId: string }[] = []
       if (currentProducts) {
         const parts = currentProducts.split(',').map(s => s.trim())
-        let totalQty = 0
-        for (const part of parts) {
-          const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
-          if (match) {
-            totalQty += parseInt(match[1], 10)
-          } else {
-            totalQty += 1
-          }
-        }
+        // Check if there's only one product without qty prefix - use currentQty from delivery
+        const isSingleProduct = parts.length === 1 && !parts[0].match(/^\d+\s*x\s*/i)
+        const totalQty = currentQty || 1
         const avgPrice = totalQty > 0 ? currentAmount / totalQty : 0
+        
         for (const part of parts) {
           const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
           if (match) {
             items.push({ name: match[2].trim(), qty: parseInt(match[1], 10), unitPrice: avgPrice, deliveryId })
           } else if (part) {
-            items.push({ name: part, qty: 1, unitPrice: avgPrice, deliveryId })
+            // Use delivery's qty for single products without prefix
+            const itemQty = isSingleProduct ? totalQty : 1
+            items.push({ name: part, qty: itemQty, unitPrice: avgPrice, deliveryId })
           }
         }
       }
