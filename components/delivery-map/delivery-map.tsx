@@ -3658,13 +3658,31 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           <Crosshair className="w-3.5 h-3.5" />Pin on Map
                                         </button>
                                       )}
-                                      <button onClick={() => setRemarkPopup({ pin: d })}
-                                        className={cn("action-pill h-9 px-3 gap-1.5 border text-[11px] font-mono font-bold",
-                                          d.riderPriority || d.riderRemarks || d.contact2 
-                                            ? "bg-violet-500/12 border-violet-400/15 text-violet-400" 
-                                            : "bg-white/5 border-white/10 text-white/60")}>
-                                        <MessageSquareMore className="w-3.5 h-3.5" />Remark
-                                      </button>
+                                      {d.riderRemarks ? (
+                                        <button onClick={() => setRemarkPopup({ pin: d })}
+                                          className="action-pill h-9 px-3 gap-1.5 bg-gradient-to-r from-violet-500/15 to-fuchsia-500/15 border border-violet-400/20 text-[11px] font-medium max-w-[140px]">
+                                          <MapPin className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
+                                          <span className="truncate text-violet-300">{d.riderRemarks}</span>
+                                        </button>
+                                      ) : d.riderPriority ? (
+                                        <button onClick={() => setRemarkPopup({ pin: d })}
+                                          className={cn("action-pill h-9 px-3 gap-1.5 border text-[11px] font-bold",
+                                            d.riderPriority === 'priority' 
+                                              ? "bg-red-500/12 border-red-400/20 text-red-400" 
+                                              : "bg-amber-500/12 border-amber-400/20 text-amber-400")}>
+                                          {d.riderPriority === 'priority' ? <Star className="w-3.5 h-3.5" /> : <Clock3 className="w-3.5 h-3.5" />}
+                                          {d.riderPriority === 'priority' ? 'Priority' : 'Later'}
+                                        </button>
+                                      ) : (
+                                        <button onClick={() => setRemarkPopup({ pin: d })}
+                                          className={cn("action-pill h-9 px-3 gap-1.5 border text-[11px] font-mono",
+                                            d.contact2 
+                                              ? "bg-violet-500/12 border-violet-400/15 text-violet-400 font-bold" 
+                                              : "bg-white/5 border-white/10 text-white/40 hover:text-white/60 hover:bg-white/8")}>
+                                          <MessageSquareMore className="w-3.5 h-3.5" />
+                                          {d.contact2 ? '+Contact' : 'Note'}
+                                        </button>
+                                      )}
                                       <div className="flex-1" />
                                       {d.contact1 && (
                                         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
