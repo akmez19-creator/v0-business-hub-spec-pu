@@ -21,6 +21,7 @@ interface CmsReviewActionsProps {
     status: string
     new_price: number | null
     original_price: number | null
+    original_qty: number | null
     created_at: string
     rider_name?: string
     contractor_name?: string
@@ -91,9 +92,21 @@ export function CmsReviewActions({ modification, onReviewed }: CmsReviewActionsP
     ? modification.new_price - modification.original_price 
     : 0
   const needsPriceReview = priceDiff !== 0
+  const remainingQty = modification.original_qty ? modification.original_qty - modification.qty : null
 
   return (
     <div className="space-y-3">
+      {/* Qty Info */}
+      {modification.original_qty && (
+        <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-400/20">
+          <div className="flex items-center gap-2 text-[11px] text-amber-400 font-mono">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>Qty: {modification.original_qty}x → {remainingQty}x</span>
+            <span className="text-red-400">({modification.qty}x CMS)</span>
+          </div>
+        </div>
+      )}
+      
       {/* Price Info */}
       {needsPriceReview && (
         <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-400/20">
