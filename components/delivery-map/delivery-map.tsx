@@ -3523,6 +3523,9 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-[14px] font-semibold text-white/90">{d.customerName}{d.isModified && <span className="ml-1.5 text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20">MOD</span>}</span>
+                                      {d.riderPriority === 'priority' && <span className="flex items-center gap-0.5 text-red-400"><Star className="w-3.5 h-3.5 fill-red-400" /></span>}
+                                      {d.riderPriority === 'later' && <span className="flex items-center gap-0.5 text-amber-400"><Clock3 className="w-3.5 h-3.5" /></span>}
+                                      {d.riderRemarks && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-400/15 truncate max-w-[80px]">{d.riderRemarks}</span>}
                                       {d.locationFlagged && <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[9px] font-black font-mono animate-pulse">FLAG</span>}
                                       {d.pendingModificationId && <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20 animate-pulse">REVIEW</span>}
                                       {isReturnOrder(d) && (d.amount || 0) <= 0 ? (
@@ -3653,6 +3656,9 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-[14px] font-semibold text-white/75">{d.customerName}{d.isModified && <span className="ml-1.5 text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20">MOD</span>}</span>
+                                      {d.riderPriority === 'priority' && <span className="flex items-center gap-0.5 text-red-400"><Star className="w-3.5 h-3.5 fill-red-400" /></span>}
+                                      {d.riderPriority === 'later' && <span className="flex items-center gap-0.5 text-amber-400"><Clock3 className="w-3.5 h-3.5" /></span>}
+                                      {d.riderRemarks && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-400/15 truncate max-w-[80px]">{d.riderRemarks}</span>}
                                       {isReturnOrder(d) && (d.amount || 0) <= 0 ? (
                                         <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${d.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : d.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>{getReturnLabel(d.salesType!)}</span>
                                       ) : (
