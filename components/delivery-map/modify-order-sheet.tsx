@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, Package, Plus, Minus, ChevronDown, ChevronUp, AlertTriangle, Check, Loader2, Users, Trash2, Edit3, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getAvailableProducts, modifyOrder, reduceOrderItem, replaceOrderProduct, markProductAsCms } from '@/lib/modification-actions'
+import { getAvailableProducts, modifyOrder, reduceOrderItem, replaceOrderProduct, markProductAsCms, getItemsFromDeliveryIds } from '@/lib/modification-actions'
 
 interface StockSource {
   deliveryId: string
@@ -29,6 +29,7 @@ interface ModifyOrderSheetProps {
   open: boolean
   onClose: () => void
   deliveryId: string
+  itemIds?: string[] // Array of all delivery IDs for grouped orders
   customerName: string
   currentProducts: string
   currentAmount: number
@@ -36,7 +37,7 @@ interface ModifyOrderSheetProps {
 }
 
 export function ModifyOrderSheet({
-  open, onClose, deliveryId, customerName, currentProducts, currentAmount, onModified
+  open, onClose, deliveryId, itemIds, customerName, currentProducts, currentAmount, onModified
 }: ModifyOrderSheetProps) {
   const [stockProducts, setStockProducts] = useState<StockProduct[]>([])
   const [loading, setLoading] = useState(false)
@@ -45,8 +46,8 @@ export function ModifyOrderSheet({
   const [affectedInfo, setAffectedInfo] = useState<{ name: string; markedNwd: boolean; remainingQty: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   
-  // Current order items (parsed from currentProducts)
-  const [currentItems, setCurrentItems] = useState<{ name: string; qty: number; unitPrice: number }[]>([])
+  // Current order items (parsed from currentProducts) - each item tracks its deliveryId
+  const [currentItems, setCurrentItems] = useState<{ name: string; qty: number; unitPrice: number; deliveryId: string }[]>([])
   const [editingItem, setEditingItem] = useState<string | null>(null)
   const [pendingQty, setPendingQty] = useState<Record<string, number>>({})
   const [reducingItem, setReducingItem] = useState<string | null>(null)
@@ -57,8 +58,8 @@ export function ModifyOrderSheet({
   const [replacePrice, setReplacePrice] = useState('')
   const [isReplacing, setIsReplacing] = useState(false)
   
-  // CMS mode - for marking individual products as CMS
-  const [cmsProduct, setCmsProduct] = useState<{ name: string; qty: number } | null>(null)
+  // CMS mode - for marking individual products as CMS (includes deliveryId for correct targeting)
+  const [cmsProduct, setCmsProduct] = useState<{ name: string; qty: number; deliveryId: string } | null>(null)
   const [cmsReason, setCmsReason] = useState('')
   const [cmsNotes, setCmsNotes] = useState('')
   const [isMarkingCms, setIsMarkingCms] = useState(false)
@@ -89,37 +90,48 @@ export function ModifyOrderSheet({
     setReplacePrice('')
     setIsReplacing(false)
     
-    // Parse current products into editable items
-    const items: { name: string; qty: number; unitPrice: number }[] = []
-    if (currentProducts) {
-      const parts = currentProducts.split(',').map(s => s.trim())
-      let totalQty = 0
-      for (const part of parts) {
-        const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
-        if (match) {
-          totalQty += parseInt(match[1], 10)
-        } else {
-          totalQty += 1
+    // Fetch items from all delivery IDs (for grouped orders)
+    const allIds = itemIds?.length ? itemIds : [deliveryId]
+    
+    // If we have multiple IDs, fetch from server to get accurate deliveryId per item
+    if (allIds.length > 1) {
+      getItemsFromDeliveryIds(allIds).then(res => {
+        if (res.error) setError(res.error)
+        if (res.items) setCurrentItems(res.items)
+      })
+    } else {
+      // Single delivery - parse from props
+      const items: { name: string; qty: number; unitPrice: number; deliveryId: string }[] = []
+      if (currentProducts) {
+        const parts = currentProducts.split(',').map(s => s.trim())
+        let totalQty = 0
+        for (const part of parts) {
+          const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
+          if (match) {
+            totalQty += parseInt(match[1], 10)
+          } else {
+            totalQty += 1
+          }
+        }
+        const avgPrice = totalQty > 0 ? currentAmount / totalQty : 0
+        for (const part of parts) {
+          const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
+          if (match) {
+            items.push({ name: match[2].trim(), qty: parseInt(match[1], 10), unitPrice: avgPrice, deliveryId })
+          } else if (part) {
+            items.push({ name: part, qty: 1, unitPrice: avgPrice, deliveryId })
+          }
         }
       }
-      const avgPrice = totalQty > 0 ? currentAmount / totalQty : 0
-      for (const part of parts) {
-        const match = part.match(/^(\d+)\s*x\s*(.+)$/i)
-        if (match) {
-          items.push({ name: match[2].trim(), qty: parseInt(match[1], 10), unitPrice: avgPrice })
-        } else if (part) {
-          items.push({ name: part, qty: 1, unitPrice: avgPrice })
-        }
-      }
+      setCurrentItems(items)
     }
-    setCurrentItems(items)
     
     getAvailableProducts(deliveryId).then(res => {
       if (res.error) setError(res.error)
       setStockProducts(res.stockProducts || [])
       setLoading(false)
     })
-  }, [open, deliveryId, currentProducts, currentAmount])
+  }, [open, deliveryId, itemIds, currentProducts, currentAmount])
 
   const resetForm = useCallback(() => {
     setExpandedProduct(null)
@@ -196,7 +208,7 @@ export function ModifyOrderSheet({
     
     const fullReason = cmsNotes ? `${cmsReason}: ${cmsNotes}` : cmsReason
     const result = await markProductAsCms({
-      deliveryId,
+      deliveryId: cmsProduct.deliveryId, // Use the item's specific deliveryId
       productName: cmsProduct.name,
       qty: cmsProduct.qty,
       cmsReason: fullReason,
@@ -217,10 +229,10 @@ export function ModifyOrderSheet({
         })
         setTimeout(() => { onClose(); resetForm(); setSuccess(false) }, 1500)
       } else {
-        // Update local state
+        // Update local state - match by both name AND deliveryId for accuracy
         setCurrentItems(prev => {
           const updated = prev.map(item => {
-            if (item.name === cmsProduct.name) {
+            if (item.name === cmsProduct.name && item.deliveryId === cmsProduct.deliveryId) {
               const newQty = item.qty - cmsProduct.qty
               return newQty > 0 ? { ...item, qty: newQty } : null
             }
@@ -385,7 +397,7 @@ const handleSubmit = async () => {
                         <span className="text-[11px] text-white/70 flex-1 truncate">{item.name}</span>
                         <span className="text-[10px] text-white/30">Rs {Math.round(item.qty * item.unitPrice)}</span>
                         <button 
-                          onClick={() => setCmsProduct({ name: item.name, qty: item.qty })}
+                          onClick={() => setCmsProduct({ name: item.name, qty: item.qty, deliveryId: item.deliveryId })}
                           className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition"
                           title="Mark as CMS"
                         >

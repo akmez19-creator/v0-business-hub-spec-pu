@@ -131,7 +131,7 @@ export interface DeliveryPin {
   locationSource?: string | null
   isModified?: boolean
   modificationCount?: number
-items?: { name: string; qty: number; amount: number }[]
+items?: { name: string; qty: number; amount: number; deliveryId?: string }[]
   salesType?: string | null
   returnProduct?: string | null
   deliveredAt?: string | null // Timestamp when status was set to delivered
@@ -676,7 +676,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ════════════════════════════════════════════════════════════���═════════��═══
+      // ════════════════════════════════════════════════════════════���═════��═══��═══
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -4344,6 +4344,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         open={!!modifyTarget}
         onClose={() => setModifyTarget(null)}
         deliveryId={modifyTarget?.id || ''}
+        itemIds={modifyTarget?.itemIds}
         customerName={modifyTarget?.customerName || ''}
         currentProducts={modifyTarget?.products || ''}
         currentAmount={modifyTarget?.amount || 0}
