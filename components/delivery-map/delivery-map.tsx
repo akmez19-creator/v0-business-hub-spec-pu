@@ -2588,7 +2588,11 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 {/* Row 1: Status dot + Name + Price + List toggle */}
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full shrink-0 shadow-[0_0_6px_currentColor]" style={{ backgroundColor: STATUS_COLORS[navTarget.status]?.dot || '#6b7280' }} />
-                  <p className="text-[12px] font-bold text-white truncate flex-1">{navTarget.customerName}</p>
+                  <p className="text-[12px] font-bold text-white truncate">{navTarget.customerName}</p>
+                  {navTarget.riderPriority === 'priority' && <Star className="w-3.5 h-3.5 text-red-400 fill-red-400 shrink-0" />}
+                  {navTarget.riderPriority === 'later' && <Clock3 className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                  {navTarget.riderRemarks && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-400/15 shrink-0 max-w-[80px] truncate">{navTarget.riderRemarks}</span>}
+                  <div className="flex-1" />
                   {isReturnOrder(navTarget) && (navTarget.amount || 0) <= 0 ? (
                     <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${navTarget.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : navTarget.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
                       {getReturnLabel(navTarget.salesType!)}
@@ -2697,45 +2701,37 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                             </div>
                           )}
                         </div>
-                        {/* ── Expanded: Update location (not for delivered orders) ─�� */}
+                        {/* ── Expanded: Compact location update ── */}
                         {isStopExpanded && p.status !== 'delivered' && (
-                          <div className="px-3 pb-2.5 border-t border-white/[0.04] bg-white/[0.02]">
-                            <div className="flex items-center gap-2 py-2">
-                              <span className="text-[9px] text-white/25 font-mono uppercase tracking-wider">Update Location</span>
-                              <div className="flex-1 h-px bg-white/[0.05]" />
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {/* Pin on map - always available */}
-                              <button onClick={(e) => { e.stopPropagation(); startPlacingPin(p); setNavStopsExpanded(false) }}
-                                className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
-                                <Crosshair className="w-3.5 h-3.5" />Pin on Map
-                              </button>
-                            </div>
-                            {/* Paste Google Maps link */}
-                            <div className="mt-2">
-                              {locationLinkInput === p.id ? (
-                                <div className="flex items-center gap-1.5">
-                                  <input type="text" value={locationLinkValue} onChange={e => setLocationLinkValue(e.target.value)}
-                                    placeholder="Paste Google Maps link..."
-                                    className="flex-1 h-8 px-3 rounded-lg bg-cyan-500/5 border border-cyan-400/15 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-cyan-400/30 font-mono"
-                                    autoFocus onKeyDown={e => { if (e.key === 'Enter' && locationLinkValue) handlePasteLocationLink(p, locationLinkValue) }}
-                                  />
-                                  <button onClick={(e) => { e.stopPropagation(); handlePasteLocationLink(p, locationLinkValue) }} disabled={!locationLinkValue || updatingPinId === p.id}
-                                    className="btn-holo w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/15 border border-cyan-400/15 disabled:opacity-20">
-                                    {updatingPinId === p.id ? <div className="w-3 h-3 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-3.5 h-3.5 text-cyan-400" />}
-                                  </button>
-                                  <button onClick={(e) => { e.stopPropagation(); setLocationLinkInput(null); setLocationLinkValue('') }}
-                                    className="btn-holo w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 border border-white/5">
-                                    <X className="w-3.5 h-3.5 text-white/30" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button onClick={(e) => { e.stopPropagation(); setLocationLinkInput(p.id); setLocationLinkValue('') }}
-                                  className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-amber-500/8 text-amber-400/70 border border-amber-400/10 text-[10px] font-mono w-full justify-center">
-                                  <Link2 className="w-3.5 h-3.5" />Paste Shared Location Link
+                          <div className="px-3 py-1.5 border-t border-white/[0.04]">
+                            {locationLinkInput === p.id ? (
+                              <div className="flex items-center gap-1.5">
+                                <input type="text" value={locationLinkValue} onChange={e => setLocationLinkValue(e.target.value)}
+                                  placeholder="Paste Google Maps link..."
+                                  className="flex-1 h-7 px-2.5 rounded-md bg-cyan-500/5 border border-cyan-400/15 text-[10px] text-white placeholder:text-white/20 outline-none focus:border-cyan-400/30 font-mono"
+                                  autoFocus onKeyDown={e => { if (e.key === 'Enter' && locationLinkValue) handlePasteLocationLink(p, locationLinkValue) }}
+                                />
+                                <button onClick={(e) => { e.stopPropagation(); handlePasteLocationLink(p, locationLinkValue) }} disabled={!locationLinkValue || updatingPinId === p.id}
+                                  className="w-7 h-7 rounded-md flex items-center justify-center bg-cyan-500/15 border border-cyan-400/15 disabled:opacity-20">
+                                  {updatingPinId === p.id ? <div className="w-2.5 h-2.5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-3 h-3 text-cyan-400" />}
                                 </button>
-                              )}
-                            </div>
+                                <button onClick={(e) => { e.stopPropagation(); setLocationLinkInput(null); setLocationLinkValue('') }}
+                                  className="w-7 h-7 rounded-md flex items-center justify-center bg-white/5">
+                                  <X className="w-3 h-3 text-white/30" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={(e) => { e.stopPropagation(); startPlacingPin(p); setNavStopsExpanded(false) }}
+                                  className="h-7 px-2.5 rounded-md flex items-center gap-1 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[9px] font-mono">
+                                  <Crosshair className="w-3 h-3" />Pin
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); setLocationLinkInput(p.id); setLocationLinkValue('') }}
+                                  className="flex-1 h-7 px-2.5 rounded-md flex items-center justify-center gap-1 bg-amber-500/6 text-amber-400/60 border border-amber-400/10 text-[9px] font-mono">
+                                  <Link2 className="w-3 h-3" />Paste Link
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2783,44 +2779,37 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               </a>
                             </div>
                           </div>
-                          {/* Expanded: Location update for nearby (not for delivered) */}
+                          {/* Expanded: Compact location update for nearby */}
                           {isNExpanded && n.status !== 'delivered' && (
-                            <div className="px-3 pb-2.5 border-t border-white/[0.04] bg-white/[0.02]">
-                              <div className="flex items-center gap-2 py-2">
-                                <span className="text-[9px] text-white/25 font-mono uppercase tracking-wider">Update Location</span>
-                                <div className="flex-1 h-px bg-white/[0.05]" />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-1.5">
-
-                                <button onClick={() => { startPlacingPin(n); setNavStopsExpanded(false) }}
-                                  className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
-                                  <Crosshair className="w-3.5 h-3.5" />Pin on Map
-                                </button>
-                              </div>
-                              <div className="mt-2">
-                                {locationLinkInput === n.id ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <input type="text" value={locationLinkValue} onChange={e => setLocationLinkValue(e.target.value)}
-                                      placeholder="Paste Google Maps link..."
-                                      className="flex-1 h-8 px-3 rounded-lg bg-cyan-500/5 border border-cyan-400/15 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-cyan-400/30 font-mono"
-                                      autoFocus onKeyDown={e => { if (e.key === 'Enter' && locationLinkValue) handlePasteLocationLink(n, locationLinkValue) }}
-                                    />
-                                    <button onClick={() => handlePasteLocationLink(n, locationLinkValue)} disabled={!locationLinkValue || updatingPinId === n.id}
-                                      className="btn-holo w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/15 border border-cyan-400/15 disabled:opacity-20">
-                                      {updatingPinId === n.id ? <div className="w-3 h-3 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-3.5 h-3.5 text-cyan-400" />}
-                                    </button>
-                                    <button onClick={() => { setLocationLinkInput(null); setLocationLinkValue('') }}
-                                      className="btn-holo w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 border border-white/5">
-                                      <X className="w-3.5 h-3.5 text-white/30" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button onClick={() => { setLocationLinkInput(n.id); setLocationLinkValue('') }}
-                                    className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-amber-500/8 text-amber-400/70 border border-amber-400/10 text-[10px] font-mono w-full justify-center">
-                                    <Link2 className="w-3.5 h-3.5" />Paste Shared Location Link
+                            <div className="px-3 py-1.5 border-t border-white/[0.04]">
+                              {locationLinkInput === n.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input type="text" value={locationLinkValue} onChange={e => setLocationLinkValue(e.target.value)}
+                                    placeholder="Paste Google Maps link..."
+                                    className="flex-1 h-7 px-2.5 rounded-md bg-cyan-500/5 border border-cyan-400/15 text-[10px] text-white placeholder:text-white/20 outline-none focus:border-cyan-400/30 font-mono"
+                                    autoFocus onKeyDown={e => { if (e.key === 'Enter' && locationLinkValue) handlePasteLocationLink(n, locationLinkValue) }}
+                                  />
+                                  <button onClick={() => handlePasteLocationLink(n, locationLinkValue)} disabled={!locationLinkValue || updatingPinId === n.id}
+                                    className="w-7 h-7 rounded-md flex items-center justify-center bg-cyan-500/15 border border-cyan-400/15 disabled:opacity-20">
+                                    {updatingPinId === n.id ? <div className="w-2.5 h-2.5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-3 h-3 text-cyan-400" />}
                                   </button>
-                                )}
-                              </div>
+                                  <button onClick={() => { setLocationLinkInput(null); setLocationLinkValue('') }}
+                                    className="w-7 h-7 rounded-md flex items-center justify-center bg-white/5">
+                                    <X className="w-3 h-3 text-white/30" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button onClick={() => { startPlacingPin(n); setNavStopsExpanded(false) }}
+                                    className="h-7 px-2.5 rounded-md flex items-center gap-1 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[9px] font-mono">
+                                    <Crosshair className="w-3 h-3" />Pin
+                                  </button>
+                                  <button onClick={() => { setLocationLinkInput(n.id); setLocationLinkValue('') }}
+                                    className="flex-1 h-7 px-2.5 rounded-md flex items-center justify-center gap-1 bg-amber-500/6 text-amber-400/60 border border-amber-400/10 text-[9px] font-mono">
+                                    <Link2 className="w-3 h-3" />Paste Link
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -2873,53 +2862,45 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                               </a>
                             </div>
                           </div>
-                          {/* Expanded: Location update for unreachable */}
+                          {/* Expanded: Compact location update for unreachable */}
                           {isUExpanded && (
-                            <div className="px-3 pb-2.5 border-t border-orange-400/[0.04] bg-orange-500/[0.02]">
-                              <div className="flex items-center gap-2 py-2">
-                                <span className="text-[9px] text-orange-400/30 font-mono uppercase tracking-wider">Set Location</span>
-                                <div className="flex-1 h-px bg-orange-400/[0.08]" />
-                              </div>
-                              <div className="flex flex-wrap items-center gap-1.5">
-
-                                {u.contact1 && (
-                                  <button onClick={() => sendMapMessage(u, 'sms', 'location')} disabled={sendingMsg === u.id}
-                                    className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-blue-500/8 text-blue-400 border border-blue-400/10 text-[10px] font-mono">
-                                    <Mail className="w-3.5 h-3.5" />SMS Location
+                            <div className="px-3 py-1.5 border-t border-orange-400/[0.04]">
+                              {locationLinkInput === u.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input type="text" value={locationLinkValue} onChange={e => setLocationLinkValue(e.target.value)}
+                                    placeholder="Paste Google Maps link..."
+                                    className="flex-1 h-7 px-2.5 rounded-md bg-cyan-500/5 border border-cyan-400/15 text-[10px] text-white placeholder:text-white/20 outline-none focus:border-cyan-400/30 font-mono"
+                                    autoFocus onKeyDown={e => { if (e.key === 'Enter' && locationLinkValue) handlePasteLocationLink(u, locationLinkValue) }}
+                                  />
+                                  <button onClick={() => handlePasteLocationLink(u, locationLinkValue)} disabled={!locationLinkValue || updatingPinId === u.id}
+                                    className="w-7 h-7 rounded-md flex items-center justify-center bg-cyan-500/15 border border-cyan-400/15 disabled:opacity-20">
+                                    {updatingPinId === u.id ? <div className="w-2.5 h-2.5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-3 h-3 text-cyan-400" />}
                                   </button>
-                                )}
-                                {u.status !== 'delivered' && (
-                                  <button onClick={() => { startPlacingPin(u); setNavStopsExpanded(false) }}
-                                    className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[10px] font-mono">
-                                    <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                  <button onClick={() => { setLocationLinkInput(null); setLocationLinkValue('') }}
+                                    className="w-7 h-7 rounded-md flex items-center justify-center bg-white/5">
+                                    <X className="w-3 h-3 text-white/30" />
                                   </button>
-                                )}
-                              </div>
-                              {/* Paste link */}
-                              <div className="mt-2">
-                                {locationLinkInput === u.id ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <input type="text" value={locationLinkValue} onChange={e => setLocationLinkValue(e.target.value)}
-                                      placeholder="Paste Google Maps link..."
-                                      className="flex-1 h-8 px-3 rounded-lg bg-cyan-500/5 border border-cyan-400/15 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-cyan-400/30 font-mono"
-                                      autoFocus onKeyDown={e => { if (e.key === 'Enter' && locationLinkValue) handlePasteLocationLink(u, locationLinkValue) }}
-                                    />
-                                    <button onClick={() => handlePasteLocationLink(u, locationLinkValue)} disabled={!locationLinkValue || updatingPinId === u.id}
-                                      className="btn-holo w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/15 border border-cyan-400/15 disabled:opacity-20">
-                                      {updatingPinId === u.id ? <div className="w-3 h-3 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  {u.contact1 && (
+                                    <button onClick={() => sendMapMessage(u, 'sms', 'location')} disabled={sendingMsg === u.id}
+                                      className="h-7 px-2.5 rounded-md flex items-center gap-1 bg-blue-500/8 text-blue-400 border border-blue-400/10 text-[9px] font-mono">
+                                      <Mail className="w-3 h-3" />SMS
                                     </button>
-                                    <button onClick={() => { setLocationLinkInput(null); setLocationLinkValue('') }}
-                                      className="btn-holo w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 border border-white/5">
-                                      <X className="w-3.5 h-3.5 text-white/30" />
+                                  )}
+                                  {u.status !== 'delivered' && (
+                                    <button onClick={() => { startPlacingPin(u); setNavStopsExpanded(false) }}
+                                      className="h-7 px-2.5 rounded-md flex items-center gap-1 bg-cyan-500/8 text-cyan-400 border border-cyan-400/10 text-[9px] font-mono">
+                                      <Crosshair className="w-3 h-3" />Pin
                                     </button>
-                                  </div>
-                                ) : (
+                                  )}
                                   <button onClick={() => { setLocationLinkInput(u.id); setLocationLinkValue('') }}
-                                    className="btn-holo h-8 px-3 rounded-lg flex items-center gap-1.5 bg-amber-500/8 text-amber-400/70 border border-amber-400/10 text-[10px] font-mono w-full justify-center">
-                                    <Link2 className="w-3.5 h-3.5" />Paste Shared Location Link
+                                    className="flex-1 h-7 px-2.5 rounded-md flex items-center justify-center gap-1 bg-amber-500/6 text-amber-400/60 border border-amber-400/10 text-[9px] font-mono">
+                                    <Link2 className="w-3 h-3" />Paste Link
                                   </button>
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3523,6 +3504,9 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-[14px] font-semibold text-white/90">{d.customerName}{d.isModified && <span className="ml-1.5 text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20">MOD</span>}</span>
+                                      {d.riderPriority === 'priority' && <span className="flex items-center gap-0.5 text-red-400"><Star className="w-3.5 h-3.5 fill-red-400" /></span>}
+                                      {d.riderPriority === 'later' && <span className="flex items-center gap-0.5 text-amber-400"><Clock3 className="w-3.5 h-3.5" /></span>}
+                                      {d.riderRemarks && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-400/15 truncate max-w-[80px]">{d.riderRemarks}</span>}
                                       {d.locationFlagged && <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[9px] font-black font-mono animate-pulse">FLAG</span>}
                                       {d.pendingModificationId && <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20 animate-pulse">REVIEW</span>}
                                       {isReturnOrder(d) && (d.amount || 0) <= 0 ? (
@@ -3653,6 +3637,9 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-[14px] font-semibold text-white/75">{d.customerName}{d.isModified && <span className="ml-1.5 text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20">MOD</span>}</span>
+                                      {d.riderPriority === 'priority' && <span className="flex items-center gap-0.5 text-red-400"><Star className="w-3.5 h-3.5 fill-red-400" /></span>}
+                                      {d.riderPriority === 'later' && <span className="flex items-center gap-0.5 text-amber-400"><Clock3 className="w-3.5 h-3.5" /></span>}
+                                      {d.riderRemarks && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-400/15 truncate max-w-[80px]">{d.riderRemarks}</span>}
                                       {isReturnOrder(d) && (d.amount || 0) <= 0 ? (
                                         <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${d.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : d.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>{getReturnLabel(d.salesType!)}</span>
                                       ) : (
