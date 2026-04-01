@@ -1195,7 +1195,7 @@ export function OrdersContent({
                                   Call
                                 </span>
                               )}
-                              {order.deliveryNotes && (
+                              {order.deliveryNotes && order.status !== 'cms' && (
                                 <span
                                   onClick={() => setNotePanel({ order, note: order.deliveryNotes || '' })}
                                   className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground text-[9px] font-medium cursor-pointer hover:bg-muted transition-colors shrink-0"
@@ -1203,6 +1203,17 @@ export function OrdersContent({
                                 >
                                   <StickyNote className="w-2.5 h-2.5" />
                                   Note
+                                </span>
+                              )}
+                              {/* CMS Reason - show prominently for CMS orders */}
+                              {order.status === 'cms' && order.deliveryNotes && (
+                                <span
+                                  onClick={() => setNotePanel({ order, note: order.deliveryNotes || '' })}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-bold cursor-pointer hover:bg-amber-500/30 transition-colors shrink-0"
+                                  title={order.deliveryNotes}
+                                >
+                                  <AlertTriangle className="w-2.5 h-2.5" />
+                                  {order.deliveryNotes}
                                 </span>
                               )}
                               {/* Location indicator */}
@@ -2138,7 +2149,7 @@ export function OrdersContent({
         document.body
       )}
 
-      {/* ── Client Reply Panel (Portal to body) ── */}
+      {/* ���─ Client Reply Panel (Portal to body) ── */}
       {/* ── Payment Method Popup (Portal to body) ── */}
       {mounted && paymentPopup && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/70 flex items-end" onClick={() => setPaymentPopup(null)}>
