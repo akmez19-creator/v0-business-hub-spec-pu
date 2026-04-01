@@ -4347,6 +4347,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         itemIds={modifyTarget?.itemIds}
         customerName={modifyTarget?.customerName || ''}
         currentProducts={modifyTarget?.products || ''}
+        currentQty={modifyTarget?.qty || 1}
         currentAmount={modifyTarget?.amount || 0}
         onModified={(result) => {
           // Update target pin with new values
