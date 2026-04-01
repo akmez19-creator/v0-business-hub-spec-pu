@@ -3309,6 +3309,17 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-[11px] font-semibold text-white truncate">{stop.pin.customerName}</p>
+                        {/* Priority/Later tag */}
+                        {stop.pin.riderPriority === 'priority' && (
+                          <span className="flex items-center gap-0.5 text-[8px] font-bold text-red-400">
+                            <Star className="w-3 h-3 fill-red-400" />
+                          </span>
+                        )}
+                        {stop.pin.riderPriority === 'later' && (
+                          <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-400">
+                            <Clock3 className="w-3 h-3" />
+                          </span>
+                        )}
                         {stop.pin.salesType && stop.pin.salesType !== 'sale' && (
                           <span className={`text-[7px] font-bold px-1 py-px rounded shrink-0 ${stop.pin.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : stop.pin.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : stop.pin.salesType === 'refund' ? 'bg-red-500/20 text-red-400' : 'bg-teal-500/20 text-teal-400'}`}>
                     {stop.pin.salesType === 'exchange' ? 'EXCHG' : stop.pin.salesType === 'trade_in' ? 'TRADE' : stop.pin.salesType === 'refund' ? 'REFND' : 'DROP'}
@@ -3318,6 +3329,13 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                   <span className="text-[9px] text-amber-400/40 font-mono font-bold shrink-0">Rs {stop.pin.amount.toLocaleString()}</span>
                 )}
                       </div>
+                      {/* Rider landmark/remarks - prominent display */}
+                      {stop.pin.riderRemarks && (
+                        <div className="flex items-center gap-1.5 mt-1 px-2 py-1 rounded-md bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 border border-violet-400/15">
+                          <MapPin className="w-3 h-3 text-fuchsia-400 shrink-0" />
+                          <span className="text-[10px] text-violet-300 font-medium">{stop.pin.riderRemarks}</span>
+                        </div>
+                      )}
                       {/* Product - clear display */}
                       <p className="text-[9px] text-white/35 truncate mt-0.5 font-mono">{stop.pin.items?.length ? stop.pin.items.map(it => `${it.qty}x ${it.name}`).join(', ') : stop.pin.products}</p>
                       {stop.pin.returnProduct && <p className="text-[7px] text-amber-400/40 font-mono truncate mt-0.5">Pickup: {stop.pin.returnProduct}</p>}
@@ -3666,13 +3684,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                         </button>
                                       ) : d.riderPriority ? (
                                         <button onClick={() => setRemarkPopup({ pin: d })}
-                                          className={cn("action-pill h-9 w-9 border",
-                                            d.riderPriority === 'priority' 
-                                              ? "bg-red-500/15 border-red-400/25" 
-                                              : "bg-amber-500/15 border-amber-400/25")}>
-                                          {d.riderPriority === 'priority' 
-                                            ? <Star className="w-4 h-4 text-red-400 fill-red-400/50" /> 
-                                            : <Clock3 className="w-4 h-4 text-amber-400" />}
+                                          className={cn("flex items-center gap-1 text-[11px] font-semibold px-1",
+                                            d.riderPriority === 'priority' ? "text-red-400" : "text-amber-400")}>
+                                          {d.riderPriority === 'priority' ? <Star className="w-3.5 h-3.5 fill-red-400" /> : <Clock3 className="w-3.5 h-3.5" />}
+                                          {d.riderPriority === 'priority' ? 'Priority' : 'Later'}
                                         </button>
                                       ) : (
                                         <button onClick={() => setRemarkPopup({ pin: d })}
