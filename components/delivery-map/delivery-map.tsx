@@ -7,10 +7,10 @@ import {
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
   Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
-  Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle,
+  Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle, MessageSquareMore, Star, Clock3, UserPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof } from '@/lib/delivery-actions'
+import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof, saveDeliveryRemark } from '@/lib/delivery-actions'
 import { cancelPendingCmsModification } from '@/lib/modification-actions'
 import { ModifyOrderSheet } from './modify-order-sheet'
 import Link from 'next/link'
@@ -137,6 +137,9 @@ export interface DeliveryPin {
   returnProduct?: string | null
   deliveredAt?: string | null // Timestamp when status was set to delivered
   pendingModificationId?: string | null // ID of pending CMS modification awaiting admin review
+  contact2?: string | null // Secondary contact number
+  riderPriority?: 'priority' | 'later' | null // Rider-set priority
+  riderRemarks?: string | null // Short rider remarks (2 words max)
 }
 
 export interface RegionCluster {
@@ -424,6 +427,8 @@ export function DeliveryMap({
   const [mapProofUploading, setMapProofUploading] = useState(false)
   const [calledTwice, setCalledTwice] = useState<Set<string>>(new Set())
   const [modifyTarget, setModifyTarget] = useState<DeliveryPin | null>(null)
+  const [remarkPopup, setRemarkPopup] = useState<{ pin: DeliveryPin } | null>(null)
+  const [savingRemark, setSavingRemark] = useState(false)
   const mapContainerParentRef = useRef<HTMLDivElement>(null)
   const prevPinIdsRef = useRef<Set<string>>(new Set())
   const arriveAtStopRef = useRef<() => void>(() => {})
@@ -681,7 +686,7 @@ export function DeliveryMap({
       
       // ════════════════════════════════════════════════════════════����═���═══��═══��═══
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
-      // ���═════════════════════════════════════════════════════════════════════════
+      // ����═════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
       const zoomLevels = [10, 12, 13, 14, 15, 16, 17, 18] // All zoom levels rider will use
       
@@ -3604,7 +3609,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                           </>
                         )}
 
-                        {/* ── NEED LOCATION ── */}
+                        {/* ── NEED LOCATION ��─ */}
                         {pendingUnreachable.length > 0 && (
                           <>
                             <div className="flex items-center gap-2 py-1.5 px-1 mt-1">
@@ -3645,7 +3650,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                 {/* ── Expanded: Paste link + Status actions ── */}
                                 {isExpandedCard && (
                                   <div className="px-3 pb-3 pt-2 border-t border-white/[0.03] space-y-2">
-                                    {/* Contact + Pin row */}
+                                    {/* Contact + Pin + Remark row */}
                                     <div className="flex items-center gap-2">
                                       {d.status !== 'delivered' && (
                                         <button onClick={() => startPlacingPin(d)}
@@ -3653,6 +3658,13 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           <Crosshair className="w-3.5 h-3.5" />Pin on Map
                                         </button>
                                       )}
+                                      <button onClick={() => setRemarkPopup({ pin: d })}
+                                        className={cn("action-pill h-9 px-3 gap-1.5 border text-[11px] font-mono font-bold",
+                                          d.riderPriority || d.riderRemarks || d.contact2 
+                                            ? "bg-violet-500/12 border-violet-400/15 text-violet-400" 
+                                            : "bg-white/5 border-white/10 text-white/60")}>
+                                        <MessageSquareMore className="w-3.5 h-3.5" />Remark
+                                      </button>
                                       <div className="flex-1" />
                                       {d.contact1 && (
                                         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
@@ -4398,6 +4410,117 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               }} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:text-white hover:border-white/20 transition active:scale-95">
                 <Mail className="w-3.5 h-3.5" /> Other Reason
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remark Popup */}
+      {remarkPopup && (
+        <div className="absolute inset-0 z-[60] bg-black/70 flex items-end" onClick={() => setRemarkPopup(null)}>
+          <div className="w-full bg-zinc-900 border-t border-white/10 rounded-t-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <div>
+                <h3 className="font-semibold text-white text-sm">Add Remark</h3>
+                <p className="text-xs text-white/40">{remarkPopup.pin.customerName}</p>
+              </div>
+              <button onClick={() => setRemarkPopup(null)} className="p-2 rounded-lg hover:bg-white/10 transition"><X className="w-4 h-4 text-white/40" /></button>
+            </div>
+            
+            {/* Priority Tags */}
+            <div className="px-4 pt-4 pb-3">
+              <p className="text-[10px] text-white/30 font-mono mb-2 uppercase tracking-wider">Priority Tag</p>
+              <div className="flex gap-2">
+                <button 
+                  onClick={async () => {
+                    setSavingRemark(true)
+                    const newPriority = remarkPopup.pin.riderPriority === 'priority' ? null : 'priority'
+                    await saveDeliveryRemark({ deliveryId: remarkPopup.pin.id, priority: newPriority })
+                    remarkPopup.pin.riderPriority = newPriority
+                    setSavingRemark(false)
+                    router.refresh()
+                  }}
+                  disabled={savingRemark}
+                  className={cn("flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition active:scale-95 disabled:opacity-50",
+                    remarkPopup.pin.riderPriority === 'priority' 
+                      ? "bg-red-500/20 border-red-500/30 text-red-400" 
+                      : "bg-red-500/8 border-red-500/15 text-red-400/60 hover:bg-red-500/15")}>
+                  <Star className="w-4 h-4" />
+                  <span className="text-xs font-bold">Priority</span>
+                </button>
+                <button 
+                  onClick={async () => {
+                    setSavingRemark(true)
+                    const newPriority = remarkPopup.pin.riderPriority === 'later' ? null : 'later'
+                    await saveDeliveryRemark({ deliveryId: remarkPopup.pin.id, priority: newPriority })
+                    remarkPopup.pin.riderPriority = newPriority
+                    setSavingRemark(false)
+                    router.refresh()
+                  }}
+                  disabled={savingRemark}
+                  className={cn("flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition active:scale-95 disabled:opacity-50",
+                    remarkPopup.pin.riderPriority === 'later' 
+                      ? "bg-amber-500/20 border-amber-500/30 text-amber-400" 
+                      : "bg-amber-500/8 border-amber-500/15 text-amber-400/60 hover:bg-amber-500/15")}>
+                  <Clock3 className="w-4 h-4" />
+                  <span className="text-xs font-bold">Later</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Contact 2 */}
+            <div className="px-4 pb-3">
+              <p className="text-[10px] text-white/30 font-mono mb-2 uppercase tracking-wider">Secondary Contact</p>
+              <div className="flex gap-2">
+                <input 
+                  type="tel" 
+                  defaultValue={remarkPopup.pin.contact2 || ''}
+                  placeholder="Enter phone number..."
+                  className="flex-1 h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/20 outline-none focus:border-violet-400/40 font-mono"
+                  onBlur={async (e) => {
+                    const value = e.target.value.trim()
+                    if (value !== (remarkPopup.pin.contact2 || '')) {
+                      setSavingRemark(true)
+                      await saveDeliveryRemark({ deliveryId: remarkPopup.pin.id, contact2: value || null })
+                      remarkPopup.pin.contact2 = value || null
+                      setSavingRemark(false)
+                      router.refresh()
+                    }
+                  }}
+                />
+                <div className="w-11 h-11 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+                  <UserPlus className="w-4 h-4 text-violet-400" />
+                </div>
+              </div>
+            </div>
+
+            {/* Short Remarks */}
+            <div className="px-4 pb-4">
+              <p className="text-[10px] text-white/30 font-mono mb-2 uppercase tracking-wider">Quick Note (2 words max)</p>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  defaultValue={remarkPopup.pin.riderRemarks || ''}
+                  placeholder="e.g. Gate closed, Dog inside..."
+                  maxLength={30}
+                  className="flex-1 h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/20 outline-none focus:border-cyan-400/40"
+                  onBlur={async (e) => {
+                    const value = e.target.value.trim()
+                    if (value !== (remarkPopup.pin.riderRemarks || '')) {
+                      setSavingRemark(true)
+                      await saveDeliveryRemark({ deliveryId: remarkPopup.pin.id, remarks: value || null })
+                      remarkPopup.pin.riderRemarks = value || null
+                      setSavingRemark(false)
+                      router.refresh()
+                    }
+                  }}
+                />
+                <button 
+                  onClick={() => setRemarkPopup(null)}
+                  className="h-11 px-4 rounded-xl bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 text-xs font-bold hover:bg-emerald-500/25 transition active:scale-95">
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </div>
