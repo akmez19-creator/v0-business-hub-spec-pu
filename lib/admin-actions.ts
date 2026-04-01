@@ -1069,19 +1069,41 @@ export async function reviewCmsModification(params: {
     return { error: `Failed to update modification: ${updateModError.message}` }
   }
 
-  // If approved with adjusted price, update the delivery amount
+  // If approved, update delivery amount and clear pending_modification_id
   if (action === 'approve') {
     const finalPrice = adjustedPrice ?? modification.new_price
     
+    const updateData: { amount?: number; pending_modification_id: null } = {
+      pending_modification_id: null, // Always clear the pending flag on approve
+    }
+    
     if (finalPrice !== null && finalPrice !== undefined) {
-      const { error: updateDeliveryError } = await admin
-        .from('deliveries')
-        .update({ amount: finalPrice })
-        .eq('id', deliveryId)
+      updateData.amount = finalPrice
+    }
+    
+    const { error: updateDeliveryError } = await admin
+      .from('deliveries')
+      .update(updateData)
+      .eq('id', deliveryId)
 
-      if (updateDeliveryError) {
-        return { error: `Failed to update delivery: ${updateDeliveryError.message}` }
-      }
+    if (updateDeliveryError) {
+      return { error: `Failed to update delivery: ${updateDeliveryError.message}` }
+    }
+  }
+
+  // If rejected, restore original values and clear pending_modification_id
+  if (action === 'reject') {
+    const { error: updateDeliveryError } = await admin
+      .from('deliveries')
+      .update({
+        qty: modification.original_qty,
+        amount: modification.original_price,
+        pending_modification_id: null,
+      })
+      .eq('id', deliveryId)
+
+    if (updateDeliveryError) {
+      return { error: `Failed to restore delivery: ${updateDeliveryError.message}` }
     }
   }
 
