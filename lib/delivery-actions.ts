@@ -219,6 +219,9 @@ export async function updateDeliveryStatus(deliveryId: string, status: DeliveryS
 export async function updateDeliveryStatusBulk(deliveryIds: string[], status: DeliveryStatus, notes?: string, paymentMethod?: string, paymentProofUrl?: string) {
   const supabase = await createClient()
   
+  // Track if we're reverting from delivered (need to clear payment data)
+  let revertingFromDelivered = false
+  
   // If changing FROM delivered to another status, check 5-minute rule
   if (status !== 'delivered' && deliveryIds.length > 0) {
     const { data: currentDeliveries } = await supabase
@@ -235,6 +238,7 @@ export async function updateDeliveryStatusBulk(deliveryIds: string[], status: De
           if ((now - deliveredTime) > fiveMinutes) {
             return { error: 'Cannot change status - more than 5 minutes have passed since delivery' }
           }
+          revertingFromDelivered = true
         }
       }
     }
@@ -250,6 +254,17 @@ export async function updateDeliveryStatusBulk(deliveryIds: string[], status: De
     updateData.picked_up_at = new Date().toISOString()
   } else if (status === 'delivered') {
     updateData.delivered_at = new Date().toISOString()
+  }
+  
+  // When reverting from delivered, clear delivered_at and payment info
+  if (revertingFromDelivered) {
+    updateData.delivered_at = null
+    updateData.payment_method = null
+    updateData.payment_cash = 0
+    updateData.payment_juice = 0
+    updateData.payment_bank = 0
+    updateData.payment_status = 'unpaid'
+    updateData.payment_proof_url = null
   }
 
   if (notes) {

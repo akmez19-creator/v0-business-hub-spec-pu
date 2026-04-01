@@ -53,6 +53,40 @@ function formatPhone(phone: string): string {
   return phone
 }
 
+// Countdown timer component for 5-minute edit window
+function CountdownTimer({ deliveredAt }: { deliveredAt: string }) {
+  const [timeLeft, setTimeLeft] = useState<number>(0)
+  
+  useEffect(() => {
+    const updateTime = () => {
+      const deliveredTime = new Date(deliveredAt).getTime()
+      const fiveMinutes = 5 * 60 * 1000
+      const elapsed = Date.now() - deliveredTime
+      const remaining = Math.max(0, fiveMinutes - elapsed)
+      setTimeLeft(remaining)
+    }
+    updateTime()
+    const interval = setInterval(updateTime, 1000)
+    return () => clearInterval(interval)
+  }, [deliveredAt])
+  
+  if (timeLeft <= 0) return null
+  
+  const minutes = Math.floor(timeLeft / 60000)
+  const seconds = Math.floor((timeLeft % 60000) / 1000)
+  const isUrgent = timeLeft < 60000 // Less than 1 minute
+  
+  return (
+    <div className={cn(
+      'flex items-center gap-1.5 text-[10px] font-mono font-bold px-2 py-1 rounded-md',
+      isUrgent ? 'bg-red-500/15 text-red-400 animate-pulse' : 'bg-amber-500/10 text-amber-400'
+    )}>
+      <Clock className="w-3 h-3" />
+      <span>Edit window: {minutes}:{seconds.toString().padStart(2, '0')}</span>
+    </div>
+  )
+}
+
 // Parse comma-separated products string into items array
 // "2x Mini Cooker, 1x Aluminium Tape" -> [{ name: "Mini Cooker", qty: 2, amount: X }, ...]
 function parseProductsToItems(products: string | null, totalAmount: number): { name: string; qty: number; amount: number }[] {
@@ -3701,59 +3735,65 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
     </button>
     {/* Expanded actions - CMS/NWD always, Delivered only within 5 min */}
     {isExpDoneCard && (d.status !== 'delivered' || canChangeDeliveredStatus(d)) && (
-      <div className="px-3 pb-2.5 pt-1 flex flex-wrap items-center gap-2 border-t border-white/[0.03]">
-        {/* Pin button - not for delivered */}
-        {d.status !== 'delivered' && (
-          <button onClick={() => startPlacingPin(d)}
-            className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
-            <Crosshair className="w-3.5 h-3.5" />Pin
-          </button>
+      <div className="px-3 pb-2.5 pt-1 space-y-2 border-t border-white/[0.03]">
+        {/* Countdown timer for delivered orders */}
+        {d.status === 'delivered' && d.deliveredAt && (
+          <CountdownTimer deliveredAt={d.deliveredAt} />
         )}
-        <button onClick={() => { 
-          setSelectedPin(d); setShowClientList(false)
-          const override = REGION_OVERRIDES[d.locality]
-          mapRef.current?.flyTo({ center: [override?.lng ?? d.lng, override?.lat ?? d.lat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
-        }}
-          className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
-          <Navigation className="w-3.5 h-3.5" />Fly
-        </button>
-        <button 
-          onClick={async () => {
-            setUpdatingPinId(d.id)
-            await updateDeliveryStatusBulk(d.itemIds, 'assigned')
-            setUpdatingPinId(null)
-            setExpandedClientId(null)
-            router.refresh()
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Pin button - not for delivered */}
+          {d.status !== 'delivered' && (
+            <button onClick={() => startPlacingPin(d)}
+              className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
+              <Crosshair className="w-3.5 h-3.5" />Pin
+            </button>
+          )}
+          <button onClick={() => { 
+            setSelectedPin(d); setShowClientList(false)
+            const override = REGION_OVERRIDES[d.locality]
+            mapRef.current?.flyTo({ center: [override?.lng ?? d.lng, override?.lat ?? d.lat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
           }}
-          disabled={updatingPinId === d.id}
-          className="action-pill h-8 px-3 gap-1.5 bg-blue-500/8 border border-blue-400/10 text-[10px] text-blue-400 font-mono font-bold disabled:opacity-50">
-          {updatingPinId === d.id ? <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-          Assigned
-        </button>
-        {/* CMS/NWD buttons for delivered within 5 min */}
-        {d.status === 'delivered' && (
-          <>
-            <button 
-              onClick={() => setCmsPopup({ pin: d })}
-              disabled={updatingPinId === d.id}
-              className="action-pill h-8 px-3 gap-1.5 bg-amber-500/8 border border-amber-400/10 text-[10px] text-amber-400 font-mono font-bold disabled:opacity-50">
-              <AlertTriangle className="w-3.5 h-3.5" />CMS
-            </button>
-            <button 
-              onClick={async () => {
-                setUpdatingPinId(d.id)
-                await updateDeliveryStatusBulk(d.itemIds, 'nwd')
-                setUpdatingPinId(null)
-                setExpandedClientId(null)
-                router.refresh()
-              }}
-              disabled={updatingPinId === d.id}
-              className="action-pill h-8 px-3 gap-1.5 bg-red-500/8 border border-red-400/10 text-[10px] text-red-400 font-mono font-bold disabled:opacity-50">
-              {updatingPinId === d.id ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-              NWD
-            </button>
-          </>
-        )}
+            className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
+            <Navigation className="w-3.5 h-3.5" />Fly
+          </button>
+          <button 
+            onClick={async () => {
+              setUpdatingPinId(d.id)
+              await updateDeliveryStatusBulk(d.itemIds, 'assigned')
+              setUpdatingPinId(null)
+              setExpandedClientId(null)
+              router.refresh()
+            }}
+            disabled={updatingPinId === d.id}
+            className="action-pill h-8 px-3 gap-1.5 bg-blue-500/8 border border-blue-400/10 text-[10px] text-blue-400 font-mono font-bold disabled:opacity-50">
+            {updatingPinId === d.id ? <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            Assigned
+          </button>
+          {/* CMS/NWD buttons for delivered within 5 min */}
+          {d.status === 'delivered' && (
+            <>
+              <button 
+                onClick={() => setCmsPopup({ pin: d })}
+                disabled={updatingPinId === d.id}
+                className="action-pill h-8 px-3 gap-1.5 bg-amber-500/8 border border-amber-400/10 text-[10px] text-amber-400 font-mono font-bold disabled:opacity-50">
+                <AlertTriangle className="w-3.5 h-3.5" />CMS
+              </button>
+              <button 
+                onClick={async () => {
+                  setUpdatingPinId(d.id)
+                  await updateDeliveryStatusBulk(d.itemIds, 'nwd')
+                  setUpdatingPinId(null)
+                  setExpandedClientId(null)
+                  router.refresh()
+                }}
+                disabled={updatingPinId === d.id}
+                className="action-pill h-8 px-3 gap-1.5 bg-red-500/8 border border-red-400/10 text-[10px] text-red-400 font-mono font-bold disabled:opacity-50">
+                {updatingPinId === d.id ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                NWD
+              </button>
+            </>
+          )}
+        </div>
       </div>
     )}
   </div>
