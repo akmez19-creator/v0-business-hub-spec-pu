@@ -3699,13 +3699,16 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         'bg-red-500/10 text-red-400/40'
       )}>{d.status}</span>
     </button>
-    {/* Expanded actions for CMS/NWD */}
-    {isExpDoneCard && d.status !== 'delivered' && (
-      <div className="px-3 pb-2.5 pt-1 flex items-center gap-2 border-t border-white/[0.03]">
-        <button onClick={() => startPlacingPin(d)}
-          className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
-          <Crosshair className="w-3.5 h-3.5" />Pin
-        </button>
+    {/* Expanded actions - CMS/NWD always, Delivered only within 5 min */}
+    {isExpDoneCard && (d.status !== 'delivered' || canChangeDeliveredStatus(d)) && (
+      <div className="px-3 pb-2.5 pt-1 flex flex-wrap items-center gap-2 border-t border-white/[0.03]">
+        {/* Pin button - not for delivered */}
+        {d.status !== 'delivered' && (
+          <button onClick={() => startPlacingPin(d)}
+            className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
+            <Crosshair className="w-3.5 h-3.5" />Pin
+          </button>
+        )}
         <button onClick={() => { 
           setSelectedPin(d); setShowClientList(false)
           const override = REGION_OVERRIDES[d.locality]
@@ -3727,6 +3730,30 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
           {updatingPinId === d.id ? <div className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
           Assigned
         </button>
+        {/* CMS/NWD buttons for delivered within 5 min */}
+        {d.status === 'delivered' && (
+          <>
+            <button 
+              onClick={() => setCmsPopup({ pin: d })}
+              disabled={updatingPinId === d.id}
+              className="action-pill h-8 px-3 gap-1.5 bg-amber-500/8 border border-amber-400/10 text-[10px] text-amber-400 font-mono font-bold disabled:opacity-50">
+              <AlertTriangle className="w-3.5 h-3.5" />CMS
+            </button>
+            <button 
+              onClick={async () => {
+                setUpdatingPinId(d.id)
+                await updateDeliveryStatusBulk(d.itemIds, 'nwd')
+                setUpdatingPinId(null)
+                setExpandedClientId(null)
+                router.refresh()
+              }}
+              disabled={updatingPinId === d.id}
+              className="action-pill h-8 px-3 gap-1.5 bg-red-500/8 border border-red-400/10 text-[10px] text-red-400 font-mono font-bold disabled:opacity-50">
+              {updatingPinId === d.id ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+              NWD
+            </button>
+          </>
+        )}
       </div>
     )}
   </div>
