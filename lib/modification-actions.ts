@@ -780,17 +780,34 @@ export async function markProductAsCms(params: {
     }
   }
 
-  // Find the product to mark as CMS
-  const existing = productMap.get(productName)
-  if (!existing) return { error: `Product "${productName}" not found in order` }
+  // Find the product to mark as CMS (case-insensitive match)
+  let existing = productMap.get(productName)
+  let matchedName = productName
+  
+  // If exact match fails, try case-insensitive match
+  if (!existing) {
+    for (const [name, value] of productMap.entries()) {
+      if (name.toLowerCase().trim() === productName.toLowerCase().trim()) {
+        existing = value
+        matchedName = name
+        break
+      }
+    }
+  }
+  
+  if (!existing) {
+    // Debug: show what products are actually in the map
+    const availableProducts = Array.from(productMap.keys()).join(', ')
+    return { error: `Product "${productName}" not found. Available: ${availableProducts}` }
+  }
 
   const actualCmsQty = Math.min(qty, existing.qty)
   const newQtyForProduct = existing.qty - actualCmsQty
 
   if (newQtyForProduct <= 0) {
-    productMap.delete(productName)
+    productMap.delete(matchedName)
   } else {
-    productMap.set(productName, { ...existing, qty: newQtyForProduct })
+    productMap.set(matchedName, { ...existing, qty: newQtyForProduct })
   }
 
   // Calculate new totals
