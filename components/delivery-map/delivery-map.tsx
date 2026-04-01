@@ -4494,14 +4494,14 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               </div>
             </div>
 
-            {/* Short Remarks */}
+            {/* Short Remarks / Landmark */}
             <div className="px-4 pb-4">
-              <p className="text-[10px] text-white/30 font-mono mb-2 uppercase tracking-wider">Quick Note (2 words max)</p>
+              <p className="text-[10px] text-white/30 font-mono mb-2 uppercase tracking-wider">Landmark / Note</p>
               <div className="flex gap-2">
                 <input 
                   type="text" 
                   defaultValue={remarkPopup.pin.riderRemarks || ''}
-                  placeholder="e.g. Gate closed, Dog inside..."
+                  placeholder="e.g. Near mosque, Blue gate, Corner shop..."
                   maxLength={30}
                   className="flex-1 h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/20 outline-none focus:border-cyan-400/40"
                   onBlur={async (e) => {
