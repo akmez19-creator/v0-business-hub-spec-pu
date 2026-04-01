@@ -3543,8 +3543,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           isReturnOrder(d) ? "bg-violet-500/12 text-violet-400 border-violet-400/12" : "bg-emerald-500/12 text-emerald-400 border-emerald-400/12")}>
                                         <Check className="w-4 h-4" />{isReturnOrder(d) ? 'Collected' : 'Done'}
                                       </button>
-                                      {!isReturnOrder(d) && (
-                                      <>
                                       <button onClick={() => setCmsPopup({ pin: d })} disabled={updatingPinId === d.id}
                                         className="status-chip bg-amber-500/12 text-amber-400 border-amber-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                         CMS
@@ -3553,8 +3551,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                         className="status-chip bg-red-500/12 text-red-400 border-red-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                         NWD
                                       </button>
-                                      </>
-                                      )}
                                       <button onClick={() => setModifyTarget(d)}
                                         className="status-chip bg-purple-500/12 text-purple-400 border-purple-400/12 text-xs px-3.5 py-2 gap-1">
                                         <Package className="w-3.5 h-3.5" />Mod
@@ -3675,8 +3671,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           isReturnOrder(d) ? "bg-violet-500/12 text-violet-400 border-violet-400/12" : "bg-emerald-500/12 text-emerald-400 border-emerald-400/12")}>
                                         <Check className="w-4 h-4" />{isReturnOrder(d) ? 'Collected' : 'Done'}
                                       </button>
-                                      {!isReturnOrder(d) && (
-                                      <>
                                       <button onClick={() => setCmsPopup({ pin: d })} disabled={updatingPinId === d.id}
                                         className="status-chip bg-amber-500/12 text-amber-400 border-amber-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                         CMS
@@ -3685,8 +3679,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                         className="status-chip bg-red-500/12 text-red-400 border-red-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                         NWD
                                       </button>
-                                      </>
-                                      )}
                                       <button onClick={() => setModifyTarget(d)}
                                         className="status-chip bg-purple-500/12 text-purple-400 border-purple-400/12 text-xs px-3.5 py-2 gap-1">
                                         <Package className="w-3.5 h-3.5" />Mod
