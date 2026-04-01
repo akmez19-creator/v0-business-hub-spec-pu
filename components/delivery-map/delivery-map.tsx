@@ -1575,6 +1575,12 @@ map.on('load', () => {
 
   // ── Status change + Payment ─���
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
+    // Check if pin has valid location (not geocoded/approximate)
+    const needsLocation = pin.source === 'geocoded' || !pin.lat
+    if (needsLocation) {
+      alert('Please pin the delivery location on the map before marking as delivered')
+      return
+    }
     // Exchange / Trade-in / Refund: show protocol popup via paymentPopup with protocol flag
     if (isReturnOrder(pin)) {
       setPaymentPopup({ pin, protocol: true })
