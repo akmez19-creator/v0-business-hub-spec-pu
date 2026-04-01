@@ -60,6 +60,7 @@ export function ModifyOrderSheet({
   // CMS mode - for marking individual products as CMS
   const [cmsProduct, setCmsProduct] = useState<{ name: string; qty: number } | null>(null)
   const [cmsReason, setCmsReason] = useState('')
+  const [cmsNotes, setCmsNotes] = useState('')
   const [isMarkingCms, setIsMarkingCms] = useState(false)
 
   // Selection state
@@ -134,6 +135,7 @@ export function ModifyOrderSheet({
     setIsReplacing(false)
     setCmsProduct(null)
     setCmsReason('')
+    setCmsNotes('')
     setIsMarkingCms(false)
   }, [])
 
@@ -192,11 +194,12 @@ export function ModifyOrderSheet({
     setIsMarkingCms(true)
     setError(null)
     
+    const fullReason = cmsNotes ? `${cmsReason}: ${cmsNotes}` : cmsReason
     const result = await markProductAsCms({
       deliveryId,
       productName: cmsProduct.name,
       qty: cmsProduct.qty,
-      cmsReason,
+      cmsReason: fullReason,
     })
     
     setIsMarkingCms(false)
@@ -227,6 +230,7 @@ export function ModifyOrderSheet({
         })
         setCmsProduct(null)
         setCmsReason('')
+        setCmsNotes('')
         
         onModified?.({
           newAmount: result.newAmount!,
@@ -381,11 +385,11 @@ const handleSubmit = async () => {
                         <span className="text-[11px] text-white/70 flex-1 truncate">{item.name}</span>
                         <span className="text-[10px] text-white/30">Rs {Math.round(item.qty * item.unitPrice)}</span>
                         <button 
-                          onClick={() => { console.log('[v0] CMS button clicked for', item.name); setCmsProduct({ name: item.name, qty: item.qty }) }}
-                          className="p-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/20 transition"
+                          onClick={() => setCmsProduct({ name: item.name, qty: item.qty })}
+                          className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition"
                           title="Mark as CMS"
                         >
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
                         </button>
                         <button 
                           onClick={() => { setEditingItem(item.name); setPendingQty(p => ({ ...p, [item.name]: 0 })) }}
@@ -517,7 +521,7 @@ const handleSubmit = async () => {
           </div>
         )}
 
-        {/* CMS Product Popup */}
+{/* CMS Product Popup */}
         {cmsProduct && (
           <div className="mx-4 mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-400/20">
             <div className="flex items-center justify-between mb-3">
@@ -525,7 +529,7 @@ const handleSubmit = async () => {
                 <AlertTriangle className="w-4 h-4 text-amber-400" />
                 <span className="text-[11px] font-bold text-amber-400 font-mono">MARK AS CMS</span>
               </div>
-              <button onClick={() => { setCmsProduct(null); setCmsReason('') }}
+              <button onClick={() => { setCmsProduct(null); setCmsReason(''); setCmsNotes('') }}
                 className="p-1 rounded hover:bg-white/10">
                 <X className="w-3.5 h-3.5 text-white/40" />
               </button>
@@ -537,7 +541,7 @@ const handleSubmit = async () => {
             
             <p className="text-[9px] text-white/40 font-mono mb-2">SELECT REASON</p>
             <div className="grid grid-cols-2 gap-1.5 mb-3">
-              {['Client Refused', 'Wrong Number', 'Not Reachable', 'Changed Mind', 'Product Issue', 'Other'].map(reason => (
+              {['Client Refused', 'Defective Product', 'Wrong Product', 'Changed Mind', 'Not As Described', 'Other'].map(reason => (
                 <button
                   key={reason}
                   onClick={() => setCmsReason(reason)}
@@ -547,6 +551,37 @@ const handleSubmit = async () => {
                       ? "bg-amber-500/20 border-amber-400/30 text-amber-400"
                       : "bg-white/3 border-white/10 text-white/50 hover:bg-white/5"
                   )}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            
+            {/* Notes field for additional details */}
+            <p className="text-[9px] text-white/40 font-mono mb-2">NOTES (optional)</p>
+            <textarea
+              value={cmsNotes}
+              onChange={(e) => setCmsNotes(e.target.value)}
+              placeholder="Add details about the product issue..."
+              className="w-full h-16 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[11px] text-white/80 placeholder:text-white/30 resize-none mb-3 focus:outline-none focus:border-amber-400/30"
+            />
+            
+            <button
+              onClick={handleMarkProductCms}
+              disabled={!cmsReason || isMarkingCms}
+              className="w-full h-10 rounded-lg bg-amber-500/20 border border-amber-400/30 text-amber-400 text-[11px] font-bold font-mono flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-500/30"
+            >
+              {isMarkingCms ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <AlertTriangle className="w-4 h-4" />
+                  CONFIRM CMS
+                </>
+              )}
+            </button>
+          </div>
+        )}
                 >
                   {reason}
                 </button>
