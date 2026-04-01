@@ -2,20 +2,10 @@ import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, Phone, MapPin, Calendar, Clock, User, Bike, Building2, Package, StickyNote, RefreshCw } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { AlertTriangle, Phone, MapPin, Calendar, Clock, Bike, Building2, Package, StickyNote, RefreshCw, DollarSign } from 'lucide-react'
 import Link from 'next/link'
-
-// CMS reason categories for filtering
-const CMS_REASONS = [
-  'Wrong Number',
-  'Client Refused',
-  'Client Cancelled',
-  'Not Available',
-  'Address Not Found',
-  'Out of Area',
-  'Other'
-]
+import { getPendingCmsModifications } from '@/lib/admin-actions'
+import { CmsReviewActions } from '@/components/admin/cms-review-actions'
 
 export default async function CMSAdminPage() {
   const supabase = await createClient()
@@ -33,6 +23,11 @@ export default async function CMSAdminPage() {
   if (!currentProfile || !['admin', 'manager'].includes(currentProfile.role)) {
     redirect('/dashboard')
   }
+
+  // Get CMS modifications for review
+  const { modifications: cmsModifications } = await getPendingCmsModifications()
+  const pendingModifications = cmsModifications?.filter(m => m.status === 'pending') || []
+  const reviewedModifications = cmsModifications?.filter(m => m.status !== 'pending') || []
   
   // Get all CMS deliveries with related data
   const { data: cmsDeliveries } = await supabase
@@ -153,13 +148,13 @@ export default async function CMSAdminPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pending Review
+              Price Reviews
             </CardTitle>
-            <Clock className="w-4 h-4 text-muted-foreground" />
+            <DollarSign className="w-4 h-4 text-purple-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{olderCms.length}</div>
-            <p className="text-xs text-muted-foreground">From previous days</p>
+            <div className="text-2xl font-bold text-purple-500">{pendingModifications.length}</div>
+            <p className="text-xs text-muted-foreground">Pending approval</p>
           </CardContent>
         </Card>
         <Card>
@@ -174,6 +169,74 @@ export default async function CMSAdminPage() {
           </CardContent>
         </Card>
       </div>
+      
+      {/* Pending Price Reviews - Priority Section */}
+      {pendingModifications.length > 0 && (
+        <Card className="border-purple-500/30 bg-purple-500/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-purple-600">
+              <DollarSign className="w-5 h-5" />
+              Price Adjustments Pending Review ({pendingModifications.length})
+            </CardTitle>
+            <CardDescription>
+              Riders have made price adjustments that need your approval
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {pendingModifications.map(mod => (
+                <div 
+                  key={mod.id} 
+                  className="p-4 rounded-lg border border-purple-500/20 bg-background"
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                    {/* Order Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <h4 className="font-semibold truncate">{mod.customer_name}</h4>
+                        <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/20 text-[10px]">
+                          Price Review
+                        </Badge>
+                      </div>
+                      
+                      <div className="mb-3 p-2 rounded-md bg-muted/50">
+                        <p className="text-sm font-medium">{mod.qty}x {mod.product_name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          CMS Reason: <span className="font-medium">{mod.notes}</span>
+                        </p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <MapPin className="w-3.5 h-3.5" />
+                          <span className="truncate">{mod.locality}</span>
+                        </div>
+                        {mod.rider_name && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Bike className="w-3.5 h-3.5" />
+                            <span>{mod.rider_name}</span>
+                          </div>
+                        )}
+                        {mod.contractor_name && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Building2 className="w-3.5 h-3.5" />
+                            <span>{mod.contractor_name}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Review Actions */}
+                    <div className="lg:w-64 shrink-0">
+                      <CmsReviewActions modification={mod} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       {/* Reason Breakdown */}
       <Card>
