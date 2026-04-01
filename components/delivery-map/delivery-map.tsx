@@ -1575,9 +1575,9 @@ map.on('load', () => {
 
   // ── Status change + Payment ─���
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
-    // Check if pin has valid location (not geocoded/approximate)
-    const needsLocation = pin.source === 'geocoded' || !pin.lat
-    if (needsLocation) {
+    // Check if pin has valid location - must be pinned by user (gps or response), not just geocoded from address
+    const hasValidPin = pin.source === 'gps' || pin.source === 'response'
+    if (!hasValidPin) {
       alert('Please pin the delivery location on the map before marking as delivered')
       return
     }
