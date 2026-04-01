@@ -582,28 +582,6 @@ const handleSubmit = async () => {
             </button>
           </div>
         )}
-                >
-                  {reason}
-                </button>
-              ))}
-            </div>
-            
-            <button
-              onClick={handleMarkProductCms}
-              disabled={!cmsReason || isMarkingCms}
-              className="w-full h-10 rounded-lg bg-amber-500/20 border border-amber-400/30 text-amber-400 text-[11px] font-bold font-mono flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-500/30"
-            >
-              {isMarkingCms ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
-                  <AlertTriangle className="w-4 h-4" />
-                  CONFIRM CMS
-                </>
-              )}
-            </button>
-          </div>
-        )}
 
         {/* Loading */}
         {loading && (
