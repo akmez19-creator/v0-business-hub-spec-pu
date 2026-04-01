@@ -897,6 +897,23 @@ export async function markProductAsCms(params: {
 
     if (updateError) return { error: updateError.message }
 
+    // Log the CMS modification for admin review
+    await admin.from('order_modifications').insert({
+      target_delivery_id: deliveryId,
+      modified_by: user.id,
+      rider_id: delivery.rider_id,
+      contractor_id: delivery.contractor_id,
+      product_name: productName,
+      qty: actualCmsQty,
+      unit_price: avgUnitPrice,
+      total_price: actualCmsQty * avgUnitPrice,
+      reason: 'product_cms',
+      notes: cmsReason,
+      status: needsReview ? 'pending' : 'approved',
+      new_price: 0,
+      original_price: totalAmount,
+    })
+
     return {
       success: true,
       newAmount: 0,
@@ -926,8 +943,9 @@ export async function markProductAsCms(params: {
   if (updateError) return { error: updateError.message }
 
   // Log the CMS modification - pending review if custom price was entered
-  await admin.from('order_modifications').insert({
+  const { error: insertError } = await admin.from('order_modifications').insert({
     target_delivery_id: deliveryId,
+    modified_by: user.id,
     rider_id: delivery.rider_id,
     contractor_id: delivery.contractor_id,
     product_name: productName,
@@ -940,6 +958,10 @@ export async function markProductAsCms(params: {
     new_price: newAmount, // Store the new price for admin review
     original_price: totalAmount, // Store original price for comparison
   })
+  
+  if (insertError) {
+    console.error('[v0] Failed to insert CMS modification:', insertError)
+  }
 
   return {
     success: true,
