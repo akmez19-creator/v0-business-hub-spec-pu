@@ -3666,13 +3666,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                         </button>
                                       ) : d.riderPriority ? (
                                         <button onClick={() => setRemarkPopup({ pin: d })}
-                                          className={cn("action-pill h-9 w-9 border",
-                                            d.riderPriority === 'priority' 
-                                              ? "bg-red-500/15 border-red-400/25" 
-                                              : "bg-amber-500/15 border-amber-400/25")}>
-                                          {d.riderPriority === 'priority' 
-                                            ? <Star className="w-4 h-4 text-red-400 fill-red-400/50" /> 
-                                            : <Clock3 className="w-4 h-4 text-amber-400" />}
+                                          className={cn("flex items-center gap-1 text-[11px] font-semibold px-1",
+                                            d.riderPriority === 'priority' ? "text-red-400" : "text-amber-400")}>
+                                          {d.riderPriority === 'priority' ? <Star className="w-3.5 h-3.5 fill-red-400" /> : <Clock3 className="w-3.5 h-3.5" />}
+                                          {d.riderPriority === 'priority' ? 'Priority' : 'Later'}
                                         </button>
                                       ) : (
                                         <button onClick={() => setRemarkPopup({ pin: d })}
