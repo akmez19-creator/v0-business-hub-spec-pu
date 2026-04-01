@@ -3681,18 +3681,43 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                 {filteredDone.map(d => {
                                   const initials = d.customerName.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()
                                   const hue = d.customerName.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0) % 360
+                                  const isExpDoneCard = expandedRegions.has(`done-card-${d.id}`)
                                   return (
-                                  <div key={d.id} className="flex items-center gap-3 px-3 py-2 rounded-lg opacity-40 hover:opacity-60 transition-opacity">
-                                    <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                                      style={{ background: `linear-gradient(135deg, hsl(${hue}, 30%, 18%) 0%, hsl(${hue}, 20%, 10%) 100%)` }}>
-                                      <span className="text-[11px] font-bold text-white/40 font-mono">{initials}</span>
-                                    </div>
-                                    <span className="text-sm text-white/50 truncate flex-1">{d.customerName}</span>
-                                    <span className={cn('text-[11px] font-bold uppercase px-2.5 py-1 rounded-full font-mono',
-                                      d.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400/40' :
-                                      d.status === 'cms' ? 'bg-amber-500/10 text-amber-400/40' :
-                                      'bg-red-500/10 text-red-400/40'
-                                    )}>{d.status}</span>
+                                  <div key={d.id} className="rounded-lg opacity-50 hover:opacity-70 transition-opacity overflow-hidden">
+                                    <button 
+                                      onClick={() => setExpandedRegions(prev => { const next = new Set(prev); const key = `done-card-${d.id}`; next.has(key) ? next.delete(key) : next.add(key); return next })}
+                                      className="w-full flex items-center gap-3 px-3 py-2 text-left"
+                                    >
+                                      <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                                        style={{ background: `linear-gradient(135deg, hsl(${hue}, 30%, 18%) 0%, hsl(${hue}, 20%, 10%) 100%)` }}>
+                                        <span className="text-[11px] font-bold text-white/40 font-mono">{initials}</span>
+                                      </div>
+                                      <span className="text-sm text-white/50 truncate flex-1">{d.customerName}</span>
+                                      <span className={cn('text-[11px] font-bold uppercase px-2.5 py-1 rounded-full font-mono',
+                                        d.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400/40' :
+                                        d.status === 'cms' ? 'bg-amber-500/10 text-amber-400/40' :
+                                        'bg-red-500/10 text-red-400/40'
+                                      )}>{d.status}</span>
+                                    </button>
+                                    {/* Expanded actions for CMS/NWD - pin editing */}
+                                    {isExpDoneCard && d.status !== 'delivered' && (
+                                      <div className="px-3 pb-2.5 pt-1 flex items-center gap-2 border-t border-white/[0.03]">
+                                        <button onClick={() => startPlacingPin(d)}
+                                          className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
+                                          <Crosshair className="w-3.5 h-3.5" />Pin on Map
+                                        </button>
+                                        <button onClick={() => { 
+                                          setSelectedPin(d); setShowClientList(false)
+                                          const override = REGION_OVERRIDES[d.locality]
+                                          const flyLng = override ? override.lng : d.lng
+                                          const flyLat = override ? override.lat : d.lat
+                                          mapRef.current?.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: mapRef.current?.getPitch() || 0, duration: 1400, essential: true }) 
+                                        }}
+                                          className="action-pill h-8 px-3 gap-1.5 bg-cyan-500/8 border border-cyan-400/10 text-[10px] text-cyan-400 font-mono font-bold">
+                                          <Navigation className="w-3.5 h-3.5" />Fly to
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                   )
                                 })}
