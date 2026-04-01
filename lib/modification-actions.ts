@@ -890,6 +890,7 @@ export async function markProductAsCms(params: {
       newProducts: '',
       markedCmsQty: actualCmsQty,
       fullyCms: true, // Entire delivery is now CMS
+      cmsDeliveryId: deliveryId, // The delivery that was marked as CMS
     }
   }
 
@@ -931,6 +932,7 @@ export async function markProductAsCms(params: {
     newProducts,
     markedCmsQty: actualCmsQty,
     fullyCms: false,
+    cmsDeliveryId: deliveryId, // The delivery that was modified
   }
 }
 
