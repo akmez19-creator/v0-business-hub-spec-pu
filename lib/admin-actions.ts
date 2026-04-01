@@ -1020,3 +1020,143 @@ export async function saveContractorAvatar(contractorId: string, photoUrl: strin
   revalidatePath('/dashboard/contractors/settings')
   return { success: true }
 }
+
+// ── Review a CMS modification (approve/reject/adjust price) ──
+export async function reviewCmsModification(params: {
+  modificationId: string
+  deliveryId: string
+  action: 'approve' | 'reject'
+  adjustedPrice?: number
+}) {
+  const { error: authError, authorized } = await checkAdminOrManagerAccess()
+  if (!authorized) return { error: authError }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  const { createAdminClient } = await import('@/lib/supabase/server')
+  const admin = createAdminClient()
+
+  const { modificationId, deliveryId, action, adjustedPrice } = params
+
+  // Get the modification
+  const { data: modification, error: modError } = await admin
+    .from('order_modifications')
+    .select('*')
+    .eq('id', modificationId)
+    .single()
+
+  if (modError || !modification) {
+    return { error: 'Modification not found' }
+  }
+
+  if (modification.status !== 'pending') {
+    return { error: 'Modification already reviewed' }
+  }
+
+  // Update the modification status
+  const { error: updateModError } = await admin
+    .from('order_modifications')
+    .update({
+      status: action === 'approve' ? 'approved' : 'rejected',
+      reviewed_by: user?.id,
+      reviewed_at: new Date().toISOString(),
+      new_price: adjustedPrice ?? modification.new_price,
+    })
+    .eq('id', modificationId)
+
+  if (updateModError) {
+    return { error: `Failed to update modification: ${updateModError.message}` }
+  }
+
+  // If approved with adjusted price, update the delivery amount
+  if (action === 'approve') {
+    const finalPrice = adjustedPrice ?? modification.new_price
+    
+    if (finalPrice !== null && finalPrice !== undefined) {
+      const { error: updateDeliveryError } = await admin
+        .from('deliveries')
+        .update({ amount: finalPrice })
+        .eq('id', deliveryId)
+
+      if (updateDeliveryError) {
+        return { error: `Failed to update delivery: ${updateDeliveryError.message}` }
+      }
+    }
+  }
+
+  revalidatePath('/dashboard/admin/cms')
+  return { success: true }
+}
+
+// ── Get CMS modifications for review ──
+export async function getPendingCmsModifications() {
+  const { error: authError, authorized } = await checkAdminOrManagerAccess()
+  if (!authorized) return { error: authError, modifications: [] }
+
+  const { createAdminClient } = await import('@/lib/supabase/server')
+  const admin = createAdminClient()
+
+  // Get all CMS modifications with delivery details
+  const { data: modifications, error } = await admin
+    .from('order_modifications')
+    .select(`
+      id,
+      target_delivery_id,
+      product_name,
+      qty,
+      unit_price,
+      total_price,
+      reason,
+      notes,
+      status,
+      new_price,
+      original_price,
+      created_at,
+      rider_id,
+      contractor_id
+    `)
+    .eq('reason', 'product_cms')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    return { error: error.message, modifications: [] }
+  }
+
+  // Get delivery details
+  const deliveryIds = [...new Set((modifications || []).map(m => m.target_delivery_id))]
+  const riderIds = [...new Set((modifications || []).map(m => m.rider_id).filter(Boolean))]
+  const contractorIds = [...new Set((modifications || []).map(m => m.contractor_id).filter(Boolean))]
+
+  const [deliveriesResult, ridersResult, contractorsResult] = await Promise.all([
+    admin.from('deliveries').select('id, customer_name, locality, products').in('id', deliveryIds.length > 0 ? deliveryIds : ['none']),
+    admin.from('profiles').select('id, name, email').in('id', riderIds.length > 0 ? riderIds : ['none']),
+    admin.from('profiles').select('id, name, email').in('id', contractorIds.length > 0 ? contractorIds : ['none']),
+  ])
+
+  const deliveryMap: Record<string, { customer_name: string; locality: string; products: string }> = {}
+  const riderMap: Record<string, string> = {}
+  const contractorMap: Record<string, string> = {}
+
+  for (const d of (deliveriesResult.data || [])) {
+    deliveryMap[d.id] = { customer_name: d.customer_name, locality: d.locality, products: d.products }
+  }
+  for (const r of (ridersResult.data || [])) {
+    riderMap[r.id] = r.name || r.email
+  }
+  for (const c of (contractorsResult.data || [])) {
+    contractorMap[c.id] = c.name || c.email
+  }
+
+  // Enrich modifications with delivery/rider/contractor info
+  const enrichedModifications = (modifications || []).map(m => ({
+    ...m,
+    customer_name: deliveryMap[m.target_delivery_id]?.customer_name || 'Unknown',
+    locality: deliveryMap[m.target_delivery_id]?.locality || 'Unknown',
+    delivery_products: deliveryMap[m.target_delivery_id]?.products || '',
+    rider_name: m.rider_id ? riderMap[m.rider_id] : undefined,
+    contractor_name: m.contractor_id ? contractorMap[m.contractor_id] : undefined,
+  }))
+
+  return { modifications: enrichedModifications }
+}

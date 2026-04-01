@@ -60,9 +60,11 @@ export function ModifyOrderSheet({
   const [isReplacing, setIsReplacing] = useState(false)
   
   // CMS mode - for marking individual products as CMS (includes deliveryId for correct targeting)
-  const [cmsProduct, setCmsProduct] = useState<{ name: string; qty: number; deliveryId: string } | null>(null)
+  const [cmsProduct, setCmsProduct] = useState<{ name: string; qty: number; unitPrice: number; deliveryId: string } | null>(null)
+  const [cmsQty, setCmsQty] = useState(1) // How many units to mark as CMS
   const [cmsReason, setCmsReason] = useState('')
   const [cmsNotes, setCmsNotes] = useState('')
+  const [cmsNewPrice, setCmsNewPrice] = useState('') // New price for remaining items
   const [isMarkingCms, setIsMarkingCms] = useState(false)
 
   // Selection state
@@ -144,8 +146,10 @@ export function ModifyOrderSheet({
     setReplacePrice('')
     setIsReplacing(false)
     setCmsProduct(null)
+    setCmsQty(1)
     setCmsReason('')
     setCmsNotes('')
+    setCmsNewPrice('')
     setIsMarkingCms(false)
   }, [])
 
@@ -205,11 +209,20 @@ export function ModifyOrderSheet({
     setError(null)
     
     const fullReason = cmsNotes ? `${cmsReason}: ${cmsNotes}` : cmsReason
+    
+    // Calculate auto price or use custom price
+    const remainingQty = cmsProduct.qty - cmsQty
+    const autoCalculatedPrice = remainingQty > 0 ? Math.round(cmsProduct.unitPrice * remainingQty) : 0
+    const finalNewPrice = cmsNewPrice ? parseFloat(cmsNewPrice) : autoCalculatedPrice
+    const needsReview = cmsNewPrice !== '' && parseFloat(cmsNewPrice) !== autoCalculatedPrice // Custom price entered - needs admin review
+    
     const result = await markProductAsCms({
-      deliveryId: cmsProduct.deliveryId, // Use the item's specific deliveryId
+      deliveryId: cmsProduct.deliveryId,
       productName: cmsProduct.name,
-      qty: cmsProduct.qty,
+      qty: cmsQty, // Use selected qty, not full product qty
       cmsReason: fullReason,
+      newPrice: finalNewPrice,
+      needsReview, // Flag for admin review if price was manually adjusted
     })
     
     setIsMarkingCms(false)
@@ -224,7 +237,7 @@ export function ModifyOrderSheet({
           newAmount: result.newAmount!,
           newQty: result.newQty!,
           newProducts: result.newProducts,
-          cmsDeliveryId: result.cmsDeliveryId, // Pass which delivery was marked CMS
+          cmsDeliveryId: result.cmsDeliveryId,
         })
         setTimeout(() => { onClose(); resetForm(); setSuccess(false) }, 1500)
       } else {
@@ -232,16 +245,14 @@ export function ModifyOrderSheet({
         setCurrentItems(prev => {
           const updated = prev.map(item => {
             if (item.name === cmsProduct.name && item.deliveryId === cmsProduct.deliveryId) {
-              const newQty = item.qty - cmsProduct.qty
+              const newQty = item.qty - cmsQty
               return newQty > 0 ? { ...item, qty: newQty } : null
             }
             return item
           }).filter(Boolean) as typeof prev
           return updated
         })
-        setCmsProduct(null)
-        setCmsReason('')
-        setCmsNotes('')
+        resetForm()
         
         onModified?.({
           newAmount: result.newAmount!,
@@ -397,7 +408,7 @@ const handleSubmit = async () => {
                         <span className="text-[11px] text-white/70 flex-1 truncate">{item.name}</span>
                         <span className="text-[10px] text-white/30">Rs {Math.round(item.qty * item.unitPrice)}</span>
                         <button 
-                          onClick={() => setCmsProduct({ name: item.name, qty: item.qty, deliveryId: item.deliveryId })}
+                          onClick={() => { setCmsProduct({ name: item.name, qty: item.qty, unitPrice: item.unitPrice, deliveryId: item.deliveryId }); setCmsQty(1) }}
                           className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition"
                           title="Mark as CMS"
                         >
@@ -547,8 +558,34 @@ const handleSubmit = async () => {
               </button>
             </div>
             
+            {/* Qty selector for partial CMS */}
+            {cmsProduct.qty > 1 && (
+              <>
+                <p className="text-[9px] text-white/40 font-mono mb-2">HOW MANY TO MARK AS CMS?</p>
+                <div className="flex items-center gap-2 mb-3">
+                  {Array.from({ length: cmsProduct.qty }, (_, i) => i + 1).map(num => (
+                    <button
+                      key={num}
+                      onClick={() => setCmsQty(num)}
+                      className={cn(
+                        "w-10 h-10 rounded-lg text-[12px] font-bold font-mono border transition-all",
+                        cmsQty === num
+                          ? "bg-amber-500/20 border-amber-400/30 text-amber-400"
+                          : "bg-white/3 border-white/10 text-white/50 hover:bg-white/5"
+                      )}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            
             <p className="text-[11px] text-white/60 mb-3">
-              <span className="text-amber-400 font-bold">{cmsProduct.qty}x {cmsProduct.name}</span> will be marked as CMS
+              <span className="text-amber-400 font-bold">{cmsQty}x {cmsProduct.name}</span> will be marked as CMS
+              {cmsProduct.qty > cmsQty && (
+                <span className="text-cyan-400"> ({cmsProduct.qty - cmsQty}x remaining)</span>
+              )}
             </p>
             
             <p className="text-[9px] text-white/40 font-mono mb-2">SELECT REASON</p>
@@ -569,13 +606,42 @@ const handleSubmit = async () => {
               ))}
             </div>
             
+            {/* Price adjustment - only show if there are remaining items */}
+            {cmsProduct.qty > cmsQty && (
+              <>
+                <p className="text-[9px] text-white/40 font-mono mb-2">NEW PRICE FOR REMAINING {cmsProduct.qty - cmsQty}x</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex-1 relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/40">Rs</span>
+                    <input
+                      type="number"
+                      value={cmsNewPrice}
+                      onChange={(e) => setCmsNewPrice(e.target.value)}
+                      placeholder={String(Math.round(cmsProduct.unitPrice * (cmsProduct.qty - cmsQty)))}
+                      className="w-full h-10 pl-9 pr-3 rounded-lg bg-white/5 border border-white/10 text-[12px] text-white/80 placeholder:text-white/30 focus:outline-none focus:border-amber-400/30 font-mono"
+                    />
+                  </div>
+                  <div className="text-[10px] text-white/40 font-mono">
+                    Auto: Rs {Math.round(cmsProduct.unitPrice * (cmsProduct.qty - cmsQty))}
+                  </div>
+                </div>
+                {cmsNewPrice && parseFloat(cmsNewPrice) !== Math.round(cmsProduct.unitPrice * (cmsProduct.qty - cmsQty)) && (
+                  <div className="mb-3 p-2 rounded-lg bg-purple-500/10 border border-purple-400/20">
+                    <p className="text-[10px] text-purple-400 font-mono">
+                      Custom price entered - will need admin review
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+            
             {/* Notes field for additional details */}
             <p className="text-[9px] text-white/40 font-mono mb-2">NOTES (optional)</p>
             <textarea
               value={cmsNotes}
               onChange={(e) => setCmsNotes(e.target.value)}
               placeholder="Add details about the product issue..."
-              className="w-full h-16 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[11px] text-white/80 placeholder:text-white/30 resize-none mb-3 focus:outline-none focus:border-amber-400/30"
+              className="w-full h-14 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[11px] text-white/80 placeholder:text-white/30 resize-none mb-3 focus:outline-none focus:border-amber-400/30"
             />
             
             <button
@@ -588,7 +654,7 @@ const handleSubmit = async () => {
               ) : (
                 <>
                   <AlertTriangle className="w-4 h-4" />
-                  CONFIRM CMS
+                  CONFIRM CMS ({cmsQty}x)
                 </>
               )}
             </button>
