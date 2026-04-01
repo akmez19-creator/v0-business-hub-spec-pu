@@ -225,7 +225,6 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
         pendingModificationId: items.find(d => d.pending_modification_id)?.pending_modification_id || null,
       }
 
-
       if (lat && lng) {
         exact.push({ ...pin, lat, lng })
       } else if (first.locality) {
