@@ -2588,7 +2588,11 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 {/* Row 1: Status dot + Name + Price + List toggle */}
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full shrink-0 shadow-[0_0_6px_currentColor]" style={{ backgroundColor: STATUS_COLORS[navTarget.status]?.dot || '#6b7280' }} />
-                  <p className="text-[12px] font-bold text-white truncate flex-1">{navTarget.customerName}</p>
+                  <p className="text-[12px] font-bold text-white truncate">{navTarget.customerName}</p>
+                  {navTarget.riderPriority === 'priority' && <Star className="w-3.5 h-3.5 text-red-400 fill-red-400 shrink-0" />}
+                  {navTarget.riderPriority === 'later' && <Clock3 className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                  {navTarget.riderRemarks && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-400/15 shrink-0 max-w-[80px] truncate">{navTarget.riderRemarks}</span>}
+                  <div className="flex-1" />
                   {isReturnOrder(navTarget) && (navTarget.amount || 0) <= 0 ? (
                     <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${navTarget.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : navTarget.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
                       {getReturnLabel(navTarget.salesType!)}
