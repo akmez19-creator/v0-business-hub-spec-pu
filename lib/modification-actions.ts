@@ -813,6 +813,9 @@ export async function markProductAsCms(params: {
 
   if (delivery.products) {
     const items = delivery.products.split(',').map((s: string) => s.trim())
+    // Check if there's only one product without qty prefix - use delivery's totalQty
+    const isSingleProduct = items.length === 1 && !items[0].match(/^\d+\s*x\s*/i)
+    
     for (const item of items) {
       const match = item.match(/^(\d+)\s*x\s*(.+)$/i)
       if (match) {
@@ -820,7 +823,9 @@ export async function markProductAsCms(params: {
         const itemName = match[2].trim()
         productMap.set(itemName, { qty: itemQty, unitPrice: avgUnitPrice })
       } else if (item) {
-        productMap.set(item, { qty: 1, unitPrice: avgUnitPrice })
+        // Use delivery's totalQty for single products without prefix
+        const itemQty = isSingleProduct ? totalQty : 1
+        productMap.set(item, { qty: itemQty, unitPrice: avgUnitPrice })
       }
     }
   }
