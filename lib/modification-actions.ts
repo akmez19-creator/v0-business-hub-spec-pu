@@ -944,7 +944,7 @@ export async function markProductAsCms(params: {
   if (updateError) return { error: updateError.message }
 
   // Log the CMS modification - pending review if custom price was entered
-  const { error: insertError } = await admin.from('order_modifications').insert({
+  const { data: insertedMod, error: insertError } = await admin.from('order_modifications').insert({
     target_delivery_id: deliveryId,
     modified_by: user.id,
     rider_id: delivery.rider_id,
@@ -959,10 +959,17 @@ export async function markProductAsCms(params: {
     new_price: newAmount, // Store the new price for admin review
     original_price: totalAmount, // Store original price for comparison
     original_qty: totalQty, // Store original qty for comparison
-  })
+  }).select('id').single()
   
   if (insertError) {
     console.error('[v0] Failed to insert CMS modification:', insertError)
+  }
+
+  // If needs review, link the pending modification to the delivery
+  if (needsReview && insertedMod?.id) {
+    await admin.from('deliveries').update({
+      pending_modification_id: insertedMod.id,
+    }).eq('id', deliveryId)
   }
 
   return {
@@ -973,7 +980,66 @@ export async function markProductAsCms(params: {
     markedCmsQty: actualCmsQty,
     fullyCms: false,
     cmsDeliveryId: deliveryId, // The delivery that was modified
+    pendingReview: needsReview, // Flag to indicate pending review
   }
+}
+
+// ── Cancel a pending CMS modification (rider can undo before admin approves) ──
+export async function cancelPendingCmsModification(params: {
+  modificationId: string
+  deliveryId: string
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { modificationId, deliveryId } = params
+
+  const { createAdminClient } = await import('@/lib/supabase/server')
+  const admin = createAdminClient()
+
+  // Get the modification to restore original values
+  const { data: modification, error: modError } = await admin
+    .from('order_modifications')
+    .select('*')
+    .eq('id', modificationId)
+    .single()
+
+  if (modError || !modification) {
+    return { error: 'Modification not found' }
+  }
+
+  if (modification.status !== 'pending') {
+    return { error: 'Only pending modifications can be cancelled' }
+  }
+
+  // Restore the delivery to original values
+  const { error: restoreError } = await admin
+    .from('deliveries')
+    .update({
+      qty: modification.original_qty,
+      amount: modification.original_price,
+      pending_modification_id: null,
+      is_modified: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', deliveryId)
+
+  if (restoreError) {
+    return { error: `Failed to restore delivery: ${restoreError.message}` }
+  }
+
+  // Delete the modification record
+  const { error: deleteError } = await admin
+    .from('order_modifications')
+    .delete()
+    .eq('id', modificationId)
+
+  if (deleteError) {
+    return { error: `Failed to delete modification: ${deleteError.message}` }
+  }
+
+  return { success: true }
 }
 
 // ── Get all pending modifications for contractor/admin ──

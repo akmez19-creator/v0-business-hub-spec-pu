@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof } from '@/lib/delivery-actions'
+import { cancelPendingCmsModification } from '@/lib/modification-actions'
 import { ModifyOrderSheet } from './modify-order-sheet'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -131,11 +132,12 @@ export interface DeliveryPin {
   locationSource?: string | null
   isModified?: boolean
   modificationCount?: number
-items?: { name: string; qty: number; amount: number; deliveryId?: string }[]
+  items?: { name: string; qty: number; amount: number; deliveryId?: string }[]
   salesType?: string | null
   returnProduct?: string | null
   deliveredAt?: string | null // Timestamp when status was set to delivered
-  }
+  pendingModificationId?: string | null // ID of pending CMS modification awaiting admin review
+}
 
 export interface RegionCluster {
   locality: string
@@ -410,6 +412,7 @@ export function DeliveryMap({
   const [sendingMsg, setSendingMsg] = useState<string | null>(null)
   const [paymentPopup, setPaymentPopup] = useState<{ pin: DeliveryPin; protocol?: boolean } | null>(null)
   const [updatingPinId, setUpdatingPinId] = useState<string | null>(null)
+  const [cancellingModificationId, setCancellingModificationId] = useState<string | null>(null)
   const [newPinIds, setNewPinIds] = useState<Set<string>>(new Set())
   const [nightMode, setNightMode] = useState(false)
   const [bulkSending, setBulkSending] = useState(false)
@@ -676,7 +679,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ════════════════════════════════════════════════════════════���═���═══��═══��═══
+      // ════════════════════════════════════════════════════════════����═���═══��═══��═══
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -1573,7 +1576,23 @@ map.on('load', () => {
     setExporting(null)
   }, [safeRegionGroups, customTemplates, markRegionExported])
 
-  // ── Status change + Payment ─���
+  // ── Cancel pending CMS modification ──
+  const handleCancelPendingModification = useCallback(async (pin: DeliveryPin) => {
+    if (!pin.pendingModificationId) return
+    setCancellingModificationId(pin.id)
+    const result = await cancelPendingCmsModification({
+      modificationId: pin.pendingModificationId,
+      deliveryId: pin.id,
+    })
+    setCancellingModificationId(null)
+    if (result.error) {
+      alert(`Failed to cancel: ${result.error}`)
+    } else {
+      router.refresh()
+    }
+  }, [router])
+
+  // ── Status change + Payment ──
   const handleMapDelivered = useCallback((pin: DeliveryPin) => {
     // Check if pin has valid location (not geocoded/approximate)
     const needsLocation = pin.source === 'geocoded' || !pin.lat
@@ -3482,6 +3501,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-[14px] font-semibold text-white/90">{d.customerName}{d.isModified && <span className="ml-1.5 text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20">MOD</span>}</span>
                                       {d.locationFlagged && <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-[9px] font-black font-mono animate-pulse">FLAG</span>}
+                                      {d.pendingModificationId && <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/20 animate-pulse">REVIEW</span>}
                                       {isReturnOrder(d) && (d.amount || 0) <= 0 ? (
                                         <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${d.salesType === 'exchange' ? 'bg-violet-500/20 text-violet-400' : d.salesType === 'trade_in' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>{getReturnLabel(d.salesType!)}</span>
                                       ) : (
@@ -3535,7 +3555,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                       )}
                                     </div>
                                     {/* Status row */}
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                       <button onClick={() => handleMapDelivered(d)} disabled={updatingPinId === d.id}
                                         className={cn("status-chip disabled:opacity-30 text-xs px-3.5 py-2 gap-1.5",
                                           isReturnOrder(d) ? "bg-violet-500/12 text-violet-400 border-violet-400/12" : "bg-emerald-500/12 text-emerald-400 border-emerald-400/12")}>
@@ -3553,6 +3573,19 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                         className="status-chip bg-purple-500/12 text-purple-400 border-purple-400/12 text-xs px-3.5 py-2 gap-1">
                                         <Package className="w-3.5 h-3.5" />Mod
                                       </button>
+                                      {d.pendingModificationId && (
+                                        <button 
+                                          onClick={() => handleCancelPendingModification(d)}
+                                          disabled={cancellingModificationId === d.id}
+                                          className="status-chip bg-orange-500/12 text-orange-400 border-orange-400/12 text-xs px-3.5 py-2 gap-1 disabled:opacity-30">
+                                          {cancellingModificationId === d.id ? (
+                                            <div className="w-3.5 h-3.5 border-2 border-orange-400/30 border-t-orange-400 rounded-full animate-spin" />
+                                          ) : (
+                                            <RotateCcw className="w-3.5 h-3.5" />
+                                          )}
+                                          Undo
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 )}

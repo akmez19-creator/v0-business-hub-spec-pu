@@ -222,6 +222,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
         salesType: first.sales_type || null,
         returnProduct: first.return_product || null,
         deliveredAt: first.delivered_at || null,
+        pendingModificationId: items.find(d => d.pending_modification_id)?.pending_modification_id || null,
       }
 
 
