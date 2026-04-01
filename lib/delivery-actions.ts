@@ -1289,3 +1289,48 @@ function extractCoordsFromLocationUrl(url: string): { lat: number; lng: number }
   if (dirMatch) return { lat: parseFloat(dirMatch[1]), lng: parseFloat(dirMatch[2]) }
   return null
 }
+
+// ── Save rider remarks (priority, contact_2, short note) ──
+export async function saveDeliveryRemark(params: {
+  deliveryId: string
+  priority?: 'priority' | 'later' | null
+  contact2?: string | null
+  remarks?: string | null
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { deliveryId, priority, contact2, remarks } = params
+
+  // Build update object with only provided fields
+  const updateData: Record<string, string | null> = {}
+  
+  if (priority !== undefined) {
+    updateData.rider_priority = priority
+  }
+  if (contact2 !== undefined) {
+    updateData.contact_2 = contact2 || null
+  }
+  if (remarks !== undefined) {
+    // Limit to 2 words max
+    const cleanRemarks = remarks ? remarks.split(/\s+/).slice(0, 2).join(' ') : null
+    updateData.rider_remarks = cleanRemarks
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return { error: 'No changes provided' }
+  }
+
+  const { error } = await supabase
+    .from('deliveries')
+    .update(updateData)
+    .eq('id', deliveryId)
+
+  if (error) {
+    return { error: `Failed to save: ${error.message}` }
+  }
+
+  revalidateAllDeliveryPaths()
+  return { success: true }
+}

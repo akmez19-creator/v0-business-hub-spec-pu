@@ -223,6 +223,9 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
         returnProduct: first.return_product || null,
         deliveredAt: first.delivered_at || null,
         pendingModificationId: items.find(d => d.pending_modification_id)?.pending_modification_id || null,
+        contact2: first.contact_2 || null,
+        riderPriority: first.rider_priority || null,
+        riderRemarks: first.rider_remarks || null,
       }
 
       if (lat && lng) {
