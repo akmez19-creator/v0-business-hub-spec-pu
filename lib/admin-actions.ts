@@ -1112,6 +1112,7 @@ export async function getPendingCmsModifications() {
       status,
       new_price,
       original_price,
+      original_qty,
       created_at,
       rider_id,
       contractor_id

@@ -912,6 +912,7 @@ export async function markProductAsCms(params: {
       status: needsReview ? 'pending' : 'approved',
       new_price: 0,
       original_price: totalAmount,
+      original_qty: totalQty,
     })
 
     return {
@@ -957,6 +958,7 @@ export async function markProductAsCms(params: {
     status: needsReview ? 'pending' : 'approved', // Pending review if custom price
     new_price: newAmount, // Store the new price for admin review
     original_price: totalAmount, // Store original price for comparison
+    original_qty: totalQty, // Store original qty for comparison
   })
   
   if (insertError) {
