@@ -35,6 +35,7 @@ import {
   Menu,
   LogOut,
   User,
+  AlertTriangle,
 } from 'lucide-react'
 
 interface SubNavItem {
@@ -193,6 +194,13 @@ const navItems: NavItem[] = [
     icon: Users,
     roles: ['admin', 'manager'],
     color: '#6366f1',
+  },
+  {
+    href: '/dashboard/admin/cms',
+    label: 'CMS Review',
+    icon: AlertTriangle,
+    roles: ['admin', 'manager'],
+    color: '#f59e0b',
   },
   {
     href: '/dashboard/admin/regions',
