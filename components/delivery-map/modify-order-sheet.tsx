@@ -381,11 +381,11 @@ const handleSubmit = async () => {
                         <span className="text-[11px] text-white/70 flex-1 truncate">{item.name}</span>
                         <span className="text-[10px] text-white/30">Rs {Math.round(item.qty * item.unitPrice)}</span>
                         <button 
-                          onClick={() => setCmsProduct({ name: item.name, qty: item.qty })}
-                          className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 transition"
+                          onClick={() => { console.log('[v0] CMS button clicked for', item.name); setCmsProduct({ name: item.name, qty: item.qty }) }}
+                          className="p-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/20 transition"
                           title="Mark as CMS"
                         >
-                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                         </button>
                         <button 
                           onClick={() => { setEditingItem(item.name); setPendingQty(p => ({ ...p, [item.name]: 0 })) }}
