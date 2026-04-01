@@ -33,7 +33,7 @@ interface ModifyOrderSheetProps {
   customerName: string
   currentProducts: string
   currentAmount: number
-  onModified?: (result: { newAmount: number; newQty: number; newProducts?: string; affectedClient?: { deliveryId: string; name: string; markedNwd: boolean; remainingQty: number } | null }) => void
+  onModified?: (result: { newAmount: number; newQty: number; newProducts?: string; cmsDeliveryId?: string; affectedClient?: { deliveryId: string; name: string; markedNwd: boolean; remainingQty: number } | null }) => void
 }
 
 export function ModifyOrderSheet({
@@ -220,12 +220,13 @@ export function ModifyOrderSheet({
       setError(result.error)
     } else {
       if (result.fullyCms) {
-        // Entire delivery is now CMS
+        // Entire delivery is now CMS - pass the cmsDeliveryId for grouped order handling
         setSuccess(true)
         onModified?.({
-          newAmount: 0,
-          newQty: 0,
-          newProducts: '',
+          newAmount: result.newAmount!,
+          newQty: result.newQty!,
+          newProducts: result.newProducts,
+          cmsDeliveryId: result.cmsDeliveryId, // Pass which delivery was marked CMS
         })
         setTimeout(() => { onClose(); resetForm(); setSuccess(false) }, 1500)
       } else {
@@ -248,6 +249,7 @@ export function ModifyOrderSheet({
           newAmount: result.newAmount!,
           newQty: result.newQty!,
           newProducts: result.newProducts,
+          cmsDeliveryId: result.cmsDeliveryId,
         })
       }
     }

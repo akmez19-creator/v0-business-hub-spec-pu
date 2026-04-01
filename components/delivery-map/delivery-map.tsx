@@ -676,7 +676,7 @@ export function DeliveryMap({
         maxSpeed: 1200 // Cap speed to prevent jank
       })
       
-      // ════════════════════════════════════════════════════════════���═════��═══��═══
+      // ════════════════════════════════════════════════════════════���═���═══��═══��═══
       // PRELOAD ALL MAURITIUS TILES - Instant zoom after initial load
       // ══════════════════════════════════════════════════════════════════════════
       const mauritiusBounds: [[number, number], [number, number]] = [[57.30, -20.53], [57.81, -19.97]]
@@ -4351,12 +4351,29 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         onModified={(result) => {
           // Update target pin with new values
           if (modifyTarget) {
-            modifyTarget.amount = result.newAmount
-            modifyTarget.qty = result.newQty
-            if (result.newProducts) {
-              modifyTarget.products = result.newProducts
-              // Also update items array for proper display
-              modifyTarget.items = parseProductsToItems(result.newProducts, result.newAmount)
+            // Handle grouped order CMS - one delivery in group marked as CMS
+            if (result.cmsDeliveryId && modifyTarget.itemIds && modifyTarget.itemIds.length > 1) {
+              // Remove the CMS'd delivery from the group
+              modifyTarget.itemIds = modifyTarget.itemIds.filter(id => id !== result.cmsDeliveryId)
+              // Remove items belonging to the CMS'd delivery
+              if (modifyTarget.items) {
+                modifyTarget.items = modifyTarget.items.filter(item => item.deliveryId !== result.cmsDeliveryId)
+              }
+              // Recalculate totals from remaining items
+              const remainingAmount = modifyTarget.items?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0
+              const remainingQty = modifyTarget.items?.reduce((sum, item) => sum + item.qty, 0) || 0
+              modifyTarget.amount = remainingAmount
+              modifyTarget.qty = remainingQty
+              modifyTarget.products = modifyTarget.items?.map(item => `${item.qty}x ${item.name}`).join(', ') || ''
+            } else {
+              // Single delivery or standard modification
+              modifyTarget.amount = result.newAmount
+              modifyTarget.qty = result.newQty
+              if (result.newProducts !== undefined) {
+                modifyTarget.products = result.newProducts
+                // Also update items array for proper display
+                modifyTarget.items = parseProductsToItems(result.newProducts, result.newAmount)
+              }
             }
             modifyTarget.isModified = true
             modifyTarget.modificationCount = (modifyTarget.modificationCount || 0) + 1
@@ -4368,10 +4385,11 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                   ...stop,
                   pin: {
                     ...stop.pin,
-                    amount: result.newAmount,
-                    qty: result.newQty,
-                    products: result.newProducts || stop.pin.products,
-                    items: result.newProducts ? parseProductsToItems(result.newProducts, result.newAmount) : stop.pin.items,
+                    amount: modifyTarget.amount,
+                    qty: modifyTarget.qty,
+                    products: modifyTarget.products,
+                    items: modifyTarget.items,
+                    itemIds: modifyTarget.itemIds,
                     isModified: true,
                     modificationCount: (stop.pin.modificationCount || 0) + 1,
                   }
