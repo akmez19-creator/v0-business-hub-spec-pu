@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   Navigation, Phone, X, Locate, Clock, MapPin, Users,
-  ChevronDown, List, Search, ArrowRight, ArrowLeft,
+  ChevronDown, ChevronLeft, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
   Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
   Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle, MessageSquareMore, Star, Clock3, UserPlus, Sparkles, Flag,
@@ -3075,14 +3075,14 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
       {/* Floating Controls (right side) - auto-hide with scroll indicator */}
       {!navigating && !(optimizedStops.length > 0 && !showClientList) && !placingPin && (
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
-          {/* Collapsed scroll indicator - tap to expand */}
+          {/* Collapsed toolbar toggle - tap to expand */}
           {!toolbarExpanded && (
             <button 
               onClick={() => setToolbarExpanded(true)}
-              className="w-2 h-24 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/20 transition-all active:scale-95"
+              className="w-10 h-10 rounded-xl bg-zinc-900/90 backdrop-blur-xl border border-cyan-400/40 flex items-center justify-center hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-black/30"
               title="Tap to show controls"
             >
-              <div className="w-1 h-12 rounded-full bg-gradient-to-b from-cyan-400/60 via-cyan-400/30 to-transparent" />
+              <ChevronLeft className="w-5 h-5 text-cyan-400" />
             </button>
           )}
           {/* Expanded toolbar */}
