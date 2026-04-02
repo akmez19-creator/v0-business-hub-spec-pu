@@ -7,7 +7,7 @@ import {
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
   Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
-  Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle, MessageSquareMore, Star, Clock3, UserPlus, Sparkles,
+  Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle, MessageSquareMore, Star, Clock3, UserPlus, Sparkles, Flag,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof, saveDeliveryRemark } from '@/lib/delivery-actions'
@@ -415,6 +415,8 @@ export function DeliveryMap({
   const [navPanelExpanded, setNavPanelExpanded] = useState(false) // Shutter state - collapsed by default for better map view
   const [toolbarExpanded, setToolbarExpanded] = useState(false) // Auto-hide toolbar state
   const [showFeatureTip, setShowFeatureTip] = useState(false) // Feature tip popup
+  const [showPoleTip, setShowPoleTip] = useState(false) // Pole feature tip popup
+  const [hasCalledClient, setHasCalledClient] = useState(false) // Track if first call was made
   const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
   const [sendingMsg, setSendingMsg] = useState<string | null>(null)
@@ -1392,7 +1394,15 @@ map.on('load', () => {
       try { sessionStorage.setItem(contactedKey, JSON.stringify(next)) } catch {}
       return next
     })
-  }, [contactedKey])
+    // Auto-hide region poles after first call (rider is now actively delivering)
+    if (medium === 'call' && !hasCalledClient) {
+      setHasCalledClient(true)
+      setShowPoles(false)
+      if (mapRef.current && (mapRef.current as any)._regionPoleMarkers) {
+        (mapRef.current as any)._regionPoleMarkers.forEach((m: any) => { m.getElement().style.display = 'none' })
+      }
+    }
+  }, [contactedKey, hasCalledClient])
 
   const sendMapMessage = useCallback(async (pin: DeliveryPin, method: 'sms', templateId: string = 'onway') => {
     if (!pin.contact1) return
@@ -3114,8 +3124,14 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             <button onClick={() => {
               const next = !showPoles; setShowPoles(next)
               if (mapRef.current && (mapRef.current as any)._regionPoleMarkers) (mapRef.current as any)._regionPoleMarkers.forEach((m: any) => { m.getElement().style.display = next ? '' : 'none' })
+              // Show feature tip on first toggle
+              if (!sessionStorage.getItem('poleTipShown')) {
+                setShowPoleTip(true)
+                sessionStorage.setItem('poleTipShown', 'true')
+                setTimeout(() => setShowPoleTip(false), 5000)
+              }
             }} className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', showPoles ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
-              <MapPin className="w-4 h-4" />
+              <Flag className="w-4 h-4" />
             </button>
             <button onClick={toggleNightMode}
               className={cn('btn-holo w-11 h-11 flex items-center justify-center transition', nightMode ? 'text-cyan-400' : 'text-white/40 hover:text-cyan-400')}>
@@ -4744,6 +4760,36 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
           router.refresh()
         }}
       />
+
+      {/* Pole Feature Tip Popup */}
+      {showPoleTip && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] animate-in zoom-in-95 fade-in duration-300">
+          <div className="bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900 rounded-2xl p-5 border border-amber-400/30 shadow-2xl shadow-amber-500/20 max-w-[280px]">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/30 flex items-center justify-center">
+                <Flag className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Region Markers</h3>
+                <p className="text-[10px] text-amber-400/80">{showPoles ? 'Visible' : 'Hidden'}</p>
+              </div>
+            </div>
+            <p className="text-xs text-white/70 leading-relaxed">
+              Region markers show delivery clusters on the map. They auto-hide after your first call to reduce clutter during active delivery.
+            </p>
+            <div className="mt-3 flex items-center gap-2 text-[10px] text-white/40">
+              <Sparkles className="w-3 h-3 text-amber-400" />
+              <span>Tap the flag button anytime to toggle</span>
+            </div>
+            <button 
+              onClick={() => setShowPoleTip(false)}
+              className="mt-3 w-full py-2 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-semibold hover:bg-amber-500/30 transition"
+            >
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Feature Tip Popup - Beautiful explanation */}
       {showFeatureTip && (
