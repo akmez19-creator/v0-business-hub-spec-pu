@@ -4078,8 +4078,20 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
   )}
             </div>
           </div>
-          <div className="absolute bottom-24 left-3 right-3 z-40 flex flex-col gap-2">
-            {/* Google Maps button - open current map center in Google Maps */}
+          <div className="absolute bottom-44 left-3 right-3 z-40 flex flex-col gap-2">
+            {/* Action buttons row - Cancel and Confirm side by side */}
+            <div className="flex gap-2">
+              <button onClick={() => { setPlacingPin(null); setStreetSearch(''); setStreetResults([]) }}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800/90 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition shadow-lg">
+                <X className="w-4 h-4" /> Cancel
+              </button>
+              <button onClick={confirmPinPlacement} disabled={savingPin}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 text-cyan-400 font-bold text-sm active:scale-95 transition disabled:opacity-50 shadow-lg">
+                {savingPin ? <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                Confirm
+              </button>
+            </div>
+            {/* Google Maps button - smaller, below main actions */}
             <button onClick={() => {
               const map = mapRef.current
               if (!map) return
@@ -4088,21 +4100,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               setShowFeatureTip(true)
               setTimeout(() => setShowFeatureTip(false), 4000)
             }}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-500/20 backdrop-blur-xl border border-green-400/30 text-green-400 font-bold text-sm active:scale-95 transition shadow-lg">
-              <ExternalLink className="w-4 h-4" />
-              Open in Google Maps
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-green-500/10 backdrop-blur-xl border border-green-400/20 text-green-400 font-semibold text-xs active:scale-95 transition">
+              <ExternalLink className="w-3.5 h-3.5" />
+              View in Google Maps
             </button>
-            <div className="flex gap-2">
-<button onClick={() => { setPlacingPin(null); setStreetSearch(''); setStreetResults([]) }}
-  className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition shadow-lg">
-  <X className="w-4 h-4" /> Cancel
-            </button>
-            <button onClick={confirmPinPlacement} disabled={savingPin}
-              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 text-cyan-400 font-bold text-sm active:scale-95 transition disabled:opacity-50 shadow-lg">
-              {savingPin ? <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
-              Confirm Pin
-            </button>
-            </div>
           </div>
         </>
       )}
