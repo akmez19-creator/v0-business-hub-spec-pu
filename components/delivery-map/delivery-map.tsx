@@ -179,6 +179,8 @@ interface DeliveryMapProps {
   riderColorMap?: Record<string, { color: string; name: string }>
   riderJuicePolicies?: Record<string, string>
   deviceType?: 'apple' | 'android'
+  allDeliveriesCount?: number
+  riderDeliveryCounts?: Record<string, number>
   }
 
 interface RouteInfo {
@@ -290,6 +292,8 @@ export function DeliveryMap({
   warehouseLat, warehouseLng, warehouseName = 'Warehouse',
   className, backHref, customTemplates, riderColorMap, riderJuicePolicies = {},
   deviceType = 'apple',
+  allDeliveriesCount,
+  riderDeliveryCounts = {},
 }: DeliveryMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const miniMapRef = useRef<HTMLDivElement>(null)
@@ -335,8 +339,6 @@ export function DeliveryMap({
   const [regionOverrides, setRegionOverrides] = useState<Record<string, { lat: number; lng: number }>>({})
   const regionOverridesRef = useRef<Record<string, { lat: number; lng: number }>>({})
   const [savingRegion, setSavingRegion] = useState(false)
-  const [riderDropdownOpen, setRiderDropdownOpen] = useState(false)
-  const [selectedRiderFilter, setSelectedRiderFilter] = useState<string>('all')
   
   // Fetch region coordinate overrides on mount
   useEffect(() => {
@@ -670,7 +672,7 @@ export function DeliveryMap({
         refreshExpiredTiles: false, // Don't re-fetch during session
         renderWorldCopies: false, // Only render one world
         
-        // ── Interaction ──
+        // ── Interaction ─���
         projection: 'mercator',
         touchZoomRotate: true, touchPitch: false, dragRotate: false,
         cooperativeGestures: false,
@@ -1277,7 +1279,7 @@ map.on('load', () => {
   // ����══════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
-  // ══════════════════════════════════════════════════════════════════════════
+  // ═════════════════════�����════════════════════════════════════════════════════
   const gpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   const startContinuousTracking = useCallback(() => {
@@ -3194,46 +3196,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             className="btn-holo shrink-0 w-11 h-11 rounded-xl holo-panel flex items-center justify-center text-white/50 hover:text-cyan-400 transition">
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
-          {/* Rider Filter Dropdown */}
-          {riderColorMap && Object.keys(riderColorMap).length > 0 && (
-            <div className="relative">
-              <button 
-                onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
-                className="btn-holo shrink-0 h-11 px-3 rounded-xl holo-panel flex items-center gap-2 text-white/70 hover:text-amber-400 transition border border-amber-500/30"
-              >
-                <Users className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-semibold">
-                  {selectedRiderFilter === 'all' 
-                    ? `All (${deliveries.length})`
-                    : `${riderColorMap[selectedRiderFilter]?.name || 'Rider'} (${deliveries.filter(d => d.riderId === selectedRiderFilter).length})`}
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${riderDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {riderDropdownOpen && (
-                <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden z-50">
-                  <button
-                    onClick={() => { setSelectedRiderFilter('all'); setRiderDropdownOpen(false) }}
-                    className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderFilter === 'all' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
-                  >
-                    All Riders ({deliveries.length})
-                  </button>
-                  {Object.entries(riderColorMap).map(([id, { name, color }]) => {
-                    const count = deliveries.filter(d => d.riderId === id).length
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => { setSelectedRiderFilter(id); setRiderDropdownOpen(false) }}
-                        className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors flex items-center gap-2 ${selectedRiderFilter === id ? 'bg-white/5' : 'text-white/80'}`}
-                      >
-                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color }} />
-                        <span className={selectedRiderFilter === id ? 'text-amber-400' : ''}>{name} ({count})</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 

@@ -62,6 +62,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
   const [selectedRiderId, setSelectedRiderId] = useState<string>(
     defaultRiderId && Object.keys(riderMap).length > 1 ? defaultRiderId : 'all'
   )
+  const [riderDropdownOpen, setRiderDropdownOpen] = useState(false)
 
   const RIDER_COLORS = ['#b45309', '#1d4ed8', '#047857', '#c2410c', '#6d28d9', '#b91c1c', '#0d9488', '#7c3aed', '#ca8a04', '#4f46e5']
 
@@ -77,6 +78,16 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
     map['unassigned'] = { color: '#6b7280', name: 'Unassigned' }
     return map
   }, [riderEntries])
+
+  // Compute rider delivery counts for dropdown
+  const riderDeliveryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    riderEntries.forEach(([id]) => {
+      counts[id] = deliveries.filter(d => d.rider_id === id).length
+    })
+    counts['unassigned'] = deliveries.filter(d => !d.rider_id).length
+    return counts
+  }, [deliveries, riderEntries])
 
   // Filter deliveries by selected rider
   const filteredDeliveries = useMemo(() => {
@@ -329,7 +340,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-black">
       {(exactPins.length > 0 || regions.length > 0) ? (
-        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} />
+        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} allDeliveriesCount={deliveries.length} riderDeliveryCounts={riderDeliveryCounts} />
       ) : (
         <div className="h-full flex items-center justify-center">
           <div className="text-center space-y-3 px-6">
@@ -338,6 +349,61 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
             </div>
             <p className="text-sm font-medium text-white/60">No locations available</p>
             <p className="text-xs text-white/30 max-w-xs">Pins appear when clients share GPS or addresses are geocoded.</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Rider Filter Dropdown - rendered AFTER map to stay on top */}
+      {hasMultipleRiders && (
+        <div className="absolute top-3 left-28 z-[9999]">
+          <div className="relative">
+            <button
+              onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
+              className="flex items-center gap-1.5 h-11 px-3 rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-amber-500/40 text-xs text-white hover:bg-zinc-800 transition-colors shadow-lg"
+            >
+              <Users className="w-4 h-4 text-amber-400" />
+              <span className="font-semibold">
+                {selectedRiderId === 'all'
+                  ? `All (${deliveries.length})`
+                  : selectedRiderId === 'unassigned'
+                  ? `Unassigned (${riderDeliveryCounts['unassigned'] || 0})`
+                  : `${riderMap[selectedRiderId] || 'Rider'} (${riderDeliveryCounts[selectedRiderId] || 0})`}
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${riderDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {riderDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden">
+                <button
+                  onClick={() => { setSelectedRiderId('all'); setRiderDropdownOpen(false) }}
+                  className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderId === 'all' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
+                >
+                  All Riders ({deliveries.length})
+                </button>
+                {riderEntries.map(([id, name]) => {
+                  const count = riderDeliveryCounts[id] || 0
+                  const rColor = riderColorMapData[id]?.color || '#6b7280'
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSelectedRiderId(id); setRiderDropdownOpen(false) }}
+                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors flex items-center gap-2 ${selectedRiderId === id ? 'bg-white/5' : 'text-white/80'}`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: rColor }} />
+                      <span className={selectedRiderId === id ? 'text-amber-400' : ''}>{name} ({count})</span>
+                    </button>
+                  )
+                })}
+                {(riderDeliveryCounts['unassigned'] || 0) > 0 && (
+                  <button
+                    onClick={() => { setSelectedRiderId('unassigned'); setRiderDropdownOpen(false) }}
+                    className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors flex items-center gap-2 ${selectedRiderId === 'unassigned' ? 'bg-white/5' : 'text-white/80'}`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-gray-500" />
+                    <span className={selectedRiderId === 'unassigned' ? 'text-amber-400' : ''}>Unassigned ({riderDeliveryCounts['unassigned'] || 0})</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
