@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.3.0",
+  "version": "2.5.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -92,7 +92,149 @@ const POPUP_HTML = `<!DOCTYPE html>
       justify-content: center;
     }
     .header-btn:hover { background: rgba(255,255,255,0.3); }
+    .main-tabs {
+      display: flex;
+      background: rgba(0,0,0,0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .main-tab {
+      flex: 1;
+      padding: 10px 12px;
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+      border-bottom: 2px solid transparent;
+    }
+    .main-tab:hover { color: #fff; background: rgba(255,255,255,0.05); }
+    .main-tab.active {
+      color: #f97316;
+      border-bottom-color: #f97316;
+      background: rgba(249, 115, 22, 0.1);
+    }
+    .main-tab .tab-icon { font-size: 14px; }
     .content { padding: 14px; }
+    .worktime-panel {
+      text-align: center;
+    }
+    .worktime-status {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .worktime-status.clocked-out {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .worktime-status .status-dot {
+      width: 12px;
+      height: 12px;
+      background: #10b981;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 8px;
+      animation: pulse 2s infinite;
+    }
+    .worktime-status.clocked-out .status-dot {
+      background: #ef4444;
+      animation: none;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .worktime-status .status-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: #10b981;
+    }
+    .worktime-status.clocked-out .status-text { color: #ef4444; }
+    .worktime-timer {
+      font-size: 42px;
+      font-weight: 700;
+      font-family: 'SF Mono', monospace;
+      color: #fff;
+      margin: 20px 0;
+      letter-spacing: 2px;
+    }
+    .worktime-info {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 20px;
+    }
+    .worktime-info span { color: #f97316; font-weight: 600; }
+    .pin-input-wrap {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .pin-digit {
+      width: 48px;
+      height: 56px;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      text-align: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      outline: none;
+    }
+    .pin-digit:focus { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
+    .clock-btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.15s;
+    }
+    .clock-btn.clock-in {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+    .clock-btn.clock-out {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+    }
+    .clock-btn:hover { transform: scale(1.02); }
+    .clock-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .worktime-history {
+      margin-top: 20px;
+      text-align: left;
+    }
+    .worktime-history h4 {
+      font-size: 11px;
+      color: #f97316;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+    .history-item .date { color: #888; }
+    .history-item .hours { color: #10b981; font-weight: 600; }
     .login-msg {
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.1);
@@ -182,97 +324,120 @@ const POPUP_HTML = `<!DOCTYPE html>
       padding-bottom: 6px;
       border-bottom: 1px solid rgba(249, 115, 22, 0.2);
     }
+    .product-search-wrap {
+      position: sticky;
+      top: 0;
+      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+      padding: 4px 0 8px;
+      z-index: 5;
+    }
     .product-search {
       width: 100%;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .product-search:focus { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
+    .product-search::placeholder { color: #888; }
+    .category-tabs {
+      display: flex;
+      gap: 4px;
+      margin: 8px 0;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .category-tab {
+      flex-shrink: 0;
+      padding: 6px 12px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 6px;
-      padding: 8px 10px;
-      color: #fff;
-      font-size: 12px;
-      outline: none;
-      margin-bottom: 8px;
-    }
-    .product-search:focus { border-color: #f97316; }
-    .product-search::placeholder { color: #555; }
-    .products-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
-      max-height: 150px;
-      overflow-y: auto;
-      padding: 2px;
-      transition: max-height 0.3s ease;
-    }
-    .products-grid.expanded {
-      max-height: 350px;
-    }
-    .expand-toggle {
-      width: 100%;
-      background: rgba(249, 115, 22, 0.1);
-      border: 1px solid rgba(249, 115, 22, 0.2);
-      border-radius: 6px;
-      padding: 6px;
-      color: #f97316;
+      color: #888;
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
-      margin-top: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
+      transition: all 0.15s;
     }
-    .expand-toggle:hover {
-      background: rgba(249, 115, 22, 0.2);
+    .category-tab:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .category-tab.active {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      border-color: #f97316;
+      color: #fff;
     }
-    .expand-toggle .arrow {
-      transition: transform 0.3s ease;
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 4px 2px;
     }
-    .expand-toggle.expanded .arrow {
-      transform: rotate(180deg);
+    .no-products {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 20px;
+      color: #666;
+      font-size: 12px;
     }
     .product-btn {
       position: relative;
-      padding: 6px 8px;
+      padding: 10px 12px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
+      border-radius: 8px;
       color: #fff;
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s;
       text-align: left;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
     .product-btn:hover {
       background: rgba(249, 115, 22, 0.15);
       border-color: #f97316;
+      transform: scale(1.02);
     }
     .product-btn.selected {
       background: linear-gradient(135deg, #f97316, #ea580c);
       border-color: #f97316;
     }
     .product-btn.hidden { display: none; }
+    .product-btn .product-name {
+      font-weight: 600;
+      line-height: 1.2;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .product-btn .product-price {
+      font-size: 10px;
+      color: #888;
+    }
+    .product-btn.selected .product-price { color: rgba(255,255,255,0.8); }
     .product-btn .qty-badge {
       position: absolute;
-      top: -4px;
-      right: -4px;
-      min-width: 14px;
-      height: 14px;
+      top: -6px;
+      right: -6px;
+      min-width: 18px;
+      height: 18px;
       background: #10b981;
-      border-radius: 7px;
-      font-size: 8px;
+      border-radius: 9px;
+      font-size: 10px;
       font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 0 3px;
+      padding: 0 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
-    .product-btn .price { display: none; }
     .settings-panel {
       background: rgba(0,0,0,0.3);
       border: 1px solid rgba(255,255,255,0.1);
@@ -412,6 +577,10 @@ const POPUP_HTML = `<!DOCTYPE html>
       <button class="header-btn" id="closeBtn" title="Close">×</button>
     </div>
   </div>
+  <div class="main-tabs">
+    <button class="main-tab active" id="ordersTab" data-tab="orders"><span class="tab-icon">📋</span> Orders</button>
+    <button class="main-tab" id="worktimeTab" data-tab="worktime"><span class="tab-icon">⏱</span> Working Time</button>
+  </div>
   <div class="content" id="content">
     <div class="loading" id="loading">
       <div class="spinner"></div>
@@ -429,9 +598,28 @@ let regions = [];
 let cart = {};
 let authToken = null;
 let settings = { nameSelector: '' };
+let currentTab = 'orders';
+let clockedIn = false;
+let clockInTime = null;
+let timerInterval = null;
 
 document.getElementById('settingsBtn').addEventListener('click', showSettings);
 document.getElementById('closeBtn').addEventListener('click', () => window.close());
+
+// Tab switching
+document.querySelectorAll('.main-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentTab = tab.dataset.tab;
+    if (currentTab === 'orders') {
+      if (authToken) { chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); }); }
+      else { showLoginRequired(); }
+    } else {
+      renderWorktime();
+    }
+  });
+});
 
 async function init() {
   try {
@@ -479,9 +667,137 @@ function showLoginRequired() {
   document.getElementById('openLogin').addEventListener('click', () => { chrome.tabs.create({ url: API_BASE + '/auth/sign-in' }); });
 }
 
+function renderWorktime() {
+  chrome.storage.local.get(['clockedIn', 'clockInTime', 'worktimeHistory'], (stored) => {
+    clockedIn = stored.clockedIn || false;
+    clockInTime = stored.clockInTime || null;
+    const history = stored.worktimeHistory || [];
+    
+    content.innerHTML = '<div class="worktime-panel">' +
+      '<div class="worktime-status ' + (clockedIn ? '' : 'clocked-out') + '">' +
+        '<span class="status-dot"></span>' +
+        '<span class="status-text">' + (clockedIn ? 'Currently Working' : 'Not Clocked In') + '</span>' +
+      '</div>' +
+      '<div class="worktime-timer" id="worktimeTimer">' + (clockedIn ? formatTime(Date.now() - clockInTime) : '00:00:00') + '</div>' +
+      '<div class="worktime-info">' + (clockedIn ? 'Started at <span>' + new Date(clockInTime).toLocaleTimeString() + '</span>' : 'Enter PIN to clock in') + '</div>' +
+      '<div class="pin-input-wrap">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin1">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin2">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin3">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin4">' +
+      '</div>' +
+      '<div class="login-error" id="pinError" style="display:none;"></div>' +
+      '<button class="clock-btn ' + (clockedIn ? 'clock-out' : 'clock-in') + '" id="clockBtn">' + (clockedIn ? 'Clock Out' : 'Clock In') + '</button>' +
+      (history.length > 0 ? '<div class="worktime-history"><h4>Recent Sessions</h4>' + history.slice(0, 3).map(h => '<div class="history-item"><span class="date">' + h.date + '</span><span class="hours">' + h.hours + '</span></div>').join('') + '</div>' : '') +
+    '</div>';
+    
+    if (clockedIn) { startTimer(); }
+    
+    // PIN input handling
+    const pins = [document.getElementById('pin1'), document.getElementById('pin2'), document.getElementById('pin3'), document.getElementById('pin4')];
+    pins.forEach((pin, i) => {
+      pin.addEventListener('input', () => {
+        if (pin.value.length === 1 && i < 3) pins[i + 1].focus();
+      });
+      pin.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && pin.value === '' && i > 0) pins[i - 1].focus();
+      });
+    });
+    
+    document.getElementById('clockBtn').addEventListener('click', async () => {
+      const pin = pins.map(p => p.value).join('');
+      const err = document.getElementById('pinError');
+      if (pin.length !== 4) { err.textContent = 'Enter 4-digit PIN'; err.style.display = 'block'; return; }
+      
+      const btn = document.getElementById('clockBtn');
+      btn.disabled = true;
+      
+      try {
+        const res = await fetch(API_BASE + '/api/extension/worktime', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken },
+          body: JSON.stringify({ pin, action: clockedIn ? 'clock-out' : 'clock-in' })
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (clockedIn) {
+            // Clock out
+            const duration = formatTime(Date.now() - clockInTime);
+            const historyEntry = { date: new Date().toLocaleDateString(), hours: duration };
+            const newHistory = [historyEntry, ...history].slice(0, 10);
+            await chrome.storage.local.set({ clockedIn: false, clockInTime: null, worktimeHistory: newHistory });
+            clearInterval(timerInterval);
+          } else {
+            // Clock in
+            await chrome.storage.local.set({ clockedIn: true, clockInTime: Date.now() });
+          }
+          renderWorktime();
+        } else {
+          err.textContent = data.error || 'Invalid PIN';
+          err.style.display = 'block';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        err.textContent = 'Connection error';
+        err.style.display = 'block';
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function formatTime(ms) {
+  const secs = Math.floor(ms / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const timer = document.getElementById('worktimeTimer');
+    if (timer && clockInTime) { timer.textContent = formatTime(Date.now() - clockInTime); }
+  }, 1000);
+}
+
 function renderForm(saved = {}) {
-  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (tap to add) - ' + products.length + ' items</div><input type="text" class="product-search" id="productSearch" placeholder="Search products..."><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" title="' + p.name + ' - Rs ' + p.price + '">' + p.name + '</button>').join('') + '</div><button class="expand-toggle" id="expandToggle"><span class="arrow">▼</span> Show More</button><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
-  document.getElementById('productSearch').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('.product-btn').forEach(btn => { btn.classList.toggle('hidden', q && !btn.dataset.name.toLowerCase().includes(q)); }); });
+  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (' + products.length + ')</div><div class="product-search-wrap"><input type="text" class="product-search" id="productSearch" placeholder="🔍 Type to search products..."></div><div class="category-tabs" id="categoryTabs"><button class="category-tab active" data-cat="all">All</button><button class="category-tab" data-cat="a-e">A-E</button><button class="category-tab" data-cat="f-j">F-J</button><button class="category-tab" data-cat="k-o">K-O</button><button class="category-tab" data-cat="p-t">P-T</button><button class="category-tab" data-cat="u-z">U-Z</button></div><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" data-letter="' + (p.name.charAt(0).toUpperCase()) + '"><span class="product-name">' + p.name + '</span><span class="product-price">Rs ' + p.price + '</span></button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
+  let activeCategory = 'all';
+  function filterProducts() {
+    const q = document.getElementById('productSearch').value.toLowerCase();
+    let visibleCount = 0;
+    document.querySelectorAll('.product-btn').forEach(btn => {
+      const matchesSearch = !q || btn.dataset.name.toLowerCase().includes(q);
+      const letter = btn.dataset.letter;
+      let matchesCategory = activeCategory === 'all';
+      if (activeCategory === 'a-e') matchesCategory = 'ABCDE'.includes(letter);
+      else if (activeCategory === 'f-j') matchesCategory = 'FGHIJ'.includes(letter);
+      else if (activeCategory === 'k-o') matchesCategory = 'KLMNO'.includes(letter);
+      else if (activeCategory === 'p-t') matchesCategory = 'PQRST'.includes(letter);
+      else if (activeCategory === 'u-z') matchesCategory = 'UVWXYZ'.includes(letter);
+      const show = matchesSearch && matchesCategory;
+      btn.classList.toggle('hidden', !show);
+      if (show) visibleCount++;
+    });
+    const grid = document.getElementById('productsGrid');
+    if (visibleCount === 0 && !grid.querySelector('.no-products')) {
+      grid.insertAdjacentHTML('beforeend', '<div class="no-products">No products found</div>');
+    } else if (visibleCount > 0) {
+      const noProducts = grid.querySelector('.no-products');
+      if (noProducts) noProducts.remove();
+    }
+  }
+  document.getElementById('productSearch').addEventListener('input', filterProducts);
+  document.querySelectorAll('.category-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeCategory = tab.dataset.cat;
+      filterProducts();
+    });
+  });
   document.querySelectorAll('.paste-btn').forEach(btn => { btn.addEventListener('click', async () => { const t = btn.dataset.target; document.getElementById(t).value = (await navigator.clipboard.readText()).trim(); updateSubmitState(); }); });
   document.querySelectorAll('.product-btn').forEach(btn => {
     btn.addEventListener('click', () => { const id = btn.dataset.id, name = btn.dataset.name, price = parseFloat(btn.dataset.price) || 0; if (!cart[id]) cart[id] = { name, price, qty: 0 }; cart[id].qty++; updateUI(); });
@@ -491,7 +807,7 @@ function renderForm(saved = {}) {
   document.getElementById('contact1').addEventListener('input', updateSubmitState);
   document.getElementById('region').addEventListener('change', updateSubmitState);
   document.getElementById('submitBtn').addEventListener('click', submitOrder);
-  document.getElementById('expandToggle').addEventListener('click', function() { const grid = document.getElementById('productsGrid'); const isExpanded = grid.classList.toggle('expanded'); this.classList.toggle('expanded', isExpanded); this.innerHTML = isExpanded ? '<span class="arrow">▲</span> Show Less' : '<span class="arrow">▼</span> Show More'; });
+  
   tryAutoFill();
 }
 
