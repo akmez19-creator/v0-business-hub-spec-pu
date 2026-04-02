@@ -3662,6 +3662,15 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           <Crosshair className="w-3.5 h-3.5" />Pin on Map
                                         </button>
                                       )}
+                                      {/* Note button for adding remarks */}
+                                      <button onClick={() => setRemarkPopup({ pin: d })}
+                                        className={cn("action-pill h-9 px-3 gap-1.5 border text-[11px] font-mono",
+                                          d.contact2 
+                                            ? "bg-violet-500/12 border-violet-400/15 text-violet-400 font-bold" 
+                                            : "bg-white/5 border-white/10 text-white/40 hover:text-white/60 hover:bg-white/8")}>
+                                        <MessageSquareMore className="w-3.5 h-3.5" />
+                                        {d.contact2 ? '+Contact' : 'Note'}
+                                      </button>
                                       <div className="flex-1" />
                                       {d.contact1 && (
                                         <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
