@@ -5,9 +5,9 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
-  "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage"],
+  "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js"
@@ -56,27 +56,42 @@ const POPUP_HTML = `<!DOCTYPE html>
     }
     .header {
       background: linear-gradient(135deg, #f97316, #ea580c);
-      padding: 14px 16px;
+      padding: 12px 14px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       position: sticky;
       top: 0;
       z-index: 10;
     }
     .logo {
-      width: 36px;
-      height: 36px;
+      width: 32px;
+      height: 32px;
       background: rgba(255,255,255,0.2);
       border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: bold;
-      font-size: 16px;
+      font-size: 14px;
     }
-    .header h1 { font-size: 16px; font-weight: 700; }
-    .header .sub { font-size: 10px; opacity: 0.8; }
+    .header-title { flex: 1; }
+    .header h1 { font-size: 14px; font-weight: 700; }
+    .header .sub { font-size: 9px; opacity: 0.8; }
+    .header-btns { display: flex; gap: 6px; }
+    .header-btn {
+      width: 28px; height: 28px;
+      background: rgba(255,255,255,0.2);
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .header-btn:hover { background: rgba(255,255,255,0.3); }
     .content { padding: 14px; }
     .login-msg {
       background: rgba(255,255,255,0.03);
@@ -167,25 +182,42 @@ const POPUP_HTML = `<!DOCTYPE html>
       padding-bottom: 6px;
       border-bottom: 1px solid rgba(249, 115, 22, 0.2);
     }
+    .product-search {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+      margin-bottom: 8px;
+    }
+    .product-search:focus { border-color: #f97316; }
+    .product-search::placeholder { color: #555; }
     .products-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      max-height: 140px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      max-height: 120px;
       overflow-y: auto;
       padding: 2px;
     }
     .product-btn {
       position: relative;
-      padding: 8px 12px;
+      padding: 6px 8px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 8px;
+      border-radius: 6px;
       color: #fff;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s;
+      text-align: left;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
     .product-btn:hover {
       background: rgba(249, 115, 22, 0.15);
@@ -195,22 +227,57 @@ const POPUP_HTML = `<!DOCTYPE html>
       background: linear-gradient(135deg, #f97316, #ea580c);
       border-color: #f97316;
     }
+    .product-btn.hidden { display: none; }
     .product-btn .qty-badge {
       position: absolute;
-      top: -5px;
-      right: -5px;
-      min-width: 16px;
-      height: 16px;
+      top: -4px;
+      right: -4px;
+      min-width: 14px;
+      height: 14px;
       background: #10b981;
-      border-radius: 8px;
-      font-size: 9px;
+      border-radius: 7px;
+      font-size: 8px;
       font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 0 4px;
+      padding: 0 3px;
     }
-    .product-btn .price { font-size: 9px; opacity: 0.7; display: block; margin-top: 2px; }
+    .product-btn .price { display: none; }
+    .settings-panel {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .settings-panel h3 { font-size: 12px; margin-bottom: 10px; color: #f97316; }
+    .settings-row { margin-bottom: 10px; }
+    .settings-row label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+    .settings-row input[type="text"] {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+    }
+    .settings-row input:focus { border-color: #f97316; }
+    .settings-hint { font-size: 10px; color: #666; margin-top: 4px; }
+    .settings-btns { display: flex; gap: 8px; margin-top: 12px; }
+    .settings-btns button {
+      flex: 1;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+    .settings-save { background: #f97316; color: white; }
+    .settings-cancel { background: rgba(255,255,255,0.1); color: #888; }
     .cart-summary {
       background: rgba(16, 185, 129, 0.1);
       border: 1px solid rgba(16, 185, 129, 0.3);
@@ -307,9 +374,13 @@ const POPUP_HTML = `<!DOCTYPE html>
 <body>
   <div class="header">
     <div class="logo">A</div>
-    <div>
-      <h1>Akmez Quick Order</h1>
+    <div class="header-title">
+      <h1>Quick Order</h1>
       <div class="sub">Create orders from anywhere</div>
+    </div>
+    <div class="header-btns">
+      <button class="header-btn" id="settingsBtn" title="Settings">⚙</button>
+      <button class="header-btn" id="closeBtn" title="Close">×</button>
     </div>
   </div>
   <div class="content" id="content">
@@ -328,10 +399,15 @@ let products = [];
 let regions = [];
 let cart = {};
 let authToken = null;
+let settings = { nameSelector: '' };
+
+document.getElementById('settingsBtn').addEventListener('click', showSettings);
+document.getElementById('closeBtn').addEventListener('click', () => window.close());
 
 async function init() {
   try {
-    const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry']);
+    const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry', 'settings']);
+    if (stored.settings) settings = stored.settings;
     if (stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000) {
       authToken = stored.authToken;
       const res = await fetch(API_BASE + '/api/extension', { headers: { 'Authorization': 'Bearer ' + authToken } });
@@ -342,6 +418,16 @@ async function init() {
       chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
     } else { showLoginRequired(); }
   } catch (err) { showLoginRequired(); }
+}
+
+function showSettings() {
+  content.innerHTML = '<div class="settings-panel"><h3>Settings</h3><div class="settings-row"><label>Customer Name CSS Selector</label><input type="text" id="nameSelector" placeholder="e.g. .customer-name, #name-field" value="' + (settings.nameSelector || '') + '"><div class="settings-hint">Enter a CSS selector to auto-fill customer name from the page (e.g. span[dir=auto], .x1lliihq)</div></div><div class="settings-btns"><button class="settings-cancel" id="cancelSettings">Cancel</button><button class="settings-save" id="saveSettings">Save</button></div></div>';
+  document.getElementById('cancelSettings').addEventListener('click', () => { chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); }); });
+  document.getElementById('saveSettings').addEventListener('click', async () => {
+    settings.nameSelector = document.getElementById('nameSelector').value.trim();
+    await chrome.storage.local.set({ settings });
+    chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
+  });
 }
 
 function showLoginRequired() {
@@ -365,7 +451,8 @@ function showLoginRequired() {
 }
 
 function renderForm(saved = {}) {
-  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected to Akmez</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Customer Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Paste customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:12px"><div class="form-group"><label>Contact #1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact #2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:12px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select region...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Delivery Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (click to add)</div><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '">' + p.name + '<span class="price">Rs ' + p.price + '</span></button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0 items</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:12px"><label>Notes</label><textarea id="notes" placeholder="Optional delivery notes"></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
+  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (click to add)</div><input type="text" class="product-search" id="productSearch" placeholder="Search products..."><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" title="' + p.name + ' - Rs ' + p.price + '">' + p.name + '</button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
+  document.getElementById('productSearch').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('.product-btn').forEach(btn => { btn.classList.toggle('hidden', q && !btn.dataset.name.toLowerCase().includes(q)); }); });
   document.querySelectorAll('.paste-btn').forEach(btn => { btn.addEventListener('click', async () => { const t = btn.dataset.target; document.getElementById(t).value = (await navigator.clipboard.readText()).trim(); updateSubmitState(); }); });
   document.querySelectorAll('.product-btn').forEach(btn => {
     btn.addEventListener('click', () => { const id = btn.dataset.id, name = btn.dataset.name, price = parseFloat(btn.dataset.price) || 0; if (!cart[id]) cart[id] = { name, price, qty: 0 }; cart[id].qty++; updateUI(); });
@@ -375,6 +462,17 @@ function renderForm(saved = {}) {
   document.getElementById('contact1').addEventListener('input', updateSubmitState);
   document.getElementById('region').addEventListener('change', updateSubmitState);
   document.getElementById('submitBtn').addEventListener('click', submitOrder);
+  tryAutoFill();
+}
+
+function tryAutoFill() {
+  if (!settings.nameSelector) return;
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0]) return;
+    chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: (sel) => { const el = document.querySelector(sel); return el ? el.textContent.trim() : null; }, args: [settings.nameSelector] }, (results) => {
+      if (results && results[0] && results[0].result) { document.getElementById('customerName').value = results[0].result; updateSubmitState(); }
+    });
+  });
 }
 
 function updateUI() { updateProductButtons(); updateCartSummary(); updateSubmitState(); }
