@@ -510,14 +510,12 @@ export function DeliveryMap({
   // ── Auto-fullscreen after 2 seconds based on device type ──
   // Apple (iPhone): auto-fullscreen after 2s 
   // Android: no auto-fullscreen (user triggers manually)
-  // NEVER auto-fullscreen when placing a pin (rider needs to see confirm/cancel buttons)
   useEffect(() => {
     if (deviceType !== 'apple') return // Only auto-fullscreen for Apple devices
     if (isFullscreen) return // Already in fullscreen
-    if (placingPin) return // Don't auto-fullscreen when placing a pin
     
     const timer = setTimeout(() => {
-      if (!isFullscreen && !placingPin) {
+      if (!isFullscreen) {
         const el = mapContainerParentRef.current
         if (!el) return
         // CSS-based fullscreen
@@ -532,7 +530,7 @@ export function DeliveryMap({
       }
     }, 2000)
     return () => clearTimeout(timer)
-  }, [deviceType, placingPin]) // Re-run when placingPin changes
+  }, [deviceType]) // Only run once on mount based on device type
 
   // ── Open in external nav app (Google Maps / Waze) ──
   const openExternalNav = useCallback((pin: DeliveryPin, app: 'google' | 'waze') => {
@@ -1804,20 +1802,6 @@ map.on('load', () => {
     alert('Cannot edit pin location for delivered orders')
     return
   }
-  // Exit fullscreen when entering pin placement mode so rider can see confirm/cancel buttons
-  if (isFullscreen) {
-    const el = mapContainerParentRef.current
-    if (el) {
-      el.style.position = ''
-      el.style.inset = ''
-      el.style.zIndex = ''
-      el.style.width = ''
-      el.style.height = ''
-      document.body.style.overflow = ''
-      setIsFullscreen(false)
-      setTimeout(() => { mapRef.current?.resize() }, 100)
-    }
-  }
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]); setNoStreetResults(false) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
@@ -1838,7 +1822,7 @@ map.on('load', () => {
     flyLat = pin.lat
   }
   if (mapRef.current && flyLng && flyLat) mapRef.current.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
-  }, [regions, isFullscreen])
+  }, [regions])
 
 const confirmPinPlacement = useCallback(async () => {
   if (!mapRef.current || !placingPin) return; setSavingPin(true)
@@ -4055,13 +4039,13 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
   )}
             </div>
           </div>
-          <div className="absolute bottom-6 left-3 right-3 z-40 flex gap-2">
+          <div className="absolute bottom-24 left-3 right-3 z-40 flex gap-2">
 <button onClick={() => { setPlacingPin(null); setStreetSearch(''); setStreetResults([]) }}
-  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition">
+  className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition shadow-lg">
   <X className="w-4 h-4" /> Cancel
             </button>
             <button onClick={confirmPinPlacement} disabled={savingPin}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 text-cyan-400 font-bold text-sm active:scale-95 transition disabled:opacity-50">
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 text-cyan-400 font-bold text-sm active:scale-95 transition disabled:opacity-50 shadow-lg">
               {savingPin ? <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
               Confirm Pin
             </button>
