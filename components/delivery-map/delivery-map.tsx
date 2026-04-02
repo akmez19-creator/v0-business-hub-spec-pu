@@ -2060,12 +2060,14 @@ router.refresh()
         try { map.addLayer({ id: 'opt-route-core', type: 'line', source: 'opt-route', layout: lo, paint: { 'line-color': '#fef3c7', 'line-width': 2, 'line-opacity': 0.7 } } as any) } catch {}
       }
 
-      // Show route overview with all stops visible (don't auto-zoom to first stop)
+      // Auto-start navigation immediately (skip preview panel)
       if (ordered.length > 0) {
         setMultiStopNav(true)
-        setRouteOverview(true)
+        setRouteOverview(false)
+        routeOverviewRef.current = false
         setCurrentStopIdx(0)
-        setNavTarget(ordered[0].pin) // Set first stop as target but don't zoom yet
+        // Auto-start navigation to first stop
+        setTimeout(() => startNavigationRef.current(ordered[0].pin), 100)
         
         // Hide pole markers during optimization mode for cleaner view
         setShowPoles(false)
