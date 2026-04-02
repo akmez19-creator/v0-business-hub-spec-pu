@@ -67,7 +67,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
   const RIDER_COLORS = ['#b45309', '#1d4ed8', '#047857', '#c2410c', '#6d28d9', '#b91c1c', '#0d9488', '#7c3aed', '#ca8a04', '#4f46e5']
 
   const riderEntries = useMemo(() => Object.entries(riderMap), [riderMap])
-  const hasMultipleRiders = riderEntries.length > 1
+  const hasMultipleRiders = riderEntries.length >= 1 // Show dropdown when at least 1 rider exists
 
   // Build color map for riders
   const riderColorMapData = useMemo(() => {
