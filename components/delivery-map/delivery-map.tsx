@@ -7,7 +7,7 @@ import {
   ChevronDown, List, Search, ArrowRight, ArrowLeft,
   Mail, Smartphone, Banknote, CreditCard, Check, Ban, Crosshair,
   Moon, Sun, ExternalLink, Send, Package, TrendingUp, Maximize2, Minimize2, GripVertical, Link2, ClipboardCopy, RotateCcw, Eye,
-  Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle, MessageSquareMore, Star, Clock3, UserPlus,
+  Camera, Loader2, ImageIcon, Pencil, Trash2, AlertTriangle, XCircle, MessageSquareMore, Star, Clock3, UserPlus, Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof, saveDeliveryRemark } from '@/lib/delivery-actions'
@@ -413,6 +413,8 @@ export function DeliveryMap({
   const [optimizing, setOptimizing] = useState(false)
   const [multiStopNav, setMultiStopNav] = useState(false)
   const [navPanelExpanded, setNavPanelExpanded] = useState(false) // Shutter state - collapsed by default for better map view
+  const [toolbarExpanded, setToolbarExpanded] = useState(false) // Auto-hide toolbar state
+  const [showFeatureTip, setShowFeatureTip] = useState(false) // Feature tip popup
   const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
   const [sendingMsg, setSendingMsg] = useState<string | null>(null)
@@ -3060,10 +3062,26 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         </div>
       )}
 
-      {/* Floating Controls (right side) - hidden when optimization panel or pin placement is showing */}
+      {/* Floating Controls (right side) - auto-hide with scroll indicator */}
       {!navigating && !(optimizedStops.length > 0 && !showClientList) && !placingPin && (
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
-          <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5">
+          {/* Collapsed scroll indicator - tap to expand */}
+          {!toolbarExpanded && (
+            <button 
+              onClick={() => setToolbarExpanded(true)}
+              className="w-2 h-24 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/20 transition-all active:scale-95"
+              title="Tap to show controls"
+            >
+              <div className="w-1 h-12 rounded-full bg-gradient-to-b from-cyan-400/60 via-cyan-400/30 to-transparent" />
+            </button>
+          )}
+          {/* Expanded toolbar */}
+          {toolbarExpanded && (
+          <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5 animate-in slide-in-from-right-2 duration-200">
+            {/* Close button */}
+            <button onClick={() => setToolbarExpanded(false)} className="btn-holo w-11 h-8 flex items-center justify-center text-white/30 hover:text-white/60 transition">
+              <X className="w-3 h-3" />
+            </button>
 <button onClick={() => {
   const next = viewMode === '3d' ? 'overview' : '3d'; setViewMode(next); viewModeRef.current = next
   if (mapRef.current) {
@@ -3134,12 +3152,15 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               <span className="text-[10px] font-bold">PIN</span>
             </button>
           </div>
+          )}
+          {toolbarExpanded && (
           <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
             className="w-11 h-11 rounded-xl flex items-center justify-center text-white/70 hover:text-cyan-400 transition relative active:scale-95"
             style={{ background: '#111111', border: '1px solid rgba(255,255,255,0.12)' }}>
             <List className="w-4.5 h-4.5" />
             <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full bg-cyan-500 text-black text-[8px] font-black flex items-center justify-center px-1 shadow-[0_0_10px_rgba(0,200,255,0.5)]">{totalDeliveryCount}</span>
           </button>
+          )}
         </div>
       )}
 
@@ -4041,7 +4062,21 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
   )}
             </div>
           </div>
-          <div className="absolute bottom-24 left-3 right-3 z-40 flex gap-2">
+          <div className="absolute bottom-24 left-3 right-3 z-40 flex flex-col gap-2">
+            {/* Google Maps button - open current map center in Google Maps */}
+            <button onClick={() => {
+              const map = mapRef.current
+              if (!map) return
+              const center = map.getCenter()
+              window.open(`https://www.google.com/maps/@${center.lat},${center.lng},18z`, '_blank')
+              setShowFeatureTip(true)
+              setTimeout(() => setShowFeatureTip(false), 4000)
+            }}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-500/20 backdrop-blur-xl border border-green-400/30 text-green-400 font-bold text-sm active:scale-95 transition shadow-lg">
+              <ExternalLink className="w-4 h-4" />
+              Open in Google Maps
+            </button>
+            <div className="flex gap-2">
 <button onClick={() => { setPlacingPin(null); setStreetSearch(''); setStreetResults([]) }}
   className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl bg-white/10 backdrop-blur-xl border border-white/10 text-white/70 font-bold text-sm active:scale-95 transition shadow-lg">
   <X className="w-4 h-4" /> Cancel
@@ -4051,6 +4086,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               {savingPin ? <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
               Confirm Pin
             </button>
+            </div>
           </div>
         </>
       )}
@@ -4708,6 +4744,36 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
           router.refresh()
         }}
       />
+
+      {/* Feature Tip Popup - Beautiful explanation */}
+      {showFeatureTip && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] animate-in zoom-in-95 fade-in duration-300">
+          <div className="bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900 rounded-2xl p-5 border border-cyan-400/30 shadow-2xl shadow-cyan-500/20 max-w-[280px]">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500/20 to-emerald-500/30 flex items-center justify-center">
+                <ExternalLink className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Google Maps View</h3>
+                <p className="text-[10px] text-cyan-400/80">New Feature</p>
+              </div>
+            </div>
+            <p className="text-xs text-white/70 leading-relaxed">
+              Use Google Maps for more detailed satellite views and street names. Position the pin exactly where the customer is located.
+            </p>
+            <div className="mt-3 flex items-center gap-2 text-[10px] text-white/40">
+              <Sparkles className="w-3 h-3 text-amber-400" />
+              <span>This helps with precise delivery locations</span>
+            </div>
+            <button 
+              onClick={() => setShowFeatureTip(false)}
+              className="mt-3 w-full py-2 rounded-lg bg-cyan-500/20 text-cyan-400 text-xs font-semibold hover:bg-cyan-500/30 transition"
+            >
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
