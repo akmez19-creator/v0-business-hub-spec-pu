@@ -410,6 +410,7 @@ export function DeliveryMap({
   const [currentStopIdx, setCurrentStopIdx] = useState(0)
   const [optimizing, setOptimizing] = useState(false)
   const [multiStopNav, setMultiStopNav] = useState(false)
+  const [navPanelExpanded, setNavPanelExpanded] = useState(true) // Shutter state for nav panel
   const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
   const [sendingMsg, setSendingMsg] = useState<string | null>(null)
@@ -2554,11 +2555,17 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     const isCurr = i === currentStopIdx
                     return (
                       <button key={s.pin.id} onClick={() => {
-                        if (isDone || isCurr) return
+                        if (isDone) return
+                        // If clicking current stop, toggle panel shutter
+                        if (isCurr) {
+                          setNavPanelExpanded(!navPanelExpanded)
+                          return
+                        }
                         // Navigate to selected stop and fly to its location
                         const selectedStop = s.pin
                         setCurrentStopIdx(i)
                         setNavStopsExpanded(false)
+                        setNavPanelExpanded(true) // Expand panel when selecting new stop
                         // Fly to the selected stop location first
                         const map = mapRef.current
                         if (map && selectedStop.latitude && selectedStop.longitude) {
@@ -2581,9 +2588,21 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               </div>
             )
           })()}
-          <div className="holo-panel rounded-2xl overflow-hidden nav-card-3d glow-border-pulse">
-            {/* ═══ COMPACT CURRENT STOP ═══ */}
-            {navTarget && (
+          <div className={cn("holo-panel rounded-2xl overflow-hidden nav-card-3d glow-border-pulse transition-all duration-200")}>
+            {/* ═══ COLLAPSED MINI BAR (shown when panel is collapsed) ═══ */}
+            {navTarget && !navPanelExpanded && (
+              <button onClick={() => setNavPanelExpanded(true)} className="w-full px-3 py-2 flex items-center gap-2 active:bg-white/5">
+                <div className="w-2 h-2 rounded-full shrink-0 shadow-[0_0_6px_currentColor]" style={{ backgroundColor: STATUS_COLORS[navTarget.status]?.dot || '#6b7280' }} />
+                <span className="text-[11px] font-semibold text-white/80 truncate">{navTarget.customerName}</span>
+                {navTarget.riderPriority === 'priority' && <Star className="w-3 h-3 text-red-400 fill-red-400 shrink-0" />}
+                {navTarget.riderRemarks && <span className="text-[8px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 truncate max-w-[60px]">{navTarget.riderRemarks}</span>}
+                <div className="flex-1" />
+                <span className="text-[10px] font-mono text-cyan-400/60">Rs {navTarget.amount.toLocaleString()}</span>
+                <ChevronDown className="w-4 h-4 text-white/30 rotate-180" />
+              </button>
+            )}
+            {/* ═══ COMPACT CURRENT STOP (shown when panel is expanded) ═══ */}
+            {navTarget && navPanelExpanded && (
               <div className="px-3 pt-3 pb-2 relative">
                 {/* Row 1: Status dot + Name + Price + List toggle */}
                 <div className="flex items-center gap-2">
@@ -2912,8 +2931,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
               )
             })()}
 
-            {/* ═══ COMPACT ACTION BAR ═══ */}
-            {navTarget && !navStopsExpanded && (
+            {/* ═══ COMPACT ACTION BAR (hidden when panel collapsed) ═══ */}
+            {navTarget && !navStopsExpanded && navPanelExpanded && (
               <div className="px-3 pb-3">
                 {!['delivered', 'nwd', 'cms'].includes(navTarget.status) ? (
                   <div className="space-y-1.5">
