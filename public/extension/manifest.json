@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "1.2.0",
-  "description": "Create orders and copy customer data for Akmez delivery system",
+  "version": "2.2.0",
+  "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardWrite", "clipboardRead", "storage"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
   "background": {
