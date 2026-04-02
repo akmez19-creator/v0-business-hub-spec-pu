@@ -79,14 +79,19 @@ const POPUP_HTML = `<!DOCTYPE html>
     .header .sub { font-size: 10px; opacity: 0.8; }
     .content { padding: 14px; }
     .login-msg {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 12px;
       padding: 20px;
-      text-align: center;
     }
-    .login-msg p { color: #fca5a5; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
+    .login-title { color: #fff; font-size: 14px; font-weight: 600; margin-bottom: 14px; text-align: center; }
+    .login-field { margin-bottom: 10px; }
+    .login-field input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; color: #fff; font-size: 13px; outline: none; }
+    .login-field input:focus { border-color: #f97316; background: rgba(249,115,22,0.05); }
+    .login-field input::placeholder { color: #666; }
+    .login-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; padding: 8px; color: #fca5a5; font-size: 11px; margin-bottom: 10px; display: none; }
     .login-btn {
+      width: 100%;
       background: linear-gradient(135deg, #f97316, #ea580c);
       color: white;
       border: none;
@@ -97,6 +102,11 @@ const POPUP_HTML = `<!DOCTYPE html>
       font-size: 13px;
     }
     .login-btn:hover { opacity: 0.9; }
+    .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .login-divider { display: flex; align-items: center; margin: 12px 0; color: #555; font-size: 11px; }
+    .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.1); }
+    .login-divider span { padding: 0 10px; }
+    .login-link { display: block; text-align: center; color: #f97316; font-size: 12px; cursor: pointer; }
     .form-group { margin-bottom: 12px; }
     .form-group label {
       display: block;
@@ -317,21 +327,41 @@ const content = document.getElementById('content');
 let products = [];
 let regions = [];
 let cart = {};
+let authToken = null;
 
 async function init() {
   try {
-    const res = await fetch(API_BASE + '/api/extension', { credentials: 'include' });
-    const data = await res.json();
-    if (!data.success) { showLoginRequired(); return; }
-    products = data.products || [];
-    regions = data.regions || [];
-    chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
+    const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry']);
+    if (stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000) {
+      authToken = stored.authToken;
+      const res = await fetch(API_BASE + '/api/extension', { headers: { 'Authorization': 'Bearer ' + authToken } });
+      const data = await res.json();
+      if (!data.authenticated) { await chrome.storage.local.remove(['authToken', 'tokenExpiry']); authToken = null; showLoginRequired(); return; }
+      products = data.products || [];
+      regions = data.regions || [];
+      chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
+    } else { showLoginRequired(); }
   } catch (err) { showLoginRequired(); }
 }
 
 function showLoginRequired() {
-  content.innerHTML = '<div class="login-msg"><p>Please login to Akmez first to create orders.</p><button class="login-btn" id="loginBtn">Open Akmez Login</button></div>';
-  document.getElementById('loginBtn').addEventListener('click', () => { chrome.tabs.create({ url: API_BASE + '/auth/sign-in' }); });
+  content.innerHTML = '<div class="login-msg"><div class="login-title">Sign in to Akmez</div><div class="login-error" id="loginError"></div><div class="login-field"><input type="email" id="loginEmail" placeholder="Email address"></div><div class="login-field"><input type="password" id="loginPassword" placeholder="Password"></div><button class="login-btn" id="loginBtn">Sign In</button><div class="login-divider"><span>or</span></div><a class="login-link" id="openLogin">Open Akmez in browser</a></div>';
+  const btn = document.getElementById('loginBtn'), err = document.getElementById('loginError'), email = document.getElementById('loginEmail'), pwd = document.getElementById('loginPassword');
+  btn.addEventListener('click', async () => {
+    if (!email.value.trim() || !pwd.value) { err.textContent = 'Enter email and password'; err.style.display = 'block'; return; }
+    btn.disabled = true; btn.textContent = 'Signing in...'; err.style.display = 'none';
+    try {
+      const res = await fetch(API_BASE + '/api/extension/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.value.trim(), password: pwd.value }) });
+      const data = await res.json();
+      if (data.success && data.accessToken) {
+        await chrome.storage.local.set({ authToken: data.accessToken, tokenExpiry: data.expiresAt });
+        authToken = data.accessToken;
+        init();
+      } else { err.textContent = data.error || 'Invalid credentials'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign In'; }
+    } catch (e) { err.textContent = 'Connection error'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign In'; }
+  });
+  pwd.addEventListener('keypress', (e) => { if (e.key === 'Enter') btn.click(); });
+  document.getElementById('openLogin').addEventListener('click', () => { chrome.tabs.create({ url: API_BASE + '/auth/sign-in' }); });
 }
 
 function renderForm(saved = {}) {
@@ -374,7 +404,7 @@ async function submitOrder() {
   btn.disabled = true; btn.textContent = 'Creating...'; err.style.display = 'none';
   const data = { customerName: document.getElementById('customerName').value.trim(), contact1: document.getElementById('contact1').value.trim(), contact2: document.getElementById('contact2').value.trim(), region: document.getElementById('region').value, deliveryDate: document.getElementById('deliveryDate').value, notes: document.getElementById('notes').value.trim(), products: Object.values(cart).filter(i => i.qty > 0).map(i => ({ name: i.name, price: i.price, qty: i.qty })) };
   try {
-    const res = await fetch(API_BASE + '/api/extension', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(data) });
+    const res = await fetch(API_BASE + '/api/extension', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken }, body: JSON.stringify(data) });
     const r = await res.json();
     if (r.success) { showSuccess(r.createdBy); } else { err.textContent = r.error || 'Failed'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Create Order'; }
   } catch (e) { err.textContent = 'Connection error'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Create Order'; }
