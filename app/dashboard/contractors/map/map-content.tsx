@@ -124,8 +124,8 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
   const { exactPins, regions, regionGroups, totalMapped, totalUnmapped } = useMemo(() => {
     const exact: DeliveryPin[] = []
     // Step 1: Group deliveries by client (same name+contact = same client, like orders page)
-    // Filter out CMS and delivered deliveries from active grouping (they go to "Done" section)
-    const activeDeliveries = filteredDeliveries.filter(d => d.status !== 'cms' && d.status !== 'delivered')
+    // Include all deliveries (including delivered) so stats show correctly
+    const activeDeliveries = filteredDeliveries.filter(d => d.status !== 'cms')
     const clientMap: Record<string, typeof filteredDeliveries> = {}
     for (const d of activeDeliveries) {
       const clientKey = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}|${(d.locality || '').trim().toLowerCase()}`
