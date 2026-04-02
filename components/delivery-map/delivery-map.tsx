@@ -670,7 +670,7 @@ export function DeliveryMap({
       
       // ══════════════════════════════════════════════════════════════════════════
       // SMOOTH INTERACTION SETTINGS
-      // ═════════════════════════════════════════════��════════════════════════════
+      // ══════════════════════════════════════���══════��════════════════════════════
       map.touchZoomRotate.disableRotation()
       map.touchPitch.disable()
       
@@ -2997,8 +2997,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         </div>
       )}
 
-      {/* Floating Controls (right side) */}
-      {!navigating && (
+      {/* Floating Controls (right side) - hidden when optimization panel is showing */}
+      {!navigating && !(optimizedStops.length > 0 && !showClientList) && (
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
           <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5">
 <button onClick={() => {
