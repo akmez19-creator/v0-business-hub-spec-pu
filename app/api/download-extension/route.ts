@@ -4,8 +4,8 @@ import JSZip from 'jszip'
 // Embedded extension files
 const MANIFEST = `{
   "manifest_version": 3,
-  "name": "Akmez Quick Order",
-  "version": "2.6.0",
+  "name": "Akmez Quick Order v2.7",
+  "version": "2.7.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -570,7 +570,7 @@ const POPUP_HTML = `<!DOCTYPE html>
     <div class="header-logo">
       <div class="logo">A</div>
       <div class="header-text">
-        <div class="header-title">Quick Order <span style="font-size:9px;opacity:0.5">v2.6.0</span></div>
+        <div class="header-title">Quick Order v2.7</div>
         <div class="header-subtitle">Create orders from anywhere</div>
       </div>
     </div>
@@ -906,7 +906,7 @@ export async function GET() {
 return new NextResponse(zipContent, {
   headers: {
   'Content-Type': 'application/zip',
-  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.6.0.zip"',
+  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.7.0.zip"',
   'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
   'Pragma': 'no-cache',
   'Expires': '0',
