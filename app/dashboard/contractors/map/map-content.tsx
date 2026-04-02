@@ -331,7 +331,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
     <div className="h-screen w-screen relative overflow-hidden bg-black">
       {/* Rider filter — positioned below back/fullscreen buttons */}
       {hasMultipleRiders && (
-        <div className="absolute top-16 left-3 z-[60]">
+        <div className="absolute top-3 left-3 z-[100]">
           <div className="relative">
             <button
               onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
