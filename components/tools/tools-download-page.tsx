@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '2.7.0'
+const EXTENSION_VERSION = '2.9.0'
 const LAST_UPDATED = '2026-04-03'
 
 export function ToolsDownloadPage() {
@@ -41,7 +41,7 @@ export function ToolsDownloadPage() {
       const link = document.createElement('a')
       // Add timestamp to bust cache
       link.href = '/api/download-extension?v=' + Date.now()
-      link.download = 'akmez-quick-order-v2.7.0.zip'
+      link.download = 'akmez-quick-order-v2.9.0.zip'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)

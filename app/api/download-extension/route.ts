@@ -4,8 +4,8 @@ import JSZip from 'jszip'
 // Embedded extension files
 const MANIFEST = `{
   "manifest_version": 3,
-  "name": "Akmez Quick Order v2.7",
-  "version": "2.7.0",
+  "name": "Akmez Quick Order v2.9",
+  "version": "2.9.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -325,62 +325,42 @@ const POPUP_HTML = `<!DOCTYPE html>
       border-bottom: 1px solid rgba(249, 115, 22, 0.2);
     }
     .product-search-wrap {
-      position: sticky;
-      top: 0;
-      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
-      padding: 4px 0 8px;
-      z-index: 5;
+      position: relative;
+      margin-bottom: 8px;
     }
     .product-search {
       width: 100%;
       background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(249, 115, 22, 0.3);
-      border-radius: 8px;
-      padding: 10px 12px;
+      border: 2px solid rgba(249, 115, 22, 0.4);
+      border-radius: 10px;
+      padding: 12px 14px;
       color: #fff;
-      font-size: 13px;
+      font-size: 14px;
       outline: none;
     }
     .product-search:focus { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
     .product-search::placeholder { color: #888; }
-    .category-tabs {
-      display: flex;
-      gap: 4px;
-      margin: 8px 0;
-      overflow-x: auto;
-      padding-bottom: 4px;
-    }
-    .category-tab {
-      flex-shrink: 0;
-      padding: 6px 12px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      color: #888;
+    .search-hint {
       font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s;
+      color: #666;
+      text-align: center;
+      padding: 8px;
     }
-    .category-tab:hover { background: rgba(255,255,255,0.1); color: #fff; }
-    .category-tab.active {
-      background: linear-gradient(135deg, #f97316, #ea580c);
-      border-color: #f97316;
-      color: #fff;
+    .products-container {
+      max-height: 180px;
+      overflow-y: auto;
     }
+    .products-container.hidden { display: none; }
     .products-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 6px;
-      max-height: 220px;
-      overflow-y: auto;
       padding: 4px 2px;
     }
     .no-products {
-      grid-column: 1 / -1;
       text-align: center;
-      padding: 20px;
-      color: #666;
+      padding: 15px;
+      color: #888;
       font-size: 12px;
     }
     .product-btn {
@@ -447,20 +427,57 @@ const POPUP_HTML = `<!DOCTYPE html>
     }
     .settings-panel h3 { font-size: 12px; margin-bottom: 10px; color: #f97316; }
     .settings-row { margin-bottom: 10px; }
-    .settings-row label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
-    .settings-row input[type="text"] {
-      width: 100%;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      padding: 8px 10px;
-      color: #fff;
-      font-size: 12px;
-      outline: none;
-    }
-    .settings-row input:focus { border-color: #f97316; }
-    .settings-hint { font-size: 10px; color: #666; margin-top: 4px; }
-    .settings-btns { display: flex; gap: 8px; margin-top: 12px; }
+.settings-row label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+.settings-row input[type="text"] {
+  width: 100%;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 8px;
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+  }
+.settings-row input:focus { border-color: #f97316; }
+  .settings-hint { font-size: 10px; color: #666; margin-top: 4px; }
+  .selector-input-wrap { display: flex; gap: 6px; }
+  .selector-input-wrap input { flex: 1; }
+  .picker-btn {
+    background: linear-gradient(135deg, #10b981, #059669);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .picker-btn:hover { filter: brightness(1.1); }
+  .picker-btn.picking {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    animation: pulse-picker 1s infinite;
+  }
+  @keyframes pulse-picker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  .picker-status {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: #10b981;
+    margin-top: 8px;
+    display: none;
+  }
+  .picker-status.active { display: block; }
+  .picker-status.error { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #ef4444; }
+  .settings-btns { display: flex; gap: 8px; margin-top: 12px; }
     .settings-btns button {
       flex: 1;
       padding: 8px;
@@ -570,7 +587,7 @@ const POPUP_HTML = `<!DOCTYPE html>
     <div class="header-logo">
       <div class="logo">A</div>
       <div class="header-text">
-        <div class="header-title">Quick Order v2.7</div>
+        <div class="header-title">Quick Order v2.9</div>
         <div class="header-subtitle">Create orders from anywhere</div>
       </div>
     </div>
@@ -599,7 +616,7 @@ let products = [];
 let regions = [];
 let cart = {};
 let authToken = null;
-let settings = { nameSelector: '' };
+let settings = { nameSelector: '', contact1Selector: '', contact2Selector: '' };
 let currentTab = 'orders';
 let clockedIn = false;
 let clockInTime = null;
@@ -640,10 +657,124 @@ async function init() {
 }
 
 function showSettings() {
-  content.innerHTML = '<div class="settings-panel"><h3>Settings</h3><div class="settings-row"><label>Customer Name CSS Selector</label><input type="text" id="nameSelector" placeholder="e.g. .customer-name, #name-field" value="' + (settings.nameSelector || '') + '"><div class="settings-hint">Enter a CSS selector to auto-fill customer name from the page (e.g. span[dir=auto], .x1lliihq)</div></div><div class="settings-btns"><button class="settings-cancel" id="cancelSettings">Cancel</button><button class="settings-save" id="saveSettings">Save</button></div></div>';
+  content.innerHTML = '<div class="settings-panel"><h3>Auto-Fill Settings</h3>' +
+    '<div class="settings-row"><label>Customer Name Selector</label>' +
+    '<div class="selector-input-wrap">' +
+    '<input type="text" id="nameSelector" placeholder="CSS selector..." value="' + (settings.nameSelector || '') + '">' +
+    '<button class="picker-btn" id="pickerBtn">Pick Element</button>' +
+    '</div>' +
+    '<div class="settings-hint">Click "Pick Element" then click on the customer name on the page (Facebook). The selector will be saved automatically.</div>' +
+    '<div class="picker-status" id="pickerStatus"></div>' +
+    '</div>' +
+    '<div class="settings-row"><label>Contact 1 Selector</label>' +
+    '<div class="selector-input-wrap">' +
+    '<input type="text" id="contact1Selector" placeholder="CSS selector..." value="' + (settings.contact1Selector || '') + '">' +
+    '<button class="picker-btn" id="pickerBtn2">Pick</button>' +
+    '</div></div>' +
+    '<div class="settings-row"><label>Contact 2 Selector</label>' +
+    '<div class="selector-input-wrap">' +
+    '<input type="text" id="contact2Selector" placeholder="CSS selector..." value="' + (settings.contact2Selector || '') + '">' +
+    '<button class="picker-btn" id="pickerBtn3">Pick</button>' +
+    '</div></div>' +
+    '<div class="settings-btns"><button class="settings-cancel" id="cancelSettings">Cancel</button><button class="settings-save" id="saveSettings">Save All</button></div></div>';
+  
+  let pickingFor = null;
+  
+  function startPicker(targetField, btnId) {
+    const btn = document.getElementById(btnId);
+    const status = document.getElementById('pickerStatus');
+    btn.classList.add('picking');
+    btn.textContent = 'Picking...';
+    status.classList.add('active');
+    status.classList.remove('error');
+    status.textContent = 'Click on any element on the page to capture its selector...';
+    pickingFor = targetField;
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]) { status.textContent = 'No active tab found'; status.classList.add('error'); return; }
+      chrome.scripting.executeScript({
+        target: { tabId: tabs[0].id },
+        func: () => {
+          return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.id = 'akmez-picker-overlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:999999;cursor:crosshair;';
+            
+            const highlight = document.createElement('div');
+            highlight.id = 'akmez-picker-highlight';
+            highlight.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #f97316;background:rgba(249,115,22,0.1);z-index:999998;transition:all 0.1s;';
+            
+            document.body.appendChild(overlay);
+            document.body.appendChild(highlight);
+            
+            let lastEl = null;
+            overlay.addEventListener('mousemove', (e) => {
+              const el = document.elementFromPoint(e.clientX, e.clientY);
+              if (el && el !== overlay && el !== highlight) {
+                lastEl = el;
+                const rect = el.getBoundingClientRect();
+                highlight.style.top = rect.top + 'px';
+                highlight.style.left = rect.left + 'px';
+                highlight.style.width = rect.width + 'px';
+                highlight.style.height = rect.height + 'px';
+              }
+            });
+            
+            overlay.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              overlay.remove();
+              highlight.remove();
+              if (lastEl) {
+                // Generate a unique selector
+                let selector = '';
+                if (lastEl.id) { selector = '#' + lastEl.id; }
+                else if (lastEl.className && typeof lastEl.className === 'string') {
+                  const classes = lastEl.className.trim().split(/\s+/).slice(0, 2).join('.');
+                  selector = lastEl.tagName.toLowerCase() + '.' + classes;
+                } else {
+                  selector = lastEl.tagName.toLowerCase();
+                }
+                resolve({ selector, text: lastEl.textContent.trim().substring(0, 50) });
+              } else { resolve(null); }
+            });
+            
+            // Cancel with Escape
+            document.addEventListener('keydown', function escHandler(e) {
+              if (e.key === 'Escape') {
+                overlay.remove();
+                highlight.remove();
+                document.removeEventListener('keydown', escHandler);
+                resolve(null);
+              }
+            });
+          });
+        }
+      }, (results) => {
+        btn.classList.remove('picking');
+        btn.textContent = btnId === 'pickerBtn' ? 'Pick Element' : 'Pick';
+        if (results && results[0] && results[0].result) {
+          const { selector, text } = results[0].result;
+          document.getElementById(targetField).value = selector;
+          status.textContent = 'Captured: "' + text + '" with selector: ' + selector;
+          status.classList.remove('error');
+        } else {
+          status.textContent = 'Picker cancelled or no element selected';
+          status.classList.add('error');
+        }
+      });
+    });
+  }
+  
+  document.getElementById('pickerBtn').addEventListener('click', () => startPicker('nameSelector', 'pickerBtn'));
+  document.getElementById('pickerBtn2').addEventListener('click', () => startPicker('contact1Selector', 'pickerBtn2'));
+  document.getElementById('pickerBtn3').addEventListener('click', () => startPicker('contact2Selector', 'pickerBtn3'));
+  
   document.getElementById('cancelSettings').addEventListener('click', () => { chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); }); });
   document.getElementById('saveSettings').addEventListener('click', async () => {
     settings.nameSelector = document.getElementById('nameSelector').value.trim();
+    settings.contact1Selector = document.getElementById('contact1Selector').value.trim();
+    settings.contact2Selector = document.getElementById('contact2Selector').value.trim();
     await chrome.storage.local.set({ settings });
     chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
   });
@@ -765,41 +896,44 @@ function startTimer() {
 }
 
 function renderForm(saved = {}) {
-  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (' + products.length + ')</div><div class="product-search-wrap"><input type="text" class="product-search" id="productSearch" placeholder="🔍 Type to search products..."></div><div class="category-tabs" id="categoryTabs"><button class="category-tab active" data-cat="all">All</button><button class="category-tab" data-cat="a-e">A-E</button><button class="category-tab" data-cat="f-j">F-J</button><button class="category-tab" data-cat="k-o">K-O</button><button class="category-tab" data-cat="p-t">P-T</button><button class="category-tab" data-cat="u-z">U-Z</button></div><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" data-letter="' + (p.name.charAt(0).toUpperCase()) + '"><span class="product-name">' + p.name + '</span><span class="product-price">Rs ' + p.price + '</span></button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
-  let activeCategory = 'all';
+  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Add Products</div><div class="product-search-wrap"><input type="text" class="product-search" id="productSearch" placeholder="🔍 Type product name to search..."></div><div class="search-hint" id="searchHint">Type at least 2 letters to search ' + products.length + ' products</div><div class="products-container hidden" id="productsContainer"><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn hidden" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '"><span class="product-name">' + p.name + '</span><span class="product-price">Rs ' + p.price + '</span></button>').join('') + '</div></div><div classon class="category-tab" data-cat="u-z">U-Z</button></div><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" data-letter="' + (p.name.charAt(0).toUpperCase()) + '"><span class="product-name">' + p.name + '</span><span class="product-price">Rs ' + p.price + '</span></button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
   function filterProducts() {
-    const q = document.getElementById('productSearch').value.toLowerCase();
+    const q = document.getElementById('productSearch').value.toLowerCase().trim();
+    const container = document.getElementById('productsContainer');
+    const hint = document.getElementById('searchHint');
+    const grid = document.getElementById('productsGrid');
+    
+    // Show products only when user types at least 2 characters
+    if (q.length < 2) {
+      container.classList.add('hidden');
+      hint.style.display = 'block';
+      hint.textContent = 'Type at least 2 letters to search ' + products.length + ' products';
+      return;
+    }
+    
+    container.classList.remove('hidden');
+    hint.style.display = 'none';
+    
     let visibleCount = 0;
     document.querySelectorAll('.product-btn').forEach(btn => {
-      const matchesSearch = !q || btn.dataset.name.toLowerCase().includes(q);
-      const letter = btn.dataset.letter;
-      let matchesCategory = activeCategory === 'all';
-      if (activeCategory === 'a-e') matchesCategory = 'ABCDE'.includes(letter);
-      else if (activeCategory === 'f-j') matchesCategory = 'FGHIJ'.includes(letter);
-      else if (activeCategory === 'k-o') matchesCategory = 'KLMNO'.includes(letter);
-      else if (activeCategory === 'p-t') matchesCategory = 'PQRST'.includes(letter);
-      else if (activeCategory === 'u-z') matchesCategory = 'UVWXYZ'.includes(letter);
-      const show = matchesSearch && matchesCategory;
-      btn.classList.toggle('hidden', !show);
-      if (show) visibleCount++;
+      const matches = btn.dataset.name.toLowerCase().includes(q);
+      btn.classList.toggle('hidden', !matches);
+      if (matches) visibleCount++;
     });
-    const grid = document.getElementById('productsGrid');
-    if (visibleCount === 0 && !grid.querySelector('.no-products')) {
-      grid.insertAdjacentHTML('beforeend', '<div class="no-products">No products found</div>');
-    } else if (visibleCount > 0) {
-      const noProducts = grid.querySelector('.no-products');
-      if (noProducts) noProducts.remove();
+    
+    // Show "no products" message
+    let noMsg = grid.querySelector('.no-products');
+    if (visibleCount === 0) {
+      if (!noMsg) {
+        grid.insertAdjacentHTML('beforeend', '<div class="no-products">No products matching "' + q + '"</div>');
+      } else {
+        noMsg.textContent = 'No products matching "' + q + '"';
+      }
+    } else if (noMsg) {
+      noMsg.remove();
     }
   }
   document.getElementById('productSearch').addEventListener('input', filterProducts);
-  document.querySelectorAll('.category-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      activeCategory = tab.dataset.cat;
-      filterProducts();
-    });
-  });
   document.querySelectorAll('.paste-btn').forEach(btn => { btn.addEventListener('click', async () => { const t = btn.dataset.target; document.getElementById(t).value = (await navigator.clipboard.readText()).trim(); updateSubmitState(); }); });
   document.querySelectorAll('.product-btn').forEach(btn => {
     btn.addEventListener('click', () => { const id = btn.dataset.id, name = btn.dataset.name, price = parseFloat(btn.dataset.price) || 0; if (!cart[id]) cart[id] = { name, price, qty: 0 }; cart[id].qty++; updateUI(); });
@@ -814,11 +948,29 @@ function renderForm(saved = {}) {
 }
 
 function tryAutoFill() {
-  if (!settings.nameSelector) return;
+  const hasSelectors = settings.nameSelector || settings.contact1Selector || settings.contact2Selector;
+  if (!hasSelectors) return;
+  
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs[0]) return;
-    chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: (sel) => { const el = document.querySelector(sel); return el ? el.textContent.trim() : null; }, args: [settings.nameSelector] }, (results) => {
-      if (results && results[0] && results[0].result) { document.getElementById('customerName').value = results[0].result; updateSubmitState(); }
+    chrome.scripting.executeScript({ 
+      target: { tabId: tabs[0].id }, 
+      func: (nameSel, c1Sel, c2Sel) => { 
+        const results = {};
+        if (nameSel) { const el = document.querySelector(nameSel); if (el) results.name = el.textContent.trim(); }
+        if (c1Sel) { const el = document.querySelector(c1Sel); if (el) results.contact1 = el.textContent.trim(); }
+        if (c2Sel) { const el = document.querySelector(c2Sel); if (el) results.contact2 = el.textContent.trim(); }
+        return results;
+      }, 
+      args: [settings.nameSelector, settings.contact1Selector, settings.contact2Selector] 
+    }, (results) => {
+      if (results && results[0] && results[0].result) {
+        const data = results[0].result;
+        if (data.name) document.getElementById('customerName').value = data.name;
+        if (data.contact1) document.getElementById('contact1').value = data.contact1;
+        if (data.contact2) document.getElementById('contact2').value = data.contact2;
+        updateSubmitState();
+      }
     });
   });
 }
@@ -906,7 +1058,7 @@ export async function GET() {
 return new NextResponse(zipContent, {
   headers: {
   'Content-Type': 'application/zip',
-  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.7.0.zip"',
+  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.9.0.zip"',
   'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
   'Pragma': 'no-cache',
   'Expires': '0',
