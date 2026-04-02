@@ -510,12 +510,14 @@ export function DeliveryMap({
   // ── Auto-fullscreen after 2 seconds based on device type ──
   // Apple (iPhone): auto-fullscreen after 2s 
   // Android: no auto-fullscreen (user triggers manually)
+  // NEVER auto-fullscreen when placing a pin (rider needs to see confirm/cancel buttons)
   useEffect(() => {
     if (deviceType !== 'apple') return // Only auto-fullscreen for Apple devices
     if (isFullscreen) return // Already in fullscreen
+    if (placingPin) return // Don't auto-fullscreen when placing a pin
     
     const timer = setTimeout(() => {
-      if (!isFullscreen) {
+      if (!isFullscreen && !placingPin) {
         const el = mapContainerParentRef.current
         if (!el) return
         // CSS-based fullscreen
@@ -530,7 +532,7 @@ export function DeliveryMap({
       }
     }, 2000)
     return () => clearTimeout(timer)
-  }, [deviceType]) // Only run once on mount based on device type
+  }, [deviceType, placingPin]) // Re-run when placingPin changes
 
   // ── Open in external nav app (Google Maps / Waze) ──
   const openExternalNav = useCallback((pin: DeliveryPin, app: 'google' | 'waze') => {
@@ -1802,6 +1804,20 @@ map.on('load', () => {
     alert('Cannot edit pin location for delivered orders')
     return
   }
+  // Exit fullscreen when entering pin placement mode so rider can see confirm/cancel buttons
+  if (isFullscreen) {
+    const el = mapContainerParentRef.current
+    if (el) {
+      el.style.position = ''
+      el.style.inset = ''
+      el.style.zIndex = ''
+      el.style.width = ''
+      el.style.height = ''
+      document.body.style.overflow = ''
+      setIsFullscreen(false)
+      setTimeout(() => { mapRef.current?.resize() }, 100)
+    }
+  }
   setPlacingPin(pin); setShowClientList(false); setClientSearch(''); setExpandedRegions(new Set()); setSelectedPin(null); setSelectedRegion(null)
   setStreetSearch(''); setStreetResults([]); setNoStreetResults(false) // Clear street search
   const regionMatch = regions.find(r => r.locality === pin.locality)
@@ -1822,7 +1838,7 @@ map.on('load', () => {
     flyLat = pin.lat
   }
   if (mapRef.current && flyLng && flyLat) mapRef.current.flyTo({ center: [flyLng, flyLat], zoom: 16, pitch: currentPitch, duration: 1400, essential: true })
-  }, [regions])
+  }, [regions, isFullscreen])
 
 const confirmPinPlacement = useCallback(async () => {
   if (!mapRef.current || !placingPin) return; setSavingPin(true)
