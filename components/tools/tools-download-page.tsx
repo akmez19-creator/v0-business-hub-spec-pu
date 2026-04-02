@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import Image from 'next/image'
 import { 
   Download, 
   Chrome, 
@@ -17,7 +20,11 @@ import {
   ArrowRight,
   Settings,
   Search,
-  Lock
+  Lock,
+  User,
+  Clock,
+  Shield,
+  LogIn
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
@@ -136,48 +143,24 @@ export function ToolsDownloadPage() {
               </div>
             </div>
             
-            {/* Right side - Extension preview card */}
+            {/* Right side - Actual Extension Preview */}
             <div className="relative">
-              <div className="w-72 h-80 rounded-2xl bg-gradient-to-br from-card to-muted/50 border border-border/50 p-6 shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-500">
-                {/* Mock extension UI */}
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center text-white text-xl font-bold shadow-lg">
-                    A
-                  </div>
-                  <div>
-                    <div className="font-semibold text-foreground">Akmez Quick Order</div>
-                    <div className="text-xs text-muted-foreground">Chrome Extension</div>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="h-10 rounded-lg bg-muted/50 border border-border/50 flex items-center px-3 gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                    <span className="text-sm text-muted-foreground">Customer Name</span>
-                  </div>
-                  <div className="h-10 rounded-lg bg-muted/50 border border-border/50 flex items-center px-3 gap-2">
-                    <div className="w-2 h-2 rounded-full bg-cyan-400" />
-                    <span className="text-sm text-muted-foreground">Contact #1</span>
-                  </div>
-                  <div className="h-10 rounded-lg bg-muted/50 border border-border/50 flex items-center px-3 gap-2">
-                    <div className="w-2 h-2 rounded-full bg-orange-400" />
-                    <span className="text-sm text-muted-foreground">Contact #2</span>
-                  </div>
-                </div>
-                
-                <div className="mt-6 flex gap-2">
-                  <div className="flex-1 h-9 rounded-lg bg-orange-500/20 border border-orange-500/30 flex items-center justify-center text-sm text-orange-400 font-medium">
-                    Copy All
-                  </div>
-                  <div className="h-9 w-9 rounded-lg bg-muted border border-border flex items-center justify-center">
-                    <Settings className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                </div>
+              <div className="relative rounded-2xl overflow-hidden border border-border/50 shadow-2xl transform rotate-2 hover:rotate-0 transition-transform duration-500">
+                <Image
+                  src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-XB3iQJjH6XkQRxDIJ4oU5X4820B24f.png"
+                  alt="Akmez Quick Order Extension Preview"
+                  width={280}
+                  height={500}
+                  className="object-cover"
+                />
               </div>
               
               {/* Floating badges */}
               <div className="absolute -top-4 -right-4 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium animate-pulse">
                 Free
+              </div>
+              <div className="absolute -bottom-3 -left-3 px-3 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium">
+                Live Preview
               </div>
             </div>
           </div>
@@ -199,6 +182,113 @@ export function ToolsDownloadPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+
+        {/* Agent Login / Working Time Section */}
+        <div className="grid md:grid-cols-2 gap-6 mb-8">
+          {/* Agent Login Card */}
+          <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/5 to-transparent overflow-hidden">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-xl bg-cyan-500/20 flex items-center justify-center">
+                  <LogIn className="w-6 h-6 text-cyan-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground text-lg">Agent Login</h3>
+                  <p className="text-sm text-muted-foreground">Sign in to start working</p>
+                </div>
+              </div>
+              
+              {/* Mock Login Form */}
+              <div className="space-y-4 p-4 rounded-xl bg-card border border-border/50">
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-sm text-muted-foreground">Email or Username</Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input 
+                      id="email"
+                      placeholder="agent@akmez.com"
+                      className="pl-10 bg-muted/50 border-border/50"
+                      disabled
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-sm text-muted-foreground">Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input 
+                      id="password"
+                      type="password"
+                      placeholder="Enter your password"
+                      className="pl-10 bg-muted/50 border-border/50"
+                      disabled
+                    />
+                  </div>
+                </div>
+                <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-white" disabled>
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Sign In to Extension
+                </Button>
+              </div>
+              
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                Agents must be logged in to use the Quick Order extension
+              </p>
+            </CardContent>
+          </Card>
+          
+          {/* PIN / Working Time Card */}
+          <Card className="border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 to-transparent overflow-hidden">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                  <Clock className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground text-lg">Working Time</h3>
+                  <p className="text-sm text-muted-foreground">PIN verification when connected</p>
+                </div>
+              </div>
+              
+              {/* Mock PIN Interface */}
+              <div className="space-y-4 p-4 rounded-xl bg-card border border-border/50">
+                <div className="flex items-center justify-center gap-2 mb-4">
+                  <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-sm font-medium text-emerald-400">Agent Connected</span>
+                </div>
+                
+                <div className="text-center mb-4">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 border border-border/50">
+                    <Shield className="w-4 h-4 text-emerald-400" />
+                    <span className="text-sm text-muted-foreground">Enter PIN to Clock In/Out</span>
+                  </div>
+                </div>
+                
+                {/* PIN Input Display */}
+                <div className="flex justify-center gap-3 mb-4">
+                  {[1, 2, 3, 4].map((_, i) => (
+                    <div 
+                      key={i}
+                      className="w-12 h-14 rounded-lg bg-muted/50 border border-border/50 flex items-center justify-center text-2xl font-bold text-foreground"
+                    >
+                      {i < 2 ? '•' : ''}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Time Display */}
+                <div className="text-center p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="text-xs text-emerald-400 mb-1">Current Session</div>
+                  <div className="text-2xl font-mono font-bold text-foreground">02:45:30</div>
+                </div>
+              </div>
+              
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                Track working hours with secure PIN authentication
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* What's New Section */}
