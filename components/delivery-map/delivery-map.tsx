@@ -3072,17 +3072,25 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         </div>
       )}
 
-      {/* Floating Controls (right side) - auto-hide with scroll indicator */}
+      {/* Floating Controls (right side) */}
       {!navigating && !(optimizedStops.length > 0 && !showClientList) && !placingPin && (
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
-          {/* Collapsed scroll indicator - tap to expand */}
+          {/* Deliveries list button - always visible */}
+          <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
+            className="w-12 h-12 rounded-xl flex items-center justify-center text-white/80 hover:text-cyan-400 transition relative active:scale-95 shadow-lg"
+            style={{ background: 'rgba(17,17,17,0.95)', border: '1px solid rgba(6,182,212,0.4)' }}>
+            <List className="w-5 h-5" />
+            <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] rounded-full bg-cyan-500 text-black text-[9px] font-black flex items-center justify-center px-1 shadow-[0_0_10px_rgba(0,200,255,0.5)]">{totalDeliveryCount}</span>
+          </button>
+          
+          {/* Toolbar toggle button - tap to expand/collapse */}
           {!toolbarExpanded && (
             <button 
               onClick={() => setToolbarExpanded(true)}
-              className="w-2 h-24 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/20 transition-all active:scale-95"
+              className="w-12 h-12 rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/20 flex items-center justify-center hover:border-cyan-400/40 transition-all active:scale-95 shadow-lg"
               title="Tap to show controls"
             >
-              <div className="w-1 h-12 rounded-full bg-gradient-to-b from-cyan-400/60 via-cyan-400/30 to-transparent" />
+              <ChevronLeft className="w-5 h-5 text-cyan-400" />
             </button>
           )}
           {/* Expanded toolbar */}
@@ -3169,18 +3177,6 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             </button>
           </div>
           )}
-        </div>
-      )}
-
-      {/* Deliveries List Button - Always visible (not part of collapsible toolbar) */}
-      {!navigating && !(optimizedStops.length > 0 && !showClientList) && !placingPin && (
-        <div className="absolute top-12 right-3 z-30" style={{ marginTop: toolbarExpanded ? '340px' : '52px' }}>
-          <button onClick={() => { setShowClientList(true); setSelectedPin(null); setSelectedRegion(null) }}
-            className="w-12 h-12 rounded-xl flex items-center justify-center text-white/70 hover:text-cyan-400 transition relative active:scale-95 shadow-lg"
-            style={{ background: '#111111', border: '1px solid rgba(6,182,212,0.3)' }}>
-            <List className="w-5 h-5" />
-            <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] rounded-full bg-cyan-500 text-black text-[9px] font-black flex items-center justify-center px-1 shadow-[0_0_10px_rgba(0,200,255,0.5)]">{totalDeliveryCount}</span>
-          </button>
         </div>
       )}
 
