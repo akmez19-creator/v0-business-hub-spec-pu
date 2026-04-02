@@ -12,7 +12,6 @@
       color: #fff;
       overflow-y: auto;
     }
-    
     .header {
       background: linear-gradient(135deg, #f97316, #ea580c);
       padding: 14px 16px;
@@ -34,11 +33,162 @@
       font-weight: bold;
       font-size: 16px;
     }
+    .header-title { flex: 1; }
     .header h1 { font-size: 16px; font-weight: 700; }
     .header .sub { font-size: 10px; opacity: 0.8; }
-    
+    .header-btns { display: flex; gap: 6px; }
+    .header-btn {
+      width: 28px;
+      height: 28px;
+      background: rgba(255,255,255,0.2);
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .header-btn:hover { background: rgba(255,255,255,0.3); }
+    .main-tabs {
+      display: flex;
+      background: rgba(0,0,0,0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .main-tab {
+      flex: 1;
+      padding: 10px 12px;
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+      border-bottom: 2px solid transparent;
+    }
+    .main-tab:hover { color: #fff; background: rgba(255,255,255,0.05); }
+    .main-tab.active {
+      color: #f97316;
+      border-bottom-color: #f97316;
+      background: rgba(249, 115, 22, 0.1);
+    }
+    .main-tab .tab-icon { font-size: 14px; }
     .content { padding: 14px; }
-    
+    .worktime-panel { text-align: center; }
+    .worktime-status {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .worktime-status.clocked-out {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .worktime-status .status-dot {
+      width: 12px;
+      height: 12px;
+      background: #10b981;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 8px;
+      animation: pulse 2s infinite;
+    }
+    .worktime-status.clocked-out .status-dot {
+      background: #ef4444;
+      animation: none;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .worktime-status .status-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: #10b981;
+    }
+    .worktime-status.clocked-out .status-text { color: #ef4444; }
+    .worktime-timer {
+      font-size: 42px;
+      font-weight: 700;
+      font-family: 'SF Mono', monospace;
+      color: #fff;
+      margin: 20px 0;
+      letter-spacing: 2px;
+    }
+    .worktime-info {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 20px;
+    }
+    .worktime-info span { color: #f97316; font-weight: 600; }
+    .pin-input-wrap {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .pin-digit {
+      width: 48px;
+      height: 56px;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      text-align: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      outline: none;
+    }
+    .pin-digit:focus { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
+    .clock-btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.15s;
+    }
+    .clock-btn.clock-in {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+    .clock-btn.clock-out {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+    }
+    .clock-btn:hover { transform: scale(1.02); }
+    .clock-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .worktime-history { margin-top: 20px; text-align: left; }
+    .worktime-history h4 {
+      font-size: 11px;
+      color: #f97316;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+    .history-item .date { color: #888; }
+    .history-item .hours { color: #10b981; font-weight: 600; }
     .login-msg {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -115,7 +265,6 @@
       text-decoration: none;
     }
     .open-login-link:hover { text-decoration: underline; }
-    
     .form-group { margin-bottom: 12px; }
     .form-group label {
       display: block;
@@ -127,10 +276,8 @@
       margin-bottom: 5px;
     }
     .form-group label .req { color: #f97316; }
-    
     .input-row { display: flex; gap: 8px; }
     .input-row .form-group { flex: 1; margin-bottom: 0; }
-    
     input, select, textarea {
       width: 100%;
       background: rgba(255,255,255,0.05);
@@ -150,7 +297,6 @@
     select { cursor: pointer; }
     select option { background: #1a1a2e; color: #fff; }
     textarea { resize: none; height: 50px; }
-    
     .input-wrap { position: relative; }
     .input-wrap input { padding-right: 55px; }
     .paste-btn {
@@ -169,7 +315,6 @@
       text-transform: uppercase;
     }
     .paste-btn:hover { background: rgba(249, 115, 22, 0.5); }
-    
     .section-title {
       font-size: 11px;
       font-weight: 600;
@@ -180,18 +325,68 @@
       padding-bottom: 6px;
       border-bottom: 1px solid rgba(249, 115, 22, 0.2);
     }
-    
-    .products-grid {
+    .product-search-wrap {
+      position: sticky;
+      top: 0;
+      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+      padding: 4px 0 8px;
+      z-index: 5;
+    }
+    .product-search {
+      width: 100%;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .product-search:focus { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
+    .product-search::placeholder { color: #888; }
+    .category-tabs {
       display: flex;
-      flex-wrap: wrap;
+      gap: 4px;
+      margin: 8px 0;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .category-tab {
+      flex-shrink: 0;
+      padding: 6px 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: #888;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .category-tab:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .category-tab.active {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      border-color: #f97316;
+      color: #fff;
+    }
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
       gap: 6px;
-      max-height: 140px;
+      max-height: 220px;
       overflow-y: auto;
-      padding: 2px;
+      padding: 4px 2px;
+    }
+    .no-products {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 20px;
+      color: #666;
+      font-size: 12px;
     }
     .product-btn {
       position: relative;
-      padding: 8px 12px;
+      padding: 10px 12px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 8px;
@@ -200,32 +395,50 @@
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
     .product-btn:hover {
       background: rgba(249, 115, 22, 0.15);
       border-color: #f97316;
+      transform: scale(1.02);
     }
     .product-btn.selected {
       background: linear-gradient(135deg, #f97316, #ea580c);
       border-color: #f97316;
     }
+    .product-btn.hidden { display: none; }
+    .product-btn .product-name {
+      font-weight: 600;
+      line-height: 1.2;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .product-btn .product-price {
+      font-size: 10px;
+      color: #888;
+    }
+    .product-btn.selected .product-price { color: rgba(255,255,255,0.8); }
     .product-btn .qty-badge {
       position: absolute;
-      top: -5px;
-      right: -5px;
-      min-width: 16px;
-      height: 16px;
+      top: -6px;
+      right: -6px;
+      min-width: 18px;
+      height: 18px;
       background: #10b981;
-      border-radius: 8px;
-      font-size: 9px;
+      border-radius: 9px;
+      font-size: 10px;
       font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 0 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
-    .product-btn .price { font-size: 9px; opacity: 0.7; display: block; margin-top: 2px; }
-    
     .cart-summary {
       background: rgba(16, 185, 129, 0.1);
       border: 1px solid rgba(16, 185, 129, 0.3);
@@ -238,7 +451,6 @@
     }
     .cart-summary .items { color: #6ee7b7; }
     .cart-summary .total { color: #10b981; font-weight: 700; }
-    
     .submit-btn {
       width: 100%;
       padding: 14px;
@@ -255,56 +467,7 @@
       transition: all 0.15s;
     }
     .submit-btn:hover { transform: scale(1.02); box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3); }
-    .submit-btn:active { transform: scale(0.98); }
-    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-    
-    .success-msg {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 12px;
-      padding: 24px;
-      text-align: center;
-    }
-    .success-msg .checkmark { font-size: 48px; margin-bottom: 12px; }
-    .success-msg h3 { color: #10b981; margin-bottom: 8px; font-size: 16px; }
-    .success-msg p { color: #6ee7b7; font-size: 12px; margin-bottom: 16px; }
-    .success-msg .new-order-btn {
-      background: rgba(16, 185, 129, 0.2);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #10b981;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    
-    .error-msg {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      border-radius: 8px;
-      padding: 10px;
-      color: #fca5a5;
-      font-size: 11px;
-      margin-bottom: 10px;
-    }
-    
-    .loading {
-      text-align: center;
-      padding: 50px 20px;
-      color: #888;
-    }
-    .spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid rgba(249, 115, 22, 0.2);
-      border-top-color: #f97316;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 14px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
     .user-info {
       background: rgba(139, 92, 246, 0.1);
       border-radius: 8px;
@@ -322,24 +485,54 @@
       background: #10b981;
       border-radius: 50%;
     }
+    .error-msg {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      padding: 10px;
+      color: #fca5a5;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    .loading {
+      text-align: center;
+      padding: 50px 20px;
+      color: #888;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(249, 115, 22, 0.2);
+      border-top-color: #f97316;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="logo">A</div>
-    <div>
-      <h1>Akmez Quick Order</h1>
+    <div class="header-title">
+      <h1>Quick Order</h1>
       <div class="sub">Create orders from anywhere</div>
     </div>
+    <div class="header-btns">
+      <button class="header-btn" id="settingsBtn" title="Settings">&#9881;</button>
+      <button class="header-btn" id="closeBtn" title="Close">&times;</button>
+    </div>
   </div>
-  
+  <div class="main-tabs">
+    <button class="main-tab active" id="ordersTab" data-tab="orders"><span class="tab-icon">&#128203;</span> Orders</button>
+    <button class="main-tab" id="worktimeTab" data-tab="worktime"><span class="tab-icon">&#9201;</span> Working Time</button>
+  </div>
   <div class="content" id="content">
     <div class="loading" id="loading">
       <div class="spinner"></div>
       <p>Connecting to Akmez...</p>
     </div>
   </div>
-  
   <script src="popup.js"></script>
 </body>
 </html>
