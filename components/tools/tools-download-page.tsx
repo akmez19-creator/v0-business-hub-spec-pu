@@ -41,7 +41,7 @@ export function ToolsDownloadPage() {
             Marketing Tools
           </Badge>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-            Quick Copy Extension
+            Quick Order Extension
           </h1>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
             Speed up your workflow by copying customer data directly from Facebook Business Suite into Akmez
@@ -143,7 +143,7 @@ export function ToolsDownloadPage() {
                 { step: 2, title: 'Open Chrome Extensions', desc: 'Go to chrome://extensions in your browser' },
                 { step: 3, title: 'Enable Developer Mode', desc: 'Toggle "Developer mode" in the top right corner' },
                 { step: 4, title: 'Load Extension', desc: 'Click "Load unpacked" and select the extracted folder' },
-                { step: 5, title: 'Pin Extension', desc: 'Click the puzzle icon and pin Akmez Quick Copy for easy access' },
+                { step: 5, title: 'Pin Extension', desc: 'Click the puzzle icon and pin Akmez Quick Order for easy access' },
               ].map((item, i) => (
                 <div key={item.step} className="flex gap-4 items-start">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
