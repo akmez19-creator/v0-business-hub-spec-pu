@@ -3060,8 +3060,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         </div>
       )}
 
-      {/* Floating Controls (right side) - hidden when optimization panel is showing */}
-      {!navigating && !(optimizedStops.length > 0 && !showClientList) && (
+      {/* Floating Controls (right side) - hidden when optimization panel or pin placement is showing */}
+      {!navigating && !(optimizedStops.length > 0 && !showClientList) && !placingPin && (
         <div className="absolute top-12 right-3 z-30 flex flex-col items-end gap-2">
           <div className="flex flex-col rounded-2xl holo-panel overflow-hidden divide-y divide-cyan-400/5">
 <button onClick={() => {
@@ -3994,10 +3994,12 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
             </div>
           </div>
           <div className="absolute top-3 left-3 right-3 z-40 flex flex-col gap-2">
-            <div className="bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 rounded-xl px-4 py-2.5 text-center pointer-events-none">
-              <p className="text-xs font-bold text-cyan-400">Placing pin for</p>
-              <p className="text-sm font-black text-white">{placingPin.customerName}</p>
-              <p className="text-[10px] text-white/40">{placingPin.locality} - {placingPin.products}</p>
+            {/* Compact pin info badge in top-left corner */}
+            <div className="self-start bg-cyan-500/20 backdrop-blur-xl border border-cyan-400/30 rounded-lg px-2.5 py-1.5 pointer-events-none">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                <p className="text-[10px] font-bold text-white truncate max-w-[140px]">{placingPin.customerName}</p>
+              </div>
             </div>
             {/* Street/Building Search */}
             <div className="relative">
