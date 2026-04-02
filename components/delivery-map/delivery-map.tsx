@@ -505,6 +505,17 @@ export function DeliveryMap({
     setTimeout(() => { mapRef.current?.resize() }, 100)
   }, [isFullscreen])
 
+  // ── Auto-fullscreen after 2 seconds when map is visible and not in fullscreen ──
+  useEffect(() => {
+    if (isFullscreen) return // Already in fullscreen
+    const timer = setTimeout(() => {
+      if (!isFullscreen) {
+        toggleFullscreen()
+      }
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, []) // Only run once on mount
+
   // ── Open in external nav app (Google Maps / Waze) ──
   const openExternalNav = useCallback((pin: DeliveryPin, app: 'google' | 'waze') => {
     if (app === 'waze') {
