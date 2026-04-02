@@ -68,6 +68,10 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
 
   const riderEntries = useMemo(() => Object.entries(riderMap), [riderMap])
   const hasMultipleRiders = riderEntries.length >= 1 // Show dropdown when at least 1 rider exists
+  
+  useEffect(() => {
+    console.log("[v0] MapPageContent - riderMap:", riderMap, "hasMultipleRiders:", hasMultipleRiders)
+  }, [riderMap, hasMultipleRiders])
 
   // Build color map for riders
   const riderColorMapData = useMemo(() => {
@@ -329,13 +333,27 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-black">
-      {/* Rider filter button - always visible at top, next to back/fullscreen buttons */}
+      {(exactPins.length > 0 || regions.length > 0) ? (
+        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} />
+      ) : (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center space-y-3 px-6">
+            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto">
+              <MapPin className="w-8 h-8 text-white/20" />
+            </div>
+            <p className="text-sm font-medium text-white/60">No locations available</p>
+            <p className="text-xs text-white/30 max-w-xs">Pins appear when clients share GPS or addresses are geocoded.</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Rider filter button - rendered AFTER map so it's on top in DOM order */}
       {riderEntries.length > 0 && (
-        <div className="absolute top-3 left-28 z-[300]">
+        <div className="absolute top-3 left-28 z-[9999]" style={{ pointerEvents: 'auto' }}>
           <div className="relative">
             <button
               onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
-              className="flex items-center gap-1.5 h-10 px-3 rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-amber-500/40 text-xs text-white hover:bg-zinc-800 transition-colors shadow-lg"
+              className="flex items-center gap-1.5 h-10 px-3 rounded-xl bg-zinc-900 border border-amber-500/50 text-xs text-white hover:bg-zinc-800 transition-colors shadow-xl"
             >
               <Users className="w-4 h-4 text-amber-400" />
               <span className="font-semibold">
@@ -348,7 +366,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${riderDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
             {riderDropdownOpen && (
-              <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden">
+              <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-xl bg-zinc-900 border border-white/20 shadow-2xl overflow-hidden">
                 <button
                   onClick={() => { setSelectedRiderId('all'); setRiderDropdownOpen(false) }}
                   className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderId === 'all' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
@@ -379,20 +397,6 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
                 )}
               </div>
             )}
-          </div>
-        </div>
-      )}
-      
-      {(exactPins.length > 0 || regions.length > 0) ? (
-        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} />
-      ) : (
-        <div className="h-full flex items-center justify-center">
-          <div className="text-center space-y-3 px-6">
-            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto">
-              <MapPin className="w-8 h-8 text-white/20" />
-            </div>
-            <p className="text-sm font-medium text-white/60">No locations available</p>
-            <p className="text-xs text-white/30 max-w-xs">Pins appear when clients share GPS or addresses are geocoded.</p>
           </div>
         </div>
       )}
