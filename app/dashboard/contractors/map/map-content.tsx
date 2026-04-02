@@ -68,6 +68,9 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
 
   const riderEntries = useMemo(() => Object.entries(riderMap), [riderMap])
   const hasMultipleRiders = riderEntries.length >= 1 // Show dropdown when at least 1 rider exists
+  
+  // Debug logging
+  console.log("[v0] Rider dropdown debug:", { riderMap, riderEntries, hasMultipleRiders, exactPinsLength: exactPins?.length, regionsLength: regions?.length })
 
   // Build color map for riders
   const riderColorMapData = useMemo(() => {
