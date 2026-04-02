@@ -68,6 +68,10 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
 
   const riderEntries = useMemo(() => Object.entries(riderMap), [riderMap])
   const hasMultipleRiders = riderEntries.length >= 1 // Show dropdown when at least 1 rider exists
+  
+  useEffect(() => {
+    console.log("[v0] MapPageContent - riderMap:", riderMap, "hasMultipleRiders:", hasMultipleRiders)
+  }, [riderMap, hasMultipleRiders])
 
   // Build color map for riders
   const riderColorMapData = useMemo(() => {
@@ -329,63 +333,62 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
 
   return (
     <div className="h-screen w-screen relative overflow-hidden bg-black">
-      {(exactPins.length > 0 || regions.length > 0) ? (
-        <>
-          <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} />
-          {/* Rider filter dropdown - rendered after map to be on top */}
-          {hasMultipleRiders && (
-            <div className="absolute top-3 left-24 z-[200]">
-              <div className="relative">
+      {/* Rider filter button - always visible at top, next to back/fullscreen buttons */}
+      {hasMultipleRiders && (
+        <div className="absolute top-3 left-28 z-[300]">
+          <div className="relative">
+            <button
+              onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
+              className="flex items-center gap-1.5 h-10 px-3 rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-amber-500/40 text-xs text-white hover:bg-zinc-800 transition-colors shadow-lg"
+            >
+              <Users className="w-4 h-4 text-amber-400" />
+              <span className="font-semibold">
+                {selectedRiderId === 'all'
+                  ? `All (${deliveries.length})`
+                  : selectedRiderId === 'unassigned'
+                  ? `Unassigned (${deliveries.filter(d => !d.rider_id).length})`
+                  : `${riderMap[selectedRiderId] || 'Rider'} (${filteredDeliveries.length})`}
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${riderDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {riderDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden">
                 <button
-                  onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-cyan-500/30 text-xs text-white hover:bg-zinc-800 transition-colors shadow-lg"
+                  onClick={() => { setSelectedRiderId('all'); setRiderDropdownOpen(false) }}
+                  className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderId === 'all' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
                 >
-                  <Users className="w-4 h-4 text-amber-400" />
-                  <span className="font-semibold">
-                    {selectedRiderId === 'all'
-                      ? `All (${deliveries.length})`
-                      : selectedRiderId === 'unassigned'
-                      ? `Unassigned (${deliveries.filter(d => !d.rider_id).length})`
-                      : `${riderMap[selectedRiderId] || 'Rider'} (${filteredDeliveries.length})`}
-                  </span>
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${riderDropdownOpen ? 'rotate-180' : ''}`} />
+                  All Riders ({deliveries.length})
                 </button>
-                {riderDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden">
+                {riderEntries.map(([id, name]) => {
+                  const count = deliveries.filter(d => d.rider_id === id).length
+                  const rColor = riderColorMapData[id]?.color || '#6b7280'
+                  return (
                     <button
-                      onClick={() => { setSelectedRiderId('all'); setRiderDropdownOpen(false) }}
-                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderId === 'all' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
+                      key={id}
+                      onClick={() => { setSelectedRiderId(id); setRiderDropdownOpen(false) }}
+                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors flex items-center gap-2 ${selectedRiderId === id ? 'bg-white/5' : 'text-white/80'}`}
                     >
-                      All Riders ({deliveries.length})
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: rColor }} />
+                      <span className={selectedRiderId === id ? 'text-amber-400' : ''}>{name} ({count})</span>
                     </button>
-                    {riderEntries.map(([id, name]) => {
-                      const count = deliveries.filter(d => d.rider_id === id).length
-                      const rColor = riderColorMapData[id]?.color || '#6b7280'
-                      return (
-                        <button
-                          key={id}
-                          onClick={() => { setSelectedRiderId(id); setRiderDropdownOpen(false) }}
-                          className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors flex items-center gap-2 ${selectedRiderId === id ? 'bg-white/5' : 'text-white/80'}`}
-                        >
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: rColor }} />
-                          <span className={selectedRiderId === id ? 'text-amber-400' : ''}>{name} ({count})</span>
-                        </button>
-                      )
-                    })}
-                    {deliveries.some(d => !d.rider_id) && (
-                      <button
-                        onClick={() => { setSelectedRiderId('unassigned'); setRiderDropdownOpen(false) }}
-                        className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderId === 'unassigned' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
-                      >
-                        Unassigned ({deliveries.filter(d => !d.rider_id).length})
-                      </button>
-                    )}
-                  </div>
+                  )
+                })}
+                {deliveries.some(d => !d.rider_id) && (
+                  <button
+                    onClick={() => { setSelectedRiderId('unassigned'); setRiderDropdownOpen(false) }}
+                    className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderId === 'unassigned' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
+                  >
+                    Unassigned ({deliveries.filter(d => !d.rider_id).length})
+                  </button>
                 )}
               </div>
-            </div>
-          )}
-        </>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {(exactPins.length > 0 || regions.length > 0) ? (
+        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} />
       ) : (
         <div className="h-full flex items-center justify-center">
           <div className="text-center space-y-3 px-6">
