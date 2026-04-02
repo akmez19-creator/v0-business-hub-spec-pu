@@ -40,14 +40,36 @@
     .content { padding: 14px; }
     
     .login-msg {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 12px;
       padding: 20px;
+    }
+    .login-msg .title { 
+      color: #fff; 
+      font-size: 14px; 
+      font-weight: 600; 
+      margin-bottom: 14px; 
       text-align: center;
     }
-    .login-msg p { color: #fca5a5; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
+    .login-msg .form-group { margin-bottom: 12px; }
+    .login-msg input {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .login-msg input:focus {
+      border-color: #f97316;
+      background: rgba(249, 115, 22, 0.05);
+    }
+    .login-msg input::placeholder { color: #666; }
     .login-btn {
+      width: 100%;
       background: linear-gradient(135deg, #f97316, #ea580c);
       color: white;
       border: none;
@@ -56,8 +78,43 @@
       font-weight: 600;
       cursor: pointer;
       font-size: 13px;
+      margin-top: 4px;
     }
     .login-btn:hover { opacity: 0.9; }
+    .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .login-error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #fca5a5;
+      font-size: 11px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .login-divider {
+      display: flex;
+      align-items: center;
+      margin: 14px 0;
+      color: #555;
+      font-size: 11px;
+    }
+    .login-divider::before, .login-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(255,255,255,0.1);
+    }
+    .login-divider span { padding: 0 10px; }
+    .open-login-link {
+      display: block;
+      text-align: center;
+      color: #f97316;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .open-login-link:hover { text-decoration: underline; }
     
     .form-group { margin-bottom: 12px; }
     .form-group label {
