@@ -901,10 +901,13 @@ export async function GET() {
     zip.file('icon48.png', ICON_48_BASE64, { base64: true })
     zip.file('icon128.png', ICON_128_BASE64, { base64: true })
     const zipContent = await zip.generateAsync({ type: 'nodebuffer' })
-    return new NextResponse(zipContent, {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-extension.zip"',
+return new NextResponse(zipContent, {
+  headers: {
+  'Content-Type': 'application/zip',
+  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.5.0.zip"',
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+  'Expires': '0',
       },
     })
   } catch (error) {
