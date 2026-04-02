@@ -566,11 +566,13 @@ const POPUP_HTML = `<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="logo">A</div>
-    <div class="header-title">
-      <h1>Quick Order</h1>
-      <div class="sub">Create orders from anywhere</div>
+<div class="header">
+    <div class="header-logo">
+      <div class="logo">A</div>
+      <div class="header-text">
+        <div class="header-title">Quick Order <span style="font-size:9px;opacity:0.5">v2.6.0</span></div>
+        <div class="header-subtitle">Create orders from anywhere</div>
+      </div>
     </div>
     <div class="header-btns">
       <button class="header-btn" id="settingsBtn" title="Settings">⚙</button>
