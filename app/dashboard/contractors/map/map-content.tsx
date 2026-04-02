@@ -68,6 +68,9 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
 
   const riderEntries = useMemo(() => Object.entries(riderMap), [riderMap])
   const hasMultipleRiders = riderEntries.length >= 1 // Show dropdown when at least 1 rider exists
+  
+  // Debug: log riderMap to see what's being passed
+  console.log("[v0] riderMap:", riderMap, "riderEntries:", riderEntries, "hasMultipleRiders:", hasMultipleRiders)
 
   // Build color map for riders
   const riderColorMapData = useMemo(() => {
@@ -331,7 +334,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
     <div className="h-screen w-screen relative overflow-hidden bg-black">
       {/* Rider filter — positioned below back/fullscreen buttons */}
       {hasMultipleRiders && (
-        <div className="absolute top-3 left-3 z-[100]">
+        <div className="absolute top-16 left-3 z-[60]">
           <div className="relative">
             <button
               onClick={() => setRiderDropdownOpen(!riderDropdownOpen)}
