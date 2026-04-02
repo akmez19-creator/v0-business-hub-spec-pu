@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -46,118 +46,256 @@ const POPUP_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.8;transform:scale(1.05)} }
+    @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+    @keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(249,115,22,0.4)} 50%{box-shadow:0 0 40px rgba(249,115,22,0.8)} }
+    @keyframes rotate3d { 0%{transform:perspective(500px) rotateY(0deg)} 100%{transform:perspective(500px) rotateY(360deg)} }
     body {
-      width: 280px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+      width: 320px;
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(145deg, #0a0a12 0%, #12121f 50%, #1a1a2e 100%);
       color: #fff;
+      overflow: hidden;
     }
+    .bg-orbs {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(40px);
+      opacity: 0.3;
+      animation: float 6s ease-in-out infinite;
+    }
+    .orb1 { width: 100px; height: 100px; background: #f97316; top: -30px; right: -30px; }
+    .orb2 { width: 80px; height: 80px; background: #8b5cf6; bottom: 20px; left: -20px; animation-delay: -2s; }
+    .orb3 { width: 60px; height: 60px; background: #10b981; bottom: -20px; right: 40px; animation-delay: -4s; }
     .header {
-      background: linear-gradient(135deg, #f97316, #ea580c);
-      padding: 14px 16px;
+      position: relative;
+      background: linear-gradient(135deg, rgba(249,115,22,0.9) 0%, rgba(234,88,12,0.9) 100%);
+      padding: 18px 20px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 4px 30px rgba(249,115,22,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
     }
     .logo {
-      width: 36px;
-      height: 36px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 8px;
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(145deg, rgba(255,255,255,0.3), rgba(255,255,255,0.1));
+      border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: bold;
-      font-size: 16px;
+      font-weight: 800;
+      font-size: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.1);
+      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      transform: perspective(100px) rotateX(5deg);
     }
-    .header h1 { font-size: 15px; font-weight: 700; }
-    .header .sub { font-size: 10px; opacity: 0.8; }
-    .content { padding: 16px; }
-    .status-card {
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 12px;
+    .header-text h1 { 
+      font-size: 17px; 
+      font-weight: 700; 
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      letter-spacing: -0.3px;
+    }
+    .header-text .sub { 
+      font-size: 11px; 
+      opacity: 0.85;
+      margin-top: 2px;
+      font-weight: 500;
+    }
+    .content { 
+      position: relative;
       padding: 20px;
+      min-height: 200px;
+    }
+    .status-card {
+      background: linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 28px 24px;
       text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+      transform: perspective(500px) rotateX(2deg);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .status-card:hover {
+      transform: perspective(500px) rotateX(0deg) translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15);
     }
     .status-icon {
-      width: 48px;
-      height: 48px;
+      width: 64px;
+      height: 64px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 24px;
-      margin: 0 auto 12px;
+      font-size: 28px;
+      margin: 0 auto 16px;
+      position: relative;
     }
-    .status-icon.online { background: rgba(16,185,129,0.2); }
-    .status-icon.offline { background: rgba(239,68,68,0.2); }
-    .status-text { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-    .status-sub { font-size: 11px; color: #888; margin-bottom: 16px; }
-    .login-form { margin-top: 12px; }
-    .login-field { margin-bottom: 10px; }
+    .status-icon::before {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      padding: 4px;
+      background: linear-gradient(145deg, rgba(255,255,255,0.2), transparent);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+    }
+    .status-icon.online { 
+      background: linear-gradient(145deg, rgba(16,185,129,0.3), rgba(16,185,129,0.1));
+      box-shadow: 0 0 30px rgba(16,185,129,0.4), inset 0 2px 4px rgba(255,255,255,0.1);
+      animation: pulse 3s ease-in-out infinite;
+    }
+    .status-icon.offline { 
+      background: linear-gradient(145deg, rgba(249,115,22,0.3), rgba(249,115,22,0.1));
+      box-shadow: 0 0 30px rgba(249,115,22,0.3), inset 0 2px 4px rgba(255,255,255,0.1);
+    }
+    .status-text { 
+      font-size: 18px; 
+      font-weight: 700; 
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #fff 0%, #a0a0a0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .status-sub { 
+      font-size: 13px; 
+      color: #888; 
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+    .login-form { margin-top: 16px; }
+    .login-field { margin-bottom: 12px; position: relative; }
     .login-field input {
       width: 100%;
-      background: rgba(255,255,255,0.05);
+      background: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
       border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 8px;
-      padding: 10px 12px;
+      border-radius: 12px;
+      padding: 14px 16px;
       color: #fff;
-      font-size: 13px;
+      font-size: 14px;
+      font-weight: 500;
       outline: none;
+      transition: all 0.3s ease;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
     }
-    .login-field input:focus { border-color: #f97316; }
+    .login-field input:focus { 
+      border-color: #f97316;
+      box-shadow: 0 0 20px rgba(249,115,22,0.2), inset 0 2px 4px rgba(0,0,0,0.1);
+      background: linear-gradient(145deg, rgba(249,115,22,0.1), rgba(255,255,255,0.03));
+    }
     .login-field input::placeholder { color: #555; }
     .login-error {
-      background: rgba(239,68,68,0.1);
-      border-radius: 6px;
-      padding: 8px;
+      background: linear-gradient(145deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05));
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 10px;
+      padding: 12px;
       color: #fca5a5;
-      font-size: 11px;
-      margin-bottom: 10px;
+      font-size: 12px;
+      margin-bottom: 12px;
       display: none;
+      box-shadow: 0 4px 15px rgba(239,68,68,0.1);
     }
     .btn {
       width: 100%;
-      padding: 10px 16px;
+      padding: 14px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 12px;
       font-weight: 600;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
     }
-    .btn-primary { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
-    .btn-primary:hover { opacity: 0.9; }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-secondary { background: rgba(255,255,255,0.1); color: #888; margin-top: 8px; }
-    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+    .btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition: left 0.5s ease;
+    }
+    .btn:hover::before { left: 100%; }
+    .btn-primary { 
+      background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%);
+      color: white;
+      box-shadow: 0 4px 20px rgba(249,115,22,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+    .btn-primary:hover { 
+      transform: translateY(-2px);
+      box-shadow: 0 6px 30px rgba(249,115,22,0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+    }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-secondary { 
+      background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      color: #888;
+      margin-top: 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .btn-secondary:hover { 
+      background: linear-gradient(145deg, rgba(255,255,255,0.15), rgba(255,255,255,0.08));
+      color: #aaa;
+    }
     .hint {
-      font-size: 10px;
-      color: #666;
+      font-size: 11px;
+      color: #555;
       text-align: center;
-      margin-top: 12px;
-      line-height: 1.4;
+      margin-top: 16px;
+      line-height: 1.5;
+      padding: 12px;
+      background: linear-gradient(145deg, rgba(255,255,255,0.03), transparent);
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.05);
     }
+    .hint b { color: #f97316; font-weight: 600; }
     .version {
-      font-size: 9px;
-      color: #444;
+      font-size: 10px;
+      color: #333;
       text-align: center;
       margin-top: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
     }
   </style>
 </head>
 <body>
+  <div class="bg-orbs">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
   <div class="header">
     <div class="logo">A</div>
-    <div>
+    <div class="header-text">
       <h1>Akmez Quick Order</h1>
-      <div class="sub">v2.3.0</div>
+      <div class="sub">v2.4.0 - Premium Edition</div>
     </div>
   </div>
   <div class="content" id="content">
     <div class="status-card">
       <div class="status-icon offline">?</div>
-      <div class="status-text">Checking...</div>
+      <div class="status-text">Connecting...</div>
     </div>
   </div>
   <script src="popup.js"></script>
@@ -222,18 +360,18 @@ let products=[],regions=[],cart={},settings={nameSelector:''},authToken=null,isP
 // Create UI elements
 const toggleBtn=document.createElement('div');
 toggleBtn.id='akmez-toggle';
-toggleBtn.innerHTML='<span>A</span>';
+toggleBtn.innerHTML='<div class="pulse-ring"></div><div class="pulse-ring r2"></div><span>A</span>';
 document.body.appendChild(toggleBtn);
 
 const widget=document.createElement('div');
 widget.id='akmez-widget';
-widget.innerHTML='<div class="akmez-header" id="akmez-drag"><div class="akmez-logo">A</div><span class="akmez-title">Quick Order</span><div class="akmez-header-btns"><button class="akmez-hbtn" id="akmez-settings" title="Settings">⚙</button><button class="akmez-hbtn" id="akmez-close" title="Close">×</button></div></div><div class="akmez-body" id="akmez-body"><div class="akmez-loading"><div class="akmez-spinner"></div></div></div>';
+widget.innerHTML='<div class="widget-glow"></div><div class="akmez-header" id="akmez-drag"><div class="akmez-logo"><span>A</span></div><div class="akmez-header-text"><span class="akmez-title">Quick Order</span><span class="akmez-sub">v2.4.0 Premium</span></div><div class="akmez-header-btns"><button class="akmez-hbtn" id="akmez-settings" title="Settings"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button><button class="akmez-hbtn close-btn" id="akmez-close" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div></div><div class="akmez-body" id="akmez-body"><div class="akmez-loading"><div class="akmez-spinner"></div><p>Connecting...</p></div></div>';
 widget.style.display='none';
 document.body.appendChild(widget);
 
 const picker=document.createElement('div');
 picker.id='akmez-picker';
-picker.innerHTML='<div class="picker-msg">Click on any element to select it for auto-fill</div><button id="picker-cancel">Cancel</button>';
+picker.innerHTML='<div class="picker-icon">🎯</div><div class="picker-msg">Click on any element to select it for auto-fill</div><button id="picker-cancel">Cancel Selection</button>';
 picker.style.display='none';
 document.body.appendChild(picker);
 
@@ -242,79 +380,128 @@ highlight.id='akmez-highlight';
 highlight.style.display='none';
 document.body.appendChild(highlight);
 
-// Inject styles
+// Inject advanced 3D styles
 const style=document.createElement('style');
-style.textContent=`
-#akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(249,115,22,0.5);font-family:sans-serif;transition:transform .15s}
-#akmez-toggle:hover{transform:scale(1.1)}
-#akmez-toggle span{color:white;font-size:24px;font-weight:800}
-#akmez-widget{position:fixed;top:60px;right:20px;width:380px;max-height:90vh;background:#0f0f1a;border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden}
-.akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:10px 12px;display:flex;align-items:center;gap:8px;cursor:move;user-select:none}
-.akmez-logo{width:26px;height:26px;background:rgba(255,255,255,0.2);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
-.akmez-title{flex:1;font-weight:700;font-size:13px}
-.akmez-header-btns{display:flex;gap:4px}
-.akmez-hbtn{width:24px;height:24px;border:none;border-radius:6px;background:rgba(255,255,255,0.2);color:white;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.akmez-hbtn:hover{background:rgba(255,255,255,0.3)}
-.akmez-body{padding:12px;max-height:calc(90vh - 50px);overflow-y:auto}
-.akmez-loading{text-align:center;padding:30px;color:#888}
-.akmez-spinner{width:28px;height:28px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:akspin .8s linear infinite;margin:0 auto}
-@keyframes akspin{to{transform:rotate(360deg)}}
-.akmez-row{display:flex;gap:6px;margin-bottom:8px}
+style.textContent=\`
+@keyframes float{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-8px) rotate(2deg)}}
+@keyframes pulse-ring{0%{transform:scale(1);opacity:0.8}100%{transform:scale(1.5);opacity:0}}
+@keyframes glow-pulse{0%,100%{box-shadow:0 0 30px rgba(249,115,22,0.6),0 0 60px rgba(249,115,22,0.3),inset 0 0 20px rgba(255,255,255,0.1)}50%{box-shadow:0 0 50px rgba(249,115,22,0.8),0 0 100px rgba(249,115,22,0.4),inset 0 0 30px rgba(255,255,255,0.2)}}
+@keyframes spin-3d{0%{transform:perspective(120px) rotateX(0deg) rotateY(0deg)}100%{transform:perspective(120px) rotateX(360deg) rotateY(360deg)}}
+@keyframes slide-up{0%{opacity:0;transform:translateY(20px) scale(0.95)}100%{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes border-flow{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+
+#akmez-toggle{position:fixed;bottom:24px;right:24px;width:64px;height:64px;background:linear-gradient(145deg,#ff8c42,#f97316,#ea580c);border-radius:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;font-family:'SF Pro Display',-apple-system,sans-serif;animation:float 4s ease-in-out infinite,glow-pulse 3s ease-in-out infinite;transform-style:preserve-3d;box-shadow:0 8px 32px rgba(249,115,22,0.5),0 4px 16px rgba(0,0,0,0.3),inset 0 2px 0 rgba(255,255,255,0.3),inset 0 -2px 0 rgba(0,0,0,0.2)}
+#akmez-toggle::before{content:'';position:absolute;inset:-3px;border-radius:21px;background:linear-gradient(45deg,#f97316,#fbbf24,#f97316,#ea580c);background-size:400% 400%;animation:border-flow 4s ease infinite;z-index:-1;opacity:0.7}
+#akmez-toggle::after{content:'';position:absolute;inset:0;border-radius:18px;background:linear-gradient(145deg,rgba(255,255,255,0.2) 0%,transparent 50%,rgba(0,0,0,0.1) 100%)}
+#akmez-toggle:hover{animation:none;transform:scale(1.1) translateY(-4px);box-shadow:0 16px 48px rgba(249,115,22,0.6),0 8px 24px rgba(0,0,0,0.4)}
+#akmez-toggle span{color:white;font-size:28px;font-weight:800;text-shadow:0 2px 8px rgba(0,0,0,0.3);position:relative;z-index:1}
+.pulse-ring{position:absolute;inset:0;border-radius:18px;border:3px solid rgba(249,115,22,0.6);animation:pulse-ring 2s ease-out infinite}
+.pulse-ring.r2{animation-delay:1s}
+
+#akmez-widget{position:fixed;top:80px;right:24px;width:400px;max-height:85vh;background:linear-gradient(165deg,rgba(15,15,26,0.98) 0%,rgba(26,26,46,0.98) 100%);border-radius:24px;z-index:2147483647;font-family:'SF Pro Display',-apple-system,sans-serif;color:white;overflow:hidden;animation:slide-up 0.4s cubic-bezier(0.16,1,0.3,1);transform-style:preserve-3d;box-shadow:0 25px 80px rgba(0,0,0,0.6),0 10px 30px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.1)}
+#akmez-widget::before{content:'';position:absolute;inset:-2px;border-radius:26px;background:linear-gradient(135deg,#f97316 0%,#fbbf24 25%,#f97316 50%,#ea580c 75%,#f97316 100%);background-size:300% 300%;animation:border-flow 6s ease infinite;z-index:-1}
+.widget-glow{position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 30%,rgba(249,115,22,0.15) 0%,transparent 50%);pointer-events:none;z-index:0}
+
+.akmez-header{position:relative;background:linear-gradient(135deg,rgba(249,115,22,0.95) 0%,rgba(234,88,12,0.95) 100%);padding:16px 18px;display:flex;align-items:center;gap:12px;cursor:move;user-select:none;box-shadow:0 4px 20px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.2)}
+.akmez-logo{width:40px;height:40px;background:linear-gradient(145deg,rgba(255,255,255,0.3),rgba(255,255,255,0.1));border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.4),inset 0 -1px 0 rgba(0,0,0,0.1);transform:perspective(100px) rotateX(5deg) rotateY(-5deg)}
+.akmez-logo span{font-weight:800;font-size:18px;text-shadow:0 2px 4px rgba(0,0,0,0.3)}
+.akmez-header-text{flex:1}
+.akmez-title{display:block;font-weight:700;font-size:15px;text-shadow:0 2px 4px rgba(0,0,0,0.2)}
+.akmez-sub{display:block;font-size:10px;opacity:0.85;margin-top:2px}
+.akmez-header-btns{display:flex;gap:6px}
+.akmez-hbtn{width:32px;height:32px;border:none;border-radius:10px;background:linear-gradient(145deg,rgba(255,255,255,0.25),rgba(255,255,255,0.1));color:white;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.2)}
+.akmez-hbtn:hover{background:linear-gradient(145deg,rgba(255,255,255,0.35),rgba(255,255,255,0.2));transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+.akmez-hbtn.close-btn:hover{background:linear-gradient(145deg,rgba(239,68,68,0.8),rgba(220,38,38,0.8))}
+
+.akmez-body{position:relative;padding:16px;max-height:calc(85vh - 80px);overflow-y:auto;z-index:1}
+.akmez-loading{text-align:center;padding:40px 20px;color:#888}
+.akmez-loading p{margin-top:16px;font-size:13px}
+.akmez-spinner{width:40px;height:40px;margin:0 auto;border:4px solid rgba(249,115,22,0.2);border-radius:50%;position:relative}
+.akmez-spinner::before{content:'';position:absolute;inset:-4px;border:4px solid transparent;border-top-color:#f97316;border-radius:50%;animation:spin-3d 1.5s linear infinite}
+
+.akmez-row{display:flex;gap:10px;margin-bottom:12px}
 .akmez-field{flex:1}
-.akmez-label{font-size:9px;color:#666;text-transform:uppercase;margin-bottom:3px}
+.akmez-label{font-size:10px;color:#888;text-transform:uppercase;margin-bottom:6px;font-weight:600;letter-spacing:0.5px}
 .akmez-label .req{color:#f97316}
 .akmez-input-wrap{position:relative}
-.akmez-input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 50px 8px 10px;color:white;font-size:12px;outline:none}
-.akmez-input:focus{border-color:#f97316}
-.akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 10px;color:white;font-size:12px;outline:none}
+.akmez-input{width:100%;background:linear-gradient(145deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03));border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 55px 12px 14px;color:white;font-size:13px;outline:none;transition:all 0.3s;box-shadow:inset 0 2px 4px rgba(0,0,0,0.1)}
+.akmez-input:focus{border-color:#f97316;box-shadow:0 0 20px rgba(249,115,22,0.15),inset 0 2px 4px rgba(0,0,0,0.1);background:linear-gradient(145deg,rgba(249,115,22,0.1),rgba(255,255,255,0.03))}
+.akmez-select{width:100%;background:linear-gradient(145deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03));border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:white;font-size:13px;outline:none;cursor:pointer;transition:all 0.3s}
+.akmez-select:focus{border-color:#f97316;box-shadow:0 0 20px rgba(249,115,22,0.15)}
 .akmez-select option{background:#1a1a2e;color:white}
-.akmez-paste{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:rgba(249,115,22,0.3);border:none;border-radius:4px;padding:4px 6px;color:#f97316;font-size:8px;font-weight:700;cursor:pointer}
-.akmez-paste:hover{background:rgba(249,115,22,0.5)}
-.akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;margin:12px 0 6px;font-weight:600}
-.akmez-search{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 10px;color:white;font-size:11px;outline:none;margin-bottom:6px}
-.akmez-search:focus{border-color:#f97316}
-.akmez-products{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:120px;overflow-y:auto}
-.akmez-product{position:relative;padding:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:10px;cursor:pointer;text-align:left;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.akmez-product:hover{background:rgba(249,115,22,0.15);border-color:#f97316}
-.akmez-product.sel{background:linear-gradient(135deg,#f97316,#ea580c);border-color:#f97316}
+.akmez-paste{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:linear-gradient(135deg,rgba(249,115,22,0.4),rgba(249,115,22,0.2));border:none;border-radius:8px;padding:6px 10px;color:#f97316;font-size:9px;font-weight:700;cursor:pointer;transition:all 0.2s;text-transform:uppercase;letter-spacing:0.5px}
+.akmez-paste:hover{background:linear-gradient(135deg,rgba(249,115,22,0.6),rgba(249,115,22,0.4));transform:translateY(-50%) scale(1.05)}
+
+.akmez-section{font-size:11px;color:#f97316;text-transform:uppercase;margin:16px 0 10px;font-weight:700;letter-spacing:1px;display:flex;align-items:center;gap:8px}
+.akmez-section::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,rgba(249,115,22,0.3),transparent)}
+.akmez-search{width:100%;background:linear-gradient(145deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:10px 14px;color:white;font-size:12px;outline:none;margin-bottom:10px;transition:all 0.3s}
+.akmez-search:focus{border-color:#f97316;box-shadow:0 0 20px rgba(249,115,22,0.1)}
+.akmez-search::placeholder{color:#555}
+
+.akmez-products{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-height:140px;overflow-y:auto;padding:4px}
+.akmez-product{position:relative;padding:10px 8px;background:linear-gradient(145deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.08);border-radius:12px;font-size:11px;cursor:pointer;text-align:center;overflow:hidden;transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
+.akmez-product::before{content:'';position:absolute;inset:0;background:linear-gradient(145deg,rgba(255,255,255,0.1),transparent);opacity:0;transition:opacity 0.2s}
+.akmez-product:hover{transform:translateY(-2px);border-color:rgba(249,115,22,0.5);box-shadow:0 4px 16px rgba(249,115,22,0.2)}
+.akmez-product:hover::before{opacity:1}
+.akmez-product.sel{background:linear-gradient(145deg,#f97316,#ea580c);border-color:#f97316;box-shadow:0 4px 20px rgba(249,115,22,0.4)}
 .akmez-product.hidden{display:none}
-.akmez-product .badge{position:absolute;top:-4px;right:-4px;min-width:14px;height:14px;background:#10b981;border-radius:7px;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px}
-.akmez-cart{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:8px 10px;margin-top:8px;display:flex;justify-content:space-between;font-size:11px}
-.akmez-cart .items{color:#6ee7b7}
-.akmez-cart .total{color:#10b981;font-weight:700}
-.akmez-error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:8px;color:#fca5a5;font-size:10px;margin-top:8px}
-.akmez-submit{width:100%;padding:10px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:8px;color:white;font-size:12px;font-weight:700;cursor:pointer;margin-top:10px;text-transform:uppercase}
-.akmez-submit:disabled{opacity:0.5;cursor:not-allowed}
-.akmez-success{text-align:center;padding:20px}
-.akmez-success .check{font-size:40px;color:#10b981}
-.akmez-success h3{color:#10b981;margin:8px 0 4px}
-.akmez-success p{color:#6ee7b7;font-size:11px;margin-bottom:12px}
-.akmez-success button{background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.3);color:#10b981;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:11px}
-.akmez-login{text-align:center;padding:20px}
-.akmez-login p{color:#888;margin-bottom:12px;font-size:12px}
-.akmez-login button{background:linear-gradient(135deg,#f97316,#ea580c);border:none;color:white;padding:10px 20px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px}
-.akmez-settings{background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px}
-.akmez-settings h3{font-size:12px;color:#f97316;margin-bottom:10px}
-.akmez-settings .row{margin-bottom:10px}
-.akmez-settings label{display:block;font-size:10px;color:#888;margin-bottom:4px}
-.akmez-settings input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px;color:white;font-size:11px;outline:none}
-.akmez-settings input:focus{border-color:#f97316}
-.akmez-settings .hint{font-size:9px;color:#555;margin-top:4px}
-.akmez-settings .btns{display:flex;gap:6px;margin-top:12px}
-.akmez-settings .btns button{flex:1;padding:8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none}
-.akmez-settings .pick-btn{background:#8b5cf6;color:white}
-.akmez-settings .save-btn{background:#f97316;color:white}
-.akmez-settings .cancel-btn{background:rgba(255,255,255,0.1);color:#888}
-#akmez-picker{position:fixed;top:0;left:0;right:0;background:rgba(139,92,246,0.95);color:white;padding:12px;text-align:center;z-index:2147483648;font-family:sans-serif}
-.picker-msg{font-size:14px;font-weight:600;margin-bottom:8px}
-#picker-cancel{background:white;color:#8b5cf6;border:none;padding:6px 16px;border-radius:6px;font-weight:600;cursor:pointer}
-#akmez-highlight{position:fixed;pointer-events:none;border:3px solid #8b5cf6;background:rgba(139,92,246,0.2);z-index:2147483645;transition:all .1s}
-.akmez-toast{position:fixed;bottom:80px;right:20px;background:#10b981;color:white;padding:10px 16px;border-radius:8px;font-size:12px;font-weight:600;z-index:2147483648;animation:aktoast .3s}
-@keyframes aktoast{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-#akmez-sel{position:fixed;display:none;background:#1a1a2e;border:1px solid #f97316;border-radius:6px;padding:4px;gap:4px;z-index:2147483648;font-family:sans-serif}
-#akmez-sel button{background:rgba(249,115,22,0.2);border:none;color:#f97316;padding:4px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer}
-#akmez-sel button:hover{background:rgba(249,115,22,0.4)}
-`;
+.akmez-product .badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;background:linear-gradient(145deg,#10b981,#059669);border-radius:10px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 8px rgba(16,185,129,0.4);border:2px solid rgba(15,15,26,0.8)}
+
+.akmez-cart{background:linear-gradient(145deg,rgba(16,185,129,0.15),rgba(16,185,129,0.05));border:1px solid rgba(16,185,129,0.3);border-radius:14px;padding:12px 16px;margin-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:13px;box-shadow:0 4px 16px rgba(16,185,129,0.1)}
+.akmez-cart .items{color:#6ee7b7;font-weight:500}
+.akmez-cart .total{color:#10b981;font-weight:700;font-size:15px}
+
+.akmez-error{background:linear-gradient(145deg,rgba(239,68,68,0.15),rgba(239,68,68,0.05));border:1px solid rgba(239,68,68,0.3);border-radius:12px;padding:12px;color:#fca5a5;font-size:11px;margin-top:12px;box-shadow:0 4px 16px rgba(239,68,68,0.1)}
+
+.akmez-submit{width:100%;padding:14px;background:linear-gradient(135deg,#10b981 0%,#059669 50%,#047857 100%);border:none;border-radius:14px;color:white;font-size:14px;font-weight:700;cursor:pointer;margin-top:14px;text-transform:uppercase;letter-spacing:1px;transition:all 0.3s;position:relative;overflow:hidden;box-shadow:0 4px 20px rgba(16,185,129,0.4),inset 0 1px 0 rgba(255,255,255,0.2)}
+.akmez-submit::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:linear-gradient(45deg,transparent,rgba(255,255,255,0.1),transparent);transform:rotate(45deg);transition:left 0.5s}
+.akmez-submit:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(16,185,129,0.5)}
+.akmez-submit:hover::before{left:100%}
+.akmez-submit:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+
+.akmez-success{text-align:center;padding:30px 20px}
+.akmez-success .check{font-size:56px;animation:float 2s ease-in-out infinite}
+.akmez-success h3{color:#10b981;margin:12px 0 6px;font-size:20px;font-weight:700}
+.akmez-success p{color:#6ee7b7;font-size:13px;margin-bottom:16px}
+.akmez-success button{background:linear-gradient(145deg,rgba(16,185,129,0.3),rgba(16,185,129,0.1));border:1px solid rgba(16,185,129,0.3);color:#10b981;padding:12px 24px;border-radius:12px;font-weight:600;cursor:pointer;font-size:13px;transition:all 0.2s}
+.akmez-success button:hover{background:linear-gradient(145deg,rgba(16,185,129,0.4),rgba(16,185,129,0.2));transform:translateY(-2px)}
+
+.akmez-login{text-align:center;padding:30px 20px}
+.akmez-login p{color:#888;margin-bottom:16px;font-size:14px}
+.akmez-login button{background:linear-gradient(135deg,#f97316,#ea580c);border:none;color:white;padding:14px 28px;border-radius:12px;font-weight:600;cursor:pointer;font-size:14px;transition:all 0.2s;box-shadow:0 4px 20px rgba(249,115,22,0.4)}
+.akmez-login button:hover{transform:translateY(-2px);box-shadow:0 6px 30px rgba(249,115,22,0.5)}
+
+.akmez-settings{background:linear-gradient(145deg,rgba(0,0,0,0.4),rgba(0,0,0,0.2));border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:16px}
+.akmez-settings h3{font-size:14px;color:#f97316;margin-bottom:14px;font-weight:700}
+.akmez-settings .row{margin-bottom:14px}
+.akmez-settings label{display:block;font-size:11px;color:#888;margin-bottom:6px;font-weight:600}
+.akmez-settings input{width:100%;background:linear-gradient(145deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03));border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px;color:white;font-size:12px;outline:none;transition:all 0.3s}
+.akmez-settings input:focus{border-color:#f97316;box-shadow:0 0 20px rgba(249,115,22,0.15)}
+.akmez-settings .hint{font-size:10px;color:#555;margin-top:6px}
+.akmez-settings .btns{display:flex;gap:8px;margin-top:16px}
+.akmez-settings .btns button{flex:1;padding:12px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all 0.2s}
+.akmez-settings .pick-btn{background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:white;box-shadow:0 4px 16px rgba(139,92,246,0.4)}
+.akmez-settings .pick-btn:hover{transform:translateY(-2px);box-shadow:0 6px 24px rgba(139,92,246,0.5)}
+.akmez-settings .save-btn{background:linear-gradient(135deg,#f97316,#ea580c);color:white;box-shadow:0 4px 16px rgba(249,115,22,0.4)}
+.akmez-settings .save-btn:hover{transform:translateY(-2px)}
+.akmez-settings .cancel-btn{background:linear-gradient(145deg,rgba(255,255,255,0.1),rgba(255,255,255,0.05));color:#888}
+.akmez-settings .cancel-btn:hover{background:linear-gradient(145deg,rgba(255,255,255,0.15),rgba(255,255,255,0.08))}
+
+#akmez-picker{position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,rgba(139,92,246,0.98),rgba(124,58,237,0.98));color:white;padding:20px;text-align:center;z-index:2147483648;font-family:sans-serif;box-shadow:0 4px 30px rgba(139,92,246,0.5)}
+.picker-icon{font-size:32px;margin-bottom:8px}
+.picker-msg{font-size:16px;font-weight:600;margin-bottom:12px}
+#picker-cancel{background:white;color:#8b5cf6;border:none;padding:10px 24px;border-radius:10px;font-weight:600;cursor:pointer;transition:all 0.2s}
+#picker-cancel:hover{transform:scale(1.05)}
+
+#akmez-highlight{position:fixed;pointer-events:none;border:3px solid #8b5cf6;background:rgba(139,92,246,0.15);z-index:2147483645;transition:all 0.1s;border-radius:4px;box-shadow:0 0 20px rgba(139,92,246,0.5)}
+
+.akmez-toast{position:fixed;bottom:100px;right:24px;background:linear-gradient(135deg,#10b981,#059669);color:white;padding:14px 24px;border-radius:14px;font-size:13px;font-weight:600;z-index:2147483648;animation:slide-up 0.3s;box-shadow:0 4px 20px rgba(16,185,129,0.4)}
+
+#akmez-sel{position:fixed;display:none;background:linear-gradient(145deg,rgba(26,26,46,0.98),rgba(15,15,26,0.98));border:2px solid #f97316;border-radius:12px;padding:8px;gap:6px;z-index:2147483648;font-family:sans-serif;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
+#akmez-sel button{background:linear-gradient(145deg,rgba(249,115,22,0.3),rgba(249,115,22,0.1));border:none;color:#f97316;padding:8px 14px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.2s}
+#akmez-sel button:hover{background:linear-gradient(145deg,rgba(249,115,22,0.5),rgba(249,115,22,0.3));transform:translateY(-2px)}
+\`;
 document.head.appendChild(style);
 
 // Drag functionality

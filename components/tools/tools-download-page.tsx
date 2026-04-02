@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Download, Chrome, MousePointer2, Clipboard, Keyboard, CheckCircle2, ArrowRight, Zap, RefreshCw } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '2.3.0'
+const EXTENSION_VERSION = '2.4.0'
 const LAST_UPDATED = '2026-04-02'
 
 export function ToolsDownloadPage() {
@@ -101,13 +101,14 @@ export function ToolsDownloadPage() {
             <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/20">
               <h4 className="font-semibold text-orange-500 mb-2 flex items-center gap-2">
                 <RefreshCw className="w-4 h-4" />
-                What&apos;s New in v{EXTENSION_VERSION}
+                What&apos;s New in v{EXTENSION_VERSION} - Premium Edition
               </h4>
               <ul className="text-sm space-y-1 text-muted-foreground">
-                <li>- Popup shows login status only (simple and clean)</li>
-                <li>- Full order form in floating button on page</li>
-                <li>- Visual Element Picker for auto-fill selector</li>
-                <li>- Click on elements to select customer name source</li>
+                <li>- Advanced 3D glassmorphism interface with depth effects</li>
+                <li>- Animated floating button with pulse rings and glow</li>
+                <li>- Premium gradient borders and hover animations</li>
+                <li>- Visual Element Picker with highlight effects</li>
+                <li>- Smooth slide-up animations and transitions</li>
                 <li>- Product search, settings panel, and more</li>
               </ul>
             </div>
