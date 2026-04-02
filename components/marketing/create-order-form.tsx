@@ -14,6 +14,7 @@ import {
   Loader2,
   Send,
   ClipboardPaste,
+  Search,
 } from 'lucide-react'
 
 interface Product {
@@ -62,6 +63,9 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
   const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
   
+  // Products
+  const [productSearch, setProductSearch] = useState('')
+  
   // Cart
   const [cart, setCart] = useState<CartItem[]>([])
 
@@ -79,6 +83,11 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
   const filteredRegions = regionSearch
     ? regions.filter(r => r.toLowerCase().includes(regionSearch.toLowerCase()))
     : regions
+
+  // Product filter
+  const filteredProducts = productSearch
+    ? products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()))
+    : products
 
   const selectRegion = (r: string) => {
     setRegion(r)
@@ -328,12 +337,23 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
       <div className="grid grid-cols-3 gap-4">
         {/* Products */}
         <div className="col-span-2 bg-card border rounded-2xl p-6">
-          <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wide mb-4">
-            Tap Products to Add
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wide">
+              Tap Products to Add
+            </h2>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                placeholder="Search products..."
+                className="pl-9 h-10 w-64"
+              />
+            </div>
+          </div>
           
-          <div className="flex flex-wrap gap-3 max-h-[400px] overflow-y-auto">
-            {products.map(item => {
+          <div className="grid grid-cols-4 gap-2 max-h-[400px] overflow-y-auto">
+            {filteredProducts.map(item => {
               const inCart = cart.find(c => c.id === item.id)
               
               return (
@@ -341,19 +361,20 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
                   key={item.id}
                   type="button"
                   onClick={() => addToCart(item)}
+                  title={`${item.name} - Rs ${item.price}`}
                   className={`
-                    relative px-6 py-4 rounded-2xl font-semibold text-base transition-all duration-150
+                    relative px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 text-left
                     ${inCart 
-                      ? 'bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-xl shadow-violet-500/30 scale-105' 
-                      : 'bg-muted hover:bg-muted/70 hover:scale-102'
+                      ? 'bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/20' 
+                      : 'bg-muted hover:bg-muted/70'
                     }
                     cursor-pointer active:scale-95
                   `}
                 >
-                  <span className="block">{item.name}</span>
-                  <span className="text-sm opacity-80">Rs {item.price}</span>
+                  <span className="block truncate">{item.name}</span>
+                  <span className="text-xs opacity-70">Rs {item.price}</span>
                   {inCart && (
-                    <span className="absolute -top-3 -right-3 w-8 h-8 bg-emerald-500 text-white rounded-full flex items-center justify-center text-sm font-bold shadow-lg border-2 border-background">
+                    <span className="absolute -top-2 -right-2 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-2 border-background">
                       {inCart.quantity}
                     </span>
                   )}
