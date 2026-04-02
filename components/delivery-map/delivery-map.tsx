@@ -670,7 +670,7 @@ export function DeliveryMap({
       
       // ══════════════════════════════════════════════════════════════════════════
       // SMOOTH INTERACTION SETTINGS
-      // ══════════════════════════════════════���══════��════════════════════════════
+      // ══════════════════════════════════════�����══════��════════════════════════════
       map.touchZoomRotate.disableRotation()
       map.touchPitch.disable()
       
@@ -1277,17 +1277,8 @@ map.on('load', () => {
           setDriverHeading(heading)
           setSpeed(Math.round(speed))
           
-          // Smooth camera follow ONLY during active navigation (not when idle/exploring)
-          if (mapRef.current && navigatingRef.current && !routeOverviewRef.current) {
-            mapRef.current.easeTo({ 
-              center: [lng, lat], 
-              bearing: heading, 
-              pitch: viewMode === '3d' ? 65 : 0, 
-              zoom: speed > 30 ? 16 : 17,
-              duration: speed > 15 ? 600 : 1000,
-              easing: (t: number) => 1 - Math.pow(1 - t, 3) 
-            })
-          }
+          // Auto-follow disabled - rider manually recenters using buttons
+          // Map stays focused on delivery destination, not constantly following driver
         },
         (err) => { /* Silent fail - will retry on next interval */ }, 
         { enableHighAccuracy: true, maximumAge: 0, timeout: 4000 }
@@ -2197,9 +2188,9 @@ router.refresh()
         geometry,
       })
 
-      // Instant camera: jump straight to driver position, ready immediately
-      const driverCenter: [number, number] = routeStart
-      m.jumpTo({ center: driverCenter, zoom: 17, pitch: viewMode === '3d' ? 65 : 0, bearing: viewMode === '3d' ? startBearing : 0 })
+      // Instant camera: jump to DELIVERY DESTINATION, not driver position
+      const deliveryCenter: [number, number] = routeEnd
+      m.jumpTo({ center: deliveryCenter, zoom: 16, pitch: 0, bearing: 0 })
       setNavReady(true)
     } catch (err: any) {
   alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
