@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
 // CORS headers for Chrome extension
@@ -6,7 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Credentials': 'true',
 }
 
 // Handle preflight requests
@@ -17,7 +16,6 @@ export async function OPTIONS() {
 // POST - Login from extension
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
     const body = await request.json()
     const { email, password } = body
 
@@ -31,7 +29,13 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Attempt to sign in
+    // Create Supabase admin client for direct auth
+    const supabase = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    // Attempt to sign in using admin client
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -47,7 +51,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    if (!data.user) {
+    if (!data.user || !data.session) {
       return NextResponse.json({ 
         success: false, 
         error: 'Login failed' 
@@ -74,10 +78,15 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Return the access token for extension to use
     return NextResponse.json({
       success: true,
       message: 'Logged in successfully',
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresAt: data.session.expires_at,
       user: {
+        id: data.user.id,
         name: profile.name,
         role: profile.role
       }

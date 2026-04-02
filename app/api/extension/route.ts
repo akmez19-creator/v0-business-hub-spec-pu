@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -7,7 +8,6 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Credentials': 'true',
 }
 
 // Handle preflight requests
@@ -15,15 +15,46 @@ export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders })
 }
 
+// Helper to get user from Authorization header token
+async function getUserFromToken(request: NextRequest) {
+  const authHeader = request.headers.get('Authorization')
+  if (!authHeader?.startsWith('Bearer ')) {
+    return null
+  }
+  
+  const token = authHeader.replace('Bearer ', '')
+  
+  const supabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) {
+    return null
+  }
+  
+  return { user, supabase }
+}
+
 // GET - Fetch products and regions for extension
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    // Try token auth first
+    const tokenAuth = await getUserFromToken(request)
     
-    // Check authentication
-    const { data: { user } } = await supabase.auth.getUser()
+    let user = tokenAuth?.user
+    let supabase = tokenAuth?.supabase
     
+    // Fallback to cookie auth
     if (!user) {
+      const cookieSupabase = await createClient()
+      const { data: { user: cookieUser } } = await cookieSupabase.auth.getUser()
+      user = cookieUser
+      supabase = cookieSupabase as any
+    }
+    
+    if (!user || !supabase) {
       return NextResponse.json({ 
         authenticated: false,
         products: [],
@@ -67,12 +98,21 @@ export async function GET() {
 // POST - Create a new order from extension
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    // Try token auth first
+    const tokenAuth = await getUserFromToken(request)
     
-    // Check if user is authenticated
-    const { data: { user } } = await supabase.auth.getUser()
+    let user = tokenAuth?.user
+    let supabase = tokenAuth?.supabase
     
+    // Fallback to cookie auth
     if (!user) {
+      const cookieSupabase = await createClient()
+      const { data: { user: cookieUser } } = await cookieSupabase.auth.getUser()
+      user = cookieUser
+      supabase = cookieSupabase as any
+    }
+    
+    if (!user || !supabase) {
       return NextResponse.json({ 
         success: false, 
         error: 'Not authenticated. Please login to Akmez first.' 

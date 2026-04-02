@@ -5,28 +5,44 @@ const content = document.getElementById('content');
 let products = [];
 let regions = [];
 let cart = {};
+let authToken = null;
 
 // Initialize
 async function init() {
   try {
-    // Fetch products and regions
-    const res = await fetch(`${API_BASE}/api/extension`, {
-      credentials: 'include'
-    });
-    const data = await res.json();
+    // Check for saved token
+    const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry', 'userName']);
     
-    if (!data.authenticated) {
+    if (stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000) {
+      authToken = stored.authToken;
+      
+      // Fetch products and regions with token
+      const res = await fetch(`${API_BASE}/api/extension`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+      const data = await res.json();
+      
+      if (!data.authenticated) {
+        // Token invalid, clear and show login
+        await chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName']);
+        authToken = null;
+        showLoginRequired();
+        return;
+      }
+      
+      products = data.products || [];
+      regions = data.regions || [];
+      
+      // Load saved form data
+      chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => {
+        renderForm(saved);
+      });
+    } else {
+      // No valid token, show login
       showLoginRequired();
-      return;
     }
-    
-    products = data.products || [];
-    regions = data.regions || [];
-    
-    // Load saved data from storage
-    chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => {
-      renderForm(saved);
-    });
   } catch (err) {
     console.error('Init error:', err);
     showLoginRequired();
@@ -74,13 +90,20 @@ function showLoginRequired() {
       const res = await fetch(`${API_BASE}/api/extension/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ email, password })
       });
       
       const data = await res.json();
       
-      if (data.success) {
+      if (data.success && data.accessToken) {
+        // Store token in chrome storage
+        await chrome.storage.local.set({
+          authToken: data.accessToken,
+          tokenExpiry: data.expiresAt,
+          userName: data.user?.name || ''
+        });
+        authToken = data.accessToken;
+        
         // Re-initialize to load products
         init();
       } else {
@@ -304,8 +327,10 @@ async function submitOrder() {
   try {
     const res = await fetch(`${API_BASE}/api/extension`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
       body: JSON.stringify(orderData)
     });
     
