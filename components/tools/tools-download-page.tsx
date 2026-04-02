@@ -39,8 +39,9 @@ export function ToolsDownloadPage() {
     setDownloading(true)
     try {
       const link = document.createElement('a')
-      link.href = '/api/download-extension'
-      link.download = 'akmez-selector-extension.zip'
+      // Add timestamp to bust cache
+      link.href = '/api/download-extension?v=' + Date.now()
+      link.download = 'akmez-quick-order-v2.5.0.zip'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
