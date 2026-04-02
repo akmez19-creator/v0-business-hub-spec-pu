@@ -85,7 +85,6 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
       counts[id] = deliveries.filter(d => d.rider_id === id).length
     })
     counts['unassigned'] = deliveries.filter(d => !d.rider_id).length
-    console.log("[v0] riderDeliveryCounts:", counts, "total deliveries:", deliveries.length)
     return counts
   }, [deliveries, riderEntries])
 

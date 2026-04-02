@@ -1281,7 +1281,7 @@ map.on('load', () => {
   // ����══════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
-  // ══════════════════════════════════════════════════════════════════════════
+  // ═════════════════════���════════════════════════════════════════════════════
   const gpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   const startContinuousTracking = useCallback(() => {
@@ -3221,7 +3221,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                   >
                     All Riders ({allDeliveriesCount ?? deliveries.length})
                   </button>
-                  {Object.entries(riderColorMap).map(([id, { name, color }]) => {
+                  {Object.entries(riderColorMap).filter(([id]) => id !== 'unassigned').map(([id, { name, color }]) => {
                     const count = riderDeliveryCounts[id] ?? deliveries.filter(d => d.riderId === id).length
                     return (
                       <button
@@ -3234,6 +3234,16 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                       </button>
                     )
                   })}
+                  {/* Unassigned option */}
+                  {(riderDeliveryCounts['unassigned'] ?? 0) > 0 && (
+                    <button
+                      onClick={() => { setSelectedRiderFilter('unassigned'); setRiderDropdownOpen(false) }}
+                      className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors flex items-center gap-2 ${selectedRiderFilter === 'unassigned' ? 'bg-white/5' : 'text-white/80'}`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-gray-500" />
+                      <span className={selectedRiderFilter === 'unassigned' ? 'text-amber-400' : ''}>Unassigned ({riderDeliveryCounts['unassigned'] ?? 0})</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>

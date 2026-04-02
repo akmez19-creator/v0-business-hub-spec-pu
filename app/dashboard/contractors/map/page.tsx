@@ -53,7 +53,6 @@ export default async function ContractorMapPage() {
   const riders = allRiders || []
   const riderIds = riders.map(r => r.id)
   const riderMap = Object.fromEntries(riders.map(r => [r.id, r.name]))
-  console.log("[v0] Contractor map - riders:", riders.length, "riderMap:", riderMap)
   const riderJuicePolicies: Record<string, string> = Object.fromEntries(riders.map(r => [r.id, (r as any).juice_policy || 'rider']))
 
   // Find the rider that matches the contractor (contractor is also a rider)
