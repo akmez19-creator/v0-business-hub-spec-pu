@@ -178,6 +178,7 @@ interface DeliveryMapProps {
   customTemplates?: Record<string, string> | null
   riderColorMap?: Record<string, { color: string; name: string }>
   riderJuicePolicies?: Record<string, string>
+  deviceType?: 'apple' | 'android'
   }
 
 interface RouteInfo {
@@ -288,6 +289,7 @@ export function DeliveryMap({
   userName, userPhoto, centerLat, centerLng,
   warehouseLat, warehouseLng, warehouseName = 'Warehouse',
   className, backHref, customTemplates, riderColorMap, riderJuicePolicies = {},
+  deviceType = 'apple',
 }: DeliveryMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const miniMapRef = useRef<HTMLDivElement>(null)
@@ -505,16 +507,30 @@ export function DeliveryMap({
     setTimeout(() => { mapRef.current?.resize() }, 100)
   }, [isFullscreen])
 
-  // ── Auto-fullscreen after 2 seconds when map is visible and not in fullscreen ──
+  // ── Auto-fullscreen after 2 seconds based on device type ──
+  // Apple (iPhone): auto-fullscreen after 2s 
+  // Android: no auto-fullscreen (user triggers manually)
   useEffect(() => {
+    if (deviceType !== 'apple') return // Only auto-fullscreen for Apple devices
     if (isFullscreen) return // Already in fullscreen
+    
     const timer = setTimeout(() => {
       if (!isFullscreen) {
-        toggleFullscreen()
+        const el = mapContainerParentRef.current
+        if (!el) return
+        // CSS-based fullscreen
+        el.style.position = 'fixed'
+        el.style.inset = '0'
+        el.style.zIndex = '9999'
+        el.style.width = '100vw'
+        el.style.height = '100dvh'
+        document.body.style.overflow = 'hidden'
+        setIsFullscreen(true)
+        setTimeout(() => { mapRef.current?.resize() }, 100)
       }
     }, 2000)
     return () => clearTimeout(timer)
-  }, []) // Only run once on mount
+  }, [deviceType]) // Only run once on mount based on device type
 
   // ── Open in external nav app (Google Maps / Waze) ──
   const openExternalNav = useCallback((pin: DeliveryPin, app: 'google' | 'waze') => {
@@ -681,7 +697,7 @@ export function DeliveryMap({
       
       // ══════════════════════════════════════════════════════════════════════════
       // SMOOTH INTERACTION SETTINGS
-      // ═══════════════════════════════════��══�����══════��════════════════════════════
+      // ═══════════════════════════════════���══�����══════��════════════════════════════
       map.touchZoomRotate.disableRotation()
       map.touchPitch.disable()
       

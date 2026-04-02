@@ -53,9 +53,10 @@ interface MapPageContentProps {
   customTemplates?: Record<string, string> | null
   defaultRiderId?: string | null
   riderJuicePolicies?: Record<string, string>
+  deviceType?: 'apple' | 'android'
 }
 
-export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, userName, userPhoto, warehouseLat, warehouseLng, warehouseName, customTemplates, defaultRiderId, riderJuicePolicies = {} }: MapPageContentProps) {
+export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, userName, userPhoto, warehouseLat, warehouseLng, warehouseName, customTemplates, defaultRiderId, riderJuicePolicies = {}, deviceType = 'apple' }: MapPageContentProps) {
   const router = useRouter()
   // Default to the contractor's own rider if they have multiple riders
   const [selectedRiderId, setSelectedRiderId] = useState<string>(
@@ -382,7 +383,7 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
         </div>
       )}
       {(exactPins.length > 0 || regions.length > 0) ? (
-        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} />
+        <DeliveryMap deliveries={exactPins} regions={regions} regionGroups={regionGroups} apiKey={apiKey} userName={userName} userPhoto={userPhoto} warehouseLat={warehouseLat} warehouseLng={warehouseLng} warehouseName={warehouseName} className="h-full w-full" backHref="/dashboard/contractors" customTemplates={customTemplates} riderColorMap={hasMultipleRiders ? riderColorMapData : undefined} riderJuicePolicies={riderJuicePolicies} deviceType={deviceType} />
       ) : (
         <div className="h-full flex items-center justify-center">
           <div className="text-center space-y-3 px-6">

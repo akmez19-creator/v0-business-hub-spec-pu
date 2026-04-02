@@ -75,6 +75,8 @@ export function ContractorSettingsContent({ profile, contractor }: ContractorSet
   const [savingWarehouse, setSavingWarehouse] = useState(false)
   const [capturingGps, setCapturingGps] = useState(false)
   const [warehouseMsg, setWarehouseMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [deviceType, setDeviceType] = useState<'apple' | 'android'>(contractor.device_type || 'apple')
+  const [savingDevice, setSavingDevice] = useState(false)
   const router = useRouter()
 
   const hasNic = !!contractor.nic_number || nicJustSaved
@@ -188,6 +190,17 @@ export function ContractorSettingsContent({ profile, contractor }: ContractorSet
       router.refresh()
     }
     setSavingWarehouse(false)
+  }
+
+  async function handleSaveDeviceType(type: 'apple' | 'android') {
+    setDeviceType(type)
+    setSavingDevice(true)
+    const supabase = createClient()
+    await supabase
+      .from('contractors')
+      .update({ device_type: type })
+      .eq('id', contractor.id)
+    setSavingDevice(false)
   }
 
   function handleNicSave(data: NicData) {
@@ -562,6 +575,65 @@ export function ContractorSettingsContent({ profile, contractor }: ContractorSet
             </button>
           </div>
         )}
+      </div>
+
+      {/* Device Type Selection */}
+      <div className="rounded-2xl border border-border/40 bg-card overflow-hidden">
+        <div className="p-4 border-b border-border/30">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+              <Phone className="w-5 h-5 text-blue-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground">Device Type</p>
+              <p className="text-[11px] text-muted-foreground">Choose your phone type for map display</p>
+            </div>
+            {savingDevice && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+        <div className="p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => handleSaveDeviceType('apple')}
+              className={cn(
+                "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                deviceType === 'apple'
+                  ? "border-blue-500 bg-blue-500/10"
+                  : "border-border/40 bg-muted/30 hover:bg-muted/60"
+              )}
+            >
+              <span className="text-2xl"></span>
+              <span className={cn(
+                "text-xs font-semibold",
+                deviceType === 'apple' ? "text-blue-600" : "text-muted-foreground"
+              )}>iPhone</span>
+              {deviceType === 'apple' && (
+                <span className="text-[9px] text-blue-500 font-medium">Selected</span>
+              )}
+            </button>
+            <button
+              onClick={() => handleSaveDeviceType('android')}
+              className={cn(
+                "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                deviceType === 'android'
+                  ? "border-emerald-500 bg-emerald-500/10"
+                  : "border-border/40 bg-muted/30 hover:bg-muted/60"
+              )}
+            >
+              <span className="text-2xl">🤖</span>
+              <span className={cn(
+                "text-xs font-semibold",
+                deviceType === 'android' ? "text-emerald-600" : "text-muted-foreground"
+              )}>Android</span>
+              {deviceType === 'android' && (
+                <span className="text-[9px] text-emerald-500 font-medium">Selected</span>
+              )}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center mt-3">
+            This affects how the map fullscreen behaves on your device
+          </p>
+        </div>
       </div>
 
       {/* Pickup Location (read-only — managed by admin) */}

@@ -128,6 +128,7 @@ export default async function ContractorMapPage() {
       customTemplates={profile.message_templates || null}
       defaultRiderId={contractorAsRider?.id || null}
       riderJuicePolicies={riderJuicePolicies}
+      deviceType={contractor.device_type || 'apple'}
     />
   )
 }
