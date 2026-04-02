@@ -179,6 +179,8 @@ interface DeliveryMapProps {
   riderColorMap?: Record<string, { color: string; name: string }>
   riderJuicePolicies?: Record<string, string>
   deviceType?: 'apple' | 'android'
+  allDeliveriesCount?: number
+  riderDeliveryCounts?: Record<string, number>
   }
 
 interface RouteInfo {
@@ -290,6 +292,8 @@ export function DeliveryMap({
   warehouseLat, warehouseLng, warehouseName = 'Warehouse',
   className, backHref, customTemplates, riderColorMap, riderJuicePolicies = {},
   deviceType = 'apple',
+  allDeliveriesCount,
+  riderDeliveryCounts = {},
 }: DeliveryMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const miniMapRef = useRef<HTMLDivElement>(null)
@@ -3204,8 +3208,8 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                 <Users className="w-4 h-4 text-amber-400" />
                 <span className="text-xs font-semibold">
                   {selectedRiderFilter === 'all' 
-                    ? `All (${deliveries.length})`
-                    : `${riderColorMap[selectedRiderFilter]?.name || 'Rider'} (${deliveries.filter(d => d.riderId === selectedRiderFilter).length})`}
+                    ? `All (${allDeliveriesCount ?? deliveries.length})`
+                    : `${riderColorMap[selectedRiderFilter]?.name || 'Rider'} (${riderDeliveryCounts[selectedRiderFilter] ?? deliveries.filter(d => d.riderId === selectedRiderFilter).length})`}
                 </span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${riderDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -3215,10 +3219,10 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     onClick={() => { setSelectedRiderFilter('all'); setRiderDropdownOpen(false) }}
                     className={`w-full text-left px-3 py-2.5 text-xs hover:bg-white/10 transition-colors ${selectedRiderFilter === 'all' ? 'text-amber-400 bg-white/5' : 'text-white/80'}`}
                   >
-                    All Riders ({deliveries.length})
+                    All Riders ({allDeliveriesCount ?? deliveries.length})
                   </button>
                   {Object.entries(riderColorMap).map(([id, { name, color }]) => {
-                    const count = deliveries.filter(d => d.riderId === id).length
+                    const count = riderDeliveryCounts[id] ?? deliveries.filter(d => d.riderId === id).length
                     return (
                       <button
                         key={id}
