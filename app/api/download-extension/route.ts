@@ -244,7 +244,7 @@ document.body.appendChild(highlight);
 
 // Inject styles
 const style=document.createElement('style');
-style.textContent=\`
+style.textContent=`
 #akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(249,115,22,0.5);font-family:sans-serif;transition:transform .15s}
 #akmez-toggle:hover{transform:scale(1.1)}
 #akmez-toggle span{color:white;font-size:24px;font-weight:800}
@@ -314,7 +314,7 @@ style.textContent=\`
 #akmez-sel{position:fixed;display:none;background:#1a1a2e;border:1px solid #f97316;border-radius:6px;padding:4px;gap:4px;z-index:2147483648;font-family:sans-serif}
 #akmez-sel button{background:rgba(249,115,22,0.2);border:none;color:#f97316;padding:4px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer}
 #akmez-sel button:hover{background:rgba(249,115,22,0.4)}
-\`;
+`;
 document.head.appendChild(style);
 
 // Drag functionality
@@ -352,17 +352,7 @@ async function loadData(){
 
 function renderForm(){
   const body=document.getElementById('akmez-body');
-  body.innerHTML=\`
-    <div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Name <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-name" class="akmez-input" placeholder="Customer name"><button class="akmez-paste" data-t="ak-name">PASTE</button></div></div></div>
-    <div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Contact 1 <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-c1" class="akmez-input" placeholder="Phone"><button class="akmez-paste" data-t="ak-c1">PASTE</button></div></div><div class="akmez-field"><div class="akmez-label">Contact 2</div><div class="akmez-input-wrap"><input type="text" id="ak-c2" class="akmez-input" placeholder="Optional"><button class="akmez-paste" data-t="ak-c2">PASTE</button></div></div></div>
-    <div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Region <span class="req">*</span></div><select id="ak-region" class="akmez-select"><option value="">Select...</option>\${regions.map(r=>'<option value="'+r+'">'+r+'</option>').join('')}</select></div><div class="akmez-field"><div class="akmez-label">Date</div><input type="date" id="ak-date" class="akmez-input" value="\${new Date().toISOString().split('T')[0]}"></div></div>
-    <div class="akmez-section">Products (tap to add)</div>
-    <input type="text" class="akmez-search" id="ak-search" placeholder="Search products...">
-    <div class="akmez-products" id="ak-products">\${products.map(p=>'<div class="akmez-product" data-id="'+p.id+'" data-name="'+p.name+'" data-price="'+p.price+'" title="'+p.name+' - Rs '+p.price+'">'+p.name+'</div>').join('')}</div>
-    <div class="akmez-cart" id="ak-cart" style="display:none"><span class="items">0</span><span class="total">Rs 0</span></div>
-    <div id="ak-err" class="akmez-error" style="display:none"></div>
-    <button class="akmez-submit" id="ak-submit" disabled>Create Order</button>
-  \`;
+  body.innerHTML='<div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Name <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-name" class="akmez-input" placeholder="Customer name"><button class="akmez-paste" data-t="ak-name">PASTE</button></div></div></div><div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Contact 1 <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-c1" class="akmez-input" placeholder="Phone"><button class="akmez-paste" data-t="ak-c1">PASTE</button></div></div><div class="akmez-field"><div class="akmez-label">Contact 2</div><div class="akmez-input-wrap"><input type="text" id="ak-c2" class="akmez-input" placeholder="Optional"><button class="akmez-paste" data-t="ak-c2">PASTE</button></div></div></div><div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Region <span class="req">*</span></div><select id="ak-region" class="akmez-select"><option value="">Select...</option>'+regions.map(r=>'<option value="'+r+'">'+r+'</option>').join('')+'</select></div><div class="akmez-field"><div class="akmez-label">Date</div><input type="date" id="ak-date" class="akmez-input" value="'+new Date().toISOString().split('T')[0]+'"></div></div><div class="akmez-section">Products (tap to add)</div><input type="text" class="akmez-search" id="ak-search" placeholder="Search products..."><div class="akmez-products" id="ak-products">'+products.map(p=>'<div class="akmez-product" data-id="'+p.id+'" data-name="'+p.name+'" data-price="'+p.price+'" title="'+p.name+' - Rs '+p.price+'">'+p.name+'</div>').join('')+'</div><div class="akmez-cart" id="ak-cart" style="display:none"><span class="items">0</span><span class="total">Rs 0</span></div><div id="ak-err" class="akmez-error" style="display:none"></div><button class="akmez-submit" id="ak-submit" disabled>Create Order</button>';
   document.getElementById('ak-search').addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('.akmez-product').forEach(el=>el.classList.toggle('hidden',q&&!el.dataset.name.toLowerCase().includes(q)));});
   body.querySelectorAll('.akmez-paste').forEach(b=>b.onclick=async()=>{try{const t=await navigator.clipboard.readText();document.getElementById(b.dataset.t).value=t.trim();updateSubmit();}catch(e){}});
   body.querySelectorAll('.akmez-product').forEach(el=>{
@@ -419,21 +409,7 @@ async function submit(){
 }
 
 function showSettings(){
-  document.getElementById('akmez-body').innerHTML=\`
-    <div class="akmez-settings">
-      <h3>Settings</h3>
-      <div class="row">
-        <label>Customer Name Auto-fill Selector</label>
-        <input type="text" id="ak-selector" placeholder="Click 'Pick Element' or enter CSS selector" value="\${settings.nameSelector||''}">
-        <div class="hint">Current: \${settings.nameSelector||'Not set'}</div>
-      </div>
-      <div class="btns">
-        <button class="pick-btn" id="ak-pick">Pick Element</button>
-        <button class="cancel-btn" id="ak-cancel">Cancel</button>
-        <button class="save-btn" id="ak-save">Save</button>
-      </div>
-    </div>
-  \`;
+  document.getElementById('akmez-body').innerHTML='<div class="akmez-settings"><h3>Settings</h3><div class="row"><label>Customer Name Auto-fill Selector</label><input type="text" id="ak-selector" placeholder="Click Pick Element or enter CSS selector" value="'+(settings.nameSelector||'')+'"><div class="hint">Current: '+(settings.nameSelector||'Not set')+'</div></div><div class="btns"><button class="pick-btn" id="ak-pick">Pick Element</button><button class="cancel-btn" id="ak-cancel">Cancel</button><button class="save-btn" id="ak-save">Save</button></div></div>';
   document.getElementById('ak-pick').onclick=startPicker;
   document.getElementById('ak-cancel').onclick=()=>renderForm();
   document.getElementById('ak-save').onclick=async()=>{
