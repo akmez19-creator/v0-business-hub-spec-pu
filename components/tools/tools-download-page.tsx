@@ -1,10 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Download, Chrome, MousePointer2, Clipboard, Keyboard, CheckCircle2, ArrowRight, Zap } from 'lucide-react'
+import { Download, Chrome, MousePointer2, Clipboard, Keyboard, CheckCircle2, ArrowRight, Zap, RefreshCw } from 'lucide-react'
+
+// Current extension version - update this when making changes
+const EXTENSION_VERSION = '2.2.0'
+const LAST_UPDATED = '2026-04-02'
 
 export function ToolsDownloadPage() {
   const [downloading, setDownloading] = useState(false)
@@ -50,8 +54,14 @@ export function ToolsDownloadPage() {
             <div className="mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center text-white text-3xl font-bold shadow-xl shadow-orange-500/30 mb-4">
               A
             </div>
-            <CardTitle className="text-2xl">Akmez Quick Copy</CardTitle>
-            <CardDescription>Chrome Extension v1.0.0</CardDescription>
+            <CardTitle className="text-2xl">Akmez Quick Order</CardTitle>
+            <CardDescription className="space-y-1">
+              <span className="block">Chrome Extension</span>
+              <span className="inline-flex items-center gap-2">
+                <Badge variant="outline" className="text-orange-500 border-orange-500/50">v{EXTENSION_VERSION}</Badge>
+                <span className="text-xs text-muted-foreground">Updated: {LAST_UPDATED}</span>
+              </span>
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Features */}
@@ -85,6 +95,21 @@ export function ToolsDownloadPage() {
                   Copy captured data with one click and paste directly into Akmez
                 </p>
               </div>
+            </div>
+
+            {/* Version Info */}
+            <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/20">
+              <h4 className="font-semibold text-orange-500 mb-2 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" />
+                What&apos;s New in v{EXTENSION_VERSION}
+              </h4>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>- Embedded login form (no need to open separate tab)</li>
+                <li>- Product search filter for quick access</li>
+                <li>- Settings panel with auto-fill CSS selector</li>
+                <li>- Compact 3-column product grid layout</li>
+                <li>- Token-based authentication for better security</li>
+              </ul>
             </div>
 
             {/* Download Button */}
