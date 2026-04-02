@@ -670,7 +670,7 @@ export function DeliveryMap({
       
       // ══════════════════════════════════════════════════════════════════════════
       // SMOOTH INTERACTION SETTINGS
-      // ══════════════════════════════════════�����══════��════════════════════════════
+      // ═══════════════════════════════════��══�����══════��════════════════════════════
       map.touchZoomRotate.disableRotation()
       map.touchPitch.disable()
       
@@ -1406,6 +1406,47 @@ map.on('load', () => {
     }
   }, [])
 
+  // Helper to redraw route line after reorder
+  const redrawRouteForStops = useCallback(async (stops: OptimizedStop[]) => {
+    const map = mapRef.current
+    if (!map || stops.length < 1) return
+    
+    try {
+      // Build coordinates: driver position + all stops in new order
+      const coords = stops.map(s => ({ lng: s.pin.lng, lat: s.pin.lat }))
+      let startCoord = coords[0]
+      if (driverLocation) startCoord = driverLocation
+      else if (warehouseLng && warehouseLat) startCoord = { lng: warehouseLng, lat: warehouseLat }
+      
+      const res = await fetch('/api/optimize-route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coordinates: [startCoord, ...coords],
+          profile: 'mapbox/driving-traffic',
+          roundtrip: false,
+          source: 'first',
+          // Skip optimization - just get directions for this exact order
+          steps: false
+        })
+      })
+      const data = await res.json()
+      
+      // Update route line on map
+      if (data.geometry) {
+        ;['opt-route-casing', 'opt-route-line', 'opt-route-core'].forEach(l => { try { if (map.getLayer(l)) map.removeLayer(l) } catch {} })
+        try { if (map.getSource('opt-route')) map.removeSource('opt-route') } catch {}
+        map.addSource('opt-route', { type: 'geojson', data: { type: 'Feature', geometry: data.geometry, properties: {} } } as any)
+        const lo: any = { 'line-join': 'round', 'line-cap': 'round' }
+        try { map.addLayer({ id: 'opt-route-casing', type: 'line', source: 'opt-route', layout: lo, paint: { 'line-color': '#422006', 'line-width': 10, 'line-opacity': 0.8 } } as any) } catch {}
+        try { map.addLayer({ id: 'opt-route-line', type: 'line', source: 'opt-route', layout: lo, paint: { 'line-color': '#fbbf24', 'line-width': 6, 'line-opacity': 0.9 } } as any) } catch {}
+        try { map.addLayer({ id: 'opt-route-core', type: 'line', source: 'opt-route', layout: lo, paint: { 'line-color': '#fef3c7', 'line-width': 2, 'line-opacity': 0.7 } } as any) } catch {}
+      }
+    } catch (err) {
+      console.error('[v0] Failed to redraw route:', err)
+    }
+  }, [driverLocation, warehouseLng, warehouseLat])
+
   const handleDragEnd = useCallback((e: React.DragEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     if ('currentTarget' in e && e.currentTarget) {
       (e.currentTarget as HTMLDivElement).style.opacity = '1'
@@ -1422,12 +1463,14 @@ map.on('load', () => {
             setTimeout(() => startNavigationRef.current(newCurrentPin), 100)
           }
         }
+        // Redraw route line with new order
+        setTimeout(() => redrawRouteForStops(reordered), 50)
         return reordered
       })
     }
     setDragIdx(null)
     setDragOverIdx(null)
-  }, [dragIdx, dragOverIdx, currentStopIdx, multiStopNav, navigating])
+  }, [dragIdx, dragOverIdx, currentStopIdx, multiStopNav, navigating, redrawRouteForStops])
 
   const handleDragOver = useCallback((idx: number, e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
