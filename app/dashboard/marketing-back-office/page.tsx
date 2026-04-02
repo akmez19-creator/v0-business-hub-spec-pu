@@ -58,6 +58,22 @@ export default async function MarketingBackOfficePage() {
     .order('created_at', { ascending: false })
     .limit(10)
 
+  // Get products for Quick Order FAB
+  const { data: products } = await supabase
+    .from('products')
+    .select('id, name, price')
+    .eq('is_active', true)
+    .order('name', { ascending: true })
+
+  // Get regions for Quick Order FAB
+  const { data: localities } = await supabase
+    .from('localities')
+    .select('name')
+    .eq('is_active', true)
+    .order('name', { ascending: true })
+
+  const regions = (localities || []).map(l => l.name)
+
   return (
     <MarketingBackOfficeDashboard
       profile={profile}
@@ -68,6 +84,8 @@ export default async function MarketingBackOfficePage() {
         totalStock,
       }}
       recentDeliveries={recentDeliveries || []}
+      products={products || []}
+      regions={regions}
     />
   )
 }

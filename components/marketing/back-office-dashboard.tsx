@@ -12,6 +12,13 @@ import {
   Download,
 } from 'lucide-react'
 import type { Profile } from '@/lib/types'
+import { QuickOrderFab } from './quick-order-fab'
+
+interface Product {
+  id: string
+  name: string
+  price: string
+}
 
 interface Props {
   profile: Profile
@@ -29,6 +36,8 @@ interface Props {
     delivery_date: string | null
     products: string | null
   }[]
+  products?: Product[]
+  regions?: string[]
 }
 
 const fmtRs = (n: number) => `Rs ${n.toLocaleString()}`
@@ -42,13 +51,22 @@ const statusColors: Record<string, string> = {
   cms: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
 }
 
-export function MarketingBackOfficeDashboard({ profile, stats, recentDeliveries }: Props) {
+export function MarketingBackOfficeDashboard({ profile, stats, recentDeliveries, products = [], regions = [] }: Props) {
   const deliveryRate = stats.todayDeliveries > 0 
     ? Math.round((stats.deliveredCount / stats.todayDeliveries) * 100) 
     : 0
 
   return (
     <div className="min-h-screen bg-background p-6">
+      {/* Quick Order FAB */}
+      {products.length > 0 && (
+        <QuickOrderFab
+          userId={profile.id}
+          products={products}
+          regions={regions}
+        />
+      )}
+
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Marketing Back Office</h1>
