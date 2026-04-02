@@ -410,7 +410,7 @@ export function DeliveryMap({
   const [currentStopIdx, setCurrentStopIdx] = useState(0)
   const [optimizing, setOptimizing] = useState(false)
   const [multiStopNav, setMultiStopNav] = useState(false)
-  const [navPanelExpanded, setNavPanelExpanded] = useState(true) // Shutter state for nav panel
+  const [navPanelExpanded, setNavPanelExpanded] = useState(false) // Shutter state - collapsed by default for better map view
   const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
   const [sendingMsg, setSendingMsg] = useState<string | null>(null)
@@ -2197,9 +2197,9 @@ router.refresh()
         geometry,
       })
 
-      // Instant camera: jump straight to DESTINATION (first delivery), not driver position
-      const destCenter: [number, number] = routeEnd
-      m.jumpTo({ center: destCenter, zoom: 16, pitch: viewMode === '3d' ? 50 : 0, bearing: 0 })
+      // Instant camera: jump straight to driver position, ready immediately
+      const driverCenter: [number, number] = routeStart
+      m.jumpTo({ center: driverCenter, zoom: 17, pitch: viewMode === '3d' ? 65 : 0, bearing: viewMode === '3d' ? startBearing : 0 })
       setNavReady(true)
     } catch (err: any) {
   alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
