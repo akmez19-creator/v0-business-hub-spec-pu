@@ -15,7 +15,7 @@ async function init() {
     });
     const data = await res.json();
     
-    if (!data.success) {
+    if (!data.authenticated) {
       showLoginRequired();
       return;
     }
@@ -36,11 +36,78 @@ async function init() {
 function showLoginRequired() {
   content.innerHTML = `
     <div class="login-msg">
-      <p>Please login to Akmez first to create orders from this extension.</p>
-      <button class="login-btn" id="loginBtn">Open Akmez Login</button>
+      <div class="title">Sign in to Akmez</div>
+      <div class="login-error" id="loginError"></div>
+      <div class="form-group">
+        <input type="email" id="loginEmail" placeholder="Email address" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+      </div>
+      <button class="login-btn" id="loginBtn">Sign In</button>
+      <div class="login-divider"><span>or</span></div>
+      <a class="open-login-link" id="openLoginLink">Open Akmez login page</a>
     </div>
   `;
-  document.getElementById('loginBtn').addEventListener('click', () => {
+  
+  const loginBtn = document.getElementById('loginBtn');
+  const loginError = document.getElementById('loginError');
+  const emailInput = document.getElementById('loginEmail');
+  const passwordInput = document.getElementById('loginPassword');
+  
+  // Handle login
+  loginBtn.addEventListener('click', async () => {
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+    
+    if (!email || !password) {
+      loginError.textContent = 'Please enter email and password';
+      loginError.style.display = 'block';
+      return;
+    }
+    
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Signing in...';
+    loginError.style.display = 'none';
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/extension/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        // Re-initialize to load products
+        init();
+      } else {
+        loginError.textContent = data.error || 'Invalid email or password';
+        loginError.style.display = 'block';
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Sign In';
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      loginError.textContent = 'Connection error. Please try again.';
+      loginError.style.display = 'block';
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Sign In';
+    }
+  });
+  
+  // Enter key to submit
+  passwordInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') loginBtn.click();
+  });
+  emailInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') passwordInput.focus();
+  });
+  
+  // Open login page link
+  document.getElementById('openLoginLink').addEventListener('click', () => {
     chrome.tabs.create({ url: `${API_BASE}/auth/sign-in` });
   });
 }
