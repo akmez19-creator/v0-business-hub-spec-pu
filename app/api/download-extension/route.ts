@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -199,9 +199,38 @@ const POPUP_HTML = `<!DOCTYPE html>
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 4px;
-      max-height: 120px;
+      max-height: 150px;
       overflow-y: auto;
       padding: 2px;
+      transition: max-height 0.3s ease;
+    }
+    .products-grid.expanded {
+      max-height: 350px;
+    }
+    .expand-toggle {
+      width: 100%;
+      background: rgba(249, 115, 22, 0.1);
+      border: 1px solid rgba(249, 115, 22, 0.2);
+      border-radius: 6px;
+      padding: 6px;
+      color: #f97316;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .expand-toggle:hover {
+      background: rgba(249, 115, 22, 0.2);
+    }
+    .expand-toggle .arrow {
+      transition: transform 0.3s ease;
+    }
+    .expand-toggle.expanded .arrow {
+      transform: rotate(180deg);
     }
     .product-btn {
       position: relative;
@@ -451,7 +480,7 @@ function showLoginRequired() {
 }
 
 function renderForm(saved = {}) {
-  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (click to add)</div><input type="text" class="product-search" id="productSearch" placeholder="Search products..."><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" title="' + p.name + ' - Rs ' + p.price + '">' + p.name + '</button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
+  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (tap to add) - ' + products.length + ' items</div><input type="text" class="product-search" id="productSearch" placeholder="Search products..."><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" title="' + p.name + ' - Rs ' + p.price + '">' + p.name + '</button>').join('') + '</div><button class="expand-toggle" id="expandToggle"><span class="arrow">▼</span> Show More</button><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
   document.getElementById('productSearch').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('.product-btn').forEach(btn => { btn.classList.toggle('hidden', q && !btn.dataset.name.toLowerCase().includes(q)); }); });
   document.querySelectorAll('.paste-btn').forEach(btn => { btn.addEventListener('click', async () => { const t = btn.dataset.target; document.getElementById(t).value = (await navigator.clipboard.readText()).trim(); updateSubmitState(); }); });
   document.querySelectorAll('.product-btn').forEach(btn => {
@@ -462,6 +491,7 @@ function renderForm(saved = {}) {
   document.getElementById('contact1').addEventListener('input', updateSubmitState);
   document.getElementById('region').addEventListener('change', updateSubmitState);
   document.getElementById('submitBtn').addEventListener('click', submitOrder);
+  document.getElementById('expandToggle').addEventListener('click', function() { const grid = document.getElementById('productsGrid'); const isExpanded = grid.classList.toggle('expanded'); this.classList.toggle('expanded', isExpanded); this.innerHTML = isExpanded ? '<span class="arrow">▲</span> Show Less' : '<span class="arrow">▼</span> Show More'; });
   tryAutoFill();
 }
 
