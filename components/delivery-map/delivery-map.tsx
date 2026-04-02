@@ -342,6 +342,9 @@ export function DeliveryMap({
   const [riderDropdownOpen, setRiderDropdownOpen] = useState(false)
   const [selectedRiderFilter, setSelectedRiderFilter] = useState<string>('all')
   
+  // Debug rider dropdown data
+  console.log("[v0] DeliveryMap rider data:", { allDeliveriesCount, riderDeliveryCounts, riderColorMap: riderColorMap ? Object.keys(riderColorMap) : null })
+  
   // Fetch region coordinate overrides on mount
   useEffect(() => {
     fetch('/api/region-overrides')
@@ -1281,7 +1284,7 @@ map.on('load', () => {
   // ����══════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
-  // ═════════════════════���════════════════════════════════════════════════════
+  // ═════════════════════�����════════════════════════════════════════════════════
   const gpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   const startContinuousTracking = useCallback(() => {
