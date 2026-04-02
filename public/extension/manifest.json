@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardWrite", "clipboardRead", "storage"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],

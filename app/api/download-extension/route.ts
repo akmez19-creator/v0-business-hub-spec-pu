@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -92,7 +92,149 @@ const POPUP_HTML = `<!DOCTYPE html>
       justify-content: center;
     }
     .header-btn:hover { background: rgba(255,255,255,0.3); }
+    .main-tabs {
+      display: flex;
+      background: rgba(0,0,0,0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .main-tab {
+      flex: 1;
+      padding: 10px 12px;
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+      border-bottom: 2px solid transparent;
+    }
+    .main-tab:hover { color: #fff; background: rgba(255,255,255,0.05); }
+    .main-tab.active {
+      color: #f97316;
+      border-bottom-color: #f97316;
+      background: rgba(249, 115, 22, 0.1);
+    }
+    .main-tab .tab-icon { font-size: 14px; }
     .content { padding: 14px; }
+    .worktime-panel {
+      text-align: center;
+    }
+    .worktime-status {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .worktime-status.clocked-out {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .worktime-status .status-dot {
+      width: 12px;
+      height: 12px;
+      background: #10b981;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 8px;
+      animation: pulse 2s infinite;
+    }
+    .worktime-status.clocked-out .status-dot {
+      background: #ef4444;
+      animation: none;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .worktime-status .status-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: #10b981;
+    }
+    .worktime-status.clocked-out .status-text { color: #ef4444; }
+    .worktime-timer {
+      font-size: 42px;
+      font-weight: 700;
+      font-family: 'SF Mono', monospace;
+      color: #fff;
+      margin: 20px 0;
+      letter-spacing: 2px;
+    }
+    .worktime-info {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 20px;
+    }
+    .worktime-info span { color: #f97316; font-weight: 600; }
+    .pin-input-wrap {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .pin-digit {
+      width: 48px;
+      height: 56px;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      text-align: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      outline: none;
+    }
+    .pin-digit:focus { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
+    .clock-btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.15s;
+    }
+    .clock-btn.clock-in {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+    .clock-btn.clock-out {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+    }
+    .clock-btn:hover { transform: scale(1.02); }
+    .clock-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .worktime-history {
+      margin-top: 20px;
+      text-align: left;
+    }
+    .worktime-history h4 {
+      font-size: 11px;
+      color: #f97316;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 11px;
+    }
+    .history-item .date { color: #888; }
+    .history-item .hours { color: #10b981; font-weight: 600; }
     .login-msg {
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.1);
@@ -435,6 +577,10 @@ const POPUP_HTML = `<!DOCTYPE html>
       <button class="header-btn" id="closeBtn" title="Close">×</button>
     </div>
   </div>
+  <div class="main-tabs">
+    <button class="main-tab active" id="ordersTab" data-tab="orders"><span class="tab-icon">📋</span> Orders</button>
+    <button class="main-tab" id="worktimeTab" data-tab="worktime"><span class="tab-icon">⏱</span> Working Time</button>
+  </div>
   <div class="content" id="content">
     <div class="loading" id="loading">
       <div class="spinner"></div>
@@ -452,9 +598,28 @@ let regions = [];
 let cart = {};
 let authToken = null;
 let settings = { nameSelector: '' };
+let currentTab = 'orders';
+let clockedIn = false;
+let clockInTime = null;
+let timerInterval = null;
 
 document.getElementById('settingsBtn').addEventListener('click', showSettings);
 document.getElementById('closeBtn').addEventListener('click', () => window.close());
+
+// Tab switching
+document.querySelectorAll('.main-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentTab = tab.dataset.tab;
+    if (currentTab === 'orders') {
+      if (authToken) { chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); }); }
+      else { showLoginRequired(); }
+    } else {
+      renderWorktime();
+    }
+  });
+});
 
 async function init() {
   try {
@@ -500,6 +665,101 @@ function showLoginRequired() {
   });
   pwd.addEventListener('keypress', (e) => { if (e.key === 'Enter') btn.click(); });
   document.getElementById('openLogin').addEventListener('click', () => { chrome.tabs.create({ url: API_BASE + '/auth/sign-in' }); });
+}
+
+function renderWorktime() {
+  chrome.storage.local.get(['clockedIn', 'clockInTime', 'worktimeHistory'], (stored) => {
+    clockedIn = stored.clockedIn || false;
+    clockInTime = stored.clockInTime || null;
+    const history = stored.worktimeHistory || [];
+    
+    content.innerHTML = '<div class="worktime-panel">' +
+      '<div class="worktime-status ' + (clockedIn ? '' : 'clocked-out') + '">' +
+        '<span class="status-dot"></span>' +
+        '<span class="status-text">' + (clockedIn ? 'Currently Working' : 'Not Clocked In') + '</span>' +
+      '</div>' +
+      '<div class="worktime-timer" id="worktimeTimer">' + (clockedIn ? formatTime(Date.now() - clockInTime) : '00:00:00') + '</div>' +
+      '<div class="worktime-info">' + (clockedIn ? 'Started at <span>' + new Date(clockInTime).toLocaleTimeString() + '</span>' : 'Enter PIN to clock in') + '</div>' +
+      '<div class="pin-input-wrap">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin1">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin2">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin3">' +
+        '<input type="password" class="pin-digit" maxlength="1" id="pin4">' +
+      '</div>' +
+      '<div class="login-error" id="pinError" style="display:none;"></div>' +
+      '<button class="clock-btn ' + (clockedIn ? 'clock-out' : 'clock-in') + '" id="clockBtn">' + (clockedIn ? 'Clock Out' : 'Clock In') + '</button>' +
+      (history.length > 0 ? '<div class="worktime-history"><h4>Recent Sessions</h4>' + history.slice(0, 3).map(h => '<div class="history-item"><span class="date">' + h.date + '</span><span class="hours">' + h.hours + '</span></div>').join('') + '</div>' : '') +
+    '</div>';
+    
+    if (clockedIn) { startTimer(); }
+    
+    // PIN input handling
+    const pins = [document.getElementById('pin1'), document.getElementById('pin2'), document.getElementById('pin3'), document.getElementById('pin4')];
+    pins.forEach((pin, i) => {
+      pin.addEventListener('input', () => {
+        if (pin.value.length === 1 && i < 3) pins[i + 1].focus();
+      });
+      pin.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && pin.value === '' && i > 0) pins[i - 1].focus();
+      });
+    });
+    
+    document.getElementById('clockBtn').addEventListener('click', async () => {
+      const pin = pins.map(p => p.value).join('');
+      const err = document.getElementById('pinError');
+      if (pin.length !== 4) { err.textContent = 'Enter 4-digit PIN'; err.style.display = 'block'; return; }
+      
+      const btn = document.getElementById('clockBtn');
+      btn.disabled = true;
+      
+      try {
+        const res = await fetch(API_BASE + '/api/extension/worktime', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken },
+          body: JSON.stringify({ pin, action: clockedIn ? 'clock-out' : 'clock-in' })
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (clockedIn) {
+            // Clock out
+            const duration = formatTime(Date.now() - clockInTime);
+            const historyEntry = { date: new Date().toLocaleDateString(), hours: duration };
+            const newHistory = [historyEntry, ...history].slice(0, 10);
+            await chrome.storage.local.set({ clockedIn: false, clockInTime: null, worktimeHistory: newHistory });
+            clearInterval(timerInterval);
+          } else {
+            // Clock in
+            await chrome.storage.local.set({ clockedIn: true, clockInTime: Date.now() });
+          }
+          renderWorktime();
+        } else {
+          err.textContent = data.error || 'Invalid PIN';
+          err.style.display = 'block';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        err.textContent = 'Connection error';
+        err.style.display = 'block';
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function formatTime(ms) {
+  const secs = Math.floor(ms / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const timer = document.getElementById('worktimeTimer');
+    if (timer && clockInTime) { timer.textContent = formatTime(Date.now() - clockInTime); }
+  }, 1000);
 }
 
 function renderForm(saved = {}) {
