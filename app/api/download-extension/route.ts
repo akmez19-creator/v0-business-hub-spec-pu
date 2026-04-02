@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -904,7 +904,7 @@ export async function GET() {
 return new NextResponse(zipContent, {
   headers: {
   'Content-Type': 'application/zip',
-  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.5.0.zip"',
+  'Content-Disposition': 'attachment; filename="akmez-quick-order-v2.6.0.zip"',
   'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
   'Pragma': 'no-cache',
   'Expires': '0',
