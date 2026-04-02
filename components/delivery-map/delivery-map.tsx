@@ -670,7 +670,7 @@ export function DeliveryMap({
       
       // ══════════════════════════════════════════════════════════════════════════
       // SMOOTH INTERACTION SETTINGS
-      // ══════════════════════════════════════════════════════════════════════════
+      // ═════════════════════════════════════════════��════════════════════════════
       map.touchZoomRotate.disableRotation()
       map.touchPitch.disable()
       
@@ -2197,9 +2197,9 @@ router.refresh()
         geometry,
       })
 
-      // Instant camera: jump straight to driver position, ready immediately
-      const driverCenter: [number, number] = routeStart
-      m.jumpTo({ center: driverCenter, zoom: 17, pitch: viewMode === '3d' ? 65 : 0, bearing: viewMode === '3d' ? startBearing : 0 })
+      // Instant camera: jump straight to DESTINATION (first delivery), not driver position
+      const destCenter: [number, number] = routeEnd
+      m.jumpTo({ center: destCenter, zoom: 16, pitch: viewMode === '3d' ? 50 : 0, bearing: 0 })
       setNavReady(true)
     } catch (err: any) {
   alert('Navigation error: ' + (err?.message || 'Unknown') + '. Allow location permission.')
