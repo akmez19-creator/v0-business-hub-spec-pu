@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -47,346 +47,117 @@ const POPUP_HTML = `<!DOCTYPE html>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 400px;
-      max-height: 600px;
+      width: 280px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
       color: #fff;
-      overflow-y: auto;
     }
     .header {
       background: linear-gradient(135deg, #f97316, #ea580c);
-      padding: 12px 14px;
+      padding: 14px 16px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      position: sticky;
-      top: 0;
-      z-index: 10;
+      gap: 12px;
     }
     .logo {
-      width: 32px;
-      height: 32px;
+      width: 36px;
+      height: 36px;
       background: rgba(255,255,255,0.2);
       border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: bold;
-      font-size: 14px;
+      font-size: 16px;
     }
-    .header-title { flex: 1; }
-    .header h1 { font-size: 14px; font-weight: 700; }
-    .header .sub { font-size: 9px; opacity: 0.8; }
-    .header-btns { display: flex; gap: 6px; }
-    .header-btn {
-      width: 28px; height: 28px;
-      background: rgba(255,255,255,0.2);
-      border: none;
-      border-radius: 6px;
-      color: white;
-      font-size: 14px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .header-btn:hover { background: rgba(255,255,255,0.3); }
-    .content { padding: 14px; }
-    .login-msg {
+    .header h1 { font-size: 15px; font-weight: 700; }
+    .header .sub { font-size: 10px; opacity: 0.8; }
+    .content { padding: 16px; }
+    .status-card {
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 12px;
       padding: 20px;
+      text-align: center;
     }
-    .login-title { color: #fff; font-size: 14px; font-weight: 600; margin-bottom: 14px; text-align: center; }
-    .login-field { margin-bottom: 10px; }
-    .login-field input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px; color: #fff; font-size: 13px; outline: none; }
-    .login-field input:focus { border-color: #f97316; background: rgba(249,115,22,0.05); }
-    .login-field input::placeholder { color: #666; }
-    .login-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; padding: 8px; color: #fca5a5; font-size: 11px; margin-bottom: 10px; display: none; }
-    .login-btn {
-      width: 100%;
-      background: linear-gradient(135deg, #f97316, #ea580c);
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    .login-btn:hover { opacity: 0.9; }
-    .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .login-divider { display: flex; align-items: center; margin: 12px 0; color: #555; font-size: 11px; }
-    .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.1); }
-    .login-divider span { padding: 0 10px; }
-    .login-link { display: block; text-align: center; color: #f97316; font-size: 12px; cursor: pointer; }
-    .form-group { margin-bottom: 12px; }
-    .form-group label {
-      display: block;
-      font-size: 10px;
-      font-weight: 600;
-      color: #888;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 5px;
-    }
-    .form-group label .req { color: #f97316; }
-    .input-row { display: flex; gap: 8px; }
-    .input-row .form-group { flex: 1; margin-bottom: 0; }
-    input, select, textarea {
-      width: 100%;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: #fff;
-      font-size: 13px;
-      outline: none;
-      transition: all 0.15s;
-    }
-    input:focus, select:focus, textarea:focus {
-      border-color: #f97316;
-      background: rgba(249, 115, 22, 0.05);
-    }
-    input::placeholder, textarea::placeholder { color: #555; }
-    select { cursor: pointer; }
-    select option { background: #1a1a2e; color: #fff; }
-    textarea { resize: none; height: 50px; }
-    .input-wrap { position: relative; }
-    .input-wrap input { padding-right: 55px; }
-    .paste-btn {
-      position: absolute;
-      right: 6px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: rgba(249, 115, 22, 0.3);
-      border: none;
-      border-radius: 5px;
-      padding: 5px 8px;
-      color: #f97316;
-      font-size: 9px;
-      font-weight: 700;
-      cursor: pointer;
-      text-transform: uppercase;
-    }
-    .paste-btn:hover { background: rgba(249, 115, 22, 0.5); }
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: #f97316;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin: 16px 0 10px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid rgba(249, 115, 22, 0.2);
-    }
-    .product-search {
-      width: 100%;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      padding: 8px 10px;
-      color: #fff;
-      font-size: 12px;
-      outline: none;
-      margin-bottom: 8px;
-    }
-    .product-search:focus { border-color: #f97316; }
-    .product-search::placeholder { color: #555; }
-    .products-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
-      max-height: 120px;
-      overflow-y: auto;
-      padding: 2px;
-    }
-    .product-btn {
-      position: relative;
-      padding: 6px 8px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      color: #fff;
-      font-size: 10px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
-      text-align: left;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-    }
-    .product-btn:hover {
-      background: rgba(249, 115, 22, 0.15);
-      border-color: #f97316;
-    }
-    .product-btn.selected {
-      background: linear-gradient(135deg, #f97316, #ea580c);
-      border-color: #f97316;
-    }
-    .product-btn.hidden { display: none; }
-    .product-btn .qty-badge {
-      position: absolute;
-      top: -4px;
-      right: -4px;
-      min-width: 14px;
-      height: 14px;
-      background: #10b981;
-      border-radius: 7px;
-      font-size: 8px;
-      font-weight: 700;
+    .status-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 0 3px;
+      font-size: 24px;
+      margin: 0 auto 12px;
     }
-    .product-btn .price { display: none; }
-    .settings-panel {
-      background: rgba(0,0,0,0.3);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 10px;
-      padding: 14px;
-      margin-bottom: 14px;
-    }
-    .settings-panel h3 { font-size: 12px; margin-bottom: 10px; color: #f97316; }
-    .settings-row { margin-bottom: 10px; }
-    .settings-row label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
-    .settings-row input[type="text"] {
+    .status-icon.online { background: rgba(16,185,129,0.2); }
+    .status-icon.offline { background: rgba(239,68,68,0.2); }
+    .status-text { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .status-sub { font-size: 11px; color: #888; margin-bottom: 16px; }
+    .login-form { margin-top: 12px; }
+    .login-field { margin-bottom: 10px; }
+    .login-field input {
       width: 100%;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      padding: 8px 10px;
-      color: #fff;
-      font-size: 12px;
-      outline: none;
-    }
-    .settings-row input:focus { border-color: #f97316; }
-    .settings-hint { font-size: 10px; color: #666; margin-top: 4px; }
-    .settings-btns { display: flex; gap: 8px; margin-top: 12px; }
-    .settings-btns button {
-      flex: 1;
-      padding: 8px;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      border: none;
-    }
-    .settings-save { background: #f97316; color: white; }
-    .settings-cancel { background: rgba(255,255,255,0.1); color: #888; }
-    .cart-summary {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.3);
       border-radius: 8px;
       padding: 10px 12px;
-      margin-top: 10px;
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-    }
-    .cart-summary .items { color: #6ee7b7; }
-    .cart-summary .total { color: #10b981; font-weight: 700; }
-    .submit-btn {
-      width: 100%;
-      padding: 14px;
-      background: linear-gradient(135deg, #10b981, #059669);
-      border: none;
-      border-radius: 10px;
-      color: white;
+      color: #fff;
       font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      margin-top: 14px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      transition: all 0.15s;
+      outline: none;
     }
-    .submit-btn:hover { transform: scale(1.02); box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3); }
-    .submit-btn:active { transform: scale(0.98); }
-    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-    .success-msg {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 12px;
-      padding: 24px;
-      text-align: center;
-    }
-    .success-msg .checkmark { font-size: 48px; margin-bottom: 12px; }
-    .success-msg h3 { color: #10b981; margin-bottom: 8px; font-size: 16px; }
-    .success-msg p { color: #6ee7b7; font-size: 12px; margin-bottom: 16px; }
-    .success-msg .new-order-btn {
-      background: rgba(16, 185, 129, 0.2);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #10b981;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .error-msg {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      border-radius: 8px;
-      padding: 10px;
+    .login-field input:focus { border-color: #f97316; }
+    .login-field input::placeholder { color: #555; }
+    .login-error {
+      background: rgba(239,68,68,0.1);
+      border-radius: 6px;
+      padding: 8px;
       color: #fca5a5;
       font-size: 11px;
       margin-bottom: 10px;
+      display: none;
     }
-    .loading {
-      text-align: center;
-      padding: 50px 20px;
-      color: #888;
-    }
-    .spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid rgba(249, 115, 22, 0.2);
-      border-top-color: #f97316;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 14px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .user-info {
-      background: rgba(139, 92, 246, 0.1);
+    .btn {
+      width: 100%;
+      padding: 10px 16px;
+      border: none;
       border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 11px;
-      color: #a5b4fc;
-      margin-bottom: 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
     }
-    .user-info .dot {
-      width: 8px;
-      height: 8px;
-      background: #10b981;
-      border-radius: 50%;
+    .btn-primary { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: rgba(255,255,255,0.1); color: #888; margin-top: 8px; }
+    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+    .hint {
+      font-size: 10px;
+      color: #666;
+      text-align: center;
+      margin-top: 12px;
+      line-height: 1.4;
+    }
+    .version {
+      font-size: 9px;
+      color: #444;
+      text-align: center;
+      margin-top: 12px;
     }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="logo">A</div>
-    <div class="header-title">
-      <h1>Quick Order</h1>
-      <div class="sub">Create orders from anywhere</div>
-    </div>
-    <div class="header-btns">
-      <button class="header-btn" id="settingsBtn" title="Settings">⚙</button>
-      <button class="header-btn" id="closeBtn" title="Close">×</button>
+    <div>
+      <h1>Akmez Quick Order</h1>
+      <div class="sub">v2.3.0</div>
     </div>
   </div>
   <div class="content" id="content">
-    <div class="loading" id="loading">
-      <div class="spinner"></div>
-      <p>Connecting to Akmez...</p>
+    <div class="status-card">
+      <div class="status-icon offline">?</div>
+      <div class="status-text">Checking...</div>
     </div>
   </div>
   <script src="popup.js"></script>
@@ -395,43 +166,38 @@ const POPUP_HTML = `<!DOCTYPE html>
 
 const POPUP_JS = `const API_BASE = 'https://www.akmez.tech';
 const content = document.getElementById('content');
-let products = [];
-let regions = [];
-let cart = {};
-let authToken = null;
-let settings = { nameSelector: '' };
-
-document.getElementById('settingsBtn').addEventListener('click', showSettings);
-document.getElementById('closeBtn').addEventListener('click', () => window.close());
 
 async function init() {
   try {
-    const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry', 'settings']);
-    if (stored.settings) settings = stored.settings;
+    const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry', 'userName']);
     if (stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000) {
-      authToken = stored.authToken;
-      const res = await fetch(API_BASE + '/api/extension', { headers: { 'Authorization': 'Bearer ' + authToken } });
+      // Verify token is still valid
+      const res = await fetch(API_BASE + '/api/extension', { headers: { 'Authorization': 'Bearer ' + stored.authToken } });
       const data = await res.json();
-      if (!data.authenticated) { await chrome.storage.local.remove(['authToken', 'tokenExpiry']); authToken = null; showLoginRequired(); return; }
-      products = data.products || [];
-      regions = data.regions || [];
-      chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
-    } else { showLoginRequired(); }
-  } catch (err) { showLoginRequired(); }
+      if (data.authenticated) {
+        showLoggedIn(stored.userName || 'Agent');
+      } else {
+        await chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName']);
+        showLoginForm();
+      }
+    } else {
+      showLoginForm();
+    }
+  } catch (err) {
+    showLoginForm();
+  }
 }
 
-function showSettings() {
-  content.innerHTML = '<div class="settings-panel"><h3>Settings</h3><div class="settings-row"><label>Customer Name CSS Selector</label><input type="text" id="nameSelector" placeholder="e.g. .customer-name, #name-field" value="' + (settings.nameSelector || '') + '"><div class="settings-hint">Enter a CSS selector to auto-fill customer name from the page (e.g. span[dir=auto], .x1lliihq)</div></div><div class="settings-btns"><button class="settings-cancel" id="cancelSettings">Cancel</button><button class="settings-save" id="saveSettings">Save</button></div></div>';
-  document.getElementById('cancelSettings').addEventListener('click', () => { chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); }); });
-  document.getElementById('saveSettings').addEventListener('click', async () => {
-    settings.nameSelector = document.getElementById('nameSelector').value.trim();
-    await chrome.storage.local.set({ settings });
-    chrome.storage.local.get(['name', 'c1', 'c2'], (saved) => { renderForm(saved); });
+function showLoggedIn(name) {
+  content.innerHTML = '<div class="status-card"><div class="status-icon online">✓</div><div class="status-text">Logged In</div><div class="status-sub">' + name + '</div><button class="btn btn-secondary" id="logoutBtn">Sign Out</button></div><div class="hint">Click the orange <b>A</b> button on any webpage to create orders</div><div class="version">v2.3.0</div>';
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName']);
+    showLoginForm();
   });
 }
 
-function showLoginRequired() {
-  content.innerHTML = '<div class="login-msg"><div class="login-title">Sign in to Akmez</div><div class="login-error" id="loginError"></div><div class="login-field"><input type="email" id="loginEmail" placeholder="Email address"></div><div class="login-field"><input type="password" id="loginPassword" placeholder="Password"></div><button class="login-btn" id="loginBtn">Sign In</button><div class="login-divider"><span>or</span></div><a class="login-link" id="openLogin">Open Akmez in browser</a></div>';
+function showLoginForm() {
+  content.innerHTML = '<div class="status-card"><div class="status-icon offline">!</div><div class="status-text">Not Logged In</div><div class="status-sub">Sign in to create orders</div><div class="login-form"><div class="login-error" id="loginError"></div><div class="login-field"><input type="email" id="loginEmail" placeholder="Email"></div><div class="login-field"><input type="password" id="loginPassword" placeholder="Password"></div><button class="btn btn-primary" id="loginBtn">Sign In</button></div></div><div class="hint">Click the orange <b>A</b> button on any webpage to create orders</div><div class="version">v2.3.0</div>';
   const btn = document.getElementById('loginBtn'), err = document.getElementById('loginError'), email = document.getElementById('loginEmail'), pwd = document.getElementById('loginPassword');
   btn.addEventListener('click', async () => {
     if (!email.value.trim() || !pwd.value) { err.textContent = 'Enter email and password'; err.style.display = 'block'; return; }
@@ -440,101 +206,309 @@ function showLoginRequired() {
       const res = await fetch(API_BASE + '/api/extension/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.value.trim(), password: pwd.value }) });
       const data = await res.json();
       if (data.success && data.accessToken) {
-        await chrome.storage.local.set({ authToken: data.accessToken, tokenExpiry: data.expiresAt });
-        authToken = data.accessToken;
-        init();
+        await chrome.storage.local.set({ authToken: data.accessToken, tokenExpiry: data.expiresAt, userName: data.user?.name || '' });
+        showLoggedIn(data.user?.name || 'Agent');
       } else { err.textContent = data.error || 'Invalid credentials'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign In'; }
     } catch (e) { err.textContent = 'Connection error'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign In'; }
   });
   pwd.addEventListener('keypress', (e) => { if (e.key === 'Enter') btn.click(); });
-  document.getElementById('openLogin').addEventListener('click', () => { chrome.tabs.create({ url: API_BASE + '/auth/sign-in' }); });
-}
-
-function renderForm(saved = {}) {
-  content.innerHTML = '<div class="user-info"><span class="dot"></span>Connected' + (settings.nameSelector ? ' - Auto-fill ON' : '') + '</div><div id="errorMsg" class="error-msg" style="display:none;"></div><div class="form-group"><label>Name <span class="req">*</span></label><div class="input-wrap"><input type="text" id="customerName" placeholder="Customer name" value="' + (saved.name || '') + '"><button class="paste-btn" data-target="customerName">Paste</button></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Contact 1 <span class="req">*</span></label><div class="input-wrap"><input type="text" id="contact1" placeholder="Phone" value="' + (saved.c1 || '') + '"><button class="paste-btn" data-target="contact1">Paste</button></div></div><div class="form-group"><label>Contact 2</label><div class="input-wrap"><input type="text" id="contact2" placeholder="Optional" value="' + (saved.c2 || '') + '"><button class="paste-btn" data-target="contact2">Paste</button></div></div></div><div class="input-row" style="margin-bottom:10px"><div class="form-group"><label>Region <span class="req">*</span></label><select id="region"><option value="">Select...</option>' + regions.map(r => '<option value="' + r + '">' + r + '</option>').join('') + '</select></div><div class="form-group"><label>Date</label><input type="date" id="deliveryDate" value="' + new Date().toISOString().split('T')[0] + '"></div></div><div class="section-title">Products (click to add)</div><input type="text" class="product-search" id="productSearch" placeholder="Search products..."><div class="products-grid" id="productsGrid">' + products.map(p => '<button class="product-btn" data-id="' + p.id + '" data-name="' + p.name + '" data-price="' + p.price + '" title="' + p.name + ' - Rs ' + p.price + '">' + p.name + '</button>').join('') + '</div><div class="cart-summary" id="cartSummary" style="display:none;"><span class="items" id="cartItems">0</span><span class="total" id="cartTotal">Rs 0</span></div><div class="form-group" style="margin-top:10px"><label>Notes</label><textarea id="notes" placeholder="Optional..."></textarea></div><button class="submit-btn" id="submitBtn" disabled>Create Order</button>';
-  document.getElementById('productSearch').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('.product-btn').forEach(btn => { btn.classList.toggle('hidden', q && !btn.dataset.name.toLowerCase().includes(q)); }); });
-  document.querySelectorAll('.paste-btn').forEach(btn => { btn.addEventListener('click', async () => { const t = btn.dataset.target; document.getElementById(t).value = (await navigator.clipboard.readText()).trim(); updateSubmitState(); }); });
-  document.querySelectorAll('.product-btn').forEach(btn => {
-    btn.addEventListener('click', () => { const id = btn.dataset.id, name = btn.dataset.name, price = parseFloat(btn.dataset.price) || 0; if (!cart[id]) cart[id] = { name, price, qty: 0 }; cart[id].qty++; updateUI(); });
-    btn.addEventListener('contextmenu', (e) => { e.preventDefault(); const id = btn.dataset.id; if (cart[id] && cart[id].qty > 0) { cart[id].qty--; if (cart[id].qty === 0) delete cart[id]; updateUI(); } });
-  });
-  document.getElementById('customerName').addEventListener('input', updateSubmitState);
-  document.getElementById('contact1').addEventListener('input', updateSubmitState);
-  document.getElementById('region').addEventListener('change', updateSubmitState);
-  document.getElementById('submitBtn').addEventListener('click', submitOrder);
-  tryAutoFill();
-}
-
-function tryAutoFill() {
-  if (!settings.nameSelector) return;
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (!tabs[0]) return;
-    chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: (sel) => { const el = document.querySelector(sel); return el ? el.textContent.trim() : null; }, args: [settings.nameSelector] }, (results) => {
-      if (results && results[0] && results[0].result) { document.getElementById('customerName').value = results[0].result; updateSubmitState(); }
-    });
-  });
-}
-
-function updateUI() { updateProductButtons(); updateCartSummary(); updateSubmitState(); }
-
-function updateProductButtons() {
-  document.querySelectorAll('.product-btn').forEach(btn => {
-    const id = btn.dataset.id, item = cart[id];
-    btn.classList.toggle('selected', item && item.qty > 0);
-    const badge = btn.querySelector('.qty-badge'); if (badge) badge.remove();
-    if (item && item.qty > 0) { const b = document.createElement('span'); b.className = 'qty-badge'; b.textContent = item.qty; btn.appendChild(b); }
-  });
-}
-
-function updateCartSummary() {
-  const s = document.getElementById('cartSummary'), items = Object.values(cart), tQty = items.reduce((a, i) => a + i.qty, 0), tAmt = items.reduce((a, i) => a + i.price * i.qty, 0);
-  if (tQty > 0) { s.style.display = 'flex'; document.getElementById('cartItems').textContent = tQty + ' item' + (tQty > 1 ? 's' : ''); document.getElementById('cartTotal').textContent = 'Rs ' + tAmt.toLocaleString(); }
-  else { s.style.display = 'none'; }
-}
-
-function updateSubmitState() {
-  const name = document.getElementById('customerName').value.trim(), c1 = document.getElementById('contact1').value.trim(), reg = document.getElementById('region').value, hasP = Object.values(cart).some(i => i.qty > 0);
-  document.getElementById('submitBtn').disabled = !name || !c1 || !reg || !hasP;
-}
-
-async function submitOrder() {
-  const btn = document.getElementById('submitBtn'), err = document.getElementById('errorMsg');
-  btn.disabled = true; btn.textContent = 'Creating...'; err.style.display = 'none';
-  const data = { customerName: document.getElementById('customerName').value.trim(), contact1: document.getElementById('contact1').value.trim(), contact2: document.getElementById('contact2').value.trim(), region: document.getElementById('region').value, deliveryDate: document.getElementById('deliveryDate').value, notes: document.getElementById('notes').value.trim(), products: Object.values(cart).filter(i => i.qty > 0).map(i => ({ name: i.name, price: i.price, qty: i.qty })) };
-  try {
-    const res = await fetch(API_BASE + '/api/extension', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken }, body: JSON.stringify(data) });
-    const r = await res.json();
-    if (r.success) { showSuccess(r.createdBy); } else { err.textContent = r.error || 'Failed'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Create Order'; }
-  } catch (e) { err.textContent = 'Connection error'; err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Create Order'; }
-}
-
-function showSuccess(by) {
-  content.innerHTML = '<div class="success-msg"><div class="checkmark">✓</div><h3>Order Created!</h3><p>Order created' + (by ? ' by ' + by : '') + '</p><button class="new-order-btn" id="newOrderBtn">Create Another</button></div>';
-  cart = {}; chrome.storage.local.remove(['name', 'c1', 'c2']);
-  document.getElementById('newOrderBtn').addEventListener('click', () => { renderForm(); });
 }
 
 init();`
 
 const CONTENT_JS = `const API_BASE='https://www.akmez.tech';
-const toggleBtn=document.createElement('div');toggleBtn.id='akmez-toggle';toggleBtn.innerHTML='<span>A</span>';document.body.appendChild(toggleBtn);
-const widget=document.createElement('div');widget.id='akmez-widget';widget.innerHTML='<div class="akmez-header" id="akmez-drag"><div class="akmez-logo">A</div><span>Quick Order</span><button class="akmez-close" id="akmez-close">×</button></div><div class="akmez-body" id="akmez-body"><div class="akmez-loading"><div class="akmez-spinner"></div></div></div>';widget.style.display='none';document.body.appendChild(widget);
-const style=document.createElement('style');style.textContent='#akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(249,115,22,0.5);font-family:sans-serif;}#akmez-toggle:hover{transform:scale(1.1);}#akmez-toggle span{color:white;font-size:24px;font-weight:800;}#akmez-widget{position:fixed;top:60px;right:20px;width:360px;background:#0f0f1a;border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;}.akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:10px 12px;display:flex;align-items:center;gap:8px;cursor:move;border-radius:14px 14px 0 0;user-select:none;}.akmez-logo{width:26px;height:26px;background:rgba(255,255,255,0.2);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;}.akmez-header span{flex:1;font-weight:700;font-size:13px;}.akmez-close{width:24px;height:24px;border:none;border-radius:6px;background:rgba(255,255,255,0.2);color:white;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}.akmez-close:hover{background:rgba(255,255,255,0.3);}.akmez-body{padding:10px;}.akmez-loading{text-align:center;padding:30px;color:#888;}.akmez-spinner{width:28px;height:28px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto;}@keyframes spin{to{transform:rotate(360deg);}}.akmez-row{display:flex;gap:6px;margin-bottom:8px;}.akmez-field{flex:1;}.akmez-label{font-size:9px;color:#666;text-transform:uppercase;margin-bottom:3px;}.akmez-label .req{color:#f97316;}.akmez-input-wrap{position:relative;}.akmez-input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 44px 8px 8px;color:white;font-size:12px;outline:none;}.akmez-input:focus{border-color:#f97316;}.akmez-input::placeholder{color:#444;}.akmez-paste{position:absolute;right:3px;top:50%;transform:translateY(-50%);background:#f97316;border:none;border-radius:4px;padding:5px 8px;color:white;font-size:8px;font-weight:700;cursor:pointer;}.akmez-paste:hover{background:#ea580c;}.akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px;color:white;font-size:12px;outline:none;}.akmez-select:focus{border-color:#f97316;}.akmez-select option{background:#1a1a2e;}.akmez-section{font-size:9px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px solid rgba(249,115,22,0.2);}.akmez-products{display:flex;flex-wrap:wrap;gap:5px;}.akmez-product{position:relative;padding:6px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:white;font-size:10px;font-weight:500;cursor:pointer;}.akmez-product:hover{border-color:#f97316;background:rgba(249,115,22,0.1);}.akmez-product.sel{background:#f97316;border-color:#f97316;}.akmez-product .badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;background:#10b981;border-radius:8px;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;}.akmez-product .price{font-size:8px;opacity:0.7;display:block;}.akmez-cart{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:6px 10px;margin-top:8px;display:flex;justify-content:space-between;font-size:11px;}.akmez-cart .items{color:#6ee7b7;}.akmez-cart .total{color:#10b981;font-weight:700;}.akmez-submit{width:100%;padding:10px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:8px;color:white;font-size:12px;font-weight:700;cursor:pointer;margin-top:10px;text-transform:uppercase;}.akmez-submit:hover{box-shadow:0 4px 15px rgba(16,185,129,0.3);}.akmez-submit:disabled{opacity:0.5;cursor:not-allowed;}.akmez-success{text-align:center;padding:15px;}.akmez-success .check{font-size:36px;color:#10b981;}.akmez-success h3{color:#10b981;margin:8px 0 4px;font-size:14px;}.akmez-success p{color:#6ee7b7;font-size:11px;margin-bottom:12px;}.akmez-success button{background:rgba(16,185,129,0.2);border:1px solid #10b981;color:#10b981;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:11px;}.akmez-error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:8px;color:#fca5a5;font-size:10px;margin-bottom:8px;}.akmez-login{text-align:center;padding:15px;}.akmez-login p{color:#fca5a5;margin-bottom:12px;font-size:11px;}.akmez-login button{background:#f97316;border:none;color:white;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;font-size:11px;}#akmez-sel{display:none;position:fixed;z-index:2147483647;background:#1a1a2e;padding:4px;border-radius:8px;border:2px solid #f97316;gap:3px;font-family:sans-serif;}#akmez-sel button{padding:6px 10px;border:none;border-radius:5px;background:#f97316;color:white;font-size:10px;font-weight:700;cursor:pointer;}#akmez-sel button:hover{background:#ea580c;}.akmez-toast{position:fixed;bottom:80px;right:20px;background:#10b981;color:white;padding:10px 16px;border-radius:8px;font-family:sans-serif;font-size:12px;font-weight:600;z-index:2147483647;animation:fadeIn .3s;}@keyframes fadeIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}';document.head.appendChild(style);
-let products=[],regions=[],cart={},isDragging=false,dragOffset={x:0,y:0};
+let products=[],regions=[],cart={},settings={nameSelector:''},authToken=null,isPicking=false;
+
+// Create UI elements
+const toggleBtn=document.createElement('div');
+toggleBtn.id='akmez-toggle';
+toggleBtn.innerHTML='<span>A</span>';
+document.body.appendChild(toggleBtn);
+
+const widget=document.createElement('div');
+widget.id='akmez-widget';
+widget.innerHTML='<div class="akmez-header" id="akmez-drag"><div class="akmez-logo">A</div><span class="akmez-title">Quick Order</span><div class="akmez-header-btns"><button class="akmez-hbtn" id="akmez-settings" title="Settings">⚙</button><button class="akmez-hbtn" id="akmez-close" title="Close">×</button></div></div><div class="akmez-body" id="akmez-body"><div class="akmez-loading"><div class="akmez-spinner"></div></div></div>';
+widget.style.display='none';
+document.body.appendChild(widget);
+
+const picker=document.createElement('div');
+picker.id='akmez-picker';
+picker.innerHTML='<div class="picker-msg">Click on any element to select it for auto-fill</div><button id="picker-cancel">Cancel</button>';
+picker.style.display='none';
+document.body.appendChild(picker);
+
+const highlight=document.createElement('div');
+highlight.id='akmez-highlight';
+highlight.style.display='none';
+document.body.appendChild(highlight);
+
+// Inject styles
+const style=document.createElement('style');
+style.textContent=\`
+#akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(249,115,22,0.5);font-family:sans-serif;transition:transform .15s}
+#akmez-toggle:hover{transform:scale(1.1)}
+#akmez-toggle span{color:white;font-size:24px;font-weight:800}
+#akmez-widget{position:fixed;top:60px;right:20px;width:380px;max-height:90vh;background:#0f0f1a;border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden}
+.akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:10px 12px;display:flex;align-items:center;gap:8px;cursor:move;user-select:none}
+.akmez-logo{width:26px;height:26px;background:rgba(255,255,255,0.2);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+.akmez-title{flex:1;font-weight:700;font-size:13px}
+.akmez-header-btns{display:flex;gap:4px}
+.akmez-hbtn{width:24px;height:24px;border:none;border-radius:6px;background:rgba(255,255,255,0.2);color:white;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.akmez-hbtn:hover{background:rgba(255,255,255,0.3)}
+.akmez-body{padding:12px;max-height:calc(90vh - 50px);overflow-y:auto}
+.akmez-loading{text-align:center;padding:30px;color:#888}
+.akmez-spinner{width:28px;height:28px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:akspin .8s linear infinite;margin:0 auto}
+@keyframes akspin{to{transform:rotate(360deg)}}
+.akmez-row{display:flex;gap:6px;margin-bottom:8px}
+.akmez-field{flex:1}
+.akmez-label{font-size:9px;color:#666;text-transform:uppercase;margin-bottom:3px}
+.akmez-label .req{color:#f97316}
+.akmez-input-wrap{position:relative}
+.akmez-input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 50px 8px 10px;color:white;font-size:12px;outline:none}
+.akmez-input:focus{border-color:#f97316}
+.akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 10px;color:white;font-size:12px;outline:none}
+.akmez-select option{background:#1a1a2e;color:white}
+.akmez-paste{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:rgba(249,115,22,0.3);border:none;border-radius:4px;padding:4px 6px;color:#f97316;font-size:8px;font-weight:700;cursor:pointer}
+.akmez-paste:hover{background:rgba(249,115,22,0.5)}
+.akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;margin:12px 0 6px;font-weight:600}
+.akmez-search{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 10px;color:white;font-size:11px;outline:none;margin-bottom:6px}
+.akmez-search:focus{border-color:#f97316}
+.akmez-products{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:120px;overflow-y:auto}
+.akmez-product{position:relative;padding:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:10px;cursor:pointer;text-align:left;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.akmez-product:hover{background:rgba(249,115,22,0.15);border-color:#f97316}
+.akmez-product.sel{background:linear-gradient(135deg,#f97316,#ea580c);border-color:#f97316}
+.akmez-product.hidden{display:none}
+.akmez-product .badge{position:absolute;top:-4px;right:-4px;min-width:14px;height:14px;background:#10b981;border-radius:7px;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.akmez-cart{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:6px;padding:8px 10px;margin-top:8px;display:flex;justify-content:space-between;font-size:11px}
+.akmez-cart .items{color:#6ee7b7}
+.akmez-cart .total{color:#10b981;font-weight:700}
+.akmez-error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:8px;color:#fca5a5;font-size:10px;margin-top:8px}
+.akmez-submit{width:100%;padding:10px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:8px;color:white;font-size:12px;font-weight:700;cursor:pointer;margin-top:10px;text-transform:uppercase}
+.akmez-submit:disabled{opacity:0.5;cursor:not-allowed}
+.akmez-success{text-align:center;padding:20px}
+.akmez-success .check{font-size:40px;color:#10b981}
+.akmez-success h3{color:#10b981;margin:8px 0 4px}
+.akmez-success p{color:#6ee7b7;font-size:11px;margin-bottom:12px}
+.akmez-success button{background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.3);color:#10b981;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer;font-size:11px}
+.akmez-login{text-align:center;padding:20px}
+.akmez-login p{color:#888;margin-bottom:12px;font-size:12px}
+.akmez-login button{background:linear-gradient(135deg,#f97316,#ea580c);border:none;color:white;padding:10px 20px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px}
+.akmez-settings{background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px}
+.akmez-settings h3{font-size:12px;color:#f97316;margin-bottom:10px}
+.akmez-settings .row{margin-bottom:10px}
+.akmez-settings label{display:block;font-size:10px;color:#888;margin-bottom:4px}
+.akmez-settings input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px;color:white;font-size:11px;outline:none}
+.akmez-settings input:focus{border-color:#f97316}
+.akmez-settings .hint{font-size:9px;color:#555;margin-top:4px}
+.akmez-settings .btns{display:flex;gap:6px;margin-top:12px}
+.akmez-settings .btns button{flex:1;padding:8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none}
+.akmez-settings .pick-btn{background:#8b5cf6;color:white}
+.akmez-settings .save-btn{background:#f97316;color:white}
+.akmez-settings .cancel-btn{background:rgba(255,255,255,0.1);color:#888}
+#akmez-picker{position:fixed;top:0;left:0;right:0;background:rgba(139,92,246,0.95);color:white;padding:12px;text-align:center;z-index:2147483648;font-family:sans-serif}
+.picker-msg{font-size:14px;font-weight:600;margin-bottom:8px}
+#picker-cancel{background:white;color:#8b5cf6;border:none;padding:6px 16px;border-radius:6px;font-weight:600;cursor:pointer}
+#akmez-highlight{position:fixed;pointer-events:none;border:3px solid #8b5cf6;background:rgba(139,92,246,0.2);z-index:2147483645;transition:all .1s}
+.akmez-toast{position:fixed;bottom:80px;right:20px;background:#10b981;color:white;padding:10px 16px;border-radius:8px;font-size:12px;font-weight:600;z-index:2147483648;animation:aktoast .3s}
+@keyframes aktoast{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+#akmez-sel{position:fixed;display:none;background:#1a1a2e;border:1px solid #f97316;border-radius:6px;padding:4px;gap:4px;z-index:2147483648;font-family:sans-serif}
+#akmez-sel button{background:rgba(249,115,22,0.2);border:none;color:#f97316;padding:4px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer}
+#akmez-sel button:hover{background:rgba(249,115,22,0.4)}
+\`;
+document.head.appendChild(style);
+
+// Drag functionality
+let isDragging=false,dragOffset={x:0,y:0};
 document.getElementById('akmez-drag').addEventListener('mousedown',e=>{if(e.target.closest('button'))return;isDragging=true;const r=widget.getBoundingClientRect();dragOffset={x:e.clientX-r.left,y:e.clientY-r.top};});
-document.addEventListener('mousemove',e=>{if(!isDragging)return;widget.style.left=Math.max(0,Math.min(window.innerWidth-360,e.clientX-dragOffset.x))+'px';widget.style.top=Math.max(0,Math.min(window.innerHeight-400,e.clientY-dragOffset.y))+'px';widget.style.right='auto';});
+document.addEventListener('mousemove',e=>{if(!isDragging)return;widget.style.left=Math.max(0,Math.min(window.innerWidth-380,e.clientX-dragOffset.x))+'px';widget.style.top=Math.max(0,Math.min(window.innerHeight-400,e.clientY-dragOffset.y))+'px';widget.style.right='auto';});
 document.addEventListener('mouseup',()=>isDragging=false);
+
+// Button handlers
 toggleBtn.addEventListener('click',()=>{widget.style.display=widget.style.display==='none'?'block':'none';if(widget.style.display==='block')loadData();});
 document.getElementById('akmez-close').addEventListener('click',()=>widget.style.display='none');
+document.getElementById('akmez-settings').addEventListener('click',showSettings);
+
+// Load auth token
+chrome.storage.local.get(['authToken','tokenExpiry','settings'],stored=>{
+  if(stored.authToken&&stored.tokenExpiry&&Date.now()<stored.tokenExpiry*1000)authToken=stored.authToken;
+  if(stored.settings)settings=stored.settings;
+});
+
 function toast(msg){const t=document.createElement('div');t.className='akmez-toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
-function loadData(){const body=document.getElementById('akmez-body');body.innerHTML='<div class="akmez-loading"><div class="akmez-spinner"></div></div>';chrome.runtime.sendMessage({action:'fetchData'},res=>{if(!res||!res.success){body.innerHTML='<div class="akmez-error">Connection failed - use extension popup</div>';return;}const data=res.data;if(!data.authenticated){body.innerHTML='<div class="akmez-login"><p>Log in to Akmez first</p><button id="akmez-login-btn">Open Login</button></div>';document.getElementById('akmez-login-btn').onclick=()=>window.open(API_BASE+'/auth/sign-in','_blank');return;}products=data.products||[];regions=data.regions||[];renderForm();});}
-function renderForm(){const body=document.getElementById('akmez-body');body.innerHTML='<div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Name <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-name" class="akmez-input" placeholder="Customer"><button class="akmez-paste" data-t="ak-name">PASTE</button></div></div></div><div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Contact 1 <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-c1" class="akmez-input" placeholder="Phone"><button class="akmez-paste" data-t="ak-c1">PASTE</button></div></div><div class="akmez-field"><div class="akmez-label">Contact 2</div><div class="akmez-input-wrap"><input type="text" id="ak-c2" class="akmez-input" placeholder="Phone 2"><button class="akmez-paste" data-t="ak-c2">PASTE</button></div></div></div><div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Region <span class="req">*</span></div><select id="ak-region" class="akmez-select"><option value="">Select</option>'+regions.map(r=>'<option value="'+r+'">'+r+'</option>').join('')+'</select></div><div class="akmez-field"><div class="akmez-label">Date <span class="req">*</span></div><input type="date" id="ak-date" class="akmez-input" value="'+new Date().toISOString().split('T')[0]+'"></div></div><div class="akmez-section">Products (tap to add)</div><div class="akmez-products">'+products.map(p=>'<div class="akmez-product" data-id="'+p.id+'" data-name="'+p.name+'" data-price="'+p.price+'">'+p.name+'<span class="price">Rs '+p.price+'</span></div>').join('')+'</div><div class="akmez-cart" id="ak-cart" style="display:none"><span class="items">0</span><span class="total">Rs 0</span></div><div id="ak-err" class="akmez-error" style="display:none"></div><button class="akmez-submit" id="ak-submit">Create Order</button>';body.querySelectorAll('.akmez-paste').forEach(b=>b.onclick=async()=>{try{document.getElementById(b.dataset.t).value=await navigator.clipboard.readText();}catch(e){}});body.querySelectorAll('.akmez-product').forEach(el=>el.onclick=()=>{cart[el.dataset.id]=(cart[el.dataset.id]||0)+1;updateCart();});document.getElementById('ak-submit').onclick=submit;}
-function updateCart(){const c=document.getElementById('ak-cart');const e=Object.entries(cart).filter(([,q])=>q>0);if(!e.length){c.style.display='none';return;}let qty=0,amt=0;e.forEach(([id,q])=>{qty+=q;const p=products.find(x=>x.id===id);if(p)amt+=parseFloat(p.price)*q;});c.style.display='flex';c.querySelector('.items').textContent=qty+' items';c.querySelector('.total').textContent='Rs '+amt;document.querySelectorAll('.akmez-product').forEach(el=>{const q=cart[el.dataset.id]||0;el.classList.toggle('sel',q>0);let b=el.querySelector('.badge');if(q>0){if(!b){b=document.createElement('span');b.className='badge';el.appendChild(b);}b.textContent=q;}else if(b)b.remove();});}
-function submit(){const name=document.getElementById('ak-name').value.trim();const c1=document.getElementById('ak-c1').value.trim();const c2=document.getElementById('ak-c2').value.trim();const region=document.getElementById('ak-region').value;const date=document.getElementById('ak-date').value;const err=document.getElementById('ak-err');const btn=document.getElementById('ak-submit');err.style.display='none';if(!name||!c1||!region||!date){err.textContent='Fill required fields';err.style.display='block';return;}const e=Object.entries(cart).filter(([,q])=>q>0);if(!e.length){err.textContent='Select products';err.style.display='block';return;}btn.disabled=true;btn.textContent='Creating...';const prods=e.map(([id,q])=>{const p=products.find(x=>x.id===id);return p?p.name+' x'+q:'';}).filter(Boolean).join(', ');let qty=0,amt=0;e.forEach(([id,q])=>{qty+=q;const p=products.find(x=>x.id===id);if(p)amt+=parseFloat(p.price)*q;});chrome.runtime.sendMessage({action:'createOrder',data:{customerName:name,contact1:c1,contact2:c2,region,deliveryDate:date,products:prods,qty,amount:amt}},res=>{if(!res||!res.success){err.textContent='Failed';err.style.display='block';btn.disabled=false;btn.textContent='Create Order';return;}const data=res.data;if(data.error){err.textContent=data.error;err.style.display='block';btn.disabled=false;btn.textContent='Create Order';return;}document.getElementById('akmez-body').innerHTML='<div class="akmez-success"><div class="check">✓</div><h3>Order Created!</h3><p>'+name+'</p><button id="ak-new">New Order</button></div>';document.getElementById('ak-new').onclick=()=>{cart={};renderForm();};});}
+
+async function loadData(){
+  const body=document.getElementById('akmez-body');
+  body.innerHTML='<div class="akmez-loading"><div class="akmez-spinner"></div></div>';
+  try{
+    if(!authToken){body.innerHTML='<div class="akmez-login"><p>Sign in via the extension popup first</p><button id="ak-open-popup">Open Extension</button></div>';return;}
+    const res=await fetch(API_BASE+'/api/extension',{headers:{'Authorization':'Bearer '+authToken}});
+    const data=await res.json();
+    if(!data.authenticated){body.innerHTML='<div class="akmez-login"><p>Session expired. Sign in via popup</p></div>';return;}
+    products=data.products||[];regions=data.regions||[];
+    renderForm();
+    tryAutoFill();
+  }catch(e){body.innerHTML='<div class="akmez-error">Connection failed</div>';}
+}
+
+function renderForm(){
+  const body=document.getElementById('akmez-body');
+  body.innerHTML=\`
+    <div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Name <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-name" class="akmez-input" placeholder="Customer name"><button class="akmez-paste" data-t="ak-name">PASTE</button></div></div></div>
+    <div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Contact 1 <span class="req">*</span></div><div class="akmez-input-wrap"><input type="text" id="ak-c1" class="akmez-input" placeholder="Phone"><button class="akmez-paste" data-t="ak-c1">PASTE</button></div></div><div class="akmez-field"><div class="akmez-label">Contact 2</div><div class="akmez-input-wrap"><input type="text" id="ak-c2" class="akmez-input" placeholder="Optional"><button class="akmez-paste" data-t="ak-c2">PASTE</button></div></div></div>
+    <div class="akmez-row"><div class="akmez-field"><div class="akmez-label">Region <span class="req">*</span></div><select id="ak-region" class="akmez-select"><option value="">Select...</option>\${regions.map(r=>'<option value="'+r+'">'+r+'</option>').join('')}</select></div><div class="akmez-field"><div class="akmez-label">Date</div><input type="date" id="ak-date" class="akmez-input" value="\${new Date().toISOString().split('T')[0]}"></div></div>
+    <div class="akmez-section">Products (tap to add)</div>
+    <input type="text" class="akmez-search" id="ak-search" placeholder="Search products...">
+    <div class="akmez-products" id="ak-products">\${products.map(p=>'<div class="akmez-product" data-id="'+p.id+'" data-name="'+p.name+'" data-price="'+p.price+'" title="'+p.name+' - Rs '+p.price+'">'+p.name+'</div>').join('')}</div>
+    <div class="akmez-cart" id="ak-cart" style="display:none"><span class="items">0</span><span class="total">Rs 0</span></div>
+    <div id="ak-err" class="akmez-error" style="display:none"></div>
+    <button class="akmez-submit" id="ak-submit" disabled>Create Order</button>
+  \`;
+  document.getElementById('ak-search').addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('.akmez-product').forEach(el=>el.classList.toggle('hidden',q&&!el.dataset.name.toLowerCase().includes(q)));});
+  body.querySelectorAll('.akmez-paste').forEach(b=>b.onclick=async()=>{try{const t=await navigator.clipboard.readText();document.getElementById(b.dataset.t).value=t.trim();updateSubmit();}catch(e){}});
+  body.querySelectorAll('.akmez-product').forEach(el=>{
+    el.onclick=()=>{const id=el.dataset.id;if(!cart[id])cart[id]=0;cart[id]++;updateCart();};
+    el.oncontextmenu=e=>{e.preventDefault();const id=el.dataset.id;if(cart[id]>0){cart[id]--;if(cart[id]===0)delete cart[id];}updateCart();};
+  });
+  document.getElementById('ak-name').addEventListener('input',updateSubmit);
+  document.getElementById('ak-c1').addEventListener('input',updateSubmit);
+  document.getElementById('ak-region').addEventListener('change',updateSubmit);
+  document.getElementById('ak-submit').addEventListener('click',submit);
+}
+
+function updateCart(){
+  const c=document.getElementById('ak-cart');
+  const e=Object.entries(cart).filter(([,q])=>q>0);
+  if(!e.length){c.style.display='none';updateSubmit();return;}
+  let qty=0,amt=0;
+  e.forEach(([id,q])=>{qty+=q;const p=products.find(x=>x.id===id);if(p)amt+=parseFloat(p.price)*q;});
+  c.style.display='flex';
+  c.querySelector('.items').textContent=qty+' item'+(qty>1?'s':'');
+  c.querySelector('.total').textContent='Rs '+amt.toLocaleString();
+  document.querySelectorAll('.akmez-product').forEach(el=>{
+    const q=cart[el.dataset.id]||0;
+    el.classList.toggle('sel',q>0);
+    let b=el.querySelector('.badge');
+    if(q>0){if(!b){b=document.createElement('span');b.className='badge';el.appendChild(b);}b.textContent=q;}
+    else if(b)b.remove();
+  });
+  updateSubmit();
+}
+
+function updateSubmit(){
+  const name=document.getElementById('ak-name')?.value.trim();
+  const c1=document.getElementById('ak-c1')?.value.trim();
+  const reg=document.getElementById('ak-region')?.value;
+  const hasP=Object.values(cart).some(q=>q>0);
+  const btn=document.getElementById('ak-submit');
+  if(btn)btn.disabled=!name||!c1||!reg||!hasP;
+}
+
+async function submit(){
+  const btn=document.getElementById('ak-submit'),err=document.getElementById('ak-err');
+  btn.disabled=true;btn.textContent='Creating...';err.style.display='none';
+  const e=Object.entries(cart).filter(([,q])=>q>0);
+  let qty=0,amt=0;
+  const prods=e.map(([id,q])=>{qty+=q;const p=products.find(x=>x.id===id);if(p)amt+=parseFloat(p.price)*q;return p?p.name+' x'+q:'';}).filter(Boolean).join(', ');
+  const data={customerName:document.getElementById('ak-name').value.trim(),contact1:document.getElementById('ak-c1').value.trim(),contact2:document.getElementById('ak-c2').value.trim(),region:document.getElementById('ak-region').value,deliveryDate:document.getElementById('ak-date').value,products:prods,qty,amount:amt};
+  try{
+    const res=await fetch(API_BASE+'/api/extension',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+authToken},body:JSON.stringify(data)});
+    const r=await res.json();
+    if(r.success){document.getElementById('akmez-body').innerHTML='<div class="akmez-success"><div class="check">✓</div><h3>Order Created!</h3><p>'+data.customerName+'</p><button id="ak-new">New Order</button></div>';cart={};document.getElementById('ak-new').onclick=()=>renderForm();}
+    else{err.textContent=r.error||'Failed';err.style.display='block';btn.disabled=false;btn.textContent='Create Order';}
+  }catch(e){err.textContent='Connection error';err.style.display='block';btn.disabled=false;btn.textContent='Create Order';}
+}
+
+function showSettings(){
+  document.getElementById('akmez-body').innerHTML=\`
+    <div class="akmez-settings">
+      <h3>Settings</h3>
+      <div class="row">
+        <label>Customer Name Auto-fill Selector</label>
+        <input type="text" id="ak-selector" placeholder="Click 'Pick Element' or enter CSS selector" value="\${settings.nameSelector||''}">
+        <div class="hint">Current: \${settings.nameSelector||'Not set'}</div>
+      </div>
+      <div class="btns">
+        <button class="pick-btn" id="ak-pick">Pick Element</button>
+        <button class="cancel-btn" id="ak-cancel">Cancel</button>
+        <button class="save-btn" id="ak-save">Save</button>
+      </div>
+    </div>
+  \`;
+  document.getElementById('ak-pick').onclick=startPicker;
+  document.getElementById('ak-cancel').onclick=()=>renderForm();
+  document.getElementById('ak-save').onclick=async()=>{
+    settings.nameSelector=document.getElementById('ak-selector').value.trim();
+    await chrome.storage.local.set({settings});
+    toast('Settings saved');
+    renderForm();
+    tryAutoFill();
+  };
+}
+
+function startPicker(){
+  isPicking=true;
+  picker.style.display='block';
+  widget.style.display='none';
+  document.getElementById('picker-cancel').onclick=()=>{isPicking=false;picker.style.display='none';highlight.style.display='none';widget.style.display='block';};
+}
+
+document.addEventListener('mousemove',e=>{
+  if(!isPicking)return;
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  if(!el||el.closest('#akmez-picker,#akmez-widget,#akmez-toggle'))return;
+  const r=el.getBoundingClientRect();
+  highlight.style.display='block';
+  highlight.style.left=r.left+'px';
+  highlight.style.top=r.top+'px';
+  highlight.style.width=r.width+'px';
+  highlight.style.height=r.height+'px';
+});
+
+document.addEventListener('click',e=>{
+  if(!isPicking)return;
+  if(e.target.closest('#akmez-picker'))return;
+  e.preventDefault();e.stopPropagation();
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  if(!el)return;
+  const selector=getUniqueSelector(el);
+  isPicking=false;
+  picker.style.display='none';
+  highlight.style.display='none';
+  widget.style.display='block';
+  showSettings();
+  setTimeout(()=>{document.getElementById('ak-selector').value=selector;},50);
+},true);
+
+function getUniqueSelector(el){
+  if(el.id)return '#'+el.id;
+  if(el.className){const c=el.className.split(' ').filter(c=>c&&!c.includes('akmez'))[0];if(c)return el.tagName.toLowerCase()+'.'+c;}
+  const path=[];let node=el;
+  while(node&&node.nodeType===1){let sel=node.tagName.toLowerCase();if(node.id){sel='#'+node.id;path.unshift(sel);break;}
+  const sib=node.parentNode?Array.from(node.parentNode.children).filter(c=>c.tagName===node.tagName):[];
+  if(sib.length>1)sel+=':nth-child('+(Array.from(node.parentNode.children).indexOf(node)+1)+')';
+  path.unshift(sel);node=node.parentNode;}
+  return path.slice(-3).join(' > ');
+}
+
+function tryAutoFill(){
+  if(!settings.nameSelector)return;
+  try{
+    const el=document.querySelector(settings.nameSelector);
+    if(el&&el.textContent){
+      const name=el.textContent.trim();
+      const inp=document.getElementById('ak-name');
+      if(inp&&name)inp.value=name;
+      updateSubmit();
+    }
+  }catch(e){}
+}
+
+// Text selection popup
 const sel=document.createElement('div');sel.id='akmez-sel';sel.innerHTML='<button data-f="name">Name</button><button data-f="c1">C1</button><button data-f="c2">C2</button>';document.body.appendChild(sel);
-document.addEventListener('mouseup',e=>{if(e.target.closest('#akmez-sel,#akmez-widget'))return;setTimeout(()=>{const s=window.getSelection(),t=s.toString().trim();if(t&&t.length>0&&t.length<200){const r=s.getRangeAt(0).getBoundingClientRect();sel.style.display='flex';sel.style.left=Math.max(10,r.left)+'px';sel.style.top=(r.bottom+8)+'px';sel.dataset.text=t;}else sel.style.display='none';},10);});
+document.addEventListener('mouseup',e=>{if(isPicking||e.target.closest('#akmez-sel,#akmez-widget'))return;setTimeout(()=>{const s=window.getSelection(),t=s.toString().trim();if(t&&t.length>0&&t.length<200){const r=s.getRangeAt(0).getBoundingClientRect();sel.style.display='flex';sel.style.left=Math.max(10,r.left)+'px';sel.style.top=(r.bottom+8)+'px';sel.dataset.text=t;}else sel.style.display='none';},10);});
 document.addEventListener('mousedown',e=>{if(!e.target.closest('#akmez-sel'))setTimeout(()=>sel.style.display='none',100);});
-sel.onclick=async e=>{const b=e.target.closest('button');if(!b)return;const t=sel.dataset.text;if(t){await navigator.clipboard.writeText(t);const inp=document.getElementById('ak-'+b.dataset.f)||document.getElementById('ak-name');if(inp)inp.value=t;toast('Copied: '+t.substring(0,20));sel.style.display='none';window.getSelection().removeAllRanges();}};`
+sel.onclick=async e=>{const b=e.target.closest('button');if(!b)return;const t=sel.dataset.text;if(t){await navigator.clipboard.writeText(t);const inp=document.getElementById('ak-'+b.dataset.f);if(inp)inp.value=t;toast('Copied');sel.style.display='none';window.getSelection().removeAllRanges();updateSubmit();}};
+`
 
 const CONTENT_CSS = ``
 

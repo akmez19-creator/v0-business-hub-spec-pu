@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Download, Chrome, MousePointer2, Clipboard, Keyboard, CheckCircle2, ArrowRight, Zap, RefreshCw } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '2.2.0'
+const EXTENSION_VERSION = '2.3.0'
 const LAST_UPDATED = '2026-04-02'
 
 export function ToolsDownloadPage() {
@@ -104,11 +104,11 @@ export function ToolsDownloadPage() {
                 What&apos;s New in v{EXTENSION_VERSION}
               </h4>
               <ul className="text-sm space-y-1 text-muted-foreground">
-                <li>- Embedded login form (no need to open separate tab)</li>
-                <li>- Product search filter for quick access</li>
-                <li>- Settings panel with auto-fill CSS selector</li>
-                <li>- Compact 3-column product grid layout</li>
-                <li>- Token-based authentication for better security</li>
+                <li>- Popup shows login status only (simple and clean)</li>
+                <li>- Full order form in floating button on page</li>
+                <li>- Visual Element Picker for auto-fill selector</li>
+                <li>- Click on elements to select customer name source</li>
+                <li>- Product search, settings panel, and more</li>
               </ul>
             </div>
 
