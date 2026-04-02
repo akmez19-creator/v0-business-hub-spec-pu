@@ -382,8 +382,7 @@ document.body.appendChild(highlight);
 
 // Inject advanced 3D styles
 const style=document.createElement('style');
-style.textContent=\`
-@keyframes float{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-8px) rotate(2deg)}}
+style.textContent='@keyframes float{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-8px) rotate(2deg)}}
 @keyframes pulse-ring{0%{transform:scale(1);opacity:0.8}100%{transform:scale(1.5);opacity:0}}
 @keyframes glow-pulse{0%,100%{box-shadow:0 0 30px rgba(249,115,22,0.6),0 0 60px rgba(249,115,22,0.3),inset 0 0 20px rgba(255,255,255,0.1)}50%{box-shadow:0 0 50px rgba(249,115,22,0.8),0 0 100px rgba(249,115,22,0.4),inset 0 0 30px rgba(255,255,255,0.2)}}
 @keyframes spin-3d{0%{transform:perspective(120px) rotateX(0deg) rotateY(0deg)}100%{transform:perspective(120px) rotateX(360deg) rotateY(360deg)}}
@@ -500,8 +499,7 @@ style.textContent=\`
 
 #akmez-sel{position:fixed;display:none;background:linear-gradient(145deg,rgba(26,26,46,0.98),rgba(15,15,26,0.98));border:2px solid #f97316;border-radius:12px;padding:8px;gap:6px;z-index:2147483648;font-family:sans-serif;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
 #akmez-sel button{background:linear-gradient(145deg,rgba(249,115,22,0.3),rgba(249,115,22,0.1));border:none;color:#f97316;padding:8px 14px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.2s}
-#akmez-sel button:hover{background:linear-gradient(145deg,rgba(249,115,22,0.5),rgba(249,115,22,0.3));transform:translateY(-2px)}
-\`;
+#akmez-sel button:hover{background:linear-gradient(145deg,rgba(249,115,22,0.5),rgba(249,115,22,0.3));transform:translateY(-2px)}';
 document.head.appendChild(style);
 
 // Drag functionality
