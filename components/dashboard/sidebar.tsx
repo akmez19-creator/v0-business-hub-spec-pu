@@ -36,6 +36,7 @@ import {
   LogOut,
   User,
   AlertTriangle,
+  CalendarDays,
 } from 'lucide-react'
 
 interface SubNavItem {
@@ -201,6 +202,13 @@ const navItems: NavItem[] = [
     icon: UserCog,
     roles: ['admin', 'manager'],
     color: '#8b5cf6',
+  },
+  {
+    href: '/dashboard/admin/timetable',
+    label: 'Staff Timetable',
+    icon: CalendarDays,
+    roles: ['admin', 'manager'],
+    color: '#06b6d4',
   },
   {
     href: '/dashboard/admin/cms',
