@@ -196,6 +196,13 @@ const navItems: NavItem[] = [
     color: '#6366f1',
   },
   {
+    href: '/dashboard/admin/executives',
+    label: 'Staff / Executives',
+    icon: UserCog,
+    roles: ['admin', 'manager'],
+    color: '#8b5cf6',
+  },
+  {
     href: '/dashboard/admin/cms',
     label: 'CMS Review',
     icon: AlertTriangle,
