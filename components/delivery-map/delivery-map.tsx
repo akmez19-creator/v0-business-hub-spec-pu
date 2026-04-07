@@ -385,19 +385,6 @@ export function DeliveryMap({
       .catch(() => {})
   }, [])
   
-  // Fetch CMS products and regions when CMS popup opens
-  useEffect(() => {
-    if (cmsPopup && cmsProducts.length === 0) {
-      fetch('/api/cms-data')
-        .then(res => res.json())
-        .then(data => {
-          if (data.products) setCmsProducts(data.products)
-          if (data.regions) setCmsRegions(data.regions)
-        })
-        .catch(() => {})
-    }
-  }, [cmsPopup, cmsProducts.length])
-  
   // Update coordinates when map moves while adding POI
   useEffect(() => {
     const map = mapRef.current
@@ -460,6 +447,19 @@ export function DeliveryMap({
   const mapContainerParentRef = useRef<HTMLDivElement>(null)
   const prevPinIdsRef = useRef<Set<string>>(new Set())
   const arriveAtStopRef = useRef<() => void>(() => {})
+
+  // Fetch CMS products and regions when CMS popup opens
+  useEffect(() => {
+    if (cmsPopup && cmsProducts.length === 0) {
+      fetch('/api/cms-data')
+        .then(res => res.json())
+        .then(data => {
+          if (data.products) setCmsProducts(data.products)
+          if (data.regions) setCmsRegions(data.regions)
+        })
+        .catch(() => {})
+    }
+  }, [cmsPopup, cmsProducts.length])
 
   const safeRegionGroups = regionGroups ?? []
   const filtered = deliveries
