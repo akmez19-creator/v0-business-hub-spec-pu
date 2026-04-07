@@ -85,6 +85,22 @@ export default async function CMSAdminPage() {
     reasonCounts[reason] = (reasonCounts[reason] || 0) + 1
   }
   
+  // Group by rider
+  const riderCounts: Record<string, { name: string, count: number, deliveries: typeof cmsDeliveries }> = {}
+  for (const d of (cmsDeliveries || [])) {
+    const riderId = d.rider_id || 'unassigned'
+    const riderName = d.rider_id ? (riderMap[d.rider_id] || 'Unknown Rider') : 'Unassigned'
+    if (!riderCounts[riderId]) {
+      riderCounts[riderId] = { name: riderName, count: 0, deliveries: [] }
+    }
+    riderCounts[riderId].count++
+    riderCounts[riderId].deliveries?.push(d)
+  }
+  
+  // Sort riders by CMS count (highest first)
+  const sortedRiders = Object.entries(riderCounts)
+    .sort((a, b) => b[1].count - a[1].count)
+  
   // Group by date
   const today = new Date().toISOString().split('T')[0]
   const todayCms = (cmsDeliveries || []).filter(d => d.delivery_date === today)
@@ -122,7 +138,7 @@ export default async function CMSAdminPage() {
       </div>
       
       {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -143,6 +159,20 @@ export default async function CMSAdminPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{todayCms.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Riders with CMS
+            </CardTitle>
+            <Bike className="w-4 h-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-500">{sortedRiders.filter(([id]) => id !== 'unassigned').length}</div>
+            <p className="text-xs text-muted-foreground">
+              {sortedRiders.length > 0 && sortedRiders[0][1].count > 0 ? `Highest: ${sortedRiders[0][1].count}` : ''}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -257,6 +287,89 @@ export default async function CMSAdminPage() {
                   {reason}: <span className="font-bold ml-1">{count}</span>
                 </Badge>
               ))}
+          </div>
+        </CardContent>
+      </Card>
+      
+      {/* CMS by Rider */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bike className="w-5 h-5 text-blue-500" />
+            CMS by Rider
+          </CardTitle>
+          <CardDescription>Breakdown of failed deliveries per rider - sorted by highest CMS count</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {sortedRiders.map(([riderId, riderData]) => (
+              <div key={riderId} className="border border-border rounded-lg overflow-hidden">
+                {/* Rider Header */}
+                <div className="flex items-center justify-between p-3 bg-muted/50">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      riderId === 'unassigned' ? 'bg-gray-500/20' : 'bg-blue-500/20'
+                    }`}>
+                      <Bike className={`w-5 h-5 ${riderId === 'unassigned' ? 'text-gray-500' : 'text-blue-500'}`} />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold">{riderData.name}</h4>
+                      <p className="text-xs text-muted-foreground">
+                        {riderData.count} CMS deliver{riderData.count === 1 ? 'y' : 'ies'}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge 
+                    variant="outline" 
+                    className={`text-sm font-bold ${
+                      riderData.count >= 5 
+                        ? 'bg-red-500/20 text-red-600 border-red-500/30' 
+                        : riderData.count >= 3 
+                        ? 'bg-amber-500/20 text-amber-600 border-amber-500/30'
+                        : 'bg-green-500/20 text-green-600 border-green-500/30'
+                    }`}
+                  >
+                    {riderData.count}
+                  </Badge>
+                </div>
+                
+                {/* Rider's CMS List */}
+                <div className="divide-y divide-border">
+                  {riderData.deliveries?.map(delivery => (
+                    <div key={delivery.id} className="p-3 hover:bg-muted/30 transition-colors">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium truncate">{delivery.customer_name}</span>
+                            <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] shrink-0">
+                              {delivery.delivery_notes || 'No reason'}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3" />
+                              {delivery.contact_1}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              {delivery.locality}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Package className="w-3 h-3" />
+                              {delivery.products}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm">
+                          <span className="font-mono text-xs text-muted-foreground">Rs {delivery.amount || 0}</span>
+                          <span className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
