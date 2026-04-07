@@ -261,17 +261,15 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Label>Select Rider / Contractor</Label>
+            <Label>Select Rider</Label>
             <Select value={selectedRider || 'unassigned'} onValueChange={(v) => setSelectedRider(v === 'unassigned' ? '' : v)}>
               <SelectTrigger className="mt-2">
-                <SelectValue placeholder="Select a rider or contractor" />
+                <SelectValue placeholder="Select a rider" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
                 {riders.filter(r => r.id).map(r => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.name || r.email} {r.role === 'contractor' ? '(Contractor)' : '(Rider)'}
-                  </SelectItem>
+                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -348,7 +346,7 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Label>Assign to Rider / Contractor (optional)</Label>
+            <Label>Assign to Rider (optional)</Label>
             <Select value={selectedRider || 'keep-current'} onValueChange={(v) => setSelectedRider(v === 'keep-current' ? '' : v)}>
               <SelectTrigger className="mt-2">
                 <SelectValue placeholder="Keep current or select new" />
@@ -356,9 +354,7 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
               <SelectContent>
                 <SelectItem value="keep-current">Keep current ({delivery.rider_id ? riderMap[delivery.rider_id] || 'Unknown' : 'Unassigned'})</SelectItem>
                 {riders.filter(r => r.id).map(r => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.name || r.email} {r.role === 'contractor' ? '(Contractor)' : '(Rider)'}
-                  </SelectItem>
+                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
