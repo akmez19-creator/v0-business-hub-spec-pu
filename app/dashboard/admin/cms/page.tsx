@@ -105,9 +105,16 @@ export default async function CMSAdminPage() {
     .order('name')
   const allProducts = (productsData || []).map(p => p.name)
   
-  // Count reviewed vs pending
+  // Count reviewed vs pending vs postponed
   const reviewedCms = (cmsDeliveries || []).filter(d => d.delivery_notes?.startsWith('[REVIEWED]'))
-  const pendingCms = (cmsDeliveries || []).filter(d => !d.delivery_notes?.startsWith('[REVIEWED]'))
+  const postponedCms = (cmsDeliveries || []).filter(d => {
+    const notes = d.delivery_notes || ''
+    return notes.includes('Postponed to') && !notes.startsWith('[REVIEWED]')
+  })
+  const pendingCms = (cmsDeliveries || []).filter(d => {
+    const notes = d.delivery_notes || ''
+    return !notes.startsWith('[REVIEWED]') && !notes.includes('Postponed to')
+  })
   
   // Group by reason (excluding [REVIEWED] prefix)
   const reasonCounts: Record<string, number> = {}
@@ -172,7 +179,7 @@ export default async function CMSAdminPage() {
       </div>
       
       {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -195,6 +202,18 @@ export default async function CMSAdminPage() {
           <CardContent>
             <div className="text-2xl font-bold text-amber-500">{pendingCms.length}</div>
             <p className="text-xs text-muted-foreground">Needs attention</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Postponed
+            </CardTitle>
+            <Calendar className="w-4 h-4 text-purple-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-500">{postponedCms.length}</div>
+            <p className="text-xs text-muted-foreground">Scheduled for later</p>
           </CardContent>
         </Card>
         <Card>
@@ -302,21 +321,24 @@ export default async function CMSAdminPage() {
           </CardTitle>
           <CardDescription>
             All failed deliveries sorted by date - newest first. 
-            <span className="ml-2 text-green-600">
-              {(cmsDeliveries || []).filter(d => d.delivery_notes?.startsWith('[REVIEWED]')).length} reviewed
-            </span>
-            <span className="ml-2 text-amber-600">
-              {(cmsDeliveries || []).filter(d => !d.delivery_notes?.startsWith('[REVIEWED]')).length} pending
-            </span>
+            <span className="ml-2 text-green-600">{reviewedCms.length} reviewed</span>
+            <span className="ml-2 text-purple-600">{postponedCms.length} postponed</span>
+            <span className="ml-2 text-amber-600">{pendingCms.length} pending</span>
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             {(cmsDeliveries || []).map(delivery => {
               const isReviewed = delivery.delivery_notes?.startsWith('[REVIEWED]')
-              const displayReason = isReviewed 
-                ? delivery.delivery_notes?.replace('[REVIEWED] ', '') 
-                : delivery.delivery_notes
+              const isPostponed = delivery.delivery_notes?.includes('Postponed to') && !isReviewed
+              let displayReason = delivery.delivery_notes || 'No reason'
+              if (isReviewed) {
+                displayReason = displayReason.replace('[REVIEWED] ', '')
+              }
+              
+              // Extract postponed date if present
+              const postponedMatch = displayReason.match(/Postponed to (\d{1,2} \w+ \d{4})/)
+              const postponedDateStr = postponedMatch ? postponedMatch[1] : null
               
               return (
                 <div 
@@ -324,9 +346,11 @@ export default async function CMSAdminPage() {
                   className={`p-4 rounded-lg border transition-colors ${
                     isReviewed
                       ? 'border-green-500/30 bg-green-500/5 opacity-70 hover:opacity-100'
-                      : delivery.delivery_date === today 
-                        ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10' 
-                        : 'border-border bg-muted/30 hover:bg-muted/50'
+                      : isPostponed
+                        ? 'border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10'
+                        : delivery.delivery_date === today 
+                          ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10' 
+                          : 'border-border bg-muted/30 hover:bg-muted/50'
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
@@ -340,20 +364,32 @@ export default async function CMSAdminPage() {
                             </svg>
                           </span>
                         )}
+                        {isPostponed && (
+                          <span className="w-5 h-5 rounded-full bg-purple-500/20 flex items-center justify-center shrink-0">
+                            <Calendar className="w-3 h-3 text-purple-600" />
+                          </span>
+                        )}
                         <span className={`font-semibold truncate ${isReviewed ? 'text-muted-foreground' : ''}`}>{delivery.customer_name}</span>
                         <Badge variant="outline" className={`text-[10px] shrink-0 ${
                           isReviewed 
                             ? 'bg-green-500/10 text-green-600 border-green-500/20' 
-                            : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                            : isPostponed
+                              ? 'bg-purple-500/10 text-purple-600 border-purple-500/20'
+                              : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
                         }`}>
-                          {displayReason || 'No reason'}
+                          {isPostponed && postponedDateStr ? `Postponed: ${postponedDateStr}` : displayReason}
                         </Badge>
-                        {delivery.delivery_date === today && !isReviewed && (
+                        {delivery.delivery_date === today && !isReviewed && !isPostponed && (
                           <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] shrink-0">
                             Today
                           </Badge>
                         )}
                       </div>
+                      
+                      {/* Show full reason for postponed entries */}
+                      {isPostponed && (
+                        <p className="text-xs text-purple-400 mb-2 pl-7">{displayReason}</p>
+                      )}
                       
                       <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">

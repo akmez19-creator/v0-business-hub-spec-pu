@@ -1,15 +1,16 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { X, Phone, Package, Ban, MapPin, Mail, Search, Check, ChevronLeft, Loader2 } from 'lucide-react'
+import { X, Phone, Package, Ban, MapPin, Mail, Search, Check, ChevronLeft, Loader2, Calendar, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface CmsReasonPopupProps {
   open: boolean
   customerName: string
   currentProduct?: string
+  currentRegion?: string
   onClose: () => void
-  onConfirm: (reason: string, extraData?: { newProduct?: string; newRegion?: string }) => void
+  onConfirm: (reason: string, extraData?: { newProduct?: string; newRegion?: string; postponedDate?: string }) => void
   products?: { name: string }[]
   regions?: string[]
   loading?: boolean
@@ -19,17 +20,20 @@ export function CmsReasonPopup({
   open,
   customerName,
   currentProduct,
+  currentRegion,
   onClose,
   onConfirm,
   products = [],
   regions = [],
   loading = false
 }: CmsReasonPopupProps) {
-  const [step, setStep] = useState<'reasons' | 'wrong-product' | 'change-address' | 'other'>('reasons')
+  const [step, setStep] = useState<'reasons' | 'wrong-product' | 'change-address' | 'postponed' | 'postponed-region' | 'other'>('reasons')
   const [search, setSearch] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [customReason, setCustomReason] = useState('')
+  const [postponedDate, setPostponedDate] = useState('')
+  const [keepSameRegion, setKeepSameRegion] = useState<boolean | null>(null)
 
   // Reset state when popup opens/closes
   useEffect(() => {
@@ -39,8 +43,17 @@ export function CmsReasonPopup({
       setSelectedProduct(null)
       setSelectedRegion(null)
       setCustomReason('')
+      setPostponedDate('')
+      setKeepSameRegion(null)
     }
   }, [open])
+  
+  // Get tomorrow's date as minimum for calendar
+  const tomorrow = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  }, [])
 
   // Filter products by search
   const filteredProducts = useMemo(() => {
@@ -63,6 +76,8 @@ export function CmsReasonPopup({
     } else if (reason === 'Change of Address') {
       setStep('change-address')
       setSearch('')
+    } else if (reason === 'Postponed') {
+      setStep('postponed')
     } else if (reason === 'Other') {
       setStep('other')
     } else {
@@ -88,6 +103,24 @@ export function CmsReasonPopup({
     }
   }
 
+  const handlePostponedDateConfirm = () => {
+    if (postponedDate) {
+      // After selecting date, ask about region
+      setStep('postponed-region')
+    }
+  }
+
+  const handlePostponedConfirm = () => {
+    if (postponedDate && keepSameRegion !== null) {
+      const formattedDate = new Date(postponedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      if (keepSameRegion) {
+        onConfirm(`Postponed to ${formattedDate} - Same region (${currentRegion})`, { postponedDate })
+      } else if (selectedRegion) {
+        onConfirm(`Postponed to ${formattedDate} - Region change: ${currentRegion} → ${selectedRegion}`, { postponedDate, newRegion: selectedRegion })
+      }
+    }
+  }
+
   if (!open) return null
 
   return (
@@ -97,7 +130,20 @@ export function CmsReasonPopup({
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2">
             {step !== 'reasons' && (
-              <button onClick={() => { setStep('reasons'); setSearch(''); setSelectedProduct(null); setSelectedRegion(null) }} 
+              <button onClick={() => { 
+                if (step === 'postponed-region') {
+                  setStep('postponed')
+                  setKeepSameRegion(null)
+                  setSelectedRegion(null)
+                } else {
+                  setStep('reasons')
+                  setSearch('')
+                  setSelectedProduct(null)
+                  setSelectedRegion(null)
+                  setPostponedDate('')
+                  setKeepSameRegion(null)
+                }
+              }} 
                 className="p-1.5 rounded-lg hover:bg-white/10 transition">
                 <ChevronLeft className="w-4 h-4 text-white/60" />
               </button>
@@ -107,6 +153,8 @@ export function CmsReasonPopup({
                 {step === 'reasons' && 'Cannot Make Sale'}
                 {step === 'wrong-product' && 'Select Correct Product'}
                 {step === 'change-address' && 'Select New Region'}
+                {step === 'postponed' && 'Select Postponed Date'}
+                {step === 'postponed-region' && 'Same Region or Change?'}
                 {step === 'other' && 'Enter Reason'}
               </h3>
               <p className="text-xs text-white/40">{customerName}</p>
@@ -143,6 +191,10 @@ export function CmsReasonPopup({
             <button onClick={() => handleReasonClick('Cancelled Order')} disabled={loading}
               className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition active:scale-95 disabled:opacity-50">
               <X className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Cancelled Order</span>
+            </button>
+            <button onClick={() => handleReasonClick('Postponed')} disabled={loading}
+              className="flex items-center gap-2 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition active:scale-95 disabled:opacity-50">
+              <Calendar className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Postponed</span>
             </button>
             <button onClick={() => handleReasonClick('Other')} disabled={loading}
               className="col-span-2 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:text-white hover:border-white/20 transition active:scale-95 disabled:opacity-50">
@@ -294,6 +346,147 @@ export function CmsReasonPopup({
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
               Confirm
             </button>
+          </div>
+        )}
+
+        {/* Postponed - Date Selection */}
+        {step === 'postponed' && (
+          <div className="p-4 space-y-4">
+            <div>
+              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-2">Select Delivery Date</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400 pointer-events-none" />
+                <input
+                  type="date"
+                  value={postponedDate}
+                  onChange={e => setPostponedDate(e.target.value)}
+                  min={tomorrow}
+                  className="w-full h-12 bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 text-sm text-white focus:outline-none focus:border-purple-400/50 [color-scheme:dark]"
+                />
+              </div>
+              {postponedDate && (
+                <p className="text-xs text-purple-400 mt-2">
+                  Scheduled for: {new Date(postponedDate).toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={handlePostponedDateConfirm}
+              disabled={!postponedDate || loading}
+              className="w-full h-11 rounded-xl bg-purple-500 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+              Continue
+            </button>
+          </div>
+        )}
+
+        {/* Postponed - Region Selection */}
+        {step === 'postponed-region' && (
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="px-4 pt-3 pb-2 border-b border-white/5">
+              <p className="text-[10px] text-white/30 uppercase tracking-wider">Postponed to</p>
+              <p className="text-sm text-purple-400 font-medium mt-0.5">
+                {new Date(postponedDate).toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+            
+            {/* Same Region or Change? */}
+            {keepSameRegion === null && (
+              <div className="p-4 space-y-3">
+                <p className="text-xs text-white/50 text-center mb-4">Will the client keep the same region or need a change?</p>
+                <button
+                  onClick={() => { setKeepSameRegion(true) }}
+                  className="w-full flex items-center gap-3 p-4 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition active:scale-[0.98]"
+                >
+                  <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                    <Check className="w-5 h-5" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-semibold">Same Region</p>
+                    <p className="text-[10px] text-green-400/60">{currentRegion}</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setKeepSameRegion(false); setSearch('') }}
+                  className="w-full flex items-center gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition active:scale-[0.98]"
+                >
+                  <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                    <MapPin className="w-5 h-5" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-semibold">Change Region</p>
+                    <p className="text-[10px] text-blue-400/60">Select new delivery area</p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Same Region - Confirm */}
+            {keepSameRegion === true && (
+              <div className="p-4 space-y-4">
+                <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20">
+                  <p className="text-xs text-green-400/60 uppercase tracking-wider mb-1">Delivery Region</p>
+                  <p className="text-lg font-semibold text-green-400">{currentRegion}</p>
+                </div>
+                <button
+                  onClick={handlePostponedConfirm}
+                  disabled={loading}
+                  className="w-full h-11 rounded-xl bg-purple-500 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Confirm Postponed Delivery
+                </button>
+              </div>
+            )}
+
+            {/* Change Region - Select */}
+            {keepSameRegion === false && (
+              <>
+                <div className="px-4 py-3 border-b border-white/5">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      placeholder="Search regions..."
+                      className="w-full h-10 bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-blue-400/50"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1 max-h-[35vh]">
+                  {filteredRegions.map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setSelectedRegion(r)}
+                      className={cn(
+                        "w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition",
+                        selectedRegion === r
+                          ? "bg-blue-500/20 border border-blue-400/30"
+                          : "bg-white/3 border border-transparent hover:bg-white/5"
+                      )}
+                    >
+                      <span className="text-sm text-white/80">{r}</span>
+                      {selectedRegion === r && <Check className="w-4 h-4 text-blue-400 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="px-4 py-3 border-t border-white/10 shrink-0">
+                  <button
+                    onClick={handlePostponedConfirm}
+                    disabled={!selectedRegion || loading}
+                    className="w-full h-11 rounded-xl bg-purple-500 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] transition"
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    Confirm: {selectedRegion || 'Select region'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
