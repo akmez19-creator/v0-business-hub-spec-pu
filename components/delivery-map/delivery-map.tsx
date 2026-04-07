@@ -676,7 +676,7 @@ export function DeliveryMap({
 
       // ══════════════════════════════════════════════════════════════════════════
       // ULTIMATE MAPBOX PERFORMANCE CONFIG - Based on official Mapbox docs + research
-      // ══════════════════════════════════════════════════════════════════════════
+      // ════════════════════════════════��═════════════════════════════════════════
       const map = new (mbgl()).Map({
         container: mapContainerRef.current,
         style: 'mapbox://styles/mapbox/standard?optimize=true', // style-optimized vector tiles
@@ -4588,6 +4588,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         open={!!cmsPopup}
         customerName={cmsPopup?.pin.customerName || ''}
         currentProduct={cmsPopup?.pin.products || ''}
+        currentRegion={cmsPopup?.pin.locality || ''}
         onClose={() => setCmsPopup(null)}
         onConfirm={confirmCmsReason}
         products={cmsProducts}
