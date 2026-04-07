@@ -642,6 +642,7 @@ export async function updateDeliveryNote(deliveryId: string, note: string) {
 export async function updateDeliveryPrice(deliveryId: string, amount: number) {
   console.log('[v0] updateDeliveryPrice called:', { deliveryId, amount })
   const supabase = await createClient()
+  const { createAdminClient } = await import('@/lib/supabase/server')
   const adminDb = createAdminClient()
   
   const { data: { user } } = await supabase.auth.getUser()
