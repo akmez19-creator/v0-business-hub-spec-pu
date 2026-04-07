@@ -638,6 +638,53 @@ export async function updateDeliveryNote(deliveryId: string, note: string) {
   return { success: true }
 }
 
+// Update delivery price (admin only)
+export async function updateDeliveryPrice(deliveryId: string, amount: number) {
+  const supabase = await createClient()
+  const adminDb = createAdminClient()
+  
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+  
+  // Check if user is admin or manager
+  const { data: profile } = await adminDb
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+  
+  if (!profile || !['admin', 'manager'].includes(profile.role)) {
+    return { error: 'Only admins can edit delivery prices' }
+  }
+  
+  // Get current delivery to track original price
+  const { data: delivery } = await adminDb
+    .from('deliveries')
+    .select('amount, original_amount, is_modified')
+    .eq('id', deliveryId)
+    .single()
+  
+  const updateData: Record<string, unknown> = {
+    amount,
+    is_modified: true,
+    updated_at: new Date().toISOString(),
+  }
+  
+  // Store original amount if this is the first modification
+  if (delivery && !delivery.is_modified) {
+    updateData.original_amount = delivery.amount || 0
+  }
+  
+  const { error } = await adminDb
+    .from('deliveries')
+    .update(updateData)
+    .eq('id', deliveryId)
+
+  if (error) return { error: error.message }
+  revalidateAllDeliveryPaths()
+  return { success: true }
+}
+
 export async function updatePaymentSplit(
   deliveryId: string,
   data: { payment_juice: number; payment_cash: number; payment_bank: number; payment_status: string; payment_method?: string }

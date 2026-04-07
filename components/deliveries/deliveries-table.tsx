@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, markRiderPaid } from '@/lib/delivery-actions'
+import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, markRiderPaid, updateDeliveryPrice } from '@/lib/delivery-actions'
 import type { Delivery, Profile, Rider, DeliveryStatus, SalesType } from '@/lib/types'
 import { STATUS_LABELS, SALES_TYPE_LABELS, SALES_TYPE_COLORS } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { MoreHorizontal, Trash2, UserPlus, CheckCircle, Clock, Package, Banknote, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { MoreHorizontal, Trash2, UserPlus, CheckCircle, Clock, Package, Banknote, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit } from 'lucide-react'
 
 interface Props {
   deliveries: Delivery[]
@@ -62,6 +62,8 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
   const [bulkAssigning, setBulkAssigning] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)
   const [jumpToPage, setJumpToPage] = useState('')
+  const [editPriceDelivery, setEditPriceDelivery] = useState<Delivery | null>(null)
+  const [editPriceValue, setEditPriceValue] = useState('')
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -156,6 +158,30 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
     await markRiderPaid(unpaidDeliveries.map(d => d.id))
     setSelectedIds([])
     router.refresh()
+  }
+
+  function openEditPrice(delivery: Delivery) {
+    setEditPriceDelivery(delivery)
+    setEditPriceValue(String(delivery.amount || 0))
+  }
+
+  async function handleEditPrice() {
+    if (!editPriceDelivery) return
+    const newPrice = parseFloat(editPriceValue)
+    if (isNaN(newPrice) || newPrice < 0) {
+      alert('Please enter a valid price')
+      return
+    }
+    setLoading(editPriceDelivery.id)
+    const result = await updateDeliveryPrice(editPriceDelivery.id, newPrice)
+    setLoading(null)
+    if (result.error) {
+      alert(result.error)
+    } else {
+      setEditPriceDelivery(null)
+      setEditPriceValue('')
+      router.refresh()
+    }
   }
 
   // Calculate page range info
@@ -466,6 +492,11 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                       <DropdownMenuContent align="end">
                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                         <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => openEditPrice(delivery)}>
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit Price
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => handleDelete(delivery.id)}
                           className="text-destructive focus:text-destructive"
@@ -533,6 +564,47 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
             </Button>
             <Button onClick={handleBulkAssign} disabled={!selectedRider || bulkAssigning}>
               {bulkAssigning ? 'Assigning...' : 'Assign'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Price Dialog */}
+      <Dialog open={!!editPriceDelivery} onOpenChange={(open) => !open && setEditPriceDelivery(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Price</DialogTitle>
+            <DialogDescription>
+              Update the price for {editPriceDelivery?.customer_name}&apos;s delivery
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Current Price</p>
+              <p className="text-muted-foreground">Rs {Number(editPriceDelivery?.amount || 0).toLocaleString()}</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">New Price (Rs)</p>
+              <Input
+                type="number"
+                min={0}
+                value={editPriceValue}
+                onChange={(e) => setEditPriceValue(e.target.value)}
+                placeholder="Enter new price"
+              />
+            </div>
+            {editPriceDelivery?.products && (
+              <div className="text-xs text-muted-foreground">
+                Product: {editPriceDelivery.products}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPriceDelivery(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditPrice} disabled={loading === editPriceDelivery?.id}>
+              {loading === editPriceDelivery?.id ? 'Saving...' : 'Save Price'}
             </Button>
           </DialogFooter>
         </DialogContent>
