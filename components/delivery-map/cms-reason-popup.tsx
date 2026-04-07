@@ -48,27 +48,11 @@ export function CmsReasonPopup({
     }
   }, [open])
   
-  // Get valid dates for postponement (2-7 days from now, excluding Sundays)
-  const validPostponeDates = useMemo(() => {
-    const dates: { date: string; label: string; dayName: string }[] = []
-    const today = new Date()
-    
-    // Start from day after tomorrow (skip tomorrow)
-    for (let i = 2; i <= 8 && dates.length < 6; i++) {
-      const d = new Date(today)
-      d.setDate(today.getDate() + i)
-      
-      // Skip Sundays (0 = Sunday)
-      if (d.getDay() === 0) continue
-      
-      dates.push({
-        date: d.toISOString().split('T')[0],
-        label: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-        dayName: d.toLocaleDateString('en-US', { weekday: 'short' })
-      })
-    }
-    
-    return dates
+  // Get tomorrow's date as minimum for calendar
+  const tomorrow = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
   }, [])
 
   // Filter products by search
@@ -369,23 +353,22 @@ export function CmsReasonPopup({
         {step === 'postponed' && (
           <div className="p-4 space-y-4">
             <div>
-              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-2">Select Delivery Date (Next 7 days, excl. Sunday)</label>
-              <div className="grid grid-cols-3 gap-2">
-                {validPostponeDates.map(({ date, label, dayName }) => (
-                  <button
-                    key={date}
-                    onClick={() => setPostponedDate(date)}
-                    className={`p-3 rounded-xl border text-center transition active:scale-95 ${
-                      postponedDate === date
-                        ? 'bg-purple-500/20 border-purple-400/50 text-purple-400'
-                        : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                    }`}
-                  >
-                    <p className="text-[10px] uppercase opacity-60">{dayName}</p>
-                    <p className="text-sm font-semibold">{label}</p>
-                  </button>
-                ))}
+              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-2">Select Delivery Date</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400 pointer-events-none" />
+                <input
+                  type="date"
+                  value={postponedDate}
+                  onChange={e => setPostponedDate(e.target.value)}
+                  min={tomorrow}
+                  className="w-full h-12 bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 text-sm text-white focus:outline-none focus:border-purple-400/50 [color-scheme:dark]"
+                />
               </div>
+              {postponedDate && (
+                <p className="text-xs text-purple-400 mt-2">
+                  Scheduled for: {new Date(postponedDate).toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+                </p>
+              )}
             </div>
             <button
               onClick={handlePostponedDateConfirm}

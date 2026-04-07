@@ -885,11 +885,16 @@ export async function markProductAsCms(params: {
 
   // If all products are now CMS, mark entire delivery as CMS
   if (productMap.size === 0) {
+    // When entire order is CMS, preserve original amount for reference but set status to cms
+    // The amount stays as-is since it represents the order value (for reporting/tracking)
     const { error: updateError } = await admin
       .from('deliveries')
       .update({
         status: 'cms',
         delivery_notes: newNotes,
+        is_modified: true,
+        modification_count: (delivery.modification_count || 0) + 1,
+        original_amount: delivery.is_modified ? delivery.original_amount : totalAmount,
         status_updated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -910,14 +915,14 @@ export async function markProductAsCms(params: {
       reason: 'product_cms',
       notes: cmsReason,
       status: needsReview ? 'pending' : 'approved',
-      new_price: 0,
+      new_price: newPrice !== undefined ? newPrice : 0,
       original_price: totalAmount,
       original_qty: totalQty,
     })
 
     return {
       success: true,
-      newAmount: 0,
+      newAmount: totalAmount, // Keep original amount for display/tracking
       newQty: 0,
       newProducts: '',
       markedCmsQty: actualCmsQty,
