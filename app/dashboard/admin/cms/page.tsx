@@ -295,29 +295,6 @@ export default async function CMSAdminPage() {
         </Card>
       )}
       
-      {/* Reason Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>CMS Reasons Breakdown</CardTitle>
-          <CardDescription>Summary of why deliveries could not be completed</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(reasonCounts)
-              .sort((a, b) => b[1] - a[1])
-              .map(([reason, count]) => (
-                <Badge 
-                  key={reason} 
-                  variant="outline" 
-                  className="px-3 py-1.5 text-sm bg-amber-500/10 text-amber-600 border-amber-500/30"
-                >
-                  {reason}: <span className="font-bold ml-1">{count}</span>
-                </Badge>
-              ))}
-          </div>
-        </CardContent>
-      </Card>
-      
       {/* All CMS Deliveries - Unified View */}
       <Card>
         <CardHeader>

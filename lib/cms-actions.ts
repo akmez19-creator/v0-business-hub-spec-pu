@@ -171,6 +171,52 @@ export async function addProductToCmsDelivery(
   return { success: true, delivery: newDelivery }
 }
 
+// Mark CMS delivery as done (delivered)
+export async function markCmsDeliveryDone(deliveryId: string) {
+  const { error: authError, authorized } = await checkAdminOrManagerAccess()
+  if (!authorized) return { error: authError }
+
+  const adminDb = createAdminClient()
+  
+  const { error: updateError } = await adminDb
+    .from('deliveries')
+    .update({
+      status: 'delivered',
+      delivery_notes: null,
+      status_updated_at: new Date().toISOString(),
+    })
+    .eq('id', deliveryId)
+  
+  if (updateError) {
+    return { error: 'Failed to mark as done: ' + updateError.message }
+  }
+  
+  revalidatePath('/dashboard/admin/cms')
+  revalidatePath('/dashboard/deliveries')
+  return { success: true }
+}
+
+// Delete/Cancel CMS delivery
+export async function deleteCmsDelivery(deliveryId: string) {
+  const { error: authError, authorized } = await checkAdminOrManagerAccess()
+  if (!authorized) return { error: authError }
+
+  const adminDb = createAdminClient()
+  
+  const { error: deleteError } = await adminDb
+    .from('deliveries')
+    .delete()
+    .eq('id', deliveryId)
+  
+  if (deleteError) {
+    return { error: 'Failed to delete delivery: ' + deleteError.message }
+  }
+  
+  revalidatePath('/dashboard/admin/cms')
+  revalidatePath('/dashboard/deliveries')
+  return { success: true }
+}
+
 // Bulk reset multiple CMS deliveries
 export async function bulkResetCmsDeliveries(deliveryIds: string[], newRiderId?: string) {
   const { error: authError, authorized } = await checkAdminOrManagerAccess()
