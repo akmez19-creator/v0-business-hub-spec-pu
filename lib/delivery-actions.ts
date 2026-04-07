@@ -640,10 +640,12 @@ export async function updateDeliveryNote(deliveryId: string, note: string) {
 
 // Update delivery price (admin only)
 export async function updateDeliveryPrice(deliveryId: string, amount: number) {
+  console.log('[v0] updateDeliveryPrice called:', { deliveryId, amount })
   const supabase = await createClient()
   const adminDb = createAdminClient()
   
   const { data: { user } } = await supabase.auth.getUser()
+  console.log('[v0] User:', user?.id)
   if (!user) return { error: 'Not authenticated' }
   
   // Check if user is admin or manager
@@ -653,16 +655,19 @@ export async function updateDeliveryPrice(deliveryId: string, amount: number) {
     .eq('id', user.id)
     .single()
   
+  console.log('[v0] Profile role:', profile?.role)
   if (!profile || !['admin', 'manager'].includes(profile.role)) {
     return { error: 'Only admins can edit delivery prices' }
   }
   
   // Get current delivery to track original price
-  const { data: delivery } = await adminDb
+  const { data: delivery, error: fetchError } = await adminDb
     .from('deliveries')
     .select('amount, original_amount, is_modified')
     .eq('id', deliveryId)
     .single()
+  
+  console.log('[v0] Fetched delivery:', delivery, 'error:', fetchError)
   
   const updateData: Record<string, unknown> = {
     amount,
@@ -675,13 +680,16 @@ export async function updateDeliveryPrice(deliveryId: string, amount: number) {
     updateData.original_amount = delivery.amount || 0
   }
   
+  console.log('[v0] Updating with:', updateData)
   const { error } = await adminDb
     .from('deliveries')
     .update(updateData)
     .eq('id', deliveryId)
 
+  console.log('[v0] Update result, error:', error)
   if (error) return { error: error.message }
   revalidateAllDeliveryPaths()
+  console.log('[v0] Price updated successfully')
   return { success: true }
 }
 

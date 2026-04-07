@@ -173,14 +173,22 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
       return
     }
     setLoading(editPriceDelivery.id)
-    const result = await updateDeliveryPrice(editPriceDelivery.id, newPrice)
-    setLoading(null)
-    if (result.error) {
-      alert(result.error)
-    } else {
-      setEditPriceDelivery(null)
-      setEditPriceValue('')
-      router.refresh()
+    try {
+      console.log('[v0] Calling updateDeliveryPrice', editPriceDelivery.id, newPrice)
+      const result = await updateDeliveryPrice(editPriceDelivery.id, newPrice)
+      console.log('[v0] updateDeliveryPrice result:', result)
+      if (result.error) {
+        alert(result.error)
+      } else {
+        setEditPriceDelivery(null)
+        setEditPriceValue('')
+        router.refresh()
+      }
+    } catch (error) {
+      console.error('[v0] Edit price error:', error)
+      alert('Failed to update price. Please try again.')
+    } finally {
+      setLoading(null)
     }
   }
 
