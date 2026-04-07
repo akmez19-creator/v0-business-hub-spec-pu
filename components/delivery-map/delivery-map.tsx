@@ -14,6 +14,7 @@ import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, 
 import { cancelPendingCmsModification } from '@/lib/modification-actions'
 import { ModifyOrderSheet } from './modify-order-sheet'
 import { CmsReasonPopup } from './cms-reason-popup'
+import { NwdReasonPopup } from './nwd-reason-popup'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
@@ -436,6 +437,8 @@ export function DeliveryMap({
   const [cmsProducts, setCmsProducts] = useState<{ name: string }[]>([])
   const [cmsRegions, setCmsRegions] = useState<string[]>([])
   const [cmsLoading, setCmsLoading] = useState(false)
+  const [nwdPopup, setNwdPopup] = useState<{ pin: DeliveryPin } | null>(null)
+  const [nwdLoading, setNwdLoading] = useState(false)
   const [mapProofStep, setMapProofStep] = useState<{ pin: DeliveryPin; method: string } | null>(null)
   const [mapProofFile, setMapProofFile] = useState<File | null>(null)
   const [mapProofPreview, setMapProofPreview] = useState<string | null>(null)
@@ -448,9 +451,9 @@ export function DeliveryMap({
   const prevPinIdsRef = useRef<Set<string>>(new Set())
   const arriveAtStopRef = useRef<() => void>(() => {})
 
-  // Fetch CMS products and regions when CMS popup opens
+  // Fetch CMS products and regions when CMS or NWD popup opens
   useEffect(() => {
-    if (cmsPopup && cmsProducts.length === 0) {
+    if ((cmsPopup || nwdPopup) && cmsRegions.length === 0) {
       fetch('/api/cms-data')
         .then(res => res.json())
         .then(data => {
@@ -459,7 +462,7 @@ export function DeliveryMap({
         })
         .catch(() => {})
     }
-  }, [cmsPopup, cmsProducts.length])
+  }, [cmsPopup, nwdPopup, cmsRegions.length])
 
   const safeRegionGroups = regionGroups ?? []
   const filtered = deliveries
@@ -683,7 +686,7 @@ export function DeliveryMap({
         antialias: false, // Huge GPU savings, minimal visual impact
         pixelRatio: Math.min(window.devicePixelRatio, 1.5), // Balance quality vs performance
         
-        // ── Tile Loading ──
+        // ── Tile Loading ��─
         fadeDuration: 150, // Fast but smooth tile transitions
         maxTileCacheSize: 300, // Max cache for Mauritius tiles (~50MB)
         refreshExpiredTiles: false, // Don't re-fetch during session
@@ -1839,6 +1842,26 @@ const confirmCmsReason = useCallback(async (reason: string, extraData?: { newPro
   setCmsLoading(false)
   await handleMapStatusChange(pin, 'cms', fullReason, true)
   }, [cmsPopup, handleMapStatusChange])
+
+  // Confirm NWD with region info
+  const confirmNwd = useCallback(async (keepSameRegion: boolean, newRegion?: string) => {
+    if (!nwdPopup) return
+    const { pin } = nwdPopup
+    
+    setNwdLoading(true)
+    
+    // Build NWD reason with region info
+    let reason = 'Next working day'
+    if (keepSameRegion) {
+      reason = `NWD - Same region (${pin.locality})`
+    } else if (newRegion) {
+      reason = `NWD - Region change: ${pin.locality} → ${newRegion}`
+    }
+    
+    setNwdPopup(null)
+    setNwdLoading(false)
+    await handleMapStatusChange(pin, 'nwd', reason, true)
+  }, [nwdPopup, handleMapStatusChange])
 
 // ── Pin placement ──
   const startPlacingPin = useCallback((pin: DeliveryPin) => {
@@ -3071,7 +3094,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                         className="btn-holo flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 text-[9px] font-bold border border-amber-400/15 disabled:opacity-50 shrink-0">
                         <Ban className="w-3 h-3" /> CMS
                       </button>
-                      <button onClick={() => handleMapStatusChange(navTarget, 'nwd', 'Next working day', true)} disabled={updatingPinId === navTarget.id}
+                      <button onClick={() => setNwdPopup({ pin: navTarget })} disabled={updatingPinId === navTarget.id}
                         className="btn-holo flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-[9px] font-bold border border-red-400/15 disabled:opacity-50 shrink-0">
                         <Clock className="w-3 h-3" /> NWD
                       </button>
@@ -3311,7 +3334,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                     className="btn-holo flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-amber-500/10 text-amber-400 text-[10px] font-bold border border-amber-400/15 disabled:opacity-50 shadow-[0_0_8px_rgba(251,191,36,0.1)]">
                     <Ban className="w-3.5 h-3.5" /> CMS
                   </button>
-                  <button onClick={() => handleMapStatusChange(selectedPin, 'nwd', 'Next working day', false)} disabled={updatingPinId === selectedPin.id}
+                  <button onClick={() => setNwdPopup({ pin: selectedPin })} disabled={updatingPinId === selectedPin.id}
                     className="btn-holo flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-400 text-[10px] font-bold border border-red-400/15 disabled:opacity-50 shadow-[0_0_8px_rgba(239,68,68,0.1)]">
                     <Clock className="w-3.5 h-3.5" /> NWD
                   </button>
@@ -3754,7 +3777,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           className="status-chip bg-amber-500/12 text-amber-400 border-amber-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                           CMS
                                         </button>
-                                        <button onClick={() => handleMapStatusChange(d, 'nwd', 'Next working day', false)} disabled={updatingPinId === d.id}
+                                        <button onClick={() => setNwdPopup({ pin: d })} disabled={updatingPinId === d.id}
                                           className="status-chip bg-red-500/12 text-red-400 border-red-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                           NWD
                                         </button>
@@ -3930,7 +3953,7 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
                                           className="status-chip bg-amber-500/12 text-amber-400 border-amber-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                           CMS
                                         </button>
-                                        <button onClick={() => handleMapStatusChange(d, 'nwd', 'Next working day', false)} disabled={updatingPinId === d.id}
+                                        <button onClick={() => setNwdPopup({ pin: d })} disabled={updatingPinId === d.id}
                                           className="status-chip bg-red-500/12 text-red-400 border-red-400/12 disabled:opacity-30 text-xs px-3.5 py-2">
                                           NWD
                                         </button>
@@ -4570,6 +4593,17 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         products={cmsProducts}
         regions={cmsRegions}
         loading={cmsLoading}
+      />
+
+      {/* NWD Reason Popup - Ask about region change */}
+      <NwdReasonPopup
+        open={!!nwdPopup}
+        customerName={nwdPopup?.pin.customerName || ''}
+        currentRegion={nwdPopup?.pin.locality || ''}
+        onClose={() => setNwdPopup(null)}
+        onConfirm={confirmNwd}
+        regions={cmsRegions}
+        loading={nwdLoading}
       />
 
       {/* Remark Popup */}
