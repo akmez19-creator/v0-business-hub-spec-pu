@@ -318,228 +318,83 @@ export default async function CMSAdminPage() {
         </CardContent>
       </Card>
       
-      {/* CMS by Rider */}
+      {/* All CMS Deliveries - Unified View */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bike className="w-5 h-5 text-blue-500" />
-            CMS by Rider
+            <AlertTriangle className="w-5 h-5 text-amber-500" />
+            All CMS Deliveries ({cmsDeliveries?.length || 0})
           </CardTitle>
-          <CardDescription>Breakdown of failed deliveries per rider - sorted by highest CMS count</CardDescription>
+          <CardDescription>All failed deliveries sorted by date - newest first</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {sortedRiders.map(([riderId, riderData]) => (
-              <div key={riderId} className="border border-border rounded-lg overflow-hidden">
-                {/* Rider Header */}
-                <div className="flex items-center justify-between p-3 bg-muted/50">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      riderId === 'unassigned' ? 'bg-gray-500/20' : 'bg-blue-500/20'
-                    }`}>
-                      <Bike className={`w-5 h-5 ${riderId === 'unassigned' ? 'text-gray-500' : 'text-blue-500'}`} />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold">{riderData.name}</h4>
-                      <p className="text-xs text-muted-foreground">
-                        {riderData.count} CMS deliver{riderData.count === 1 ? 'y' : 'ies'}
-                      </p>
-                    </div>
-                  </div>
-                  <Badge 
-                    variant="outline" 
-                    className={`text-sm font-bold ${
-                      riderData.count >= 5 
-                        ? 'bg-red-500/20 text-red-600 border-red-500/30' 
-                        : riderData.count >= 3 
-                        ? 'bg-amber-500/20 text-amber-600 border-amber-500/30'
-                        : 'bg-green-500/20 text-green-600 border-green-500/30'
-                    }`}
-                  >
-                    {riderData.count}
-                  </Badge>
-                </div>
-                
-                {/* Rider's CMS List */}
-                <div className="divide-y divide-border">
-                  {riderData.deliveries?.map(delivery => (
-                    <div key={delivery.id} className="p-3 hover:bg-muted/30 transition-colors">
-                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium truncate">{delivery.customer_name}</span>
-                            <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] shrink-0">
-                              {delivery.delivery_notes || 'No reason'}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3" />
-                              {delivery.contact_1}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-3 h-3" />
-                              {delivery.locality}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Package className="w-3 h-3" />
-                              {delivery.qty || 1}x {delivery.products}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-muted-foreground">Rs {delivery.amount || 0}</span>
-<CmsEditActions
-  delivery={delivery}
-  riders={allRiders || []}
-  regions={uniqueRegions}
-  products={allProducts}
-  riderMap={riderMap}
-  />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-      
-      {/* Today's CMS */}
-      {todayCms.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-amber-500" />
-              Today&apos;s CMS ({todayCms.length})
-            </CardTitle>
-            <CardDescription>Deliveries marked as CMS today - requires immediate attention</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {todayCms.map(delivery => (
-                <div 
-                  key={delivery.id} 
-                  className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition-colors"
-                >
-                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                    {/* Customer Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h4 className="font-semibold text-foreground truncate">{delivery.customer_name}</h4>
-                        <Badge variant="outline" className="bg-amber-500/20 text-amber-600 border-amber-500/30 text-[10px] shrink-0">
-                          CMS
-                        </Badge>
-                      </div>
-                      
-                      {/* CMS Reason - Prominently displayed */}
-                      <div className="mb-3 p-2 rounded-md bg-amber-500/15 border border-amber-500/30">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-                          <div>
-                            <p className="text-xs font-medium text-amber-600 mb-0.5">CMS Reason:</p>
-                            <p className="text-sm font-semibold text-amber-700">{delivery.delivery_notes || 'No reason provided'}</p>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Contact & Location */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Phone className="w-3.5 h-3.5" />
-                          <span>{delivery.contact_1}</span>
-                          {delivery.contact_2 && <span className="text-xs opacity-70">/ {delivery.contact_2}</span>}
-                        </div>
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <MapPin className="w-3.5 h-3.5" />
-                          <span className="truncate">{delivery.locality}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Package className="w-3.5 h-3.5" />
-                          <span className="truncate">{delivery.products} (x{delivery.qty || 1})</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>Marked at {formatTime(delivery.status_updated_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Rider/Contractor Info */}
-                    <div className="flex flex-col gap-1.5 text-sm shrink-0 md:text-right">
-                      {delivery.rider_id && riderMap[delivery.rider_id] && (
-                        <div className="flex items-center gap-2 md:justify-end">
-                          <Bike className="w-3.5 h-3.5 text-muted-foreground" />
-                          <span className="font-medium">{riderMap[delivery.rider_id]}</span>
-                        </div>
-                      )}
-                      {delivery.contractor_id && contractorMap[delivery.contractor_id] && (
-                        <div className="flex items-center gap-2 md:justify-end">
-                          <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
-                          <span className="text-muted-foreground">{contractorMap[delivery.contractor_id]}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 md:justify-end text-muted-foreground">
-                        <span className="font-mono text-xs">Rs {delivery.amount || 0}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      
-      {/* Older CMS */}
-      {olderCms.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-muted-foreground" />
-              Previous CMS ({olderCms.length})
-            </CardTitle>
-            <CardDescription>CMS deliveries from previous days - may need follow-up or rescheduling</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {olderCms.map(delivery => (
-                <div 
-                  key={delivery.id} 
-                  className="p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{delivery.customer_name}</p>
-                        <p className="text-xs text-muted-foreground">{delivery.locality} - {delivery.contact_1}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                      <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px]">
+          <div className="space-y-3">
+            {(cmsDeliveries || []).map(delivery => (
+              <div 
+                key={delivery.id} 
+                className={`p-4 rounded-lg border transition-colors ${
+                  delivery.delivery_date === today 
+                    ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10' 
+                    : 'border-border bg-muted/30 hover:bg-muted/50'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                  {/* Customer & Delivery Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className="font-semibold truncate">{delivery.customer_name}</span>
+                      <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] shrink-0">
                         {delivery.delivery_notes || 'No reason'}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</span>
+                      {delivery.delivery_date === today && (
+                        <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] shrink-0">
+                          Today
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Phone className="w-3 h-3" />
+                        {delivery.contact_1}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {delivery.locality}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Package className="w-3 h-3" />
+                        {delivery.qty || 1}x {delivery.products}
+                      </span>
                       {delivery.rider_id && riderMap[delivery.rider_id] && (
-                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <span className="flex items-center gap-1">
                           <Bike className="w-3 h-3" />
                           {riderMap[delivery.rider_id]}
                         </span>
                       )}
                     </div>
                   </div>
+                  
+                  {/* Amount, Date & Actions */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <span className="font-mono text-sm font-medium">Rs {delivery.amount || 0}</span>
+                      <p className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</p>
+                    </div>
+                    <CmsEditActions
+                      delivery={delivery}
+                      riders={allRiders || []}
+                      regions={uniqueRegions}
+                      products={allProducts}
+                      riderMap={riderMap}
+                    />
+                  </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
       
       {/* Empty State */}
       {(cmsDeliveries?.length || 0) === 0 && (
