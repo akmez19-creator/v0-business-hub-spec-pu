@@ -105,10 +105,17 @@ export default async function CMSAdminPage() {
     .order('name')
   const allProducts = (productsData || []).map(p => p.name)
   
-  // Group by reason
+  // Count reviewed vs pending
+  const reviewedCms = (cmsDeliveries || []).filter(d => d.delivery_notes?.startsWith('[REVIEWED]'))
+  const pendingCms = (cmsDeliveries || []).filter(d => !d.delivery_notes?.startsWith('[REVIEWED]'))
+  
+  // Group by reason (excluding [REVIEWED] prefix)
   const reasonCounts: Record<string, number> = {}
   for (const d of (cmsDeliveries || [])) {
-    const reason = d.delivery_notes || 'No Reason Given'
+    let reason = d.delivery_notes || 'No Reason Given'
+    if (reason.startsWith('[REVIEWED] ')) {
+      reason = reason.replace('[REVIEWED] ', '')
+    }
     reasonCounts[reason] = (reasonCounts[reason] || 0) + 1
   }
   
@@ -165,7 +172,7 @@ export default async function CMSAdminPage() {
       </div>
       
       {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -175,31 +182,33 @@ export default async function CMSAdminPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-500">{cmsDeliveries?.length || 0}</div>
+            <p className="text-xs text-muted-foreground">{todayCms.length} today</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Today&apos;s CMS
+              Pending Review
             </CardTitle>
-            <Calendar className="w-4 h-4 text-muted-foreground" />
+            <Clock className="w-4 h-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{todayCms.length}</div>
+            <div className="text-2xl font-bold text-amber-500">{pendingCms.length}</div>
+            <p className="text-xs text-muted-foreground">Needs attention</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Riders with CMS
+              Reviewed
             </CardTitle>
-            <Bike className="w-4 h-4 text-blue-500" />
+            <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-500">{sortedRiders.filter(([id]) => id !== 'unassigned').length}</div>
-            <p className="text-xs text-muted-foreground">
-              {sortedRiders.length > 0 && sortedRiders[0][1].count > 0 ? `Highest: ${sortedRiders[0][1].count}` : ''}
-            </p>
+            <div className="text-2xl font-bold text-green-500">{reviewedCms.length}</div>
+            <p className="text-xs text-muted-foreground">Handled by admin</p>
           </CardContent>
         </Card>
         <Card>
@@ -212,17 +221,6 @@ export default async function CMSAdminPage() {
           <CardContent>
             <div className="text-2xl font-bold text-purple-500">{pendingModifications.length}</div>
             <p className="text-xs text-muted-foreground">Pending approval</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Unique Reasons
-            </CardTitle>
-            <StickyNote className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{Object.keys(reasonCounts).length}</div>
           </CardContent>
         </Card>
       </div>
