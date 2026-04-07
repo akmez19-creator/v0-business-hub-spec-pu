@@ -20,9 +20,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MoreHorizontal, Edit, RotateCcw, UserPlus, MapPin, Package, Plus, Trash2, Bike } from 'lucide-react'
-import { resetCmsDelivery, updateCmsDelivery, addProductToCmsDelivery } from '@/lib/cms-actions'
-// resetCmsDelivery is already imported - it resets status to 'assigned' and optionally assigns a new rider
+import { MoreHorizontal, Edit, RotateCcw, UserPlus, MapPin, Package, Plus, Trash2, Bike, CheckCircle } from 'lucide-react'
+import { resetCmsDelivery, updateCmsDelivery, addProductToCmsDelivery, markCmsDeliveryDone, deleteCmsDelivery } from '@/lib/cms-actions'
 import { useRouter } from 'next/navigation'
 
 interface Delivery {
@@ -178,6 +177,38 @@ export function CmsEditActions({ delivery, riders, regions, products = [], rider
     }
   }
 
+  const handleMarkDone = async () => {
+    if (!confirm(`Mark "${delivery.customer_name}" as delivered?`)) return
+    
+    setIsLoading(true)
+    try {
+      const result = await markCmsDeliveryDone(delivery.id)
+      if (result.error) {
+        alert(result.error)
+      } else {
+        router.refresh()
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete this delivery for "${delivery.customer_name}"? This cannot be undone.`)) return
+    
+    setIsLoading(true)
+    try {
+      const result = await deleteCmsDelivery(delivery.id)
+      if (result.error) {
+        alert(result.error)
+      } else {
+        router.refresh()
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <>
       <DropdownMenu>
@@ -187,6 +218,11 @@ export function CmsEditActions({ delivery, riders, regions, products = [], rider
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handleMarkDone} className="text-green-600">
+            <CheckCircle className="w-4 h-4 mr-2" />
+            Mark Done
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
             <Edit className="w-4 h-4 mr-2" />
             Edit Details
@@ -200,9 +236,13 @@ export function CmsEditActions({ delivery, riders, regions, products = [], rider
             Add Product
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setIsResetOpen(true)} className="text-green-600">
+          <DropdownMenuItem onClick={() => setIsResetOpen(true)} className="text-blue-600">
             <RotateCcw className="w-4 h-4 mr-2" />
             Reset & Redeliver
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDelete} className="text-red-600">
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
