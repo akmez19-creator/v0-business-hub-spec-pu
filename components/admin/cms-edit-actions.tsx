@@ -42,6 +42,7 @@ interface Rider {
   id: string
   name: string
   email: string
+  role?: string
 }
 
 interface CmsEditActionsProps {
@@ -260,15 +261,17 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Label>Select Rider</Label>
+            <Label>Select Rider / Contractor</Label>
             <Select value={selectedRider || 'unassigned'} onValueChange={(v) => setSelectedRider(v === 'unassigned' ? '' : v)}>
               <SelectTrigger className="mt-2">
-                <SelectValue placeholder="Select a rider" />
+                <SelectValue placeholder="Select a rider or contractor" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
                 {riders.filter(r => r.id).map(r => (
-                  <SelectItem key={r.id} value={r.id}>{r.name || r.email}</SelectItem>
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name || r.email} {r.role === 'contractor' ? '(Contractor)' : '(Rider)'}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -345,20 +348,22 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <Label>Assign to Rider (optional)</Label>
+            <Label>Assign to Rider / Contractor (optional)</Label>
             <Select value={selectedRider || 'keep-current'} onValueChange={(v) => setSelectedRider(v === 'keep-current' ? '' : v)}>
               <SelectTrigger className="mt-2">
-                <SelectValue placeholder="Keep current rider or select new" />
+                <SelectValue placeholder="Keep current or select new" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="keep-current">Keep current rider</SelectItem>
+                <SelectItem value="keep-current">Keep current ({delivery.rider_id ? riderMap[delivery.rider_id] || 'Unknown' : 'Unassigned'})</SelectItem>
                 {riders.filter(r => r.id).map(r => (
-                  <SelectItem key={r.id} value={r.id}>{r.name || r.email}</SelectItem>
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.name || r.email} {r.role === 'contractor' ? '(Contractor)' : '(Rider)'}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <p className="text-sm text-muted-foreground mt-4">
-              This will change the status from &quot;CMS&quot; back to &quot;assigned&quot; so the rider can attempt delivery again.
+              This will change the status from &quot;CMS&quot; back to &quot;assigned&quot; so it can be redelivered.
             </p>
           </div>
           <DialogFooter>
