@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { MoreHorizontal, Edit, RotateCcw, UserPlus, MapPin, Package, Plus, Trash2, Bike } from 'lucide-react'
 import { resetCmsDelivery, updateCmsDelivery, addProductToCmsDelivery } from '@/lib/cms-actions'
+// resetCmsDelivery is already imported - it resets status to 'assigned' and optionally assigns a new rider
 import { useRouter } from 'next/navigation'
 
 interface Delivery {
@@ -49,10 +50,11 @@ interface CmsEditActionsProps {
   delivery: Delivery
   riders: Rider[]
   regions: string[]
+  products?: string[]
   riderMap: Record<string, string>
 }
 
-export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditActionsProps) {
+export function CmsEditActions({ delivery, riders, regions, products = [], riderMap }: CmsEditActionsProps) {
   const router = useRouter()
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isReassignOpen, setIsReassignOpen] = useState(false)
@@ -77,6 +79,18 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
     qty: 1,
     price: 0,
   })
+  
+  // Search states for filtering
+  const [regionSearch, setRegionSearch] = useState('')
+  const [productSearch, setProductSearch] = useState('')
+  
+  // Filtered lists
+  const filteredRegions = regionSearch 
+    ? regions.filter(r => r.toLowerCase().includes(regionSearch.toLowerCase()))
+    : regions
+  const filteredProducts = productSearch
+    ? products.filter(p => p.toLowerCase().includes(productSearch.toLowerCase()))
+    : products
 
   const handleReset = async () => {
     setIsLoading(true)
@@ -114,11 +128,14 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
   }
 
   const handleReassign = async () => {
+    if (!selectedRider) {
+      alert('Please select a rider')
+      return
+    }
     setIsLoading(true)
     try {
-      const result = await updateCmsDelivery(delivery.id, {
-        rider_id: selectedRider || null,
-      })
+      // Use resetCmsDelivery to change status back to "assigned" AND set the new rider
+      const result = await resetCmsDelivery(delivery.id, selectedRider)
       if (result.error) {
         alert(result.error)
       } else {
@@ -202,24 +219,66 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Region / Locality</Label>
-              <Select value={editForm.locality} onValueChange={(v) => setEditForm(f => ({ ...f, locality: v }))}>
+              <Input 
+                placeholder="Search regions..." 
+                value={regionSearch}
+                onChange={(e) => setRegionSearch(e.target.value)}
+                className="mb-2"
+              />
+              <Select value={editForm.locality} onValueChange={(v) => { setEditForm(f => ({ ...f, locality: v })); setRegionSearch('') }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select region" />
                 </SelectTrigger>
-                <SelectContent>
-                  {regions.map(r => (
+                <SelectContent className="max-h-60">
+                  {/* Keep current value if not in filtered list */}
+                  {editForm.locality && !filteredRegions.includes(editForm.locality) && (
+                    <SelectItem value={editForm.locality}>{editForm.locality} (current)</SelectItem>
+                  )}
+                  {filteredRegions.slice(0, 100).map(r => (
                     <SelectItem key={r} value={r}>{r}</SelectItem>
                   ))}
+                  {filteredRegions.length > 100 && (
+                    <div className="px-2 py-1 text-xs text-muted-foreground">+{filteredRegions.length - 100} more - type to search</div>
+                  )}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">{regions.length} regions available</p>
             </div>
             <div className="space-y-2">
               <Label>Product</Label>
-              <Input
-                value={editForm.products}
-                onChange={(e) => setEditForm(f => ({ ...f, products: e.target.value }))}
-                placeholder="Product name"
-              />
+              {products.length > 0 ? (
+                <>
+                  <Input 
+                    placeholder="Search products..." 
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="mb-2"
+                  />
+                  <Select value={editForm.products} onValueChange={(v) => { setEditForm(f => ({ ...f, products: v })); setProductSearch('') }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {/* Allow keeping original value if not in list */}
+                      {editForm.products && !filteredProducts.includes(editForm.products) && (
+                        <SelectItem value={editForm.products}>{editForm.products} (current)</SelectItem>
+                      )}
+                      {filteredProducts.slice(0, 100).map(p => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                      {filteredProducts.length > 100 && (
+                        <div className="px-2 py-1 text-xs text-muted-foreground">+{filteredProducts.length - 100} more - type to search</div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </>
+              ) : (
+                <Input
+                  value={editForm.products}
+                  onChange={(e) => setEditForm(f => ({ ...f, products: e.target.value }))}
+                  placeholder="Product name"
+                />
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -255,19 +314,18 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
       <Dialog open={isReassignOpen} onOpenChange={setIsReassignOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reassign Rider</DialogTitle>
+            <DialogTitle>Reassign to Rider</DialogTitle>
             <DialogDescription>
-              Assign a different rider to this delivery
+              Select a rider to reassign this delivery. The status will be reset to &quot;Assigned&quot; and it will appear on the rider&apos;s delivery list.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Label>Select Rider</Label>
-            <Select value={selectedRider || 'unassigned'} onValueChange={(v) => setSelectedRider(v === 'unassigned' ? '' : v)}>
+            <Select value={selectedRider || ''} onValueChange={setSelectedRider}>
               <SelectTrigger className="mt-2">
-                <SelectValue placeholder="Select a rider" />
+                <SelectValue placeholder="Select a rider to reassign" />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
+              <SelectContent className="max-h-60">
                 {riders.filter(r => r.id).map(r => (
                   <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                 ))}
