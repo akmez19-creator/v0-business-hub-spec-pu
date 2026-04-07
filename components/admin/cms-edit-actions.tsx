@@ -21,7 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MoreHorizontal, Edit, RotateCcw, UserPlus, MapPin, Package, Plus, Trash2, Bike, CheckCircle } from 'lucide-react'
-import { resetCmsDelivery, updateCmsDelivery, addProductToCmsDelivery, markCmsDeliveryDone, deleteCmsDelivery } from '@/lib/cms-actions'
+import { resetCmsDelivery, updateCmsDelivery, addProductToCmsDelivery, markCmsAsReviewed, deleteCmsDelivery } from '@/lib/cms-actions'
 import { useRouter } from 'next/navigation'
 
 interface Delivery {
@@ -177,12 +177,13 @@ export function CmsEditActions({ delivery, riders, regions, products = [], rider
     }
   }
 
-  const handleMarkDone = async () => {
-    if (!confirm(`Mark "${delivery.customer_name}" as delivered?`)) return
-    
+  // Check if this CMS entry has been reviewed by admin
+  const isReviewed = delivery.delivery_notes?.startsWith('[REVIEWED]') || false
+  
+  const handleToggleReviewed = async () => {
     setIsLoading(true)
     try {
-      const result = await markCmsDeliveryDone(delivery.id)
+      const result = await markCmsAsReviewed(delivery.id, !isReviewed)
       if (result.error) {
         alert(result.error)
       } else {
@@ -218,9 +219,9 @@ export function CmsEditActions({ delivery, riders, regions, products = [], rider
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={handleMarkDone} className="text-green-600">
-            <CheckCircle className="w-4 h-4 mr-2" />
-            Mark Done
+          <DropdownMenuItem onClick={handleToggleReviewed} className={isReviewed ? "text-muted-foreground" : "text-green-600"}>
+            <CheckCircle className={`w-4 h-4 mr-2 ${isReviewed ? 'fill-green-500 text-green-500' : ''}`} />
+            {isReviewed ? 'Mark Unreviewed' : 'Mark Reviewed'}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setIsEditOpen(true)}>

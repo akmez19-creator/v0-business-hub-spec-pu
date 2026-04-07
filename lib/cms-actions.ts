@@ -171,28 +171,53 @@ export async function addProductToCmsDelivery(
   return { success: true, delivery: newDelivery }
 }
 
-// Mark CMS delivery as done (delivered)
-export async function markCmsDeliveryDone(deliveryId: string) {
+// Mark CMS delivery as reviewed by admin (does NOT change delivery status)
+// This is for admin tracking purposes - to know which CMS entries have been handled
+export async function markCmsAsReviewed(deliveryId: string, reviewed: boolean = true) {
   const { error: authError, authorized } = await checkAdminOrManagerAccess()
   if (!authorized) return { error: authError }
 
   const adminDb = createAdminClient()
   
+  // First get the current delivery to check the notes
+  const { data: delivery, error: fetchError } = await adminDb
+    .from('deliveries')
+    .select('delivery_notes')
+    .eq('id', deliveryId)
+    .single()
+  
+  if (fetchError) {
+    return { error: 'Failed to fetch delivery: ' + fetchError.message }
+  }
+  
+  // Add or remove the [REVIEWED] prefix from delivery_notes
+  let updatedNotes = delivery?.delivery_notes || ''
+  const reviewedPrefix = '[REVIEWED] '
+  
+  if (reviewed) {
+    // Add prefix if not already there
+    if (!updatedNotes.startsWith(reviewedPrefix)) {
+      updatedNotes = reviewedPrefix + updatedNotes
+    }
+  } else {
+    // Remove prefix if present
+    if (updatedNotes.startsWith(reviewedPrefix)) {
+      updatedNotes = updatedNotes.replace(reviewedPrefix, '')
+    }
+  }
+  
   const { error: updateError } = await adminDb
     .from('deliveries')
     .update({
-      status: 'delivered',
-      delivery_notes: null,
-      status_updated_at: new Date().toISOString(),
+      delivery_notes: updatedNotes,
     })
     .eq('id', deliveryId)
   
   if (updateError) {
-    return { error: 'Failed to mark as done: ' + updateError.message }
+    return { error: 'Failed to mark as reviewed: ' + updateError.message }
   }
   
   revalidatePath('/dashboard/admin/cms')
-  revalidatePath('/dashboard/deliveries')
   return { success: true }
 }
 

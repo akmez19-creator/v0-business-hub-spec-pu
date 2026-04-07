@@ -302,73 +302,101 @@ export default async function CMSAdminPage() {
             <AlertTriangle className="w-5 h-5 text-amber-500" />
             All CMS Deliveries ({cmsDeliveries?.length || 0})
           </CardTitle>
-          <CardDescription>All failed deliveries sorted by date - newest first</CardDescription>
+          <CardDescription>
+            All failed deliveries sorted by date - newest first. 
+            <span className="ml-2 text-green-600">
+              {(cmsDeliveries || []).filter(d => d.delivery_notes?.startsWith('[REVIEWED]')).length} reviewed
+            </span>
+            <span className="ml-2 text-amber-600">
+              {(cmsDeliveries || []).filter(d => !d.delivery_notes?.startsWith('[REVIEWED]')).length} pending
+            </span>
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {(cmsDeliveries || []).map(delivery => (
-              <div 
-                key={delivery.id} 
-                className={`p-4 rounded-lg border transition-colors ${
-                  delivery.delivery_date === today 
-                    ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10' 
-                    : 'border-border bg-muted/30 hover:bg-muted/50'
-                }`}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                  {/* Customer & Delivery Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      <span className="font-semibold truncate">{delivery.customer_name}</span>
-                      <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] shrink-0">
-                        {delivery.delivery_notes || 'No reason'}
-                      </Badge>
-                      {delivery.delivery_date === today && (
-                        <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] shrink-0">
-                          Today
+            {(cmsDeliveries || []).map(delivery => {
+              const isReviewed = delivery.delivery_notes?.startsWith('[REVIEWED]')
+              const displayReason = isReviewed 
+                ? delivery.delivery_notes?.replace('[REVIEWED] ', '') 
+                : delivery.delivery_notes
+              
+              return (
+                <div 
+                  key={delivery.id} 
+                  className={`p-4 rounded-lg border transition-colors ${
+                    isReviewed
+                      ? 'border-green-500/30 bg-green-500/5 opacity-70 hover:opacity-100'
+                      : delivery.delivery_date === today 
+                        ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10' 
+                        : 'border-border bg-muted/30 hover:bg-muted/50'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                    {/* Customer & Delivery Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        {isReviewed && (
+                          <span className="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center shrink-0">
+                            <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          </span>
+                        )}
+                        <span className={`font-semibold truncate ${isReviewed ? 'text-muted-foreground' : ''}`}>{delivery.customer_name}</span>
+                        <Badge variant="outline" className={`text-[10px] shrink-0 ${
+                          isReviewed 
+                            ? 'bg-green-500/10 text-green-600 border-green-500/20' 
+                            : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                        }`}>
+                          {displayReason || 'No reason'}
                         </Badge>
-                      )}
+                        {delivery.delivery_date === today && !isReviewed && (
+                          <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] shrink-0">
+                            Today
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Phone className="w-3 h-3" />
+                          {delivery.contact_1}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {delivery.locality}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Package className="w-3 h-3" />
+                          {delivery.qty || 1}x {delivery.products}
+                        </span>
+                        {delivery.rider_id && riderMap[delivery.rider_id] && (
+                          <span className="flex items-center gap-1">
+                            <Bike className="w-3 h-3" />
+                            {riderMap[delivery.rider_id]}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Phone className="w-3 h-3" />
-                        {delivery.contact_1}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {delivery.locality}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Package className="w-3 h-3" />
-                        {delivery.qty || 1}x {delivery.products}
-                      </span>
-                      {delivery.rider_id && riderMap[delivery.rider_id] && (
-                        <span className="flex items-center gap-1">
-                          <Bike className="w-3 h-3" />
-                          {riderMap[delivery.rider_id]}
-                        </span>
-                      )}
+                    {/* Amount, Date & Actions */}
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <span className="font-mono text-sm font-medium">Rs {delivery.amount || 0}</span>
+                        <p className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</p>
+                      </div>
+                      <CmsEditActions
+                        delivery={delivery}
+                        riders={allRiders || []}
+                        regions={uniqueRegions}
+                        products={allProducts}
+                        riderMap={riderMap}
+                      />
                     </div>
-                  </div>
-                  
-                  {/* Amount, Date & Actions */}
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right">
-                      <span className="font-mono text-sm font-medium">Rs {delivery.amount || 0}</span>
-                      <p className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</p>
-                    </div>
-                    <CmsEditActions
-                      delivery={delivery}
-                      riders={allRiders || []}
-                      regions={uniqueRegions}
-                      products={allProducts}
-                      riderMap={riderMap}
-                    />
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </CardContent>
       </Card>
