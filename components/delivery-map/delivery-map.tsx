@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { generateReplyTokens, updateDeliveryStatusBulk, updateDeliveryLocation, uploadPaymentProof, saveDeliveryRemark } from '@/lib/delivery-actions'
 import { cancelPendingCmsModification } from '@/lib/modification-actions'
 import { ModifyOrderSheet } from './modify-order-sheet'
+import { CmsReasonPopup } from './cms-reason-popup'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
@@ -384,6 +385,19 @@ export function DeliveryMap({
       .catch(() => {})
   }, [])
   
+  // Fetch CMS products and regions when CMS popup opens
+  useEffect(() => {
+    if (cmsPopup && cmsProducts.length === 0) {
+      fetch('/api/cms-data')
+        .then(res => res.json())
+        .then(data => {
+          if (data.products) setCmsProducts(data.products)
+          if (data.regions) setCmsRegions(data.regions)
+        })
+        .catch(() => {})
+    }
+  }, [cmsPopup, cmsProducts.length])
+  
   // Update coordinates when map moves while adding POI
   useEffect(() => {
     const map = mapRef.current
@@ -432,6 +446,9 @@ export function DeliveryMap({
   const [bulkSending, setBulkSending] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [cmsPopup, setCmsPopup] = useState<{ pin: DeliveryPin } | null>(null)
+  const [cmsProducts, setCmsProducts] = useState<{ name: string }[]>([])
+  const [cmsRegions, setCmsRegions] = useState<string[]>([])
+  const [cmsLoading, setCmsLoading] = useState(false)
   const [mapProofStep, setMapProofStep] = useState<{ pin: DeliveryPin; method: string } | null>(null)
   const [mapProofFile, setMapProofFile] = useState<File | null>(null)
   const [mapProofPreview, setMapProofPreview] = useState<string | null>(null)
@@ -1279,7 +1296,7 @@ map.on('load', () => {
   // ����══════════════════════��════════════════════════════════��════════════════
   // CONTINUOUS GPS TRACKING - Using setInterval + getCurrentPosition
   // watchPosition has known Chrome bugs - setInterval is more reliable
-  // ═════════════════════�����════════════════════════════════════════════════════
+  // ═════════════════════�����════════════════════════════════════════��═══════════
   const gpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   const startContinuousTracking = useCallback(() => {
@@ -1798,17 +1815,29 @@ map.on('load', () => {
     }
   }, [calledTwice, handleMapStatusChange])
 
-  const confirmCmsReason = useCallback(async (reason: string) => {
-    if (!cmsPopup) return
-    const { pin } = cmsPopup
-    // Check 5-minute rule before processing
-    if (pin.status === 'delivered' && !canChangeDeliveredStatus(pin)) {
-      alert('Cannot change status - more than 30 minutes have passed since delivery')
-      setCmsPopup(null)
-      return
-    }
+const confirmCmsReason = useCallback(async (reason: string, extraData?: { newProduct?: string; newRegion?: string }) => {
+  if (!cmsPopup) return
+  const { pin } = cmsPopup
+  // Check 5-minute rule before processing
+  if (pin.status === 'delivered' && !canChangeDeliveredStatus(pin)) {
+    alert('Cannot change status - more than 30 minutes have passed since delivery')
     setCmsPopup(null)
-    await handleMapStatusChange(pin, 'cms', reason, true)
+    setCmsLoading(false)
+    return
+  }
+  setCmsLoading(true)
+  
+  // Build full reason with extra data
+  let fullReason = reason
+  if (extraData?.newProduct) {
+    fullReason = `${reason}: Correct product is "${extraData.newProduct}"`
+  } else if (extraData?.newRegion) {
+    fullReason = `${reason}: New region is "${extraData.newRegion}"`
+  }
+  
+  setCmsPopup(null)
+  setCmsLoading(false)
+  await handleMapStatusChange(pin, 'cms', fullReason, true)
   }, [cmsPopup, handleMapStatusChange])
 
 // ── Pin placement ──
@@ -4531,55 +4560,17 @@ mapRef.current.flyTo({ center: [driverLocation.lng, driverLocation.lat], zoom: 1
         </div>
       )}
 
-      {/* CMS Reason Popup */}
-      {cmsPopup && (
-        <div className="absolute inset-0 z-[60] bg-black/70 flex items-end" onClick={() => setCmsPopup(null)}>
-          <div className="w-full bg-zinc-900 border-t border-white/10 rounded-t-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-              <div>
-                <h3 className="font-semibold text-white text-sm">Cannot Make Sale</h3>
-                <p className="text-xs text-white/40">{cmsPopup.pin.customerName} - Select a reason</p>
-              </div>
-              <button onClick={() => setCmsPopup(null)} className="p-2 rounded-lg hover:bg-white/10 transition"><X className="w-4 h-4 text-white/40" /></button>
-            </div>
-            <div className="p-4 grid grid-cols-2 gap-2">
-              <button onClick={() => confirmCmsReason('Wrong Number')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition active:scale-95">
-                <Phone className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Wrong Number</span>
-              </button>
-              <button onClick={() => confirmCmsReason('Wrong Product')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition active:scale-95">
-                <Package className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Wrong Product</span>
-              </button>
-              <button onClick={() => confirmCmsReason('Always No Ans')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/20 transition active:scale-95">
-                <Phone className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Always No Ans</span>
-              </button>
-              <button onClick={() => confirmCmsReason('Client Refused')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition active:scale-95">
-                <Ban className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Client Refused</span>
-              </button>
-              <button onClick={() => confirmCmsReason('Change of Address')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition active:scale-95">
-                <MapPin className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Change of Address</span>
-              </button>
-              <button onClick={() => confirmCmsReason('Cancelled Order')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition active:scale-95">
-                <X className="w-4 h-4 shrink-0" /><span className="text-xs font-semibold">Cancelled Order</span>
-              </button>
-            </div>
-            {/* Custom note option */}
-            <div className="px-4 pb-4">
-              <button onClick={() => {
-                const note = prompt('Enter CMS reason:')
-                if (note && note.trim()) confirmCmsReason(note.trim())
-              }} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/40 text-xs font-bold hover:text-white hover:border-white/20 transition active:scale-95">
-                <Mail className="w-3.5 h-3.5" /> Other Reason
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* CMS Reason Popup - Enhanced with product/region selection */}
+      <CmsReasonPopup
+        open={!!cmsPopup}
+        customerName={cmsPopup?.pin.customerName || ''}
+        currentProduct={cmsPopup?.pin.products || ''}
+        onClose={() => setCmsPopup(null)}
+        onConfirm={confirmCmsReason}
+        products={cmsProducts}
+        regions={cmsRegions}
+        loading={cmsLoading}
+      />
 
       {/* Remark Popup */}
       {remarkPopup && (

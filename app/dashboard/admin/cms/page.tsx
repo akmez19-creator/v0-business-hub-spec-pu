@@ -97,6 +97,14 @@ export default async function CMSAdminPage() {
     .not('locality', 'is', null)
   const uniqueRegions = [...new Set((regions || []).map(r => r.locality).filter(Boolean))].sort()
   
+  // Get all products for editing
+  const { data: productsData } = await adminDb
+    .from('products')
+    .select('name')
+    .eq('is_active', true)
+    .order('name')
+  const allProducts = (productsData || []).map(p => p.name)
+  
   // Group by reason
   const reasonCounts: Record<string, number> = {}
   for (const d of (cmsDeliveries || [])) {
@@ -381,12 +389,13 @@ export default async function CMSAdminPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-xs text-muted-foreground">Rs {delivery.amount || 0}</span>
-                          <CmsEditActions 
-                            delivery={delivery}
-                            riders={allRiders || []}
-                            regions={uniqueRegions}
-                            riderMap={riderMap}
-                          />
+<CmsEditActions
+  delivery={delivery}
+  riders={allRiders || []}
+  regions={uniqueRegions}
+  products={allProducts}
+  riderMap={riderMap}
+  />
                         </div>
                       </div>
                     </div>
