@@ -55,30 +55,44 @@ export default async function CMSAdminPage() {
     .eq('status', 'cms')
     .order('status_updated_at', { ascending: false })
   
-  // Get rider and contractor names - fetch ALL profiles with rider/contractor roles
-  const { data: allProfiles } = await adminDb
+  // Get ALL rider IDs from deliveries first
+  const riderIdsInDeliveries = [...new Set((cmsDeliveries || []).map(d => d.rider_id).filter(Boolean))]
+  const contractorIdsInDeliveries = [...new Set((cmsDeliveries || []).map(d => d.contractor_id).filter(Boolean))]
+  const allUserIds = [...new Set([...riderIdsInDeliveries, ...contractorIdsInDeliveries])]
+  
+  // Fetch profiles for users referenced in deliveries
+  const { data: deliveryProfiles } = allUserIds.length > 0 ? await adminDb
     .from('profiles')
     .select('id, name, email, role')
-    .in('role', ['rider', 'contractor', 'admin', 'manager'])
+    .in('id', allUserIds) : { data: [] }
+  
+  // Also fetch all riders for the dropdown
+  const { data: allRiderProfiles } = await adminDb
+    .from('profiles')
+    .select('id, name, email, role')
+    .eq('role', 'rider')
+    .order('name')
   
   const riderMap: Record<string, string> = {}
   const contractorMap: Record<string, string> = {}
   
-  for (const p of (allProfiles || [])) {
-    if (p.role === 'rider' || p.role === 'contractor') {
-      riderMap[p.id] = p.name || p.email || 'Unknown'
-    }
+  // Add profiles from deliveries
+  for (const p of (deliveryProfiles || [])) {
+    riderMap[p.id] = p.name || p.email || 'Unknown'
     if (p.role === 'contractor') {
       contractorMap[p.id] = p.name || p.email || 'Unknown'
     }
   }
   
+  // Also add all riders (for dropdown)
+  for (const p of (allRiderProfiles || [])) {
+    if (!riderMap[p.id]) {
+      riderMap[p.id] = p.name || p.email || 'Unknown'
+    }
+  }
+  
   // Get all riders for reassignment dropdown
-  const { data: allRiders } = await adminDb
-    .from('profiles')
-    .select('id, name, email')
-    .eq('role', 'rider')
-    .order('name')
+  const allRiders = allRiderProfiles || []
   
   // Get all regions for editing
   const { data: regions } = await adminDb

@@ -261,13 +261,13 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
           </DialogHeader>
           <div className="py-4">
             <Label>Select Rider</Label>
-            <Select value={selectedRider} onValueChange={setSelectedRider}>
+            <Select value={selectedRider || 'unassigned'} onValueChange={(v) => setSelectedRider(v === 'unassigned' ? '' : v)}>
               <SelectTrigger className="mt-2">
                 <SelectValue placeholder="Select a rider" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Unassigned</SelectItem>
-                {riders.map(r => (
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {riders.filter(r => r.id).map(r => (
                   <SelectItem key={r.id} value={r.id}>{r.name || r.email}</SelectItem>
                 ))}
               </SelectContent>
@@ -346,13 +346,13 @@ export function CmsEditActions({ delivery, riders, regions, riderMap }: CmsEditA
           </DialogHeader>
           <div className="py-4">
             <Label>Assign to Rider (optional)</Label>
-            <Select value={selectedRider} onValueChange={setSelectedRider}>
+            <Select value={selectedRider || 'keep-current'} onValueChange={(v) => setSelectedRider(v === 'keep-current' ? '' : v)}>
               <SelectTrigger className="mt-2">
                 <SelectValue placeholder="Keep current rider or select new" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Keep current rider</SelectItem>
-                {riders.map(r => (
+                <SelectItem value="keep-current">Keep current rider</SelectItem>
+                {riders.filter(r => r.id).map(r => (
                   <SelectItem key={r.id} value={r.id}>{r.name || r.email}</SelectItem>
                 ))}
               </SelectContent>
