@@ -55,30 +55,39 @@ export default async function CMSAdminPage() {
     .eq('status', 'cms')
     .order('status_updated_at', { ascending: false })
   
-  // Fetch ALL profiles who can act as riders (both 'rider' AND 'contractor' roles)
-  const { data: allDeliveryProfiles } = await adminDb
-    .from('profiles')
-    .select('id, name, email, role')
-    .in('role', ['rider', 'contractor'])
+  // Fetch ALL riders from the riders table (rider_id in deliveries references riders.id, NOT profiles.id)
+  const { data: allRidersData } = await adminDb
+    .from('riders')
+    .select('id, name, first_name, surname, phone, contractor_id, is_active')
+    .eq('is_active', true)
     .order('name')
+  
+  // Also fetch contractors from profiles (for contractor_id mapping)
+  const { data: contractorProfiles } = await adminDb
+    .from('profiles')
+    .select('id, name, email')
+    .eq('role', 'contractor')
   
   const riderMap: Record<string, string> = {}
   const contractorMap: Record<string, string> = {}
   
-  // Build maps from all profiles
-  for (const p of (allDeliveryProfiles || [])) {
-    riderMap[p.id] = p.name || p.email || 'No Name'
-    if (p.role === 'contractor') {
-      contractorMap[p.id] = p.name || p.email || 'No Name'
-    }
+  // Build rider map from riders table
+  for (const r of (allRidersData || [])) {
+    const displayName = r.name || (r.first_name && r.surname ? `${r.first_name} ${r.surname}` : r.first_name || r.surname) || 'Unnamed Rider'
+    riderMap[r.id] = displayName
   }
   
-  // All riders = both riders AND contractors (since contractors can also deliver)
-  const allRiders = (allDeliveryProfiles || []).map(p => ({
-    id: p.id,
-    name: p.name || p.email || 'No Name',
-    email: p.email,
-    role: p.role
+  // Build contractor map from profiles
+  for (const c of (contractorProfiles || [])) {
+    contractorMap[c.id] = c.name || c.email || 'Unknown Contractor'
+  }
+  
+  // All riders for dropdown
+  const allRiders = (allRidersData || []).map(r => ({
+    id: r.id,
+    name: r.name || (r.first_name && r.surname ? `${r.first_name} ${r.surname}` : r.first_name || r.surname) || 'Unnamed Rider',
+    email: r.phone || '',
+    role: 'rider' as const
   }))
   
   // Get all regions for editing
