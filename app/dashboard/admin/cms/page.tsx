@@ -2,10 +2,11 @@ import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, Phone, MapPin, Calendar, Clock, Bike, Building2, Package, StickyNote, RefreshCw, DollarSign } from 'lucide-react'
+import { AlertTriangle, Phone, MapPin, Calendar, Clock, Bike, Building2, Package, StickyNote, RefreshCw, DollarSign, Edit, RotateCcw } from 'lucide-react'
 import Link from 'next/link'
 import { getPendingCmsModifications } from '@/lib/admin-actions'
 import { CmsReviewActions } from '@/components/admin/cms-review-actions'
+import { CmsEditActions } from '@/components/admin/cms-edit-actions'
 
 export default async function CMSAdminPage() {
   const supabase = await createClient()
@@ -54,29 +55,37 @@ export default async function CMSAdminPage() {
     .eq('status', 'cms')
     .order('status_updated_at', { ascending: false })
   
-  // Get rider and contractor names
-  const riderIds = [...new Set((cmsDeliveries || []).map(d => d.rider_id).filter(Boolean))]
-  const contractorIds = [...new Set((cmsDeliveries || []).map(d => d.contractor_id).filter(Boolean))]
-  
-  const { data: riders } = await adminDb
+  // Get rider and contractor names - fetch ALL profiles with rider/contractor roles
+  const { data: allProfiles } = await adminDb
     .from('profiles')
-    .select('id, name, email')
-    .in('id', riderIds.length > 0 ? riderIds : ['none'])
-  
-  const { data: contractors } = await adminDb
-    .from('profiles')
-    .select('id, name, email')
-    .in('id', contractorIds.length > 0 ? contractorIds : ['none'])
+    .select('id, name, email, role')
+    .in('role', ['rider', 'contractor', 'admin', 'manager'])
   
   const riderMap: Record<string, string> = {}
   const contractorMap: Record<string, string> = {}
   
-  for (const r of (riders || [])) {
-    riderMap[r.id] = r.name || r.email
+  for (const p of (allProfiles || [])) {
+    if (p.role === 'rider' || p.role === 'contractor') {
+      riderMap[p.id] = p.name || p.email || 'Unknown'
+    }
+    if (p.role === 'contractor') {
+      contractorMap[p.id] = p.name || p.email || 'Unknown'
+    }
   }
-  for (const c of (contractors || [])) {
-    contractorMap[c.id] = c.name || c.email
-  }
+  
+  // Get all riders for reassignment dropdown
+  const { data: allRiders } = await adminDb
+    .from('profiles')
+    .select('id, name, email')
+    .eq('role', 'rider')
+    .order('name')
+  
+  // Get all regions for editing
+  const { data: regions } = await adminDb
+    .from('deliveries')
+    .select('locality')
+    .not('locality', 'is', null)
+  const uniqueRegions = [...new Set((regions || []).map(r => r.locality).filter(Boolean))].sort()
   
   // Group by reason
   const reasonCounts: Record<string, number> = {}
@@ -337,7 +346,7 @@ export default async function CMSAdminPage() {
                 <div className="divide-y divide-border">
                   {riderData.deliveries?.map(delivery => (
                     <div key={delivery.id} className="p-3 hover:bg-muted/30 transition-colors">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-medium truncate">{delivery.customer_name}</span>
@@ -356,13 +365,18 @@ export default async function CMSAdminPage() {
                             </span>
                             <span className="flex items-center gap-1">
                               <Package className="w-3 h-3" />
-                              {delivery.products}
+                              {delivery.qty || 1}x {delivery.products}
                             </span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 text-sm">
+                        <div className="flex items-center gap-2">
                           <span className="font-mono text-xs text-muted-foreground">Rs {delivery.amount || 0}</span>
-                          <span className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</span>
+                          <CmsEditActions 
+                            delivery={delivery}
+                            riders={allRiders || []}
+                            regions={uniqueRegions}
+                            riderMap={riderMap}
+                          />
                         </div>
                       </div>
                     </div>
