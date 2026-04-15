@@ -33,18 +33,19 @@ export async function POST(req: Request) {
           }))
         })
       }),
-      prompt: `You are a product inventory expert. Analyze the following product names and find groups of products that are likely the SAME product but with different names due to:
+      prompt: `You are a product inventory expert. Analyze the following product names and find groups of products that are likely ACCIDENTAL DUPLICATES (same product entered multiple times with different spelling) due to:
 - Typos (e.g., "Vaccum" vs "Vacuum")
-- Case differences (e.g., "CAR VISOR" vs "Car Visor")
-- Abbreviations (e.g., "10M Rope" vs "10 Meter Rope")
-- Word order (e.g., "Cleaner Vacuum" vs "Vacuum Cleaner")
-- Minor variations (e.g., "Knife Set" vs "Knife set - B1G1")
-- Pluralization (e.g., "Battery" vs "Batteries")
+- Case differences ONLY (e.g., "CAR VISOR" vs "Car Visor", "Knife set" vs "Knife Set")
+- Spelling mistakes (e.g., "Magnifyer" vs "Magnifier")
+- Abbreviations that mean the same thing (e.g., "10M Rope" vs "10 Meter Rope")
+- Word order swaps (e.g., "Cleaner Vacuum" vs "Vacuum Cleaner")
 
-IMPORTANT: Only group products that are TRULY the same item. Do NOT group:
-- Different sizes of the same product (e.g., "3 layer" vs "4 layer")
-- Products with different quantities (unless it's a typo)
-- Different product variants
+CRITICAL - DO NOT group these as duplicates (they are INTENTIONAL VARIANTS):
+- Products with pricing suffixes like "- B1G1", "- SPX2", "- SPX3" (these are Buy 1 Get 1, Special Price offers)
+- Products with quantity prefixes like "1x", "2x", "3x" (these are different pack sizes)
+- Different sizes (e.g., "3 layer" vs "4 layer", "500ml" vs "1L")
+- Different colors or styles
+- Different product models
 
 Return ONLY groups with 2 or more similar products. If no similar products found, return an empty array.
 
