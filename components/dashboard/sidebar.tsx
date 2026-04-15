@@ -95,9 +95,9 @@ const navItems: NavItem[] = [
     roles: ['admin', 'manager'],
     color: '#8b5cf6',
     subItems: [
-      { href: '/dashboard/deliveries/inventory', label: 'Stock Levels', icon: BoxesIcon },
+      { href: '/dashboard/deliveries/inventory', label: 'Products', icon: BoxesIcon },
       { href: '/dashboard/deliveries/purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
-      { href: '/dashboard/deliveries/stock', label: 'Stock Tracking', icon: Package },
+      { href: '/dashboard/deliveries/stock', label: 'Stock In/Out', icon: Package },
     ],
   },
   {
