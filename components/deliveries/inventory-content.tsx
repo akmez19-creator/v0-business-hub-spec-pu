@@ -67,6 +67,61 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc')
   const router = useRouter()
+  const supabase = createClient()
+  const [clearing, setClearing] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+
+  // Export to Excel
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const XLSX = await import('xlsx')
+      
+      const exportData = products.map(p => ({
+        'Category': p.category || '',
+        'Item': p.name,
+        'Quantity': p.quantity || 0,
+        'PRICE UNIT': p.price || 0,
+        'SPX2': p.price_spx2 || '',
+        'SPX3': p.price_spx3 || '',
+        'B1G1': p.price_b1g1 || '',
+        'SKU': p.sku || '',
+        'Status': p.is_active ? 'Active' : 'Inactive',
+        'Remarks': p.remarks || '',
+      }))
+      
+      const worksheet = XLSX.utils.json_to_sheet(exportData)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Products')
+      
+      // Auto-size columns
+      const colWidths = Object.keys(exportData[0] || {}).map(key => ({ wch: Math.max(key.length, 15) }))
+      worksheet['!cols'] = colWidths
+      
+      XLSX.writeFile(workbook, `products_export_${new Date().toISOString().split('T')[0]}.xlsx`)
+    } catch (error) {
+      console.error('Export failed:', error)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Clear all products
+  const handleClearAll = async () => {
+    setClearing(true)
+    try {
+      const { error } = await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      if (error) throw error
+      setProducts([])
+      setClearConfirmOpen(false)
+      router.refresh()
+    } catch (error) {
+      console.error('Clear failed:', error)
+    } finally {
+      setClearing(false)
+    }
+  }
 
   // Get unique categories
   const categories = useMemo(() => {
@@ -159,7 +214,37 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
           </p>
         </div>
 <div className="flex items-center gap-2">
-<InventoryImportDialog onSuccess={() => router.refresh()} />
+          <Button variant="outline" onClick={handleExport} disabled={exporting || products.length === 0}>
+            {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+            Export Excel
+          </Button>
+          <Dialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10" disabled={products.length === 0}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Clear All
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-destructive">
+                  <AlertTriangle className="w-5 h-5" />
+                  Clear All Products
+                </DialogTitle>
+                <DialogDescription>
+                  This will permanently delete all {products.length} products from your inventory. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setClearConfirmOpen(false)}>Cancel</Button>
+                <Button variant="destructive" onClick={handleClearAll} disabled={clearing}>
+                  {clearing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                  Delete All Products
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <InventoryImportDialog onSuccess={() => router.refresh()} />
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
               <Button>
