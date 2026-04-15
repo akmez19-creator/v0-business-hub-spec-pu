@@ -1200,8 +1200,7 @@ function ProductForm({
                 {variants.map((variant, idx) => 
                   variant.toDelete ? null : (
                     <div key={variant.id || `new-${idx}`} className="grid grid-cols-12 gap-2 items-center bg-background p-2 rounded border">
-                      <Input
-                        placeholder="Attribute (e.g., Size)"
+                      <select
                         value={variant.attribute_name}
                         onChange={(e) => {
                           const updated = [...variants]
@@ -1209,8 +1208,18 @@ function ProductForm({
                           setVariants(updated)
                         }}
                         disabled={saving}
-                        className="col-span-3 h-8 text-xs"
-                      />
+                        className="col-span-3 h-8 text-xs bg-background border border-input rounded-md px-2"
+                      >
+                        <option value="">Select...</option>
+                        <option value="Size">Size</option>
+                        <option value="Color">Color</option>
+                        <option value="Capacity">Capacity</option>
+                        <option value="Material">Material</option>
+                        <option value="Style">Style</option>
+                        <option value="Weight">Weight</option>
+                        <option value="Length">Length</option>
+                        <option value="Pack">Pack</option>
+                      </select>
                       <Input
                         placeholder="Value (e.g., Large)"
                         value={variant.attribute_value}
