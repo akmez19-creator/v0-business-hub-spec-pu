@@ -69,6 +69,10 @@ import {
   Plane,
   Droplets,
   Zap,
+  Bed,
+  Lamp,
+  Flower2,
+  WashingMachine,
 } from 'lucide-react'
 import Image from 'next/image'
 import { Product } from '@/lib/types'
@@ -519,7 +523,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
 
       {/* Category Cards - 3D Style */}
       {(() => {
-        const categoryConfig: Record<string, { icon: React.ReactNode; gradient: string; shadow: string; iconBg: string }> = {
+        const categoryConfig: Record<string, { icon: React.ReactNode; gradient: string; shadow: string; iconBg: string; shortLabel?: string }> = {
           'all': { 
             icon: <Package className="w-5 h-5" />, 
             gradient: 'from-slate-500 to-slate-700',
@@ -560,25 +564,29 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             icon: <Sofa className="w-5 h-5" />, 
             gradient: 'from-amber-500 to-amber-700',
             shadow: 'shadow-amber-500/25',
-            iconBg: 'bg-white/20'
+            iconBg: 'bg-white/20',
+            shortLabel: 'Furniture'
           },
           'Home Decor': { 
-            icon: <Sofa className="w-5 h-5" />, 
+            icon: <Lamp className="w-5 h-5" />, 
             gradient: 'from-rose-500 to-rose-700',
             shadow: 'shadow-rose-500/25',
-            iconBg: 'bg-white/20'
+            iconBg: 'bg-white/20',
+            shortLabel: 'Decor'
           },
           'Home / Laundry': { 
-            icon: <Shirt className="w-5 h-5" />, 
+            icon: <WashingMachine className="w-5 h-5" />, 
             gradient: 'from-indigo-500 to-indigo-700',
             shadow: 'shadow-indigo-500/25',
-            iconBg: 'bg-white/20'
+            iconBg: 'bg-white/20',
+            shortLabel: 'Laundry'
           },
           'Home / Bedding': { 
-            icon: <Sofa className="w-5 h-5" />, 
+            icon: <Bed className="w-5 h-5" />, 
             gradient: 'from-purple-500 to-purple-700',
             shadow: 'shadow-purple-500/25',
-            iconBg: 'bg-white/20'
+            iconBg: 'bg-white/20',
+            shortLabel: 'Bedding'
           },
           'Health & Wellness': { 
             icon: <Heart className="w-5 h-5" />, 
@@ -650,13 +658,15 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             icon: <Lightbulb className="w-5 h-5" />, 
             gradient: 'from-orange-400 to-orange-600',
             shadow: 'shadow-orange-400/25',
-            iconBg: 'bg-white/20'
+            iconBg: 'bg-white/20',
+            shortLabel: 'Appliances'
           },
           'Home & Pest Control': { 
             icon: <Bug className="w-5 h-5" />, 
             gradient: 'from-red-600 to-red-800',
             shadow: 'shadow-red-600/25',
-            iconBg: 'bg-white/20'
+            iconBg: 'bg-white/20',
+            shortLabel: 'Pest Ctrl'
           },
           'Toys & Games': { 
             icon: <Plane className="w-5 h-5" />, 
@@ -724,7 +734,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                     </div>
                     <div className="text-center">
                       <p className={`text-xs font-semibold truncate max-w-[70px] ${isActive ? 'text-white' : 'text-foreground'}`}>
-                        {cat.split(' / ')[0].split(' & ')[0]}
+                        {config.shortLabel || cat.split(' / ')[0].split(' & ')[0]}
                       </p>
                       <p className={`text-[10px] ${isActive ? 'text-white/80' : 'text-muted-foreground'}`}>{count} items</p>
                     </div>
