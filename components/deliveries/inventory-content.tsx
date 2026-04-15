@@ -86,7 +86,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
         'SPX2': p.price_spx2 || '',
         'SPX3': p.price_spx3 || '',
         'B1G1': p.price_b1g1 || '',
-        'SKU': p.sku || '',
+        'Image': p.image_url || '',
         'Status': p.is_active ? 'Active' : 'Inactive',
         'Remarks': p.remarks || '',
       }))
