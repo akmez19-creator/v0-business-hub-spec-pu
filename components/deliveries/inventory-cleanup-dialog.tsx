@@ -323,7 +323,7 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
                           </div>
 
                           {masterId === product.id && (
-                            <Badge size="sm" className="bg-primary text-[10px] px-1.5 py-0">Master</Badge>
+                            <Badge className="bg-primary text-[10px] px-1.5 py-0 h-4">Master</Badge>
                           )}
                         </div>
                       ))}
