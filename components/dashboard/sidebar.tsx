@@ -254,9 +254,11 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
   const getDefaultExpanded = () => {
     if (pathname.startsWith('/dashboard/marketing-back-office')) return '/dashboard/marketing-back-office'
     if (pathname.startsWith('/dashboard/marketing-front-office')) return '/dashboard/marketing-front-office'
+    // Check inventory/finance pages first (they're under /deliveries URL)
+    if (pathname.includes('/inventory') || pathname.includes('/purchase-orders') || (pathname.includes('/stock') && pathname.includes('/deliveries'))) return '/dashboard/inventory'
+    if (pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll') || pathname.includes('/deductions')) return '/dashboard/finance'
+    // Then check deliveries
     if (pathname.startsWith('/dashboard/deliveries')) return '/dashboard/deliveries'
-    if (pathname.startsWith('/dashboard/finance') || pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll')) return '/dashboard/finance'
-    if (pathname.startsWith('/dashboard/inventory') || pathname.includes('/purchase-orders') || pathname.includes('/stock')) return '/dashboard/inventory'
     if (pathname.startsWith('/dashboard/contractors')) return '/dashboard/contractors'
     if (pathname.startsWith('/dashboard/riders')) return '/dashboard/riders'
     if (pathname.startsWith('/dashboard/storekeeper')) return '/dashboard/storekeeper'
@@ -301,7 +303,7 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
             {/* Expanded logo text */}
             <div className="opacity-0 group-hover/sidebar:opacity-100 transition-all duration-300 whitespace-nowrap overflow-hidden">
               <h1 className="text-lg font-bold text-white">AKMEZ</h1>
-              <p className="text-[10px] text-white/50 uppercase tracking-wider">Delivery Hub</p>
+              <p className="text-[10px] text-white/50 uppercase tracking-wider">Business Hub</p>
             </div>
           </div>
         </div>
@@ -310,8 +312,22 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
         <nav className="flex-1 py-4 px-2 overflow-y-auto scrollbar-hide">
           <div className="space-y-1">
             {filteredNavItems.map((item, index) => {
-              const isActive = pathname === item.href || 
-                (item.href !== '/dashboard' && pathname.startsWith(item.href))
+              // Smart active detection - inventory/finance pages are under /deliveries URL but belong to different sections
+              const isInventoryPage = pathname.includes('/inventory') || pathname.includes('/purchase-orders') || (pathname.includes('/stock') && pathname.includes('/deliveries'))
+              const isFinancePage = pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll') || pathname.includes('/deductions')
+              
+              let isActive = false
+              if (item.label === 'Inventory' && isInventoryPage) {
+                isActive = true
+              } else if (item.label === 'Finance' && isFinancePage) {
+                isActive = true
+              } else if (item.label === 'Deliveries' && pathname.startsWith('/dashboard/deliveries') && !isInventoryPage && !isFinancePage) {
+                isActive = true
+              } else if (item.href !== '/dashboard' && item.label !== 'Deliveries' && item.label !== 'Finance' && item.label !== 'Inventory') {
+                isActive = pathname === item.href || pathname.startsWith(item.href)
+              } else if (item.href === '/dashboard' && pathname === '/dashboard') {
+                isActive = true
+              }
               const hasSubItems = item.subItems && item.subItems.length > 0
               const isExpanded = expandedItem === item.href
               const isHovered = hoveredIndex === index
