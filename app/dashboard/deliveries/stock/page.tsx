@@ -64,8 +64,8 @@ export default async function StockPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Stock Management</h1>
-        <p className="text-muted-foreground">Track rider stock - opening, in transit, returns, and defective items</p>
+        <h1 className="text-2xl font-bold">Stock In/Out</h1>
+        <p className="text-muted-foreground">Track stock movements - rider assignments, returns, and defective items</p>
       </div>
 
       <StockOverview

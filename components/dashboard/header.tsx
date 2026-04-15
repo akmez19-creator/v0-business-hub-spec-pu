@@ -74,9 +74,9 @@ const navItems: NavItem[] = [
       { href: '/dashboard/deliveries/contractors', label: 'Contractors', icon: Building2 },
       { href: '/dashboard/deliveries/collections', label: 'Collections', icon: Banknote },
       { href: '/dashboard/deliveries/payments', label: 'Payments', icon: Wallet },
-      { href: '/dashboard/deliveries/inventory', label: 'Inventory', icon: BoxesIcon },
+      { href: '/dashboard/deliveries/inventory', label: 'Products', icon: BoxesIcon },
       { href: '/dashboard/deliveries/purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
-      { href: '/dashboard/deliveries/stock', label: 'Stock', icon: Package },
+      { href: '/dashboard/deliveries/stock', label: 'Stock In/Out', icon: Package },
     ],
   },
   {
