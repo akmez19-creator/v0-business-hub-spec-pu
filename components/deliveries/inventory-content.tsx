@@ -517,64 +517,224 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
         </div>
       </div>
 
-      {/* Category Chips */}
+      {/* Category Cards - 3D Style */}
       {(() => {
-        const categoryIcons: Record<string, React.ReactNode> = {
-          'Automotive': <Car className="w-3.5 h-3.5" />,
-          'Car Accessories': <Car className="w-3.5 h-3.5" />,
-          'Bathroom / Personal Care': <Droplets className="w-3.5 h-3.5" />,
-          'Cleaning & Household': <Sparkles className="w-3.5 h-3.5" />,
-          'Kitchen & Food Tools': <UtensilsCrossed className="w-3.5 h-3.5" />,
-          'Home / Furniture': <Sofa className="w-3.5 h-3.5" />,
-          'Home Decor': <Sofa className="w-3.5 h-3.5" />,
-          'Home / Laundry': <Shirt className="w-3.5 h-3.5" />,
-          'Home / Bedding': <Sofa className="w-3.5 h-3.5" />,
-          'Health & Wellness': <Heart className="w-3.5 h-3.5" />,
-          'Pet Supplies': <PawPrint className="w-3.5 h-3.5" />,
-          'Garden & Outdoor': <TreeDeciduous className="w-3.5 h-3.5" />,
-          'Tools / Hardware': <Wrench className="w-3.5 h-3.5" />,
-          'Storage & Organization': <Boxes className="w-3.5 h-3.5" />,
-          'Tiles & Flooring': <LayoutGrid className="w-3.5 h-3.5" />,
-          'Baby & Kids': <Baby className="w-3.5 h-3.5" />,
-          'Bags & Travel': <Briefcase className="w-3.5 h-3.5" />,
-          'Sports & Fitness': <Dumbbell className="w-3.5 h-3.5" />,
-          'Sewing & Crafts': <Scissors className="w-3.5 h-3.5" />,
-          'Electronics': <Zap className="w-3.5 h-3.5" />,
-          'Home Appliances': <Lightbulb className="w-3.5 h-3.5" />,
-          'Home & Pest Control': <Bug className="w-3.5 h-3.5" />,
-          'Toys & Games': <Plane className="w-3.5 h-3.5" />,
+        const categoryConfig: Record<string, { icon: React.ReactNode; gradient: string; shadow: string; iconBg: string }> = {
+          'all': { 
+            icon: <Package className="w-5 h-5" />, 
+            gradient: 'from-slate-500 to-slate-700',
+            shadow: 'shadow-slate-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Automotive': { 
+            icon: <Car className="w-5 h-5" />, 
+            gradient: 'from-blue-500 to-blue-700',
+            shadow: 'shadow-blue-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Car Accessories': { 
+            icon: <Car className="w-5 h-5" />, 
+            gradient: 'from-sky-500 to-sky-700',
+            shadow: 'shadow-sky-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Bathroom / Personal Care': { 
+            icon: <Droplets className="w-5 h-5" />, 
+            gradient: 'from-cyan-500 to-cyan-700',
+            shadow: 'shadow-cyan-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Cleaning & Household': { 
+            icon: <Sparkles className="w-5 h-5" />, 
+            gradient: 'from-emerald-500 to-emerald-700',
+            shadow: 'shadow-emerald-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Kitchen & Food Tools': { 
+            icon: <UtensilsCrossed className="w-5 h-5" />, 
+            gradient: 'from-orange-500 to-orange-700',
+            shadow: 'shadow-orange-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Home / Furniture': { 
+            icon: <Sofa className="w-5 h-5" />, 
+            gradient: 'from-amber-500 to-amber-700',
+            shadow: 'shadow-amber-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Home Decor': { 
+            icon: <Sofa className="w-5 h-5" />, 
+            gradient: 'from-rose-500 to-rose-700',
+            shadow: 'shadow-rose-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Home / Laundry': { 
+            icon: <Shirt className="w-5 h-5" />, 
+            gradient: 'from-indigo-500 to-indigo-700',
+            shadow: 'shadow-indigo-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Home / Bedding': { 
+            icon: <Sofa className="w-5 h-5" />, 
+            gradient: 'from-purple-500 to-purple-700',
+            shadow: 'shadow-purple-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Health & Wellness': { 
+            icon: <Heart className="w-5 h-5" />, 
+            gradient: 'from-pink-500 to-pink-700',
+            shadow: 'shadow-pink-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Pet Supplies': { 
+            icon: <PawPrint className="w-5 h-5" />, 
+            gradient: 'from-amber-600 to-amber-800',
+            shadow: 'shadow-amber-600/25',
+            iconBg: 'bg-white/20'
+          },
+          'Garden & Outdoor': { 
+            icon: <TreeDeciduous className="w-5 h-5" />, 
+            gradient: 'from-green-500 to-green-700',
+            shadow: 'shadow-green-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Tools / Hardware': { 
+            icon: <Wrench className="w-5 h-5" />, 
+            gradient: 'from-zinc-500 to-zinc-700',
+            shadow: 'shadow-zinc-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Storage & Organization': { 
+            icon: <Boxes className="w-5 h-5" />, 
+            gradient: 'from-teal-500 to-teal-700',
+            shadow: 'shadow-teal-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Tiles & Flooring': { 
+            icon: <LayoutGrid className="w-5 h-5" />, 
+            gradient: 'from-stone-500 to-stone-700',
+            shadow: 'shadow-stone-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Baby & Kids': { 
+            icon: <Baby className="w-5 h-5" />, 
+            gradient: 'from-fuchsia-500 to-fuchsia-700',
+            shadow: 'shadow-fuchsia-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Bags & Travel': { 
+            icon: <Briefcase className="w-5 h-5" />, 
+            gradient: 'from-violet-500 to-violet-700',
+            shadow: 'shadow-violet-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Sports & Fitness': { 
+            icon: <Dumbbell className="w-5 h-5" />, 
+            gradient: 'from-red-500 to-red-700',
+            shadow: 'shadow-red-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Sewing & Crafts': { 
+            icon: <Scissors className="w-5 h-5" />, 
+            gradient: 'from-lime-500 to-lime-700',
+            shadow: 'shadow-lime-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Electronics': { 
+            icon: <Zap className="w-5 h-5" />, 
+            gradient: 'from-yellow-500 to-yellow-700',
+            shadow: 'shadow-yellow-500/25',
+            iconBg: 'bg-white/20'
+          },
+          'Home Appliances': { 
+            icon: <Lightbulb className="w-5 h-5" />, 
+            gradient: 'from-orange-400 to-orange-600',
+            shadow: 'shadow-orange-400/25',
+            iconBg: 'bg-white/20'
+          },
+          'Home & Pest Control': { 
+            icon: <Bug className="w-5 h-5" />, 
+            gradient: 'from-red-600 to-red-800',
+            shadow: 'shadow-red-600/25',
+            iconBg: 'bg-white/20'
+          },
+          'Toys & Games': { 
+            icon: <Plane className="w-5 h-5" />, 
+            gradient: 'from-blue-400 to-blue-600',
+            shadow: 'shadow-blue-400/25',
+            iconBg: 'bg-white/20'
+          },
         }
+        const defaultConfig = { 
+          icon: <Package className="w-5 h-5" />, 
+          gradient: 'from-gray-500 to-gray-700',
+          shadow: 'shadow-gray-500/25',
+          iconBg: 'bg-white/20'
+        }
+        
         return (
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setCategoryFilter('all')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                categoryFilter === 'all'
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-            >
-              <Package className="w-3.5 h-3.5" />
-              All ({products.length})
-            </button>
-            {categories.map(cat => {
-              const count = products.filter(p => p.category === cat).length
-              const icon = categoryIcons[cat] || <Package className="w-3.5 h-3.5" />
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setCategoryFilter(cat)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    categoryFilter === cat
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
-                >
-                  {icon}
-                  {cat} ({count})
-                </button>
-              )
-            })}
+          <div className="overflow-x-auto pb-2 -mx-4 px-4">
+            <div className="flex gap-3 min-w-max">
+              {/* All Button */}
+              <button
+                onClick={() => setCategoryFilter('all')}
+                className={`group relative flex flex-col items-center gap-2 p-3 rounded-2xl transition-all duration-300 min-w-[90px] ${
+                  categoryFilter === 'all'
+                    ? `bg-gradient-to-br ${categoryConfig.all.gradient} text-white shadow-lg ${categoryConfig.all.shadow} scale-105 -translate-y-1`
+                    : 'bg-card border border-border hover:border-primary/30 hover:-translate-y-0.5 hover:shadow-md'
+                }`}
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                  categoryFilter === 'all'
+                    ? categoryConfig.all.iconBg
+                    : 'bg-muted group-hover:bg-primary/10'
+                }`}>
+                  {categoryConfig.all.icon}
+                </div>
+                <div className="text-center">
+                  <p className={`text-xs font-semibold ${categoryFilter === 'all' ? 'text-white' : 'text-foreground'}`}>All</p>
+                  <p className={`text-[10px] ${categoryFilter === 'all' ? 'text-white/80' : 'text-muted-foreground'}`}>{products.length} items</p>
+                </div>
+                {categoryFilter === 'all' && (
+                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-1 bg-white rounded-full shadow-sm" />
+                )}
+              </button>
+              
+              {/* Category Buttons */}
+              {categories.map(cat => {
+                const count = products.filter(p => p.category === cat).length
+                const config = categoryConfig[cat] || defaultConfig
+                const isActive = categoryFilter === cat
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
+                    className={`group relative flex flex-col items-center gap-2 p-3 rounded-2xl transition-all duration-300 min-w-[90px] ${
+                      isActive
+                        ? `bg-gradient-to-br ${config.gradient} text-white shadow-lg ${config.shadow} scale-105 -translate-y-1`
+                        : 'bg-card border border-border hover:border-primary/30 hover:-translate-y-0.5 hover:shadow-md'
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                      isActive
+                        ? config.iconBg
+                        : 'bg-muted group-hover:bg-primary/10'
+                    }`}>
+                      {config.icon}
+                    </div>
+                    <div className="text-center">
+                      <p className={`text-xs font-semibold truncate max-w-[70px] ${isActive ? 'text-white' : 'text-foreground'}`}>
+                        {cat.split(' / ')[0].split(' & ')[0]}
+                      </p>
+                      <p className={`text-[10px] ${isActive ? 'text-white/80' : 'text-muted-foreground'}`}>{count} items</p>
+                    </div>
+                    {isActive && (
+                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-1 bg-white rounded-full shadow-sm" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )
       })()}
