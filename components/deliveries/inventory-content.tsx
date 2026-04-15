@@ -50,11 +50,27 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   const [addOpen, setAddOpen] = useState(false)
   const router = useRouter()
 
-  const filtered = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku && p.sku.toLowerCase().includes(search.toLowerCase())) ||
-    (p.category && p.category.toLowerCase().includes(search.toLowerCase()))
-  )
+  const filtered = products.filter(p => {
+    const searchTerm = search.toLowerCase().trim()
+    if (!searchTerm) return true
+    
+    // Check name, SKU, category
+    const matchesText = 
+      p.name.toLowerCase().includes(searchTerm) ||
+      (p.sku && p.sku.toLowerCase().includes(searchTerm)) ||
+      (p.category && p.category.toLowerCase().includes(searchTerm))
+    
+    // Check price - supports exact match, partial match, or "Rs" prefix
+    const priceString = p.price.toString()
+    const cleanSearch = searchTerm.replace(/^rs\s*/i, '').trim()
+    const matchesPrice = 
+      priceString.includes(cleanSearch) ||
+      priceString === cleanSearch ||
+      `rs ${priceString}`.includes(searchTerm) ||
+      `rs${priceString}`.includes(searchTerm)
+    
+    return matchesText || matchesPrice
+  })
 
   const activeCount = products.filter(p => p.is_active).length
   const withImageCount = products.filter(p => p.image_url).length
@@ -93,7 +109,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          placeholder="Search products by name, SKU, or category..."
+          placeholder="Search by name, SKU, category, or price..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-10"
