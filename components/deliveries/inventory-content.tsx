@@ -217,12 +217,10 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
     const active = products.filter(p => p.is_active).length
     // Low stock: has quantity between 1-5
     const lowStock = products.filter(p => (p.quantity ?? 0) > 0 && (p.quantity ?? 0) <= 5).length
-    // Out of stock: quantity is 0, null, or undefined
-    const outOfStock = products.filter(p => !p.quantity || p.quantity === 0).length
-    // No quantity set: products that have never had quantity updated
-    const noQuantitySet = products.filter(p => p.quantity === null || p.quantity === undefined).length
+    // To count: quantity is 0, null, or undefined (needs manual counting)
+    const toCount = products.filter(p => !p.quantity || p.quantity === 0).length
     const withImages = products.filter(p => p.image_url).length
-    return { total, active, lowStock, outOfStock, noQuantitySet, withImages }
+    return { total, active, lowStock, toCount, withImages }
   }, [products])
 
   // Filtered and sorted products
@@ -389,18 +387,12 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
         </div>
         <div className="bg-card border border-border rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
-              <Package className="w-5 h-5 text-red-500" />
+            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <Package className="w-5 h-5 text-blue-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-foreground">{stats.outOfStock}</p>
-              <p className="text-xs text-muted-foreground">
-                {stats.noQuantitySet > 0 ? (
-                  <span>Out of Stock <span className="text-muted-foreground/60">({stats.noQuantitySet} not set)</span></span>
-                ) : (
-                  'Out of Stock'
-                )}
-              </p>
+              <p className="text-2xl font-bold text-foreground">{stats.toCount}</p>
+              <p className="text-xs text-muted-foreground">To Count</p>
             </div>
           </div>
         </div>
@@ -717,19 +709,11 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
 }
 
 function QuantityBadge({ quantity }: { quantity: number | null | undefined }) {
-  // No quantity set yet
-  if (quantity === null || quantity === undefined) {
+  // No quantity set or zero - needs manual counting
+  if (quantity === null || quantity === undefined || quantity === 0) {
     return (
-      <Badge className="bg-muted text-muted-foreground hover:bg-muted/80 border-0">
-        No Qty
-      </Badge>
-    )
-  }
-  // Out of stock
-  if (quantity === 0) {
-    return (
-      <Badge className="bg-red-500/10 text-red-600 hover:bg-red-500/20 border-0">
-        Out of Stock
+      <Badge className="bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 border-0">
+        To Count
       </Badge>
     )
   }
