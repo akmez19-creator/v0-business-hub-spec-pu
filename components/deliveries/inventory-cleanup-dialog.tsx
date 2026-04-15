@@ -52,6 +52,7 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
   const [searchTerm, setSearchTerm] = useState('')
   const [activeTab, setActiveTab] = useState('exact')
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+  const [aiStats, setAiStats] = useState<{ total: number; batches: number; groupsFound: number } | null>(null)
   
   const supabase = createClient()
 
@@ -89,6 +90,7 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
 
   const fetchAiDuplicates = async () => {
     setAiLoading(true)
+    setAiStats(null)
     try {
       const res = await fetch('/api/inventory/find-similar', { method: 'POST' })
       const data = await res.json()
@@ -96,6 +98,9 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
       if (data.groups) {
         setAiDuplicates(data.groups)
         autoSelectMasters(data.groups, 'ai_')
+      }
+      if (data.stats) {
+        setAiStats(data.stats)
       }
     } catch (error) {
       console.error('Error fetching AI duplicates:', error)
@@ -430,9 +435,16 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
 
           <TabsContent value="ai" className="flex-1 overflow-hidden m-0 flex flex-col">
             {aiLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Brain className="w-6 h-6 animate-pulse text-violet-500" />
-                <span className="ml-2 text-sm text-muted-foreground">AI analyzing products...</span>
+              <div className="flex flex-col items-center justify-center py-12 gap-3">
+                <Brain className="w-8 h-8 animate-pulse text-violet-500" />
+                <div className="text-center">
+                  <p className="text-sm font-medium">AI analyzing products in batches...</p>
+                  <p className="text-xs text-muted-foreground mt-1">This may take a moment for large inventories</p>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Processing batches of 100 products each
+                </div>
               </div>
             ) : aiDuplicates.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center px-6">
@@ -453,9 +465,14 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
             ) : (
               <>
                 <div className="flex items-center justify-between px-6 py-2 bg-violet-500/10 border-y border-violet-500/20">
-                  <span className="text-sm">
-                    <strong>{aiDuplicates.length}</strong> similar groups detected by AI
-                  </span>
+                  <div className="text-sm">
+                    <strong>{aiDuplicates.length}</strong> similar groups detected
+                    {aiStats && (
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        ({aiStats.total} products analyzed in {aiStats.batches} batches)
+                      </span>
+                    )}
+                  </div>
                   <Button 
                     size="sm"
                     onClick={() => handleMergeAll(filteredAi, 'ai_')} 
