@@ -131,6 +131,22 @@ export interface Product {
   price_b1g1: number | null  // Buy 1 Get 1 price
   // Notes
   remarks: string | null
+  // Variants support
+  has_variants: boolean
+  variants?: ProductVariant[]
+}
+
+export interface ProductVariant {
+  id: string
+  product_id: string
+  attribute_name: string  // e.g., "Size", "Color", "Material"
+  attribute_value: string // e.g., "Medium", "Large", "X-Large"
+  quantity: number
+  price_override: number | null  // Optional: different price for this variant
+  sku: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface DeliveryImport {

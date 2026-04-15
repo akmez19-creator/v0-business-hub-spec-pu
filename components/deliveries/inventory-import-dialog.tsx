@@ -53,6 +53,8 @@ const COLUMN_MAPPING: Record<string, string> = {
   'remarks': 'remarks',
   'Notes': 'remarks',
   'notes': 'remarks',
+  'Variant': 'variant',
+  'variant': 'variant',
 }
 
 interface ParsedProduct {
@@ -65,6 +67,7 @@ interface ParsedProduct {
   price_b1g1?: number
   image_url?: string
   remarks?: string
+  variant?: string  // Format: "AttributeName: AttributeValue" e.g., "Size: Large"
 }
 
 export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps) {
@@ -211,29 +214,48 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
       let insertedCount = 0
       let updatedCount = 0
 
-      // Process each product - upsert based on name
+      // Group products by name to handle variants
+      const productGroups: Record<string, ParsedProduct[]> = {}
       for (const product of products) {
+        const key = product.name.trim().toLowerCase()
+        if (!productGroups[key]) productGroups[key] = []
+        productGroups[key].push(product)
+      }
+
+      // Process each product group
+      for (const [, group] of Object.entries(productGroups)) {
+        const firstProduct = group[0]
+        const hasVariants = group.some(p => p.variant && p.variant.trim())
+        
         // Check if product exists by name (case-insensitive)
         const { data: existingProducts } = await supabase
           .from('products')
-          .select('id')
-          .eq('name', product.name.trim())
+          .select('id, has_variants')
+          .eq('name', firstProduct.name.trim())
         
         const existing = existingProducts && existingProducts.length > 0 ? existingProducts[0] : null
 
+        // For products with variants, use the first row's price as base, sum quantities come from variants
+        const totalQuantity = hasVariants 
+          ? 0 // Will be tracked in variants
+          : (firstProduct.quantity || 0)
+
         const payload = {
-          name: product.name,
-          category: product.category || null,
-          quantity: product.quantity || 0,
-          price: product.price || 0,
-          price_spx2: product.price_spx2 || null,
-          price_spx3: product.price_spx3 || null,
-          price_b1g1: product.price_b1g1 || null,
-          image_url: product.image_url || null,
-          remarks: product.remarks || null,
+          name: firstProduct.name,
+          category: firstProduct.category || null,
+          quantity: totalQuantity,
+          price: firstProduct.price || 0,
+          price_spx2: firstProduct.price_spx2 || null,
+          price_spx3: firstProduct.price_spx3 || null,
+          price_b1g1: firstProduct.price_b1g1 || null,
+          image_url: firstProduct.image_url || null,
+          remarks: firstProduct.remarks || null,
+          has_variants: hasVariants,
           is_active: true,
           updated_at: new Date().toISOString(),
         }
+
+        let productId: string
 
         if (existing) {
           // Update existing product
@@ -243,13 +265,45 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
             .eq('id', existing.id)
           
           if (!error) updatedCount++
+          productId = existing.id
         } else {
           // Insert new product
-          const { error } = await supabase
+          const { data: newProduct, error } = await supabase
             .from('products')
             .insert(payload)
+            .select('id')
+            .single()
           
-          if (!error) insertedCount++
+          if (!error && newProduct) {
+            insertedCount++
+            productId = newProduct.id
+          } else {
+            continue
+          }
+        }
+
+        // Handle variants
+        if (hasVariants && productId) {
+          // Delete existing variants for this product
+          await supabase.from('product_variants').delete().eq('product_id', productId)
+          
+          // Insert new variants
+          for (const p of group) {
+            if (p.variant && p.variant.trim()) {
+              // Parse variant string "AttributeName: AttributeValue"
+              const [attrName, attrValue] = p.variant.split(':').map(s => s.trim())
+              if (attrName && attrValue) {
+                await supabase.from('product_variants').insert({
+                  product_id: productId,
+                  attribute_name: attrName,
+                  attribute_value: attrValue,
+                  quantity: p.quantity || 0,
+                  price_override: p.price !== firstProduct.price ? p.price : null,
+                  updated_at: new Date().toISOString(),
+                })
+              }
+            }
+          }
         }
       }
 
@@ -353,12 +407,12 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                     <tr>
                       <th className="text-left px-3 py-2">Category</th>
                       <th className="text-left px-3 py-2">Item</th>
+                      <th className="text-left px-3 py-2">Variant</th>
                       <th className="text-right px-3 py-2">Qty</th>
                       <th className="text-right px-3 py-2">Price</th>
                       <th className="text-right px-3 py-2">SPX2</th>
                       <th className="text-right px-3 py-2">SPX3</th>
                       <th className="text-right px-3 py-2">B1G1</th>
-                      <th className="text-left px-3 py-2">Image</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -366,18 +420,12 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                       <tr key={idx} className="border-t">
                         <td className="px-3 py-2 text-muted-foreground">{product.category || '-'}</td>
                         <td className="px-3 py-2 font-medium">{product.name}</td>
+                        <td className="px-3 py-2 text-violet-600">{product.variant || '-'}</td>
                         <td className="px-3 py-2 text-right">{product.quantity || '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price ? `Rs ${product.price}` : '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}</td>
-                        <td className="px-3 py-2">
-                          {product.image_url ? (
-                            <a href={product.image_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate max-w-[100px] block">
-                              View
-                            </a>
-                          ) : '-'}
-                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -428,6 +476,7 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div><span className="text-muted-foreground">Category</span> → Category</div>
               <div><span className="text-muted-foreground">Item</span> → Product Name</div>
+              <div><span className="text-muted-foreground">Variant</span> → Size: Large</div>
               <div><span className="text-muted-foreground">Quantity</span> → Stock Qty</div>
               <div><span className="text-muted-foreground">PRICE UNIT</span> → Unit Price</div>
               <div><span className="text-muted-foreground">SPX2</span> → Special Price 2</div>
@@ -436,6 +485,9 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
               <div><span className="text-muted-foreground">Image</span> → Image URL</div>
               <div><span className="text-muted-foreground">Remarks</span> → Notes</div>
             </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              For products with variants, add multiple rows with same Item name but different Variant values (e.g., &quot;Size: Medium&quot;, &quot;Size: Large&quot;).
+            </p>
           </div>
         </div>
 

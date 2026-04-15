@@ -1,7 +1,7 @@
 'use client'
 
 import React from "react"
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -79,25 +79,69 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
     try {
       const XLSX = await import('xlsx')
       
-      const exportData = products.map(p => ({
-        'Category': p.category || '',
-        'Item': p.name,
-        'Quantity': p.quantity || 0,
-        'PRICE UNIT': p.price || 0,
-        'SPX2': p.price_spx2 || '',
-        'SPX3': p.price_spx3 || '',
-        'B1G1': p.price_b1g1 || '',
-        'Image': p.image_url || '',
-        'Status': p.is_active ? 'Active' : 'Inactive',
-        'Remarks': p.remarks || '',
-      }))
+      // Fetch variants for products that have them
+      const productsWithVariants = products.filter(p => p.has_variants)
+      const variantsMap: Record<string, Array<{attribute_name: string, attribute_value: string, quantity: number, price_override: number | null}>> = {}
+      
+      if (productsWithVariants.length > 0) {
+        const { data: variants } = await supabase
+          .from('product_variants')
+          .select('*')
+          .in('product_id', productsWithVariants.map(p => p.id))
+        
+        if (variants) {
+          for (const v of variants) {
+            if (!variantsMap[v.product_id]) variantsMap[v.product_id] = []
+            variantsMap[v.product_id].push(v)
+          }
+        }
+      }
+      
+      // Build export data - products with variants get multiple rows
+      const exportData: Array<Record<string, string | number>> = []
+      
+      for (const p of products) {
+        if (p.has_variants && variantsMap[p.id]?.length > 0) {
+          // Add one row per variant
+          for (const v of variantsMap[p.id]) {
+            exportData.push({
+              'Category': p.category || '',
+              'Item': p.name,
+              'Variant': `${v.attribute_name}: ${v.attribute_value}`,
+              'Quantity': v.quantity || 0,
+              'PRICE UNIT': v.price_override || p.price || 0,
+              'SPX2': p.price_spx2 || '',
+              'SPX3': p.price_spx3 || '',
+              'B1G1': p.price_b1g1 || '',
+              'Image': p.image_url || '',
+              'Status': p.is_active ? 'Active' : 'Inactive',
+              'Remarks': p.remarks || '',
+            })
+          }
+        } else {
+          // Regular product without variants
+          exportData.push({
+            'Category': p.category || '',
+            'Item': p.name,
+            'Variant': '',
+            'Quantity': p.quantity || 0,
+            'PRICE UNIT': p.price || 0,
+            'SPX2': p.price_spx2 || '',
+            'SPX3': p.price_spx3 || '',
+            'B1G1': p.price_b1g1 || '',
+            'Image': p.image_url || '',
+            'Status': p.is_active ? 'Active' : 'Inactive',
+            'Remarks': p.remarks || '',
+          })
+        }
+      }
       
       const worksheet = XLSX.utils.json_to_sheet(exportData)
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Products')
       
       // Auto-size columns
-      const colWidths = Object.keys(exportData[0] || {}).map(key => ({ wch: Math.max(key.length, 15) }))
+      const colWidths = Object.keys(exportData[0] || {}).map(key => ({ wch: Math.max(String(key).length, 15) }))
       worksheet['!cols'] = colWidths
       
       XLSX.writeFile(workbook, `products_export_${new Date().toISOString().split('T')[0]}.xlsx`)
@@ -576,7 +620,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                       )}
                     </TableCell>
                     <TableCell className="text-center">
-                      <QuantityBadge quantity={product.quantity} />
+                      <QuantityBadge quantity={product.quantity} hasVariants={product.has_variants} />
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {product.price > 0 ? `Rs ${product.price}` : '-'}
@@ -645,7 +689,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                 )}
                 {/* Stock badge */}
                 <div className="absolute top-2 left-2">
-                  <QuantityBadge quantity={product.quantity} />
+                  <QuantityBadge quantity={product.quantity} hasVariants={product.has_variants} />
                 </div>
                 {!product.is_active && (
                   <Badge variant="destructive" className="absolute top-2 right-2">Inactive</Badge>
@@ -708,7 +752,15 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   )
 }
 
-function QuantityBadge({ quantity }: { quantity: number | null | undefined }) {
+function QuantityBadge({ quantity, hasVariants }: { quantity: number | null | undefined, hasVariants?: boolean }) {
+  // Product has variants - show "Variants" badge
+  if (hasVariants) {
+    return (
+      <Badge className="bg-violet-500/10 text-violet-600 hover:bg-violet-500/20 border-0">
+        Variants
+      </Badge>
+    )
+  }
   // No quantity set or zero - needs manual counting
   if (quantity === null || quantity === undefined || quantity === 0) {
     return (
@@ -761,6 +813,44 @@ function ProductForm({
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  
+  // Variants management
+  const [hasVariants, setHasVariants] = useState(product?.has_variants ?? false)
+  const [variants, setVariants] = useState<Array<{
+    id?: string
+    attribute_name: string
+    attribute_value: string
+    quantity: number
+    price_override: number | null
+    sku: string | null
+    isNew?: boolean
+    toDelete?: boolean
+  }>>([])
+  const [loadingVariants, setLoadingVariants] = useState(false)
+  
+  // Fetch existing variants when editing
+  useEffect(() => {
+    async function fetchVariants() {
+      if (!product?.id || !product?.has_variants) return
+      setLoadingVariants(true)
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from('product_variants')
+          .select('*')
+          .eq('product_id', product.id)
+          .order('attribute_name', { ascending: true })
+          .order('attribute_value', { ascending: true })
+        if (error) throw error
+        setVariants(data || [])
+      } catch (err) {
+        console.error('Failed to load variants:', err)
+      } finally {
+        setLoadingVariants(false)
+      }
+    }
+    fetchVariants()
+  }, [product?.id, product?.has_variants])
 
   async function uploadImageFile(file: File) {
     setUploading(true)
@@ -829,14 +919,16 @@ function ProductForm({
         description: description.trim() || null,
         is_active: isActive,
         image_url: imageUrl || null,
-        quantity: parseInt(quantity) || 0,
+        quantity: hasVariants ? 0 : (parseInt(quantity) || 0), // If has variants, main quantity is 0
         price_spx2: priceSpx2 ? parseFloat(priceSpx2) : null,
         price_spx3: priceSpx3 ? parseFloat(priceSpx3) : null,
         price_b1g1: priceB1g1 ? parseFloat(priceB1g1) : null,
         remarks: remarks.trim() || null,
+        has_variants: hasVariants,
         updated_at: new Date().toISOString(),
       }
 
+      let savedProduct: Product
       if (product) {
         const { data, error: err } = await supabase
           .from('products')
@@ -845,7 +937,7 @@ function ProductForm({
           .select()
           .single()
         if (err) throw err
-        onSave(data)
+        savedProduct = data
       } else {
         const { data, error: err } = await supabase
           .from('products')
@@ -853,8 +945,42 @@ function ProductForm({
           .select()
           .single()
         if (err) throw err
-        onSave(data)
+        savedProduct = data
       }
+      
+      // Save variants if has_variants is enabled
+      if (hasVariants && savedProduct) {
+        // Delete variants marked for deletion
+        const toDelete = variants.filter(v => v.toDelete && v.id)
+        for (const v of toDelete) {
+          await supabase.from('product_variants').delete().eq('id', v.id)
+        }
+        
+        // Upsert remaining variants
+        const toSave = variants.filter(v => !v.toDelete)
+        for (const v of toSave) {
+          const variantPayload = {
+            product_id: savedProduct.id,
+            attribute_name: v.attribute_name.trim(),
+            attribute_value: v.attribute_value.trim(),
+            quantity: v.quantity || 0,
+            price_override: v.price_override,
+            sku: v.sku?.trim() || null,
+            updated_at: new Date().toISOString(),
+          }
+          
+          if (v.id && !v.isNew) {
+            await supabase.from('product_variants').update(variantPayload).eq('id', v.id)
+          } else {
+            await supabase.from('product_variants').insert(variantPayload)
+          }
+        }
+      } else if (!hasVariants && product?.has_variants) {
+        // If variants were disabled, delete all variants
+        await supabase.from('product_variants').delete().eq('product_id', product.id)
+      }
+      
+      onSave(savedProduct)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -998,20 +1124,33 @@ function ProductForm({
           </div>
         </div>
 
-        {/* Quantity & Unit Price */}
+        {/* Has Variants Toggle */}
+        <label className="flex items-center gap-2 cursor-pointer py-2 border-y border-border">
+          <input
+            type="checkbox"
+            checked={hasVariants}
+            onChange={(e) => setHasVariants(e.target.checked)}
+            className="rounded border-border"
+          />
+          <span className="text-sm font-medium">Has Variants (Size, Color, etc.)</span>
+        </label>
+
+        {/* Quantity & Unit Price - only show quantity if no variants */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label htmlFor="product-quantity">Quantity</Label>
-            <Input
-              id="product-quantity"
-              type="number"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              placeholder="0"
-              disabled={saving}
-            />
-          </div>
-          <div className="space-y-2">
+          {!hasVariants && (
+            <div className="space-y-2">
+              <Label htmlFor="product-quantity">Quantity</Label>
+              <Input
+                id="product-quantity"
+                type="number"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="0"
+                disabled={saving}
+              />
+            </div>
+          )}
+          <div className={`space-y-2 ${hasVariants ? 'col-span-2' : ''}`}>
             <Label htmlFor="product-price">Unit Price (Rs)</Label>
             <Input
               id="product-price"
@@ -1023,6 +1162,118 @@ function ProductForm({
             />
           </div>
         </div>
+        
+        {/* Variants Management */}
+        {hasVariants && (
+          <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Product Variants</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setVariants([...variants, { 
+                  attribute_name: '', 
+                  attribute_value: '', 
+                  quantity: 0, 
+                  price_override: null, 
+                  sku: null,
+                  isNew: true 
+                }])}
+                disabled={saving}
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                Add Variant
+              </Button>
+            </div>
+            
+            {loadingVariants ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : variants.filter(v => !v.toDelete).length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No variants yet. Click &quot;Add Variant&quot; to create one.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                {variants.map((variant, idx) => 
+                  variant.toDelete ? null : (
+                    <div key={variant.id || `new-${idx}`} className="grid grid-cols-12 gap-2 items-center bg-background p-2 rounded border">
+                      <Input
+                        placeholder="Attribute (e.g., Size)"
+                        value={variant.attribute_name}
+                        onChange={(e) => {
+                          const updated = [...variants]
+                          updated[idx].attribute_name = e.target.value
+                          setVariants(updated)
+                        }}
+                        disabled={saving}
+                        className="col-span-3 h-8 text-xs"
+                      />
+                      <Input
+                        placeholder="Value (e.g., Large)"
+                        value={variant.attribute_value}
+                        onChange={(e) => {
+                          const updated = [...variants]
+                          updated[idx].attribute_value = e.target.value
+                          setVariants(updated)
+                        }}
+                        disabled={saving}
+                        className="col-span-3 h-8 text-xs"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Qty"
+                        value={variant.quantity || ''}
+                        onChange={(e) => {
+                          const updated = [...variants]
+                          updated[idx].quantity = parseInt(e.target.value) || 0
+                          setVariants(updated)
+                        }}
+                        disabled={saving}
+                        className="col-span-2 h-8 text-xs"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Price"
+                        value={variant.price_override ?? ''}
+                        onChange={(e) => {
+                          const updated = [...variants]
+                          updated[idx].price_override = e.target.value ? parseFloat(e.target.value) : null
+                          setVariants(updated)
+                        }}
+                        disabled={saving}
+                        className="col-span-3 h-8 text-xs"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="col-span-1 h-8 w-8 p-0 text-destructive hover:text-destructive"
+                        onClick={() => {
+                          const updated = [...variants]
+                          if (variant.id && !variant.isNew) {
+                            updated[idx].toDelete = true
+                          } else {
+                            updated.splice(idx, 1)
+                          }
+                          setVariants(updated)
+                        }}
+                        disabled={saving}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Leave price empty to use the main unit price. Total stock: {variants.filter(v => !v.toDelete).reduce((sum, v) => sum + (v.quantity || 0), 0)}
+            </p>
+          </div>
+        )}
 
         {/* Pricing Tiers */}
         <div className="space-y-2">
