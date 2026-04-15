@@ -1,0 +1,445 @@
+'use client'
+
+import React from "react"
+import { useState, useCallback } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Package } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import * as XLSX from 'xlsx'
+
+interface InventoryImportDialogProps {
+  onSuccess: () => void
+}
+
+// Column mapping for your Excel format - maps to product fields
+const COLUMN_MAPPING: Record<string, string> = {
+  'Category': 'category',
+  'category': 'category',
+  'Item': 'name',
+  'item': 'name',
+  'Product': 'name',
+  'product': 'name',
+  'Name': 'name',
+  'name': 'name',
+  'Quantity': 'quantity',
+  'quantity': 'quantity',
+  'Qty': 'quantity',
+  'qty': 'quantity',
+  'PRICE UNIT': 'price',
+  'Price Unit': 'price',
+  'price_unit': 'price',
+  'Price': 'price',
+  'price': 'price',
+  'Unit Price': 'price',
+  'SPX2': 'price_spx2',
+  'spx2': 'price_spx2',
+  'SPX3': 'price_spx3',
+  'spx3': 'price_spx3',
+  'B1G1': 'price_b1g1',
+  'b1g1': 'price_b1g1',
+  'Image': 'image_url',
+  'image': 'image_url',
+  'image_url': 'image_url',
+  'Remarks': 'remarks',
+  'remarks': 'remarks',
+  'Notes': 'remarks',
+  'notes': 'remarks',
+}
+
+interface ParsedProduct {
+  name: string
+  category?: string
+  quantity?: number
+  price?: number
+  price_spx2?: number
+  price_spx3?: number
+  price_b1g1?: number
+  image_url?: string
+  remarks?: string
+}
+
+export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps) {
+  const [open, setOpen] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [previewData, setPreviewData] = useState<ParsedProduct[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [result, setResult] = useState<{
+    success: boolean
+    totalRows?: number
+    insertedRows?: number
+    updatedRows?: number
+    error?: string
+  } | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }, [])
+
+  const parseExcelFile = async (file: File): Promise<ParsedProduct[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      
+      reader.onload = (e) => {
+        try {
+          const data = e.target?.result
+          const workbook = XLSX.read(data, { type: 'binary' })
+          const sheetName = workbook.SheetNames[0]
+          const worksheet = workbook.Sheets[sheetName]
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' })
+          
+          // Parse and map the data
+          const products: ParsedProduct[] = []
+          
+          for (const row of jsonData as Record<string, unknown>[]) {
+            const product: ParsedProduct = { name: '' }
+            
+            // Map columns from your Excel format
+            for (const [excelCol, value] of Object.entries(row)) {
+              const mappedField = COLUMN_MAPPING[excelCol] || COLUMN_MAPPING[excelCol.toLowerCase().trim()]
+              if (mappedField && value !== '' && value !== null && value !== undefined) {
+                const strValue = String(value).trim()
+                if (strValue) {
+                  if (['quantity'].includes(mappedField)) {
+                    const numVal = parseInt(strValue)
+                    if (!isNaN(numVal)) {
+                      product.quantity = numVal
+                    }
+                  } else if (['price', 'price_spx2', 'price_spx3', 'price_b1g1'].includes(mappedField)) {
+                    // Remove currency symbols and parse
+                    const numVal = parseFloat(strValue.replace(/[^0-9.-]/g, ''))
+                    if (!isNaN(numVal)) {
+                      (product as Record<string, number>)[mappedField] = numVal
+                    }
+                  } else {
+                    (product as Record<string, string>)[mappedField] = strValue
+                  }
+                }
+              }
+            }
+            
+            // Only add if we have a name
+            if (product.name) {
+              products.push(product)
+            }
+          }
+          
+          resolve(products)
+        } catch (error) {
+          reject(error)
+        }
+      }
+      
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsBinaryString(file)
+    })
+  }
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const droppedFile = e.dataTransfer.files[0]
+    if (droppedFile && (droppedFile.name.endsWith('.csv') || droppedFile.name.endsWith('.xlsx') || droppedFile.name.endsWith('.xls'))) {
+      setFile(droppedFile)
+      setResult(null)
+      
+      // Parse and preview
+      try {
+        const products = await parseExcelFile(droppedFile)
+        setTotalCount(products.length)
+        setPreviewData(products.slice(0, 5))
+      } catch {
+        setPreviewData([])
+        setTotalCount(0)
+      }
+    }
+  }, [])
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0]
+    if (selectedFile) {
+      setFile(selectedFile)
+      setResult(null)
+      
+      // Parse and preview
+      try {
+        const products = await parseExcelFile(selectedFile)
+        setTotalCount(products.length)
+        setPreviewData(products.slice(0, 5))
+      } catch {
+        setPreviewData([])
+        setTotalCount(0)
+      }
+    }
+  }
+
+  const handleImport = async () => {
+    if (!file) return
+
+    setIsLoading(true)
+    setResult(null)
+
+    try {
+      const products = await parseExcelFile(file)
+      
+      if (products.length === 0) {
+        setResult({
+          success: false,
+          error: 'No valid product data found. Make sure your file has an "Item" or "Product" column.'
+        })
+        setIsLoading(false)
+        return
+      }
+
+      const supabase = createClient()
+      let insertedCount = 0
+      let updatedCount = 0
+
+      // Process each product - upsert based on name
+      for (const product of products) {
+        // Check if product exists by name
+        const { data: existing } = await supabase
+          .from('products')
+          .select('id')
+          .ilike('name', product.name)
+          .single()
+
+        const payload = {
+          name: product.name,
+          category: product.category || null,
+          quantity: product.quantity || 0,
+          price: product.price || 0,
+          price_spx2: product.price_spx2 || null,
+          price_spx3: product.price_spx3 || null,
+          price_b1g1: product.price_b1g1 || null,
+          image_url: product.image_url || null,
+          remarks: product.remarks || null,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        }
+
+        if (existing) {
+          // Update existing product
+          const { error } = await supabase
+            .from('products')
+            .update(payload)
+            .eq('id', existing.id)
+          
+          if (!error) updatedCount++
+        } else {
+          // Insert new product
+          const { error } = await supabase
+            .from('products')
+            .insert(payload)
+          
+          if (!error) insertedCount++
+        }
+      }
+
+      setResult({
+        success: true,
+        totalRows: products.length,
+        insertedRows: insertedCount,
+        updatedRows: updatedCount,
+      })
+      onSuccess()
+    } catch (error) {
+      setResult({
+        success: false,
+        error: 'Failed to import products: ' + (error as Error).message
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleClose = () => {
+    setOpen(false)
+    setFile(null)
+    setResult(null)
+    setPreviewData([])
+    setTotalCount(0)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Upload className="mr-2 h-4 w-4" />
+          Import Excel
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Import Inventory from Excel</DialogTitle>
+          <DialogDescription>
+            Upload your inventory Excel file. Products will be matched by name - existing products will be updated, new products will be added.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="py-4">
+          {/* Drop Zone */}
+          <div
+            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+              isDragging
+                ? 'border-primary bg-primary/5'
+                : 'border-muted-foreground/25 hover:border-muted-foreground/50'
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            {file ? (
+              <div className="flex items-center justify-center gap-2">
+                <FileSpreadsheet className="h-8 w-8 text-primary" />
+                <div className="text-left">
+                  <p className="font-medium">{file.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {(file.size / 1024).toFixed(1)} KB - {totalCount} products found
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <Upload className="mx-auto h-10 w-10 text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground mb-2">
+                  Drag and drop your inventory Excel file here
+                </p>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="inventory-file-upload"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('inventory-file-upload')?.click()}
+                >
+                  Browse Files
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Preview */}
+          {previewData.length > 0 && !result && (
+            <div className="mt-4 border rounded-lg overflow-hidden">
+              <div className="bg-muted px-4 py-2 flex items-center gap-2">
+                <Package className="h-4 w-4" />
+                <span className="text-sm font-medium">Preview (first 5 of {totalCount} products)</span>
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2">Category</th>
+                      <th className="text-left px-3 py-2">Item</th>
+                      <th className="text-right px-3 py-2">Qty</th>
+                      <th className="text-right px-3 py-2">Price</th>
+                      <th className="text-right px-3 py-2">SPX2</th>
+                      <th className="text-right px-3 py-2">SPX3</th>
+                      <th className="text-right px-3 py-2">B1G1</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewData.map((product, idx) => (
+                      <tr key={idx} className="border-t">
+                        <td className="px-3 py-2 text-muted-foreground">{product.category || '-'}</td>
+                        <td className="px-3 py-2 font-medium">{product.name}</td>
+                        <td className="px-3 py-2 text-right">{product.quantity || '-'}</td>
+                        <td className="px-3 py-2 text-right">{product.price ? `Rs ${product.price}` : '-'}</td>
+                        <td className="px-3 py-2 text-right">{product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}</td>
+                        <td className="px-3 py-2 text-right">{product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}</td>
+                        <td className="px-3 py-2 text-right">{product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Result Display */}
+          {result && (
+            <div className={`mt-4 p-4 rounded-lg ${
+              result.success ? 'bg-green-50 dark:bg-green-950' : 'bg-red-50 dark:bg-red-950'
+            }`}>
+              <div className="flex items-start gap-2">
+                {result.success ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+                )}
+                <div>
+                  {result.success ? (
+                    <>
+                      <p className="font-medium text-green-800 dark:text-green-200">
+                        Import Successful
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        {result.insertedRows} new products added, {result.updatedRows} existing products updated
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium text-red-800 dark:text-red-200">
+                        Import Failed
+                      </p>
+                      <p className="text-sm text-red-700 dark:text-red-300">
+                        {result.error}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Expected Format */}
+          <div className="mt-4 p-3 bg-muted rounded-lg">
+            <p className="text-sm font-medium mb-2">Expected Excel columns:</p>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div><span className="text-muted-foreground">Category</span> → Category</div>
+              <div><span className="text-muted-foreground">Item</span> → Product Name</div>
+              <div><span className="text-muted-foreground">Quantity</span> → Stock Qty</div>
+              <div><span className="text-muted-foreground">PRICE UNIT</span> → Unit Price</div>
+              <div><span className="text-muted-foreground">SPX2</span> → Special Price 2</div>
+              <div><span className="text-muted-foreground">SPX3</span> → Special Price 3</div>
+              <div><span className="text-muted-foreground">B1G1</span> → Buy 1 Get 1</div>
+              <div><span className="text-muted-foreground">Remarks</span> → Notes</div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={handleClose}>
+            {result?.success ? 'Close' : 'Cancel'}
+          </Button>
+          {!result?.success && (
+            <Button onClick={handleImport} disabled={!file || isLoading}>
+              {isLoading ? 'Importing...' : `Import ${totalCount > 0 ? `${totalCount} Products` : ''}`}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
