@@ -154,6 +154,57 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
     }
   }
 
+  const [pastingImageFor, setPastingImageFor] = useState<string | null>(null)
+
+  // Quick paste image for a product (without opening edit dialog)
+  const handleQuickPasteImage = async (productId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setPastingImageFor(productId)
+    try {
+      const clipboardItems = await navigator.clipboard.read()
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(type => type.startsWith('image/'))
+        if (imageType) {
+          const blob = await item.getType(imageType)
+          const ext = imageType.split('/')[1] || 'png'
+          const file = new File([blob], `product-${productId}.${ext}`, { type: imageType })
+          
+          // Upload to Supabase storage
+          const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+          const { error: uploadError } = await supabase.storage
+            .from('product-images')
+            .upload(fileName, file, { cacheControl: '3600', upsert: false })
+
+          if (uploadError) throw uploadError
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('product-images')
+            .getPublicUrl(fileName)
+
+          // Update product with new image URL
+          const { error: updateError } = await supabase
+            .from('products')
+            .update({ image_url: publicUrl, updated_at: new Date().toISOString() })
+            .eq('id', productId)
+
+          if (updateError) throw updateError
+
+          // Update local state
+          setProducts(prev => prev.map(p => 
+            p.id === productId ? { ...p, image_url: publicUrl } : p
+          ))
+          return
+        }
+      }
+      alert('No image found in clipboard. Copy an image first.')
+    } catch (err) {
+      console.error('Paste failed:', err)
+      alert('Paste failed: ' + (err as Error).message)
+    } finally {
+      setPastingImageFor(null)
+    }
+  }
+
   // Get unique categories
   const categories = useMemo(() => {
     const cats = new Set(products.map(p => p.category).filter(Boolean))
@@ -472,7 +523,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                     onClick={() => setEditProduct(product)}
                   >
                     <TableCell>
-                      <div className="w-10 h-10 rounded-md overflow-hidden bg-muted flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-md overflow-hidden bg-muted flex items-center justify-center relative group/img">
                         {product.image_url ? (
                           <Image
                             src={product.image_url}
@@ -487,10 +538,29 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div>
-                        <p className="font-medium text-foreground">{product.name}</p>
-                        {product.sku && (
-                          <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <p className="font-medium text-foreground">{product.name}</p>
+                          {product.sku && (
+                            <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
+                          )}
+                        </div>
+                        {!product.image_url && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
+                            onClick={(e) => handleQuickPasteImage(product.id, e)}
+                            disabled={pastingImageFor === product.id}
+                            title="Paste image from clipboard"
+                          >
+                            {pastingImageFor === product.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <ClipboardPaste className="w-3 h-3" />
+                            )}
+                            <span className="ml-1">Paste</span>
+                          </Button>
                         )}
                       </div>
                     </TableCell>
