@@ -52,7 +52,6 @@ import {
 import Image from 'next/image'
 import { Product } from '@/lib/types'
 import { InventoryImportDialog } from './inventory-import-dialog'
-import { InventoryCleanupDialog } from './inventory-cleanup-dialog'
 
 type ViewMode = 'table' | 'grid'
 type SortKey = 'name' | 'category' | 'quantity' | 'price'
@@ -160,7 +159,6 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
           </p>
         </div>
 <div className="flex items-center gap-2">
-<InventoryCleanupDialog onSuccess={() => router.refresh()} />
 <InventoryImportDialog onSuccess={() => router.refresh()} />
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
