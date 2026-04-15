@@ -215,10 +215,14 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   const stats = useMemo(() => {
     const total = products.length
     const active = products.filter(p => p.is_active).length
-    const lowStock = products.filter(p => p.quantity > 0 && p.quantity <= 5).length
-    const outOfStock = products.filter(p => p.quantity === 0).length
+    // Low stock: has quantity between 1-5
+    const lowStock = products.filter(p => (p.quantity ?? 0) > 0 && (p.quantity ?? 0) <= 5).length
+    // Out of stock: quantity is 0, null, or undefined
+    const outOfStock = products.filter(p => !p.quantity || p.quantity === 0).length
+    // No quantity set: products that have never had quantity updated
+    const noQuantitySet = products.filter(p => p.quantity === null || p.quantity === undefined).length
     const withImages = products.filter(p => p.image_url).length
-    return { total, active, lowStock, outOfStock, withImages }
+    return { total, active, lowStock, outOfStock, noQuantitySet, withImages }
   }, [products])
 
   // Filtered and sorted products
@@ -390,7 +394,13 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             </div>
             <div>
               <p className="text-2xl font-bold text-foreground">{stats.outOfStock}</p>
-              <p className="text-xs text-muted-foreground">Out of Stock</p>
+              <p className="text-xs text-muted-foreground">
+                {stats.noQuantitySet > 0 ? (
+                  <span>Out of Stock <span className="text-muted-foreground/60">({stats.noQuantitySet} not set)</span></span>
+                ) : (
+                  'Out of Stock'
+                )}
+              </p>
             </div>
           </div>
         </div>
@@ -706,7 +716,16 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   )
 }
 
-function QuantityBadge({ quantity }: { quantity: number }) {
+function QuantityBadge({ quantity }: { quantity: number | null | undefined }) {
+  // No quantity set yet
+  if (quantity === null || quantity === undefined) {
+    return (
+      <Badge className="bg-muted text-muted-foreground hover:bg-muted/80 border-0">
+        No Qty
+      </Badge>
+    )
+  }
+  // Out of stock
   if (quantity === 0) {
     return (
       <Badge className="bg-red-500/10 text-red-600 hover:bg-red-500/20 border-0">
@@ -714,6 +733,7 @@ function QuantityBadge({ quantity }: { quantity: number }) {
       </Badge>
     )
   }
+  // Low stock (1-5)
   if (quantity <= 5) {
     return (
       <Badge className="bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 border-0">
@@ -721,6 +741,7 @@ function QuantityBadge({ quantity }: { quantity: number }) {
       </Badge>
     )
   }
+  // In stock
   return (
     <Badge className="bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 border-0">
       {quantity}
