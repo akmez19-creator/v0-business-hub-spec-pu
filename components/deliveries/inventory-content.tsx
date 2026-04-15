@@ -111,13 +111,30 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   const handleClearAll = async () => {
     setClearing(true)
     try {
-      const { error } = await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-      if (error) throw error
+      // Get all product IDs first
+      const productIds = products.map(p => p.id)
+      if (productIds.length === 0) {
+        setClearConfirmOpen(false)
+        return
+      }
+      
+      // Delete in batches of 100 to avoid query limits
+      const batchSize = 100
+      for (let i = 0; i < productIds.length; i += batchSize) {
+        const batch = productIds.slice(i, i + batchSize)
+        const { error } = await supabase.from('products').delete().in('id', batch)
+        if (error) {
+          console.error('[v0] Delete batch failed:', error)
+          throw error
+        }
+      }
+      
       setProducts([])
       setClearConfirmOpen(false)
       router.refresh()
     } catch (error) {
-      console.error('Clear failed:', error)
+      console.error('[v0] Clear all failed:', error)
+      alert('Failed to delete products. Check console for details.')
     } finally {
       setClearing(false)
     }
