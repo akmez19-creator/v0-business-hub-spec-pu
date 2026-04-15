@@ -469,20 +469,6 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             className="pl-10"
           />
         </div>
-        
-        {/* Category Filter */}
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
-            <SelectValue placeholder="All Categories" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map(cat => (
-              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
 
         {/* View Toggle */}
         <div className="flex border border-border rounded-lg overflow-hidden">
@@ -509,6 +495,36 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             <span className="hidden sm:inline">Grid</span>
           </button>
         </div>
+      </div>
+
+      {/* Category Chips */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setCategoryFilter('all')}
+          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+            categoryFilter === 'all'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          All ({products.length})
+        </button>
+        {categories.map(cat => {
+          const count = products.filter(p => p.category === cat).length
+          return (
+            <button
+              key={cat}
+              onClick={() => setCategoryFilter(cat)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                categoryFilter === cat
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              {cat} ({count})
+            </button>
+          )
+        })}
       </div>
 
       {/* Results count */}
