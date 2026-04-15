@@ -935,6 +935,20 @@ function ProductForm({
                 <ClipboardPaste className="w-3 h-3 mr-1" />
                 Paste Image
               </Button>
+              {imageUrl && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  asChild
+                  className="text-xs"
+                >
+                  <a href={imageUrl} download target="_blank" rel="noopener noreferrer">
+                    <Download className="w-3 h-3 mr-1" />
+                    Download
+                  </a>
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">or click box to upload</p>
             </div>
           </div>
