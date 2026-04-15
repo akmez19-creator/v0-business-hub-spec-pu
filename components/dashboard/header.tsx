@@ -132,6 +132,9 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   // Auto-expand based on current path
   const getDefaultMobileExpanded = () => {
+    // Check inventory/finance pages first (they're under /deliveries URL)
+    if (pathname.includes('/inventory') || pathname.includes('/purchase-orders') || (pathname.includes('/stock') && pathname.includes('/deliveries'))) return ['/dashboard/inventory']
+    if (pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll')) return ['/dashboard/finance']
     if (pathname.startsWith('/dashboard/deliveries')) return ['/dashboard/deliveries']
     if (pathname.startsWith('/dashboard/contractors')) return ['/dashboard/contractors']
     if (pathname.startsWith('/dashboard/riders')) return ['/dashboard/riders']
@@ -159,12 +162,24 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
     router.refresh()
   }
 
-  // Get current page title
-  const currentNavItem = navItems.find(item => 
-    pathname === item.href || 
-    (item.href !== '/dashboard' && pathname.startsWith(item.href))
-  )
-  const pageTitle = currentNavItem?.label || 'Dashboard'
+  // Get current page title with smart detection
+  const getPageTitle = () => {
+    // Check for specific inventory/finance pages first (they're under /deliveries URL but belong to different sections)
+    if (pathname.includes('/inventory')) return 'Products'
+    if (pathname.includes('/purchase-orders')) return 'Purchase Orders'
+    if (pathname.includes('/stock') && !pathname.includes('/contractors') && !pathname.includes('/riders')) return 'Stock In/Out'
+    if (pathname.includes('/collections')) return 'Collections'
+    if (pathname.includes('/payments')) return 'Payments'
+    if (pathname.includes('/payroll')) return 'Payroll'
+    
+    // Then check nav items
+    const currentNavItem = navItems.find(item => 
+      pathname === item.href || 
+      (item.href !== '/dashboard' && pathname.startsWith(item.href))
+    )
+    return currentNavItem?.label || 'Dashboard'
+  }
+  const pageTitle = getPageTitle()
 
   return (
     <header className="flex items-center justify-between h-16 px-6 border-b border-border bg-card">
