@@ -48,6 +48,7 @@ import {
   ArrowUpDown,
   Filter,
   Download,
+  ClipboardPaste,
 } from 'lucide-react'
 import Image from 'next/image'
 import { Product } from '@/lib/types'
@@ -686,14 +687,11 @@ function ProductForm({
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
+  async function uploadImageFile(file: File) {
     setUploading(true)
     try {
       const supabase = createClient()
-      const ext = file.name.split('.').pop()
+      const ext = file.name.split('.').pop() || 'png'
       const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
       
       const { error: uploadError } = await supabase.storage
@@ -711,6 +709,31 @@ function ProductForm({
       setError('Image upload failed: ' + (err as Error).message)
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await uploadImageFile(file)
+  }
+
+  async function handlePasteImage() {
+    try {
+      const clipboardItems = await navigator.clipboard.read()
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(type => type.startsWith('image/'))
+        if (imageType) {
+          const blob = await item.getType(imageType)
+          const ext = imageType.split('/')[1] || 'png'
+          const file = new File([blob], `pasted-image.${ext}`, { type: imageType })
+          await uploadImageFile(file)
+          return
+        }
+      }
+      setError('No image found in clipboard. Copy an image first.')
+    } catch (err) {
+      setError('Paste failed: ' + (err as Error).message)
     }
   }
 
@@ -825,9 +848,19 @@ function ProductForm({
                 <Upload className="w-5 h-5 text-muted-foreground" />
               )}
             </div>
-            <div className="text-xs text-muted-foreground pt-1">
-              <p>Click to upload</p>
-              <p>JPG, PNG, WebP</p>
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handlePasteImage}
+                disabled={uploading}
+                className="text-xs"
+              >
+                <ClipboardPaste className="w-3 h-3 mr-1" />
+                Paste Image
+              </Button>
+              <p className="text-xs text-muted-foreground">or click box to upload</p>
             </div>
           </div>
           <input
