@@ -125,10 +125,14 @@ export interface Product {
   updated_at?: string
   // Inventory tracking
   quantity: number
-  // Pricing tiers
-  price_spx2: number | null  // Special price tier 2 (e.g., 2-pack)
-  price_spx3: number | null  // Special price tier 3 (e.g., 3-pack)
-  price_b1g1: number | null  // Buy 1 Get 1 price
+  // Bundle pricing - flexible tiers stored as JSON {"2": 900, "3": 1200, "6": 2000}
+  bundle_prices: Record<string, number>
+  // B1G1 offer flag
+  is_b1g1: boolean
+  // Legacy fields (to be removed after full migration)
+  price_spx2?: number | null
+  price_spx3?: number | null
+  price_b1g1?: number | null
   // Notes
   remarks: string | null
   // Variants support

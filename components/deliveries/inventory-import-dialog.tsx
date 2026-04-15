@@ -40,12 +40,20 @@ const COLUMN_MAPPING: Record<string, string> = {
   'Price': 'price',
   'price': 'price',
   'Unit Price': 'price',
-  'SPX2': 'price_spx2',
-  'spx2': 'price_spx2',
-  'SPX3': 'price_spx3',
-  'spx3': 'price_spx3',
-  'B1G1': 'price_b1g1',
-  'b1g1': 'price_b1g1',
+  'SPX2': 'bundle_2',
+  'spx2': 'bundle_2',
+  '2-Pack': 'bundle_2',
+  '2-pack': 'bundle_2',
+  'SPX3': 'bundle_3',
+  'spx3': 'bundle_3',
+  '3-Pack': 'bundle_3',
+  '3-pack': 'bundle_3',
+  '4-Pack': 'bundle_4',
+  '4-pack': 'bundle_4',
+  '6-Pack': 'bundle_6',
+  '6-pack': 'bundle_6',
+  'B1G1': 'is_b1g1',
+  'b1g1': 'is_b1g1',
   'Image': 'image_url',
   'image': 'image_url',
   'image_url': 'image_url',
@@ -62,9 +70,11 @@ interface ParsedProduct {
   category?: string
   quantity?: number
   price?: number
-  price_spx2?: number
-  price_spx3?: number
-  price_b1g1?: number
+  bundle_2?: number
+  bundle_3?: number
+  bundle_4?: number
+  bundle_6?: number
+  is_b1g1?: boolean | string
   image_url?: string
   remarks?: string
   variant?: string  // Format: "AttributeName: AttributeValue" e.g., "Size: Large"
@@ -240,14 +250,27 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
           ? 0 // Will be tracked in variants
           : (firstProduct.quantity || 0)
 
+        // Build bundle prices object
+        const bundlePrices: Record<string, number> = {}
+        if (firstProduct.bundle_2) bundlePrices['2'] = firstProduct.bundle_2
+        if (firstProduct.bundle_3) bundlePrices['3'] = firstProduct.bundle_3
+        if (firstProduct.bundle_4) bundlePrices['4'] = firstProduct.bundle_4
+        if (firstProduct.bundle_6) bundlePrices['6'] = firstProduct.bundle_6
+        
+        // Check if B1G1 - can be boolean, "Yes", or truthy value
+        const isB1g1 = firstProduct.is_b1g1 === true || 
+                       firstProduct.is_b1g1 === 'Yes' || 
+                       firstProduct.is_b1g1 === 'yes' ||
+                       firstProduct.is_b1g1 === 'YES' ||
+                       firstProduct.is_b1g1 === '1'
+
         const payload = {
           name: firstProduct.name,
           category: firstProduct.category || null,
           quantity: totalQuantity,
           price: firstProduct.price || 0,
-          price_spx2: firstProduct.price_spx2 || null,
-          price_spx3: firstProduct.price_spx3 || null,
-          price_b1g1: firstProduct.price_b1g1 || null,
+          bundle_prices: bundlePrices,
+          is_b1g1: isB1g1,
           image_url: firstProduct.image_url || null,
           remarks: firstProduct.remarks || null,
           has_variants: hasVariants,
@@ -410,9 +433,8 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                       <th className="text-left px-3 py-2">Variant</th>
                       <th className="text-right px-3 py-2">Qty</th>
                       <th className="text-right px-3 py-2">Price</th>
-                      <th className="text-right px-3 py-2">SPX2</th>
-                      <th className="text-right px-3 py-2">SPX3</th>
-                      <th className="text-right px-3 py-2">B1G1</th>
+                      <th className="text-right px-3 py-2">Bundles</th>
+                      <th className="text-center px-3 py-2">B1G1</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -423,9 +445,15 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                         <td className="px-3 py-2 text-violet-600">{product.variant || '-'}</td>
                         <td className="px-3 py-2 text-right">{product.quantity || '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price ? `Rs ${product.price}` : '-'}</td>
-                        <td className="px-3 py-2 text-right">{product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}</td>
-                        <td className="px-3 py-2 text-right">{product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}</td>
-                        <td className="px-3 py-2 text-right">{product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}</td>
+                        <td className="px-3 py-2 text-right text-xs">
+                          {[
+                            product.bundle_2 && `2pk: Rs${product.bundle_2}`,
+                            product.bundle_3 && `3pk: Rs${product.bundle_3}`,
+                            product.bundle_4 && `4pk: Rs${product.bundle_4}`,
+                            product.bundle_6 && `6pk: Rs${product.bundle_6}`,
+                          ].filter(Boolean).join(', ') || '-'}
+                        </td>
+                        <td className="px-3 py-2 text-center">{product.is_b1g1 ? 'Yes' : '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -479,9 +507,10 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
               <div><span className="text-muted-foreground">Variant</span> → Size: Large</div>
               <div><span className="text-muted-foreground">Quantity</span> → Stock Qty</div>
               <div><span className="text-muted-foreground">PRICE UNIT</span> → Unit Price</div>
-              <div><span className="text-muted-foreground">SPX2</span> → Special Price 2</div>
-              <div><span className="text-muted-foreground">SPX3</span> → Special Price 3</div>
-              <div><span className="text-muted-foreground">B1G1</span> → Buy 1 Get 1</div>
+              <div><span className="text-muted-foreground">2-Pack</span> → Bundle price for 2</div>
+              <div><span className="text-muted-foreground">3-Pack</span> → Bundle price for 3</div>
+              <div><span className="text-muted-foreground">4-Pack / 6-Pack</span> → etc.</div>
+              <div><span className="text-muted-foreground">B1G1</span> → &quot;Yes&quot; if offer</div>
               <div><span className="text-muted-foreground">Image</span> → Image URL</div>
               <div><span className="text-muted-foreground">Remarks</span> → Notes</div>
             </div>

@@ -110,9 +110,11 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
               'Variant': `${v.attribute_name}: ${v.attribute_value}`,
               'Quantity': v.quantity || 0,
               'PRICE UNIT': v.price_override || p.price || 0,
-              'SPX2': p.price_spx2 || '',
-              'SPX3': p.price_spx3 || '',
-              'B1G1': p.price_b1g1 || '',
+              '2-Pack': p.bundle_prices?.['2'] || '',
+              '3-Pack': p.bundle_prices?.['3'] || '',
+              '4-Pack': p.bundle_prices?.['4'] || '',
+              '6-Pack': p.bundle_prices?.['6'] || '',
+              'B1G1': p.is_b1g1 ? 'Yes' : '',
               'Image': p.image_url || '',
               'Status': p.is_active ? 'Active' : 'Inactive',
               'Remarks': p.remarks || '',
@@ -126,9 +128,11 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             'Variant': '',
             'Quantity': p.quantity || 0,
             'PRICE UNIT': p.price || 0,
-            'SPX2': p.price_spx2 || '',
-            'SPX3': p.price_spx3 || '',
-            'B1G1': p.price_b1g1 || '',
+            '2-Pack': p.bundle_prices?.['2'] || '',
+            '3-Pack': p.bundle_prices?.['3'] || '',
+            '4-Pack': p.bundle_prices?.['4'] || '',
+            '6-Pack': p.bundle_prices?.['6'] || '',
+            'B1G1': p.is_b1g1 ? 'Yes' : '',
             'Image': p.image_url || '',
             'Status': p.is_active ? 'Active' : 'Inactive',
             'Remarks': p.remarks || '',
@@ -554,9 +558,8 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                       <ArrowUpDown className="w-3 h-3" />
                     </button>
                   </TableHead>
-                  <TableHead className="text-right">SPX2</TableHead>
-                  <TableHead className="text-right">SPX3</TableHead>
-                  <TableHead className="text-right">B1G1</TableHead>
+<TableHead className="text-right">Bundles</TableHead>
+                            <TableHead className="text-center">B1G1</TableHead>
                   <TableHead className="text-center">Status</TableHead>
                   <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
@@ -626,13 +629,23 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                       {product.price > 0 ? `Rs ${product.price}` : '-'}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground">
-                      {product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}
+                      {Object.keys(product.bundle_prices || {}).length > 0 ? (
+                        <span className="text-xs">
+                          {Object.entries(product.bundle_prices || {})
+                            .sort(([a], [b]) => Number(a) - Number(b))
+                            .slice(0, 2)
+                            .map(([tier, price]) => `${tier}pk: Rs ${price}`)
+                            .join(', ')}
+                          {Object.keys(product.bundle_prices || {}).length > 2 && '...'}
+                        </span>
+                      ) : '-'}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}
+                    <TableCell className="text-center">
+                      {product.is_b1g1 ? (
+                        <Badge className="bg-violet-500/10 text-violet-600 hover:bg-violet-500/20 border-0 text-xs">
+                          B1G1
+                        </Badge>
+                      ) : '-'}
                     </TableCell>
                     <TableCell className="text-center">
                       {product.is_active ? (
@@ -702,24 +715,26 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                 {product.category && (
                   <Badge variant="outline" className="text-xs bg-transparent">{product.category}</Badge>
                 )}
-                {/* Pricing Grid */}
-                <div className="grid grid-cols-2 gap-1 text-xs pt-1 border-t border-border">
+                {/* Pricing */}
+                <div className="text-xs pt-1 border-t border-border space-y-1">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Unit:</span>
                     <span className="font-medium text-foreground">{product.price > 0 ? `Rs ${product.price}` : '-'}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">SPX2:</span>
-                    <span className="font-medium text-foreground">{product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">SPX3:</span>
-                    <span className="font-medium text-foreground">{product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">B1G1:</span>
-                    <span className="font-medium text-foreground">{product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}</span>
-                  </div>
+                  {Object.keys(product.bundle_prices || {}).length > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Bundles:</span>
+                      <span className="font-medium text-foreground">
+                        {Object.entries(product.bundle_prices || {})
+                          .sort(([a], [b]) => Number(a) - Number(b))
+                          .map(([tier, price]) => `${tier}pk Rs${price}`)
+                          .join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {product.is_b1g1 && (
+                    <Badge className="bg-violet-500/10 text-violet-600 border-0 text-xs">B1G1 Offer</Badge>
+                  )}
                 </div>
               </div>
             </div>
@@ -804,9 +819,13 @@ function ProductForm({
   const [isActive, setIsActive] = useState(product?.is_active ?? true)
   const [imageUrl, setImageUrl] = useState(product?.image_url || '')
   const [quantity, setQuantity] = useState(product?.quantity?.toString() || '0')
-  const [priceSpx2, setPriceSpx2] = useState(product?.price_spx2?.toString() || '')
-  const [priceSpx3, setPriceSpx3] = useState(product?.price_spx3?.toString() || '')
-  const [priceB1g1, setPriceB1g1] = useState(product?.price_b1g1?.toString() || '')
+  // Bundle prices - flexible tiers
+  const [bundlePrices, setBundlePrices] = useState<Record<string, string>>(
+    Object.fromEntries(
+      Object.entries(product?.bundle_prices || {}).map(([k, v]) => [k, String(v)])
+    )
+  )
+  const [isB1g1, setIsB1g1] = useState(product?.is_b1g1 ?? false)
   const [remarks, setRemarks] = useState(product?.remarks || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -920,9 +939,12 @@ function ProductForm({
         is_active: isActive,
         image_url: imageUrl || null,
         quantity: hasVariants ? 0 : (parseInt(quantity) || 0), // If has variants, main quantity is 0
-        price_spx2: priceSpx2 ? parseFloat(priceSpx2) : null,
-        price_spx3: priceSpx3 ? parseFloat(priceSpx3) : null,
-        price_b1g1: priceB1g1 ? parseFloat(priceB1g1) : null,
+        bundle_prices: Object.fromEntries(
+          Object.entries(bundlePrices)
+            .filter(([, v]) => v && parseFloat(v) > 0)
+            .map(([k, v]) => [k, parseFloat(v)])
+        ),
+        is_b1g1: isB1g1,
         remarks: remarks.trim() || null,
         has_variants: hasVariants,
         updated_at: new Date().toISOString(),
@@ -1284,48 +1306,72 @@ function ProductForm({
           </div>
         )}
 
-        {/* Pricing Tiers */}
+        {/* Bundle Pricing */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Pricing Tiers (Rs)</Label>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <Label htmlFor="price-spx2" className="text-xs text-muted-foreground">SPX2</Label>
-              <Input
-                id="price-spx2"
-                type="number"
-                value={priceSpx2}
-                onChange={(e) => setPriceSpx2(e.target.value)}
-                placeholder="0"
-                disabled={saving}
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="price-spx3" className="text-xs text-muted-foreground">SPX3</Label>
-              <Input
-                id="price-spx3"
-                type="number"
-                value={priceSpx3}
-                onChange={(e) => setPriceSpx3(e.target.value)}
-                placeholder="0"
-                disabled={saving}
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="price-b1g1" className="text-xs text-muted-foreground">B1G1</Label>
-              <Input
-                id="price-b1g1"
-                type="number"
-                value={priceB1g1}
-                onChange={(e) => setPriceB1g1(e.target.value)}
-                placeholder="0"
-                disabled={saving}
-                className="h-9"
-              />
-            </div>
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Bundle Prices (Rs)</Label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => {
+                const nextTier = ['2', '3', '4', '6', '8', '10', '12'].find(t => !bundlePrices[t])
+                if (nextTier) setBundlePrices({ ...bundlePrices, [nextTier]: '' })
+              }}
+              disabled={saving}
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Add Tier
+            </Button>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {Object.entries(bundlePrices).sort(([a], [b]) => Number(a) - Number(b)).map(([tier, tierPrice]) => (
+              <div key={tier} className="space-y-1 relative">
+                <Label className="text-xs text-muted-foreground">{tier}-Pack</Label>
+                <div className="flex gap-1">
+                  <Input
+                    type="number"
+                    value={tierPrice}
+                    onChange={(e) => setBundlePrices({ ...bundlePrices, [tier]: e.target.value })}
+                    placeholder="0"
+                    disabled={saving}
+                    className="h-9"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      const updated = { ...bundlePrices }
+                      delete updated[tier]
+                      setBundlePrices(updated)
+                    }}
+                    disabled={saving}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {Object.keys(bundlePrices).length === 0 && (
+              <p className="col-span-4 text-xs text-muted-foreground py-2">No bundle prices set. Click &quot;Add Tier&quot; to add one.</p>
+            )}
           </div>
         </div>
+        
+        {/* B1G1 Offer Toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isB1g1}
+            onChange={(e) => setIsB1g1(e.target.checked)}
+            className="rounded border-border"
+            disabled={saving}
+          />
+          <span className="text-sm">B1G1 Offer (Buy 1 Get 1)</span>
+        </label>
 
         {/* Remarks */}
         <div className="space-y-2">
