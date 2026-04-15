@@ -213,12 +213,13 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
 
       // Process each product - upsert based on name
       for (const product of products) {
-        // Check if product exists by name
-        const { data: existing } = await supabase
+        // Check if product exists by name (case-insensitive)
+        const { data: existingProducts } = await supabase
           .from('products')
           .select('id')
-          .ilike('name', product.name)
-          .single()
+          .eq('name', product.name.trim())
+        
+        const existing = existingProducts && existingProducts.length > 0 ? existingProducts[0] : null
 
         const payload = {
           name: product.name,
