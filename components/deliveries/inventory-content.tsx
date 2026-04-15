@@ -118,13 +118,26 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
         return
       }
       
-      // Delete in batches of 100 to avoid query limits
       const batchSize = 100
+      
+      // First, delete related records in tables that reference products
+      // Delete purchase_orders that reference these products
+      for (let i = 0; i < productIds.length; i += batchSize) {
+        const batch = productIds.slice(i, i + batchSize)
+        await supabase.from('purchase_orders').delete().in('product_id', batch)
+      }
+      
+      // Delete stock_transactions that reference these products
+      for (let i = 0; i < productIds.length; i += batchSize) {
+        const batch = productIds.slice(i, i + batchSize)
+        await supabase.from('stock_transactions').delete().in('product_id', batch)
+      }
+      
+      // Now delete products in batches
       for (let i = 0; i < productIds.length; i += batchSize) {
         const batch = productIds.slice(i, i + batchSize)
         const { error } = await supabase.from('products').delete().in('id', batch)
         if (error) {
-          console.error('[v0] Delete batch failed:', error)
           throw error
         }
       }
@@ -132,9 +145,9 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       setProducts([])
       setClearConfirmOpen(false)
       router.refresh()
-    } catch (error) {
-      console.error('[v0] Clear all failed:', error)
-      alert('Failed to delete products. Check console for details.')
+    } catch (error: any) {
+      console.error('Clear all failed:', error)
+      alert(`Failed to delete products: ${error?.message || 'Unknown error'}`)
     } finally {
       setClearing(false)
     }
