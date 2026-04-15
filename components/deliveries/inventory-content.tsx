@@ -399,8 +399,8 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-card border border-border rounded-lg p-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="bg-card border border-border rounded-xl p-4 hover:border-primary/30 transition-colors">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
               <Package className="w-5 h-5 text-primary" />
@@ -411,7 +411,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             </div>
           </div>
         </div>
-        <div className="bg-card border border-border rounded-lg p-4">
+        <div className="bg-card border border-border rounded-xl p-4 hover:border-emerald-500/30 transition-colors">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
               <Package className="w-5 h-5 text-emerald-500" />
@@ -422,7 +422,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             </div>
           </div>
         </div>
-        <div className="bg-card border border-border rounded-lg p-4">
+        <div className="bg-card border border-border rounded-xl p-4 hover:border-amber-500/30 transition-colors">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5 text-amber-500" />
@@ -433,7 +433,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             </div>
           </div>
         </div>
-        <div className="bg-card border border-border rounded-lg p-4">
+        <div className="bg-card border border-border rounded-xl p-4 hover:border-blue-500/30 transition-colors">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
               <Package className="w-5 h-5 text-blue-500" />
@@ -441,6 +441,17 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             <div>
               <p className="text-2xl font-bold text-foreground">{stats.toCount}</p>
               <p className="text-xs text-muted-foreground">To Count</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4 hover:border-rose-500/30 transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center">
+              <ImageIcon className="w-5 h-5 text-rose-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-foreground">{stats.total - stats.withImages}</p>
+              <p className="text-xs text-muted-foreground">No Image</p>
             </div>
           </div>
         </div>
@@ -559,9 +570,9 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                     </button>
                   </TableHead>
 <TableHead className="text-right">Bundles</TableHead>
-                            <TableHead className="text-center">B1G1</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="w-[80px]"></TableHead>
+                  <TableHead className="text-center w-[60px]">B1G1</TableHead>
+                  <TableHead className="text-center w-[80px]">Status</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -571,8 +582,8 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                     className="hover:bg-muted/30 cursor-pointer"
                     onClick={() => setEditProduct(product)}
                   >
-                    <TableCell>
-                      <div className="w-10 h-10 rounded-md overflow-hidden bg-muted flex items-center justify-center relative group/img">
+                    <TableCell className="w-[56px]">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted/50 flex items-center justify-center border border-border/50">
                         {product.image_url ? (
                           <Image
                             src={product.image_url}
@@ -582,14 +593,14 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                             className="object-cover w-full h-full"
                           />
                         ) : (
-                          <ImageIcon className="w-4 h-4 text-muted-foreground/50" />
+                          <ImageIcon className="w-4 h-4 text-muted-foreground/30" />
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <div>
-                          <p className="font-medium text-foreground">{product.name}</p>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-foreground truncate">{product.name}</p>
                           {product.sku && (
                             <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
                           )}
@@ -598,7 +609,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
+                            className="h-6 w-6 p-0 text-muted-foreground/50 hover:text-primary shrink-0"
                             onClick={(e) => handleQuickPasteImage(product.id, e)}
                             disabled={pastingImageFor === product.id}
                             title="Paste image from clipboard"
@@ -608,54 +619,60 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                             ) : (
                               <ClipboardPaste className="w-3 h-3" />
                             )}
-                            <span className="ml-1">Paste</span>
                           </Button>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
                       {product.category ? (
-                        <Badge variant="outline" className="bg-transparent font-normal">
-                          {product.category}
-                        </Badge>
+                        <span className="text-sm text-muted-foreground">{product.category}</span>
                       ) : (
-                        <span className="text-muted-foreground">-</span>
+                        <span className="text-muted-foreground/50">-</span>
                       )}
                     </TableCell>
                     <TableCell className="text-center">
                       <QuantityBadge quantity={product.quantity} hasVariants={product.has_variants} />
                     </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {product.price > 0 ? `Rs ${product.price}` : '-'}
+                    <TableCell className="text-right">
+                      {product.price > 0 ? (
+                        <span className="font-medium text-foreground">Rs {product.price}</span>
+                      ) : (
+                        <span className="text-muted-foreground/50">-</span>
+                      )}
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
+                    <TableCell className="text-right">
                       {Object.keys(product.bundle_prices || {}).length > 0 ? (
-                        <span className="text-xs">
+                        <div className="flex flex-wrap gap-1 justify-end">
                           {Object.entries(product.bundle_prices || {})
                             .sort(([a], [b]) => Number(a) - Number(b))
-                            .slice(0, 2)
-                            .map(([tier, price]) => `${tier}pk: Rs ${price}`)
-                            .join(', ')}
-                          {Object.keys(product.bundle_prices || {}).length > 2 && '...'}
-                        </span>
-                      ) : '-'}
+                            .map(([tier, price]) => (
+                              <Badge key={tier} variant="outline" className="text-xs font-normal bg-amber-500/10 text-amber-600 border-amber-500/20">
+                                {tier}x Rs{price}
+                              </Badge>
+                            ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground/50">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-center">
-                      {product.is_b1g1 ? (
-                        <Badge className="bg-violet-500/10 text-violet-600 hover:bg-violet-500/20 border-0 text-xs">
+                      {product.is_b1g1 && (
+                        <Badge className="bg-violet-500/10 text-violet-500 border-violet-500/20 border text-xs">
                           B1G1
                         </Badge>
-                      ) : '-'}
+                      )}
                     </TableCell>
                     <TableCell className="text-center">
                       {product.is_active ? (
-                        <Badge className="bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 border-0">
-                          Active
-                        </Badge>
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                          <span className="text-xs text-emerald-600">Active</span>
+                        </div>
                       ) : (
-                        <Badge variant="secondary" className="bg-muted text-muted-foreground">
-                          Inactive
-                        </Badge>
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50"></span>
+                          <span className="text-xs text-muted-foreground">Inactive</span>
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>
