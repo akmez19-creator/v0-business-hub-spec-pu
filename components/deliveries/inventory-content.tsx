@@ -49,6 +49,26 @@ import {
   Filter,
   Download,
   ClipboardPaste,
+  Car,
+  Sparkles,
+  UtensilsCrossed,
+  Sofa,
+  Shirt,
+  Heart,
+  PawPrint,
+  Wrench,
+  Boxes,
+  LayoutGrid,
+  Baby,
+  Briefcase,
+  Dumbbell,
+  Scissors,
+  Lightbulb,
+  TreeDeciduous,
+  Bug,
+  Plane,
+  Droplets,
+  Zap,
 } from 'lucide-react'
 import Image from 'next/image'
 import { Product } from '@/lib/types'
@@ -498,34 +518,66 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       </div>
 
       {/* Category Chips */}
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setCategoryFilter('all')}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-            categoryFilter === 'all'
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-        >
-          All ({products.length})
-        </button>
-        {categories.map(cat => {
-          const count = products.filter(p => p.category === cat).length
-          return (
+      {(() => {
+        const categoryIcons: Record<string, React.ReactNode> = {
+          'Automotive': <Car className="w-3.5 h-3.5" />,
+          'Car Accessories': <Car className="w-3.5 h-3.5" />,
+          'Bathroom / Personal Care': <Droplets className="w-3.5 h-3.5" />,
+          'Cleaning & Household': <Sparkles className="w-3.5 h-3.5" />,
+          'Kitchen & Food Tools': <UtensilsCrossed className="w-3.5 h-3.5" />,
+          'Home / Furniture': <Sofa className="w-3.5 h-3.5" />,
+          'Home Decor': <Sofa className="w-3.5 h-3.5" />,
+          'Home / Laundry': <Shirt className="w-3.5 h-3.5" />,
+          'Home / Bedding': <Sofa className="w-3.5 h-3.5" />,
+          'Health & Wellness': <Heart className="w-3.5 h-3.5" />,
+          'Pet Supplies': <PawPrint className="w-3.5 h-3.5" />,
+          'Garden & Outdoor': <TreeDeciduous className="w-3.5 h-3.5" />,
+          'Tools / Hardware': <Wrench className="w-3.5 h-3.5" />,
+          'Storage & Organization': <Boxes className="w-3.5 h-3.5" />,
+          'Tiles & Flooring': <LayoutGrid className="w-3.5 h-3.5" />,
+          'Baby & Kids': <Baby className="w-3.5 h-3.5" />,
+          'Bags & Travel': <Briefcase className="w-3.5 h-3.5" />,
+          'Sports & Fitness': <Dumbbell className="w-3.5 h-3.5" />,
+          'Sewing & Crafts': <Scissors className="w-3.5 h-3.5" />,
+          'Electronics': <Zap className="w-3.5 h-3.5" />,
+          'Home Appliances': <Lightbulb className="w-3.5 h-3.5" />,
+          'Home & Pest Control': <Bug className="w-3.5 h-3.5" />,
+          'Toys & Games': <Plane className="w-3.5 h-3.5" />,
+        }
+        return (
+          <div className="flex flex-wrap gap-2">
             <button
-              key={cat}
-              onClick={() => setCategoryFilter(cat)}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                categoryFilter === cat
+              onClick={() => setCategoryFilter('all')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                categoryFilter === 'all'
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
-              {cat} ({count})
+              <Package className="w-3.5 h-3.5" />
+              All ({products.length})
             </button>
-          )
-        })}
-      </div>
+            {categories.map(cat => {
+              const count = products.filter(p => p.category === cat).length
+              const icon = categoryIcons[cat] || <Package className="w-3.5 h-3.5" />
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setCategoryFilter(cat)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    categoryFilter === cat
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                >
+                  {icon}
+                  {cat} ({count})
+                </button>
+              )
+            })}
+          </div>
+        )
+      })()}
 
       {/* Results count */}
       <div className="flex items-center justify-between text-sm text-muted-foreground">
