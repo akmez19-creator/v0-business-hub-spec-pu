@@ -30,18 +30,8 @@ import {
   X,
 } from 'lucide-react'
 import Image from 'next/image'
-
-interface Product {
-  id: string
-  name: string
-  image_url: string | null
-  sku: string | null
-  price: number
-  category: string | null
-  description: string | null
-  is_active: boolean
-  created_at: string
-}
+import { Product } from '@/lib/types'
+import { InventoryImportDialog } from './inventory-import-dialog'
 
 export function InventoryContent({ products: initialProducts }: { products: Product[] }) {
   const [products, setProducts] = useState(initialProducts)
@@ -50,11 +40,27 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
   const [addOpen, setAddOpen] = useState(false)
   const router = useRouter()
 
-  const filtered = products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku && p.sku.toLowerCase().includes(search.toLowerCase())) ||
-    (p.category && p.category.toLowerCase().includes(search.toLowerCase()))
-  )
+  const filtered = products.filter(p => {
+    const searchTerm = search.toLowerCase().trim()
+    if (!searchTerm) return true
+    
+    // Check name, SKU, category
+    const matchesText = 
+      p.name.toLowerCase().includes(searchTerm) ||
+      (p.sku && p.sku.toLowerCase().includes(searchTerm)) ||
+      (p.category && p.category.toLowerCase().includes(searchTerm))
+    
+    // Check price - supports exact match, partial match, or "Rs" prefix
+    const priceString = p.price.toString()
+    const cleanSearch = searchTerm.replace(/^rs\s*/i, '').trim()
+    const matchesPrice = 
+      priceString.includes(cleanSearch) ||
+      priceString === cleanSearch ||
+      `rs ${priceString}`.includes(searchTerm) ||
+      `rs${priceString}`.includes(searchTerm)
+    
+    return matchesText || matchesPrice
+  })
 
   const activeCount = products.filter(p => p.is_active).length
   const withImageCount = products.filter(p => p.image_url).length
@@ -69,14 +75,16 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             {products.length} products -- {activeCount} active -- {withImageCount} with images
           </p>
         </div>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Product
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
+        <div className="flex items-center gap-2">
+          <InventoryImportDialog onSuccess={() => router.refresh()} />
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Product
+              </Button>
+            </DialogTrigger>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <ProductForm
               onSave={async (p) => {
                 setProducts(prev => [...prev, p])
@@ -87,13 +95,14 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
             />
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          placeholder="Search products by name, SKU, or category..."
+          placeholder="Search by name, SKU, category, or price..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-10"
@@ -148,18 +157,37 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
               </div>
 
               {/* Details */}
-              <div className="p-3">
+              <div className="p-3 space-y-2">
                 <h3 className="font-medium text-sm text-foreground truncate">{product.name}</h3>
-                <div className="flex items-center justify-between mt-1">
+                <div className="flex items-center justify-between">
                   {product.sku && (
                     <span className="text-xs text-muted-foreground">SKU: {product.sku}</span>
                   )}
-                  {product.price > 0 && (
-                    <span className="text-sm font-semibold text-foreground">Rs {product.price}</span>
+                  {product.quantity > 0 && (
+                    <Badge variant="secondary" className="text-xs">Qty: {product.quantity}</Badge>
                   )}
                 </div>
+                {/* Pricing Grid */}
+                <div className="grid grid-cols-2 gap-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Unit:</span>
+                    <span className="font-medium text-foreground">{product.price > 0 ? `Rs ${product.price}` : '-'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">SPX2:</span>
+                    <span className="font-medium text-foreground">{product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">SPX3:</span>
+                    <span className="font-medium text-foreground">{product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">B1G1:</span>
+                    <span className="font-medium text-foreground">{product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}</span>
+                  </div>
+                </div>
                 {product.category && (
-                  <Badge variant="outline" className="mt-2 text-xs bg-transparent">{product.category}</Badge>
+                  <Badge variant="outline" className="text-xs bg-transparent">{product.category}</Badge>
                 )}
               </div>
             </div>
@@ -170,7 +198,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       {/* Edit Dialog */}
       {editProduct && (
         <Dialog open={!!editProduct} onOpenChange={(open) => { if (!open) setEditProduct(null) }}>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <ProductForm
               product={editProduct}
               onSave={async (p) => {
@@ -210,6 +238,12 @@ function ProductForm({
   const [description, setDescription] = useState(product?.description || '')
   const [isActive, setIsActive] = useState(product?.is_active ?? true)
   const [imageUrl, setImageUrl] = useState(product?.image_url || '')
+  // New fields
+  const [quantity, setQuantity] = useState(product?.quantity?.toString() || '0')
+  const [priceSpx2, setPriceSpx2] = useState(product?.price_spx2?.toString() || '')
+  const [priceSpx3, setPriceSpx3] = useState(product?.price_spx3?.toString() || '')
+  const [priceB1g1, setPriceB1g1] = useState(product?.price_b1g1?.toString() || '')
+  const [remarks, setRemarks] = useState(product?.remarks || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -261,6 +295,12 @@ function ProductForm({
         description: description.trim() || null,
         is_active: isActive,
         image_url: imageUrl || null,
+        // New fields
+        quantity: parseInt(quantity) || 0,
+        price_spx2: priceSpx2 ? parseFloat(priceSpx2) : null,
+        price_spx3: priceSpx3 ? parseFloat(priceSpx3) : null,
+        price_b1g1: priceB1g1 ? parseFloat(priceB1g1) : null,
+        remarks: remarks.trim() || null,
         updated_at: new Date().toISOString(),
       }
 
@@ -402,14 +442,79 @@ function ProductForm({
           </div>
         </div>
 
-        {/* Category */}
+        {/* Category & Quantity */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="product-category">Category</Label>
+            <Input
+              id="product-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="e.g., Kitchen, Car"
+              disabled={saving}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="product-quantity">Quantity</Label>
+            <Input
+              id="product-quantity"
+              type="number"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="0"
+              disabled={saving}
+            />
+          </div>
+        </div>
+
+        {/* Pricing Tiers */}
         <div className="space-y-2">
-          <Label htmlFor="product-category">Category</Label>
+          <Label className="text-sm font-medium">Pricing Tiers (Rs)</Label>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="price-spx2" className="text-xs text-muted-foreground">SPX2</Label>
+              <Input
+                id="price-spx2"
+                type="number"
+                value={priceSpx2}
+                onChange={(e) => setPriceSpx2(e.target.value)}
+                placeholder="0"
+                disabled={saving}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="price-spx3" className="text-xs text-muted-foreground">SPX3</Label>
+              <Input
+                id="price-spx3"
+                type="number"
+                value={priceSpx3}
+                onChange={(e) => setPriceSpx3(e.target.value)}
+                placeholder="0"
+                disabled={saving}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="price-b1g1" className="text-xs text-muted-foreground">B1G1</Label>
+              <Input
+                id="price-b1g1"
+                type="number"
+                value={priceB1g1}
+                onChange={(e) => setPriceB1g1(e.target.value)}
+                placeholder="0"
+                disabled={saving}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Remarks */}
+        <div className="space-y-2">
+          <Label htmlFor="product-remarks">Remarks</Label>
           <Input
-            id="product-category"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="e.g., Kitchen, Car, Health"
+            id="product-remarks"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            placeholder="Notes or comments..."
             disabled={saving}
           />
         </div>

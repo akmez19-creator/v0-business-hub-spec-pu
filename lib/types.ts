@@ -112,6 +112,27 @@ export interface Client {
   updated_at: string
 }
 
+export interface Product {
+  id: string
+  name: string
+  image_url: string | null
+  sku: string | null
+  price: number
+  category: string | null
+  description: string | null
+  is_active: boolean
+  created_at: string
+  updated_at?: string
+  // Inventory tracking
+  quantity: number
+  // Pricing tiers
+  price_spx2: number | null  // Special price tier 2 (e.g., 2-pack)
+  price_spx3: number | null  // Special price tier 3 (e.g., 3-pack)
+  price_b1g1: number | null  // Buy 1 Get 1 price
+  // Notes
+  remarks: string | null
+}
+
 export interface DeliveryImport {
   id: string
   filename: string

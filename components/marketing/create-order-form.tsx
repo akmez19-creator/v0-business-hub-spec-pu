@@ -21,6 +21,9 @@ interface Product {
   id: string
   name: string
   price: string
+  price_spx2?: number | null
+  price_spx3?: number | null
+  price_b1g1?: number | null
   is_active: boolean
 }
 
@@ -361,7 +364,7 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
                   key={item.id}
                   type="button"
                   onClick={() => addToCart(item)}
-                  title={`${item.name} - Rs ${item.price}`}
+                  title={`${item.name} - Rs ${item.price}${item.price_spx2 ? ` | SPX2: Rs ${item.price_spx2}` : ''}${item.price_spx3 ? ` | SPX3: Rs ${item.price_spx3}` : ''}${item.price_b1g1 ? ` | B1G1: Rs ${item.price_b1g1}` : ''}`}
                   className={`
                     relative px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 text-left
                     ${inCart 
@@ -372,7 +375,10 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
                   `}
                 >
                   <span className="block truncate">{item.name}</span>
-                  <span className="text-xs opacity-70">Rs {item.price}</span>
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    <span className="text-xs opacity-70">Rs {item.price}</span>
+                    {item.price_spx2 && <span className="text-[10px] opacity-50">| SPX2: {item.price_spx2}</span>}
+                  </div>
                   {inCart && (
                     <span className="absolute -top-2 -right-2 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center text-xs font-bold shadow-lg border-2 border-background">
                       {inCart.quantity}
