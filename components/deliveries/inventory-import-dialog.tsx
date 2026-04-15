@@ -357,6 +357,7 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                       <th className="text-right px-3 py-2">SPX2</th>
                       <th className="text-right px-3 py-2">SPX3</th>
                       <th className="text-right px-3 py-2">B1G1</th>
+                      <th className="text-left px-3 py-2">Image</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -369,6 +370,13 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                         <td className="px-3 py-2 text-right">{product.price_spx2 ? `Rs ${product.price_spx2}` : '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price_spx3 ? `Rs ${product.price_spx3}` : '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price_b1g1 ? `Rs ${product.price_b1g1}` : '-'}</td>
+                        <td className="px-3 py-2">
+                          {product.image_url ? (
+                            <a href={product.image_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate max-w-[100px] block">
+                              View
+                            </a>
+                          ) : '-'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -424,6 +432,7 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
               <div><span className="text-muted-foreground">SPX2</span> → Special Price 2</div>
               <div><span className="text-muted-foreground">SPX3</span> → Special Price 3</div>
               <div><span className="text-muted-foreground">B1G1</span> → Buy 1 Get 1</div>
+              <div><span className="text-muted-foreground">Image</span> → Image URL</div>
               <div><span className="text-muted-foreground">Remarks</span> → Notes</div>
             </div>
           </div>
