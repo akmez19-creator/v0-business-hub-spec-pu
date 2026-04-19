@@ -219,22 +219,15 @@ export default function AdsManagerPage() {
     return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  // Filter campaigns created today
+  // Filter campaigns with spend today (spend > 0)
   const filteredCampaigns = showTodayOnly 
-    ? campaigns.filter(c => {
-        const createdDate = new Date(c.created_time)
-        const today = new Date()
-        return createdDate.toDateString() === today.toDateString()
-      })
+    ? campaigns.filter(c => parseFloat(c.spend || '0') > 0)
     : campaigns
 
   const totalSpend = filteredCampaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
   const activeCampaigns = filteredCampaigns.filter(c => c.status === 'ACTIVE').length
-  const todayCampaignsCount = campaigns.filter(c => {
-    const createdDate = new Date(c.created_time)
-    const today = new Date()
-    return createdDate.toDateString() === today.toDateString()
-  }).length
+  // Count campaigns that have spend (for badge)
+  const campaignsWithSpendCount = campaigns.filter(c => parseFloat(c.spend || '0') > 0).length
 
   if (loading) {
     return (
@@ -293,18 +286,18 @@ export default function AdsManagerPage() {
             </SelectContent>
           </Select>
           
-          {/* Today's Campaigns Toggle */}
+          {/* Today's Spend Toggle */}
           <Button
             variant={showTodayOnly ? "default" : "outline"}
             size="sm"
             onClick={() => setShowTodayOnly(!showTodayOnly)}
             className={showTodayOnly ? "bg-primary" : "bg-card"}
           >
-            <CalendarIcon className="w-4 h-4 mr-2" />
-            Today&apos;s Campaigns
-            {todayCampaignsCount > 0 && (
+            <DollarSign className="w-4 h-4 mr-2" />
+            Today&apos;s Spend
+            {campaignsWithSpendCount > 0 && (
               <Badge variant="secondary" className="ml-2 px-1.5 py-0 text-xs">
-                {todayCampaignsCount}
+                {campaignsWithSpendCount}
               </Badge>
             )}
           </Button>
@@ -409,7 +402,7 @@ export default function AdsManagerPage() {
               <div>
                 <p className="text-3xl font-bold text-foreground">{filteredCampaigns.length}</p>
                 <p className="text-sm text-muted-foreground">
-                  {showTodayOnly ? "Today's Campaigns" : "Total Campaigns"}
+                  {showTodayOnly ? "With Spend" : "Total Campaigns"}
                 </p>
               </div>
             </div>
@@ -428,7 +421,7 @@ export default function AdsManagerPage() {
             <div className="flex flex-col items-center justify-center py-16 gap-2">
               <Megaphone className="w-10 h-10 text-muted-foreground/50" />
               <p className="text-muted-foreground">
-                {showTodayOnly ? "No campaigns created today" : "No campaigns found"}
+                {showTodayOnly ? "No campaigns with spend today" : "No campaigns found"}
               </p>
               {showTodayOnly && (
                 <Button variant="ghost" size="sm" onClick={() => setShowTodayOnly(false)}>
