@@ -1391,13 +1391,35 @@ function ProductForm({
           {/* Category */}
           <div className="space-y-2">
             <Label htmlFor="product-category">Category</Label>
-            <Input
-              id="product-category"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Kitchen"
-              disabled={saving}
-            />
+            <Select value={category} onValueChange={setCategory} disabled={saving}>
+              <SelectTrigger id="product-category">
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Automotive">Automotive</SelectItem>
+                <SelectItem value="Bags & Travel">Bags & Travel</SelectItem>
+                <SelectItem value="Bathroom / Personal Care">Bathroom / Personal Care</SelectItem>
+                <SelectItem value="Car Accessories">Car Accessories</SelectItem>
+                <SelectItem value="Cleaning & Household">Cleaning & Household</SelectItem>
+                <SelectItem value="Electronics">Electronics</SelectItem>
+                <SelectItem value="Health & Wellness">Health & Wellness</SelectItem>
+                <SelectItem value="Home / Bedding">Home / Bedding</SelectItem>
+                <SelectItem value="Home / Furniture">Home / Furniture</SelectItem>
+                <SelectItem value="Home / Laundry">Home / Laundry</SelectItem>
+                <SelectItem value="Home & Pest Control">Home & Pest Control</SelectItem>
+                <SelectItem value="Home Appliances">Home Appliances</SelectItem>
+                <SelectItem value="Kitchen & Food Tools">Kitchen & Food Tools</SelectItem>
+                <SelectItem value="Pet / Outdoor">Pet / Outdoor</SelectItem>
+                <SelectItem value="Pet Supplies">Pet Supplies</SelectItem>
+                <SelectItem value="Phone Accessories">Phone Accessories</SelectItem>
+                <SelectItem value="Sewing & Crafts">Sewing & Crafts</SelectItem>
+                <SelectItem value="Sports & Fitness">Sports & Fitness</SelectItem>
+                <SelectItem value="Storage & Organization">Storage & Organization</SelectItem>
+                <SelectItem value="Tiles & Flooring">Tiles & Flooring</SelectItem>
+                <SelectItem value="Tools / Hardware">Tools / Hardware</SelectItem>
+                <SelectItem value="Toys & Games">Toys & Games</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
