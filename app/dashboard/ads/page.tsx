@@ -652,7 +652,7 @@ export default function AdsManagerPage() {
             {totalBalanceOwed > 0 && (
               <div className="text-sm">
                 <span className="text-muted-foreground">Total Due: </span>
-                <span className="font-semibold text-red-500">${totalBalanceOwed.toFixed(2)}</span>
+                <span className="font-semibold text-red-500">{formatSpend(totalBalanceOwed.toString())} (${totalBalanceOwed.toFixed(2)})</span>
               </div>
             )}
           </div>
@@ -674,7 +674,7 @@ export default function AdsManagerPage() {
                       </p>
                       {account.balance > 0 && (
                         <p className="text-xs text-red-500 mt-1">
-                          Due: ${account.balance.toFixed(2)}
+                          Due: {formatSpend(account.balance.toString())} (${account.balance.toFixed(2)})
                         </p>
                       )}
                     </div>
