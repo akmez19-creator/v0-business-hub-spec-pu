@@ -77,6 +77,7 @@ export default function AdsManagerPage() {
   const [accounts, setAccounts] = useState<AdAccount[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string>('all')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [accountSpends, setAccountSpends] = useState<Record<string, number>>({}) // Account-level spend from FB
   const [loading, setLoading] = useState(true)
   const [loadingCampaigns, setLoadingCampaigns] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -137,6 +138,7 @@ export default function AdsManagerPage() {
     if (selectedAccount === 'all') {
       // Fetch from all accounts
       const allCampaigns: Campaign[] = []
+      const newAccountSpends: Record<string, number> = {}
       
       for (const account of accounts) {
         try {
@@ -150,6 +152,11 @@ export default function AdsManagerPage() {
               accountName: account.name || account.id
             })))
           }
+          
+          // Store account-level spend (more accurate than summing campaigns)
+          if (data.accountTotalSpend) {
+            newAccountSpends[account.id] = parseFloat(data.accountTotalSpend)
+          }
         } catch {
           console.error(`Failed to fetch campaigns for ${account.id}`)
         }
@@ -158,6 +165,7 @@ export default function AdsManagerPage() {
       // Sort by spend
       allCampaigns.sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend))
       setCampaigns(allCampaigns)
+      setAccountSpends(newAccountSpends)
     } else {
       // Fetch from single account
       try {
@@ -170,9 +178,15 @@ export default function AdsManagerPage() {
           accountId: selectedAccount,
           accountName: account?.name || selectedAccount
         })))
+        
+        // Store account-level spend
+        if (data.accountTotalSpend) {
+          setAccountSpends({ [selectedAccount]: parseFloat(data.accountTotalSpend) })
+        }
       } catch {
         console.error('Failed to fetch campaigns')
         setCampaigns([])
+        setAccountSpends({})
       }
     }
     
@@ -228,22 +242,37 @@ export default function AdsManagerPage() {
     ? campaigns.filter(c => parseFloat(c.spend || '0') > 0)
     : campaigns
 
-  const totalSpend = filteredCampaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
+  // Use account-level spend from Facebook (more accurate than summing campaigns)
+  const totalSpendFromAccounts = Object.values(accountSpends).reduce((sum, spend) => sum + spend, 0)
+  // Fallback to campaign sum if account spend not available
+  const campaignSum = filteredCampaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
+  const totalSpend = totalSpendFromAccounts > 0 ? totalSpendFromAccounts : campaignSum
+  
   const activeCampaigns = filteredCampaigns.filter(c => c.status === 'ACTIVE').length
   // Count campaigns that have spend > 0
   const campaignsWithSpendCount = campaigns.filter(c => parseFloat(c.spend || '0') > 0).length
 
-  // Calculate spend per account
+  // Calculate spend per account - use account-level spend from FB when available
   const accountSpendMap = filteredCampaigns.reduce((acc, campaign) => {
     const accountId = campaign.accountId || 'unknown'
     const accountName = campaign.accountName || accountId
     if (!acc[accountId]) {
-      acc[accountId] = { name: accountName, spend: 0, campaignCount: 0 }
+      // Use account-level spend from FB, fallback to 0
+      acc[accountId] = { 
+        name: accountName, 
+        spend: accountSpends[accountId] || 0, // Use FB account spend
+        campaignSpend: 0, // Track campaign-level for comparison
+        campaignCount: 0 
+      }
     }
-    acc[accountId].spend += parseFloat(campaign.spend || '0')
+    acc[accountId].campaignSpend += parseFloat(campaign.spend || '0')
     acc[accountId].campaignCount += 1
+    // If we don't have account-level spend, use campaign sum
+    if (!accountSpends[accountId]) {
+      acc[accountId].spend = acc[accountId].campaignSpend
+    }
     return acc
-  }, {} as Record<string, { name: string; spend: number; campaignCount: number }>)
+  }, {} as Record<string, { name: string; spend: number; campaignSpend: number; campaignCount: number }>)
 
   const accountSpendList = Object.entries(accountSpendMap)
     .map(([id, data]) => ({ id, ...data }))
