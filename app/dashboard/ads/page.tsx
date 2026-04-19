@@ -93,43 +93,48 @@ export default function AdsManagerPage() {
   const [countdown, setCountdown] = useState(15 * 60) // 15 minutes in seconds
   const AUTO_REFRESH_INTERVAL = 15 * 60 // 15 minutes in seconds
 
+  // Initial load - use cached API for instant data
   useEffect(() => {
-    fetchAccounts()
+    fetchCachedData()
   }, [])
   
-  // Auto-refresh every 15 minutes
-  useEffect(() => {
-    const refreshTimer = setInterval(() => {
-      if (accounts.length > 0) {
-        fetchCampaignsData()
-        setLastRefresh(new Date())
-        setCountdown(AUTO_REFRESH_INTERVAL)
-      }
-    }, AUTO_REFRESH_INTERVAL * 1000)
-    
-    return () => clearInterval(refreshTimer)
-  }, [accounts, selectedAccount, datePreset, dateRange, showTodayOnly])
-  
-  // Countdown timer
+  // Countdown timer that syncs with server cache
   useEffect(() => {
     const countdownTimer = setInterval(() => {
-      setCountdown(prev => prev > 0 ? prev - 1 : AUTO_REFRESH_INTERVAL)
+      setCountdown(prev => {
+        if (prev <= 1) {
+          // Auto-refresh when countdown hits 0
+          fetchCachedData(true)
+          return AUTO_REFRESH_INTERVAL
+        }
+        return prev - 1
+      })
     }, 1000)
     
     return () => clearInterval(countdownTimer)
   }, [])
 
+  // When filters change (not today's spend mode), fetch fresh data
   useEffect(() => {
-    if (accounts.length > 0) {
+    if (!showTodayOnly && accounts.length > 0) {
       fetchCampaignsData()
     }
-  }, [selectedAccount, accounts, datePreset, dateRange, showTodayOnly])
+  }, [selectedAccount, datePreset, dateRange])
+  
+  // When switching to today's spend mode, use cached data
+  useEffect(() => {
+    if (showTodayOnly) {
+      fetchCachedData()
+    }
+  }, [showTodayOnly])
 
-  async function fetchAccounts() {
+  async function fetchCachedData(forceRefresh = false) {
     setLoading(true)
+    setLoadingCampaigns(true)
     setError(null)
+    
     try {
-      const res = await fetch('/api/facebook-ads?action=accounts')
+      const res = await fetch(`/api/facebook-ads/cached${forceRefresh ? '?forceRefresh=true' : ''}`)
       const data = await res.json()
       
       if (data.error) {
@@ -137,11 +142,16 @@ export default function AdsManagerPage() {
         return
       }
       
-      setAccounts(data.data || [])
+      setAccounts(data.accounts || [])
+      setCampaigns(data.campaigns || [])
+      setAccountSpends(data.accountSpends || {})
+      setLastRefresh(new Date(data.lastRefresh))
+      setCountdown(data.nextRefreshIn || AUTO_REFRESH_INTERVAL)
     } catch {
-      setError('Failed to fetch ad accounts')
+      setError('Failed to fetch ads data')
     } finally {
       setLoading(false)
+      setLoadingCampaigns(false)
     }
   }
 
@@ -149,10 +159,6 @@ export default function AdsManagerPage() {
     setLoadingCampaigns(true)
     
     const buildParams = () => {
-      // If "Today's Spend" is enabled, always use today's date preset
-      if (showTodayOnly) {
-        return 'datePreset=today'
-      }
       let params = `datePreset=${datePreset}`
       if (datePreset === 'custom' && dateRange?.from && dateRange?.to) {
         params += `&since=${format(dateRange.from, 'yyyy-MM-dd')}&until=${format(dateRange.to, 'yyyy-MM-dd')}`
@@ -193,6 +199,7 @@ export default function AdsManagerPage() {
       allCampaigns.sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend))
       setCampaigns(allCampaigns)
       setAccountSpends(newAccountSpends)
+      setLastRefresh(new Date())
     } else {
       // Fetch from single account
       try {
@@ -319,9 +326,13 @@ export default function AdsManagerPage() {
   
   // Manual refresh handler
   const handleManualRefresh = () => {
-    fetchCampaignsData()
-    setLastRefresh(new Date())
-    setCountdown(AUTO_REFRESH_INTERVAL)
+    if (showTodayOnly) {
+      fetchCachedData(true) // Force refresh from Facebook
+    } else {
+      fetchCampaignsData()
+      setLastRefresh(new Date())
+      setCountdown(AUTO_REFRESH_INTERVAL)
+    }
   }
 
   if (loading) {
