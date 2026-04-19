@@ -95,7 +95,7 @@ export default function AdsManagerPage() {
     if (accounts.length > 0) {
       fetchCampaignsData()
     }
-  }, [selectedAccount, accounts, datePreset, dateRange])
+  }, [selectedAccount, accounts, datePreset, dateRange, showTodayOnly])
 
   async function fetchAccounts() {
     setLoading(true)
@@ -121,6 +121,10 @@ export default function AdsManagerPage() {
     setLoadingCampaigns(true)
     
     const buildParams = () => {
+      // If "Today's Spend" is enabled, always use today's date preset
+      if (showTodayOnly) {
+        return 'datePreset=today'
+      }
       let params = `datePreset=${datePreset}`
       if (datePreset === 'custom' && dateRange?.from && dateRange?.to) {
         params += `&since=${format(dateRange.from, 'yyyy-MM-dd')}&until=${format(dateRange.to, 'yyyy-MM-dd')}`
@@ -219,14 +223,14 @@ export default function AdsManagerPage() {
     return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  // Filter campaigns with spend today (spend > 0)
+  // When showTodayOnly is on, the API already returns today's data - filter for spend > 0
   const filteredCampaigns = showTodayOnly 
     ? campaigns.filter(c => parseFloat(c.spend || '0') > 0)
     : campaigns
 
   const totalSpend = filteredCampaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
   const activeCampaigns = filteredCampaigns.filter(c => c.status === 'ACTIVE').length
-  // Count campaigns that have spend (for badge)
+  // Count campaigns that have spend > 0
   const campaignsWithSpendCount = campaigns.filter(c => parseFloat(c.spend || '0') > 0).length
 
   if (loading) {
@@ -421,7 +425,7 @@ export default function AdsManagerPage() {
             <div className="flex flex-col items-center justify-center py-16 gap-2">
               <Megaphone className="w-10 h-10 text-muted-foreground/50" />
               <p className="text-muted-foreground">
-                {showTodayOnly ? "No campaigns with spend today" : "No campaigns found"}
+                {showTodayOnly ? "No campaigns spent money today" : "No campaigns found"}
               </p>
               {showTodayOnly && (
                 <Button variant="ghost" size="sm" onClick={() => setShowTodayOnly(false)}>
