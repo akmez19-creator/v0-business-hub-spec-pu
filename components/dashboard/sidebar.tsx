@@ -37,6 +37,7 @@ import {
   User,
   AlertTriangle,
   CalendarDays,
+  Megaphone,
 } from 'lucide-react'
 
 interface SubNavItem {
@@ -106,6 +107,13 @@ const navItems: NavItem[] = [
     icon: Database,
     roles: ['admin', 'manager', 'marketing_agent'],
     color: '#ec4899',
+  },
+  {
+    href: '/dashboard/ads',
+    label: 'Ads Manager',
+    icon: Megaphone,
+    roles: ['admin', 'manager'],
+    color: '#3b82f6',
   },
   {
     href: '/dashboard/riders',
