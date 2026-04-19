@@ -61,9 +61,12 @@ export async function GET(request: Request) {
       )
     }
     
-    // Fetch all accounts including balance (amount owed to Facebook)
+    // Fetch all accounts including billing info
+    // balance = current amount owed (positive = you owe Facebook)
+    // spend_cap = spending limit
+    // amount_spent = total amount spent (lifetime)
     const accountsResponse = await fetch(
-      `${FACEBOOK_GRAPH_URL}/me/adaccounts?fields=id,name,account_status,currency,balance&access_token=${accessToken}`
+      `${FACEBOOK_GRAPH_URL}/me/adaccounts?fields=id,name,account_status,currency,balance,spend_cap,amount_spent&access_token=${accessToken}`
     )
     
     if (!accountsResponse.ok) {
