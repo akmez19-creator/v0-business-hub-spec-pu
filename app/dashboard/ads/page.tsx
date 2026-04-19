@@ -60,6 +60,7 @@ interface AdAccount {
   account_status: number
   currency: string
   amount_spent: string
+  balance: string // Amount owed to Facebook (in cents, negative = owed)
 }
 
 interface Campaign {
@@ -402,13 +403,18 @@ export default function AdsManagerPage() {
   const accountSpendMap = filteredCampaigns.reduce((acc, campaign) => {
     const accountId = campaign.accountId || 'unknown'
     const accountName = campaign.accountName || accountId
+    const account = accounts.find(a => a.id === accountId)
     if (!acc[accountId]) {
       // Use account-level spend from FB, fallback to 0
+      // Balance from FB is in cents and negative means amount owed
+      const balanceCents = parseFloat(account?.balance || '0')
+      const balanceOwed = balanceCents < 0 ? Math.abs(balanceCents) / 100 : 0
       acc[accountId] = { 
         name: accountName, 
         spend: accountSpends[accountId] || 0, // Use FB account spend
         campaignSpend: 0, // Track campaign-level for comparison
-        campaignCount: 0 
+        campaignCount: 0,
+        balance: balanceOwed // Amount owed to Facebook in currency units
       }
     }
     acc[accountId].campaignSpend += parseFloat(campaign.spend || '0')
@@ -418,11 +424,14 @@ export default function AdsManagerPage() {
       acc[accountId].spend = acc[accountId].campaignSpend
     }
     return acc
-  }, {} as Record<string, { name: string; spend: number; campaignSpend: number; campaignCount: number }>)
+  }, {} as Record<string, { name: string; spend: number; campaignSpend: number; campaignCount: number; balance: number }>)
 
   const accountSpendList = Object.entries(accountSpendMap)
     .map(([id, data]) => ({ id, ...data }))
     .sort((a, b) => b.spend - a.spend)
+  
+  // Calculate total balance owed across all accounts
+  const totalBalanceOwed = accountSpendList.reduce((sum, acc) => sum + acc.balance, 0)
     
   // Format countdown timer
   const formatCountdown = (seconds: number) => {
@@ -637,7 +646,15 @@ export default function AdsManagerPage() {
       {/* Account Spend Breakdown */}
       {selectedAccount === 'all' && accountSpendList.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Spend by Account</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Spend by Account</h2>
+            {totalBalanceOwed > 0 && (
+              <div className="text-sm">
+                <span className="text-muted-foreground">Total Due: </span>
+                <span className="font-semibold text-red-500">${totalBalanceOwed.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {accountSpendList.map((account) => (
               <Card 
@@ -654,6 +671,11 @@ export default function AdsManagerPage() {
                       <p className="text-xs text-muted-foreground">
                         {account.campaignCount} campaign{account.campaignCount !== 1 ? 's' : ''}
                       </p>
+                      {account.balance > 0 && (
+                        <p className="text-xs text-red-500 mt-1">
+                          Due: ${account.balance.toFixed(2)}
+                        </p>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`font-semibold ${account.spend > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
