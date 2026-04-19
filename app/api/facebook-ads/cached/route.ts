@@ -61,9 +61,9 @@ export async function GET(request: Request) {
       )
     }
     
-    // Fetch all accounts
+    // Fetch all accounts including balance (amount owed to Facebook)
     const accountsResponse = await fetch(
-      `${FACEBOOK_GRAPH_URL}/me/adaccounts?fields=id,name,account_status,currency&access_token=${accessToken}`
+      `${FACEBOOK_GRAPH_URL}/me/adaccounts?fields=id,name,account_status,currency,balance&access_token=${accessToken}`
     )
     
     if (!accountsResponse.ok) {
