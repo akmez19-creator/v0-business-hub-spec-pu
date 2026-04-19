@@ -203,14 +203,19 @@ export default function AdsManagerPage() {
     return `${style.bg} ${style.text} border-0`
   }
 
-  const formatSpend = (amount: string, currency = 'MUR') => {
+  // USD to Rs conversion rate (including VAT)
+  const USD_TO_RS = 57.5
+  
+  const formatSpend = (amount: string) => {
+    // Facebook returns spend in USD cents (divide by 100) or USD
+    const usdValue = parseFloat(amount)
+    const rsValue = usdValue * USD_TO_RS
+    return `Rs ${rsValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+  
+  const formatUsd = (amount: string) => {
     const value = parseFloat(amount)
-    return new Intl.NumberFormat('en-US', { 
-      style: 'currency', 
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)
+    return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
   const totalSpend = campaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
@@ -341,6 +346,9 @@ export default function AdsManagerPage() {
                 <p className="text-3xl font-bold text-foreground">
                   {formatSpend(totalSpend.toString())}
                 </p>
+                <p className="text-xs text-muted-foreground/70 mt-0.5">
+                  {formatUsd(totalSpend.toString())} USD
+                </p>
                 <p className="text-sm text-muted-foreground">Total Spend</p>
               </div>
             </div>
@@ -420,9 +428,14 @@ export default function AdsManagerPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <span className={`font-semibold ${parseFloat(campaign.spend) > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                        {formatSpend(campaign.spend)}
-                      </span>
+                      <div>
+                        <span className={`font-semibold ${parseFloat(campaign.spend) > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                          {formatSpend(campaign.spend)}
+                        </span>
+                        {parseFloat(campaign.spend) > 0 && (
+                          <p className="text-xs text-muted-foreground/70">{formatUsd(campaign.spend)}</p>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
