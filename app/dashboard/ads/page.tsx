@@ -83,10 +83,10 @@ export default function AdsManagerPage() {
   const [error, setError] = useState<string | null>(null)
   
   // Date range state
-  const [datePreset, setDatePreset] = useState<DatePreset>('lifetime')
+  const [datePreset, setDatePreset] = useState<DatePreset>('today')
   const [dateRange, setDateRange] = useState<DateRange | undefined>()
   const [showCalendar, setShowCalendar] = useState(false)
-  const [showTodayOnly, setShowTodayOnly] = useState(false)
+  const [showTodayOnly, setShowTodayOnly] = useState(true) // Default to Today's Spend ON
 
   useEffect(() => {
     fetchAccounts()
