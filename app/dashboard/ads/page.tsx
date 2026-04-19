@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,7 +11,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
 import {
   Table,
   TableBody,
@@ -23,17 +28,14 @@ import {
 import {
   Loader2,
   RefreshCw,
-  TrendingUp,
-  Eye,
-  MousePointer,
   DollarSign,
-  Users,
-  Target,
+  CalendarIcon,
+  ChevronDown,
+  TrendingUp,
   Megaphone,
-  LayoutGrid,
-  AlertCircle,
 } from 'lucide-react'
-import Image from 'next/image'
+import { format, subDays, startOfMonth, endOfMonth, subMonths } from 'date-fns'
+import { DateRange } from 'react-day-picker'
 
 interface AdAccount {
   id: string
@@ -41,7 +43,6 @@ interface AdAccount {
   account_status: number
   currency: string
   amount_spent: string
-  balance: string
 }
 
 interface Campaign {
@@ -49,63 +50,51 @@ interface Campaign {
   name: string
   status: string
   objective: string
-  daily_budget?: string
-  lifetime_budget?: string
   created_time: string
-  start_time?: string
-  stop_time?: string
+  spend: string
+  impressions: string
+  clicks: string
+  reach: string
+  accountId?: string
+  accountName?: string
 }
 
-interface Ad {
-  id: string
-  name: string
-  status: string
-  adset_id: string
-  campaign_id: string
-  creative?: {
-    id: string
-    name: string
-    thumbnail_url?: string
-  }
-  created_time: string
-}
+type DatePreset = 'today' | 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'lifetime' | 'custom'
 
-interface Insights {
-  impressions?: string
-  clicks?: string
-  spend?: string
-  reach?: string
-  cpc?: string
-  cpm?: string
-  ctr?: string
-}
+const DATE_PRESETS: { value: DatePreset; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'last_7d', label: 'Last 7 Days' },
+  { value: 'last_14d', label: 'Last 14 Days' },
+  { value: 'last_30d', label: 'Last 30 Days' },
+  { value: 'this_month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
+  { value: 'lifetime', label: 'Lifetime' },
+  { value: 'custom', label: 'Custom Range' },
+]
 
 export default function AdsManagerPage() {
   const [accounts, setAccounts] = useState<AdAccount[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string>('all')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [ads, setAds] = useState<Ad[]>([])
-  const [insights, setInsights] = useState<Record<string, Insights>>({})
   const [loading, setLoading] = useState(true)
   const [loadingCampaigns, setLoadingCampaigns] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState('campaigns')
+  
+  // Date range state
+  const [datePreset, setDatePreset] = useState<DatePreset>('lifetime')
+  const [dateRange, setDateRange] = useState<DateRange | undefined>()
+  const [showCalendar, setShowCalendar] = useState(false)
 
-  // Fetch ad accounts on mount
   useEffect(() => {
     fetchAccounts()
   }, [])
 
-  // Fetch campaigns when account changes
   useEffect(() => {
-    if (selectedAccount && selectedAccount !== 'all') {
-      fetchCampaigns(selectedAccount)
-      fetchAds(selectedAccount)
-      fetchInsights(selectedAccount)
-    } else if (selectedAccount === 'all' && accounts.length > 0) {
-      fetchAllAccountsData()
+    if (accounts.length > 0) {
+      fetchCampaignsData()
     }
-  }, [selectedAccount, accounts])
+  }, [selectedAccount, accounts, datePreset, dateRange])
 
   async function fetchAccounts() {
     setLoading(true)
@@ -120,114 +109,112 @@ export default function AdsManagerPage() {
       }
       
       setAccounts(data.data || [])
-      if (data.data?.length > 0) {
-        setSelectedAccount('all')
-      }
-    } catch (err) {
+    } catch {
       setError('Failed to fetch ad accounts')
     } finally {
       setLoading(false)
     }
   }
 
-  async function fetchAllAccountsData() {
+  async function fetchCampaignsData() {
     setLoadingCampaigns(true)
-    const allCampaigns: Campaign[] = []
-    const allAds: Ad[] = []
-    const allInsights: Record<string, Insights> = {}
-
-    for (const account of accounts) {
+    
+    const buildParams = () => {
+      let params = `datePreset=${datePreset}`
+      if (datePreset === 'custom' && dateRange?.from && dateRange?.to) {
+        params += `&since=${format(dateRange.from, 'yyyy-MM-dd')}&until=${format(dateRange.to, 'yyyy-MM-dd')}`
+      }
+      return params
+    }
+    
+    const params = buildParams()
+    
+    if (selectedAccount === 'all') {
+      // Fetch from all accounts
+      const allCampaigns: Campaign[] = []
+      
+      for (const account of accounts) {
+        try {
+          const res = await fetch(`/api/facebook-ads?action=campaigns&accountId=${account.id}&${params}`)
+          const data = await res.json()
+          
+          if (data.data) {
+            allCampaigns.push(...data.data.map((c: Campaign) => ({
+              ...c,
+              accountId: account.id,
+              accountName: account.name || account.id
+            })))
+          }
+        } catch {
+          console.error(`Failed to fetch campaigns for ${account.id}`)
+        }
+      }
+      
+      // Sort by spend
+      allCampaigns.sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend))
+      setCampaigns(allCampaigns)
+    } else {
+      // Fetch from single account
       try {
-        const [campaignsRes, adsRes, insightsRes] = await Promise.all([
-          fetch(`/api/facebook-ads?action=campaigns&accountId=${account.id}`),
-          fetch(`/api/facebook-ads?action=ads&accountId=${account.id}`),
-          fetch(`/api/facebook-ads?action=insights&accountId=${account.id}`)
-        ])
+        const res = await fetch(`/api/facebook-ads?action=campaigns&accountId=${selectedAccount}&${params}`)
+        const data = await res.json()
         
-        const campaignsData = await campaignsRes.json()
-        const adsData = await adsRes.json()
-        const insightsData = await insightsRes.json()
-        
-        if (campaignsData.data) {
-          allCampaigns.push(...campaignsData.data.map((c: Campaign) => ({ ...c, accountId: account.id, accountName: account.name })))
-        }
-        if (adsData.data) {
-          allAds.push(...adsData.data.map((a: Ad) => ({ ...a, accountId: account.id, accountName: account.name })))
-        }
-        if (insightsData.data?.[0]) {
-          allInsights[account.id] = insightsData.data[0]
-        }
-      } catch (err) {
-        console.error(`Failed to fetch data for account ${account.id}`)
+        const account = accounts.find(a => a.id === selectedAccount)
+        setCampaigns((data.data || []).map((c: Campaign) => ({
+          ...c,
+          accountId: selectedAccount,
+          accountName: account?.name || selectedAccount
+        })))
+      } catch {
+        console.error('Failed to fetch campaigns')
+        setCampaigns([])
       }
     }
-
-    setCampaigns(allCampaigns)
-    setAds(allAds)
-    setInsights(allInsights)
+    
     setLoadingCampaigns(false)
   }
 
-  async function fetchCampaigns(accountId: string) {
-    setLoadingCampaigns(true)
-    try {
-      const res = await fetch(`/api/facebook-ads?action=campaigns&accountId=${accountId}`)
-      const data = await res.json()
-      setCampaigns(data.data || [])
-    } catch (err) {
-      console.error('Failed to fetch campaigns')
-    } finally {
-      setLoadingCampaigns(false)
+  const handleDatePresetChange = (preset: DatePreset) => {
+    setDatePreset(preset)
+    
+    if (preset === 'custom') {
+      setShowCalendar(true)
+    } else {
+      setShowCalendar(false)
+      setDateRange(undefined)
     }
   }
 
-  async function fetchAds(accountId: string) {
-    try {
-      const res = await fetch(`/api/facebook-ads?action=ads&accountId=${accountId}`)
-      const data = await res.json()
-      setAds(data.data || [])
-    } catch (err) {
-      console.error('Failed to fetch ads')
+  const getDateRangeLabel = () => {
+    if (datePreset === 'custom' && dateRange?.from && dateRange?.to) {
+      return `${format(dateRange.from, 'MMM d, yyyy')} - ${format(dateRange.to, 'MMM d, yyyy')}`
     }
-  }
-
-  async function fetchInsights(accountId: string) {
-    try {
-      const res = await fetch(`/api/facebook-ads?action=insights&accountId=${accountId}`)
-      const data = await res.json()
-      if (data.data?.[0]) {
-        setInsights({ [accountId]: data.data[0] })
-      }
-    } catch (err) {
-      console.error('Failed to fetch insights')
-    }
+    return DATE_PRESETS.find(p => p.value === datePreset)?.label || 'Select Date'
   }
 
   const getStatusBadge = (status: string) => {
-    const statusColors: Record<string, string> = {
-      ACTIVE: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-      PAUSED: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-      DELETED: 'bg-red-500/10 text-red-600 border-red-500/20',
-      ARCHIVED: 'bg-gray-500/10 text-gray-600 border-gray-500/20',
+    const config: Record<string, { bg: string; text: string }> = {
+      ACTIVE: { bg: 'bg-emerald-500/10', text: 'text-emerald-600' },
+      PAUSED: { bg: 'bg-amber-500/10', text: 'text-amber-600' },
+      DELETED: { bg: 'bg-red-500/10', text: 'text-red-600' },
+      ARCHIVED: { bg: 'bg-gray-500/10', text: 'text-gray-500' },
     }
-    return statusColors[status] || 'bg-gray-500/10 text-gray-600'
+    const style = config[status] || config.ARCHIVED
+    return `${style.bg} ${style.text} border-0`
   }
 
-  const formatCurrency = (amount: string | undefined, currency = 'MUR') => {
-    if (!amount) return '-'
-    const value = parseFloat(amount) / 100
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value)
+  const formatSpend = (amount: string, currency = 'MUR') => {
+    const value = parseFloat(amount)
+    return new Intl.NumberFormat('en-US', { 
+      style: 'currency', 
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)
   }
 
-  const totalInsights = Object.values(insights).reduce(
-    (acc, curr) => ({
-      impressions: (parseInt(acc.impressions || '0') + parseInt(curr.impressions || '0')).toString(),
-      clicks: (parseInt(acc.clicks || '0') + parseInt(curr.clicks || '0')).toString(),
-      spend: (parseFloat(acc.spend || '0') + parseFloat(curr.spend || '0')).toString(),
-      reach: (parseInt(acc.reach || '0') + parseInt(curr.reach || '0')).toString(),
-    }),
-    { impressions: '0', clicks: '0', spend: '0', reach: '0' }
-  )
+  const totalSpend = campaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
+  const activeCampaigns = campaigns.filter(c => c.status === 'ACTIVE').length
 
   if (loading) {
     return (
@@ -239,9 +226,11 @@ export default function AdsManagerPage() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
-        <AlertCircle className="w-12 h-12 text-red-500" />
-        <p className="text-lg text-red-500">{error}</p>
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4 p-6">
+        <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
+          <Megaphone className="w-8 h-8 text-red-500" />
+        </div>
+        <p className="text-lg text-red-500 text-center">{error}</p>
         <Button onClick={fetchAccounts} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
           Retry
@@ -253,23 +242,28 @@ export default function AdsManagerPage() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Ads Manager</h1>
-          <p className="text-muted-foreground">Monitor your Facebook & Instagram ad campaigns</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Ads Manager</h1>
+            <p className="text-muted-foreground">Campaign spend overview</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => { fetchAccounts(); fetchCampaignsData(); }}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
         </div>
-        <div className="flex items-center gap-3">
+        
+        {/* Filters Row */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Account Selector */}
           <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-            <SelectTrigger className="w-[250px]">
-              <Megaphone className="w-4 h-4 mr-2 text-muted-foreground" />
-              <SelectValue placeholder="Select Ad Account" />
+            <SelectTrigger className="w-[220px] bg-card">
+              <SelectValue placeholder="Select Account" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">
-                <span className="flex items-center gap-2">
-                  <LayoutGrid className="w-4 h-4" />
-                  All Accounts ({accounts.length})
-                </span>
+                All Accounts ({accounts.length})
               </SelectItem>
               {accounts.map((account) => (
                 <SelectItem key={account.id} value={account.id}>
@@ -278,244 +272,165 @@ export default function AdsManagerPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="icon" onClick={fetchAccounts}>
-            <RefreshCw className="w-4 h-4" />
-          </Button>
+          
+          {/* Date Range Selector */}
+          <Popover open={showCalendar} onOpenChange={setShowCalendar}>
+            <PopoverTrigger asChild>
+              <Button 
+                variant="outline" 
+                className="w-[220px] justify-between bg-card"
+              >
+                <span className="flex items-center gap-2">
+                  <CalendarIcon className="w-4 h-4 text-muted-foreground" />
+                  {getDateRangeLabel()}
+                </span>
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <div className="flex">
+                {/* Presets */}
+                <div className="border-r p-2 space-y-1 min-w-[140px]">
+                  {DATE_PRESETS.map(preset => (
+                    <button
+                      key={preset.value}
+                      onClick={() => handleDatePresetChange(preset.value)}
+                      className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
+                        datePreset === preset.value
+                          ? 'bg-primary text-primary-foreground'
+                          : 'hover:bg-muted'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                
+                {/* Calendar */}
+                {datePreset === 'custom' && (
+                  <div className="p-3">
+                    <Calendar
+                      mode="range"
+                      selected={dateRange}
+                      onSelect={(range) => {
+                        setDateRange(range)
+                        if (range?.from && range?.to) {
+                          setShowCalendar(false)
+                        }
+                      }}
+                      numberOfMonths={2}
+                      disabled={{ after: new Date() }}
+                    />
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <Eye className="w-5 h-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-foreground">
-                  {parseInt(totalInsights.impressions).toLocaleString()}
-                </p>
-                <p className="text-xs text-muted-foreground">Impressions</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                <MousePointer className="w-5 h-5 text-emerald-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-foreground">
-                  {parseInt(totalInsights.clicks).toLocaleString()}
-                </p>
-                <p className="text-xs text-muted-foreground">Clicks</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border-amber-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                <DollarSign className="w-5 h-5 text-amber-500" />
+          <CardContent className="p-5">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                <DollarSign className="w-6 h-6 text-amber-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">
-                  {formatCurrency(totalInsights.spend)}
+                <p className="text-3xl font-bold text-foreground">
+                  {formatSpend(totalSpend.toString())}
                 </p>
-                <p className="text-xs text-muted-foreground">Spend (7d)</p>
+                <p className="text-sm text-muted-foreground">Total Spend</p>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                <Users className="w-5 h-5 text-purple-500" />
+        
+        <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
+          <CardContent className="p-5">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-emerald-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">
-                  {parseInt(totalInsights.reach).toLocaleString()}
-                </p>
-                <p className="text-xs text-muted-foreground">Reach</p>
+                <p className="text-3xl font-bold text-foreground">{activeCampaigns}</p>
+                <p className="text-sm text-muted-foreground">Active Campaigns</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+          <CardContent className="p-5">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                <Megaphone className="w-6 h-6 text-blue-500" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-foreground">{campaigns.length}</p>
+                <p className="text-sm text-muted-foreground">Total Campaigns</p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="campaigns" className="gap-2">
-            <Target className="w-4 h-4" />
-            Campaigns ({campaigns.length})
-          </TabsTrigger>
-          <TabsTrigger value="ads" className="gap-2">
-            <Megaphone className="w-4 h-4" />
-            Ads ({ads.length})
-          </TabsTrigger>
-          <TabsTrigger value="accounts" className="gap-2">
-            <LayoutGrid className="w-4 h-4" />
-            Accounts ({accounts.length})
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Campaigns Tab */}
-        <TabsContent value="campaigns" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Campaigns</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingCampaigns ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                </div>
-              ) : campaigns.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No campaigns found</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Campaign Name</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Objective</TableHead>
-                      <TableHead className="text-right">Budget</TableHead>
-                      <TableHead>Created</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {campaigns.map((campaign) => (
-                      <TableRow key={campaign.id}>
-                        <TableCell className="font-medium">{campaign.name}</TableCell>
-                        <TableCell>
-                          <Badge className={`${getStatusBadge(campaign.status)} border`}>
-                            {campaign.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
+      {/* Campaigns Table */}
+      <Card>
+        <CardContent className="p-0">
+          {loadingCampaigns ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            </div>
+          ) : campaigns.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2">
+              <Megaphone className="w-10 h-10 text-muted-foreground/50" />
+              <p className="text-muted-foreground">No campaigns found</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[40%]">Campaign</TableHead>
+                  {selectedAccount === 'all' && <TableHead>Account</TableHead>}
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Spend</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {campaigns.map((campaign) => (
+                  <TableRow key={`${campaign.accountId}-${campaign.id}`}>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-foreground">{campaign.name}</p>
+                        <p className="text-xs text-muted-foreground">
                           {campaign.objective?.replace(/_/g, ' ')}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {campaign.daily_budget
-                            ? `${formatCurrency(campaign.daily_budget)}/day`
-                            : campaign.lifetime_budget
-                            ? formatCurrency(campaign.lifetime_budget)
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {new Date(campaign.created_time).toLocaleDateString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Ads Tab */}
-        <TabsContent value="ads" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Active Ads</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingCampaigns ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                </div>
-              ) : ads.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No ads found</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {ads.map((ad) => (
-                    <Card key={ad.id} className="overflow-hidden">
-                      <div className="aspect-video bg-muted relative">
-                        {ad.creative?.thumbnail_url ? (
-                          <Image
-                            src={ad.creative.thumbnail_url}
-                            alt={ad.name}
-                            fill
-                            className="object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Megaphone className="w-8 h-8 text-muted-foreground/50" />
-                          </div>
-                        )}
+                        </p>
                       </div>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium truncate">{ad.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Created {new Date(ad.created_time).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <Badge className={`${getStatusBadge(ad.status)} border shrink-0`}>
-                            {ad.status}
-                          </Badge>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Accounts Tab */}
-        <TabsContent value="accounts" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Ad Accounts</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Account Name</TableHead>
-                    <TableHead>Account ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Currency</TableHead>
-                    <TableHead className="text-right">Total Spent</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accounts.map((account) => (
-                    <TableRow key={account.id}>
-                      <TableCell className="font-medium">{account.name || 'Unnamed Account'}</TableCell>
-                      <TableCell className="text-muted-foreground font-mono text-sm">
-                        {account.id}
-                      </TableCell>
+                    </TableCell>
+                    {selectedAccount === 'all' && (
                       <TableCell>
-                        <Badge className={account.account_status === 1 
-                          ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' 
-                          : 'bg-red-500/10 text-red-600 border border-red-500/20'
-                        }>
-                          {account.account_status === 1 ? 'Active' : 'Inactive'}
-                        </Badge>
+                        <span className="text-sm text-muted-foreground">{campaign.accountName}</span>
                       </TableCell>
-                      <TableCell>{account.currency}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(account.amount_spent, account.currency)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                    )}
+                    <TableCell>
+                      <Badge className={getStatusBadge(campaign.status)}>
+                        {campaign.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className={`font-semibold ${parseFloat(campaign.spend) > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                        {formatSpend(campaign.spend)}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

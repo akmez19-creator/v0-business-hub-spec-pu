@@ -7,6 +7,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const action = searchParams.get('action') || 'accounts'
   const accountId = searchParams.get('accountId')
+  const datePreset = searchParams.get('datePreset') || 'lifetime'
+  const since = searchParams.get('since')
+  const until = searchParams.get('until')
   
   const accessToken = process.env.FACEBOOK_ACCESS_TOKEN
   
@@ -22,13 +25,9 @@ export async function GET(request: Request) {
       case 'accounts':
         return await getAdAccounts(accessToken)
       case 'campaigns':
-        return await getCampaigns(accessToken, accountId)
-      case 'adsets':
-        return await getAdSets(accessToken, accountId)
-      case 'ads':
-        return await getAds(accessToken, accountId)
-      case 'insights':
-        return await getInsights(accessToken, accountId)
+        return await getCampaignsWithSpend(accessToken, accountId, datePreset, since, until)
+      case 'account_spend':
+        return await getAccountSpend(accessToken, accountId, datePreset, since, until)
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }
@@ -55,72 +54,104 @@ async function getAdAccounts(accessToken: string) {
   return NextResponse.json(data)
 }
 
-async function getCampaigns(accessToken: string, accountId: string | null) {
+async function getCampaignsWithSpend(
+  accessToken: string, 
+  accountId: string | null,
+  datePreset: string,
+  since: string | null,
+  until: string | null
+) {
   if (!accountId) {
     return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
   }
   
-  const response = await fetch(
-    `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,daily_budget,lifetime_budget,created_time,updated_time,start_time,stop_time&access_token=${accessToken}`
+  // Build time range params
+  let timeRange = ''
+  if (since && until) {
+    timeRange = `&time_range={"since":"${since}","until":"${until}"}`
+  } else if (datePreset !== 'lifetime') {
+    timeRange = `&date_preset=${datePreset}`
+  }
+  
+  // Get campaigns
+  const campaignsResponse = await fetch(
+    `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=100`
   )
   
-  if (!response.ok) {
-    const error = await response.json()
+  if (!campaignsResponse.ok) {
+    const error = await campaignsResponse.json()
     throw new Error(error.error?.message || 'Failed to fetch campaigns')
   }
   
-  const data = await response.json()
-  return NextResponse.json(data)
+  const campaignsData = await campaignsResponse.json()
+  const campaigns = campaignsData.data || []
+  
+  // Get spend for each campaign
+  const campaignsWithSpend = await Promise.all(
+    campaigns.map(async (campaign: { id: string; name: string; status: string; objective: string; created_time: string }) => {
+      try {
+        const insightsUrl = datePreset === 'lifetime'
+          ? `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach&date_preset=maximum&access_token=${accessToken}`
+          : `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`
+        
+        const insightsResponse = await fetch(insightsUrl)
+        const insightsData = await insightsResponse.json()
+        
+        const insights = insightsData.data?.[0] || {}
+        
+        return {
+          ...campaign,
+          spend: insights.spend || '0',
+          impressions: insights.impressions || '0',
+          clicks: insights.clicks || '0',
+          reach: insights.reach || '0',
+        }
+      } catch {
+        return {
+          ...campaign,
+          spend: '0',
+          impressions: '0',
+          clicks: '0',
+          reach: '0',
+        }
+      }
+    })
+  )
+  
+  // Sort by spend descending
+  campaignsWithSpend.sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend))
+  
+  return NextResponse.json({ data: campaignsWithSpend })
 }
 
-async function getAdSets(accessToken: string, accountId: string | null) {
+async function getAccountSpend(
+  accessToken: string, 
+  accountId: string | null,
+  datePreset: string,
+  since: string | null,
+  until: string | null
+) {
   if (!accountId) {
     return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
   }
   
+  // Build time range params
+  let timeRange = ''
+  if (since && until) {
+    timeRange = `&time_range={"since":"${since}","until":"${until}"}`
+  } else if (datePreset !== 'lifetime') {
+    timeRange = `&date_preset=${datePreset}`
+  } else {
+    timeRange = '&date_preset=maximum'
+  }
+  
   const response = await fetch(
-    `${FACEBOOK_GRAPH_URL}/${accountId}/adsets?fields=id,name,status,campaign_id,daily_budget,lifetime_budget,targeting,optimization_goal&access_token=${accessToken}`
+    `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`
   )
   
   if (!response.ok) {
     const error = await response.json()
-    throw new Error(error.error?.message || 'Failed to fetch ad sets')
-  }
-  
-  const data = await response.json()
-  return NextResponse.json(data)
-}
-
-async function getAds(accessToken: string, accountId: string | null) {
-  if (!accountId) {
-    return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
-  }
-  
-  const response = await fetch(
-    `${FACEBOOK_GRAPH_URL}/${accountId}/ads?fields=id,name,status,adset_id,campaign_id,creative{id,name,thumbnail_url,object_story_spec},created_time,updated_time&access_token=${accessToken}`
-  )
-  
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error?.message || 'Failed to fetch ads')
-  }
-  
-  const data = await response.json()
-  return NextResponse.json(data)
-}
-
-async function getInsights(accessToken: string, accountId: string | null) {
-  if (!accountId) {
-    return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
-  }
-  
-  const response = await fetch(
-    `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=impressions,clicks,spend,reach,cpc,cpm,ctr,actions&date_preset=last_7d&access_token=${accessToken}`
-  )
-  
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error?.message || 'Failed to fetch insights')
+    throw new Error(error.error?.message || 'Failed to fetch account spend')
   }
   
   const data = await response.json()
