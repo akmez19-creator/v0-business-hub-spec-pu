@@ -73,55 +73,80 @@ async function getCampaignsWithSpend(
     timeRange = `&date_preset=${datePreset}`
   }
   
-  // Get campaigns
-  const campaignsResponse = await fetch(
-    `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=100`
-  )
+  // Get ALL campaigns with pagination
+  let allCampaigns: Array<{ id: string; name: string; status: string; objective: string; created_time: string }> = []
+  let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=500`
   
-  if (!campaignsResponse.ok) {
-    const error = await campaignsResponse.json()
-    throw new Error(error.error?.message || 'Failed to fetch campaigns')
+  while (nextUrl) {
+    const campaignsResponse = await fetch(nextUrl)
+    
+    if (!campaignsResponse.ok) {
+      const error = await campaignsResponse.json()
+      throw new Error(error.error?.message || 'Failed to fetch campaigns')
+    }
+    
+    const campaignsData = await campaignsResponse.json()
+    allCampaigns = [...allCampaigns, ...(campaignsData.data || [])]
+    
+    // Check for next page
+    nextUrl = campaignsData.paging?.next || null
   }
   
-  const campaignsData = await campaignsResponse.json()
-  const campaigns = campaignsData.data || []
+  // Get account-level spend for accurate total
+  const accountInsightsUrl = datePreset === 'lifetime'
+    ? `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend&date_preset=maximum&access_token=${accessToken}`
+    : `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend${timeRange}&access_token=${accessToken}`
   
-  // Get spend for each campaign
-  const campaignsWithSpend = await Promise.all(
-    campaigns.map(async (campaign: { id: string; name: string; status: string; objective: string; created_time: string }) => {
-      try {
-        const insightsUrl = datePreset === 'lifetime'
-          ? `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach&date_preset=maximum&access_token=${accessToken}`
-          : `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`
-        
-        const insightsResponse = await fetch(insightsUrl)
-        const insightsData = await insightsResponse.json()
-        
-        const insights = insightsData.data?.[0] || {}
-        
-        return {
-          ...campaign,
-          spend: insights.spend || '0',
-          impressions: insights.impressions || '0',
-          clicks: insights.clicks || '0',
-          reach: insights.reach || '0',
+  const accountInsightsResponse = await fetch(accountInsightsUrl)
+  const accountInsightsData = await accountInsightsResponse.json()
+  const accountTotalSpend = accountInsightsData.data?.[0]?.spend || '0'
+  
+  // Get spend for each campaign (batch to avoid rate limits)
+  const batchSize = 50
+  const campaignsWithSpend: Array<Record<string, unknown>> = []
+  
+  for (let i = 0; i < allCampaigns.length; i += batchSize) {
+    const batch = allCampaigns.slice(i, i + batchSize)
+    const batchResults = await Promise.all(
+      batch.map(async (campaign) => {
+        try {
+          const insightsUrl = datePreset === 'lifetime'
+            ? `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach&date_preset=maximum&access_token=${accessToken}`
+            : `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`
+          
+          const insightsResponse = await fetch(insightsUrl)
+          const insightsData = await insightsResponse.json()
+          
+          const insights = insightsData.data?.[0] || {}
+          
+          return {
+            ...campaign,
+            spend: insights.spend || '0',
+            impressions: insights.impressions || '0',
+            clicks: insights.clicks || '0',
+            reach: insights.reach || '0',
+          }
+        } catch {
+          return {
+            ...campaign,
+            spend: '0',
+            impressions: '0',
+            clicks: '0',
+            reach: '0',
+          }
         }
-      } catch {
-        return {
-          ...campaign,
-          spend: '0',
-          impressions: '0',
-          clicks: '0',
-          reach: '0',
-        }
-      }
-    })
-  )
+      })
+    )
+    campaignsWithSpend.push(...batchResults)
+  }
   
   // Sort by spend descending
-  campaignsWithSpend.sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend))
+  campaignsWithSpend.sort((a, b) => parseFloat(b.spend as string) - parseFloat(a.spend as string))
   
-  return NextResponse.json({ data: campaignsWithSpend })
+  return NextResponse.json({ 
+    data: campaignsWithSpend,
+    accountTotalSpend // Include accurate account-level spend
+  })
 }
 
 async function getAccountSpend(
