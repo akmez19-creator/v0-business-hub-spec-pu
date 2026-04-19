@@ -87,9 +87,36 @@ export default function AdsManagerPage() {
   const [dateRange, setDateRange] = useState<DateRange | undefined>()
   const [showCalendar, setShowCalendar] = useState(false)
   const [showTodayOnly, setShowTodayOnly] = useState(true) // Default to Today's Spend ON
+  
+  // Auto-refresh state
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [countdown, setCountdown] = useState(15 * 60) // 15 minutes in seconds
+  const AUTO_REFRESH_INTERVAL = 15 * 60 // 15 minutes in seconds
 
   useEffect(() => {
     fetchAccounts()
+  }, [])
+  
+  // Auto-refresh every 15 minutes
+  useEffect(() => {
+    const refreshTimer = setInterval(() => {
+      if (accounts.length > 0) {
+        fetchCampaignsData()
+        setLastRefresh(new Date())
+        setCountdown(AUTO_REFRESH_INTERVAL)
+      }
+    }, AUTO_REFRESH_INTERVAL * 1000)
+    
+    return () => clearInterval(refreshTimer)
+  }, [accounts, selectedAccount, datePreset, dateRange, showTodayOnly])
+  
+  // Countdown timer
+  useEffect(() => {
+    const countdownTimer = setInterval(() => {
+      setCountdown(prev => prev > 0 ? prev - 1 : AUTO_REFRESH_INTERVAL)
+    }, 1000)
+    
+    return () => clearInterval(countdownTimer)
   }, [])
 
   useEffect(() => {
@@ -277,6 +304,25 @@ export default function AdsManagerPage() {
   const accountSpendList = Object.entries(accountSpendMap)
     .map(([id, data]) => ({ id, ...data }))
     .sort((a, b) => b.spend - a.spend)
+    
+  // Format countdown timer
+  const formatCountdown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+  
+  // Format last refresh time
+  const formatLastRefresh = (date: Date) => {
+    return format(date, 'HH:mm:ss')
+  }
+  
+  // Manual refresh handler
+  const handleManualRefresh = () => {
+    fetchCampaignsData()
+    setLastRefresh(new Date())
+    setCountdown(AUTO_REFRESH_INTERVAL)
+  }
 
   if (loading) {
     return (
@@ -310,10 +356,16 @@ export default function AdsManagerPage() {
             <h1 className="text-2xl font-bold text-foreground">Ads Manager</h1>
             <p className="text-muted-foreground">Campaign spend overview</p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => { fetchAccounts(); fetchCampaignsData(); }}>
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button variant="outline" size="sm" onClick={handleManualRefresh} disabled={loadingCampaigns}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${loadingCampaigns ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <div className="text-xs text-muted-foreground flex items-center gap-2">
+              <span>Last: {formatLastRefresh(lastRefresh)}</span>
+              <span className="text-primary font-mono">({formatCountdown(countdown)})</span>
+            </div>
+          </div>
         </div>
         
         {/* Filters Row */}
