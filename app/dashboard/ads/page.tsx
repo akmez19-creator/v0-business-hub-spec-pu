@@ -233,6 +233,22 @@ export default function AdsManagerPage() {
   // Count campaigns that have spend > 0
   const campaignsWithSpendCount = campaigns.filter(c => parseFloat(c.spend || '0') > 0).length
 
+  // Calculate spend per account
+  const accountSpendMap = filteredCampaigns.reduce((acc, campaign) => {
+    const accountId = campaign.accountId || 'unknown'
+    const accountName = campaign.accountName || accountId
+    if (!acc[accountId]) {
+      acc[accountId] = { name: accountName, spend: 0, campaignCount: 0 }
+    }
+    acc[accountId].spend += parseFloat(campaign.spend || '0')
+    acc[accountId].campaignCount += 1
+    return acc
+  }, {} as Record<string, { name: string; spend: number; campaignCount: number }>)
+
+  const accountSpendList = Object.entries(accountSpendMap)
+    .map(([id, data]) => ({ id, ...data }))
+    .sort((a, b) => b.spend - a.spend)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -413,6 +429,45 @@ export default function AdsManagerPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Account Spend Breakdown */}
+      {selectedAccount === 'all' && accountSpendList.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Spend by Account</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {accountSpendList.map((account) => (
+              <Card 
+                key={account.id} 
+                className="bg-card hover:border-primary/30 transition-colors cursor-pointer"
+                onClick={() => setSelectedAccount(account.id)}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground truncate" title={account.name}>
+                        {account.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {account.campaignCount} campaign{account.campaignCount !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`font-semibold ${account.spend > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                        {formatSpend(account.spend.toString())}
+                      </p>
+                      {account.spend > 0 && (
+                        <p className="text-xs text-muted-foreground/70">
+                          {formatUsd(account.spend.toString())}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Campaigns Table */}
       <Card>
