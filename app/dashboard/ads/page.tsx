@@ -85,6 +85,7 @@ export default function AdsManagerPage() {
   const [datePreset, setDatePreset] = useState<DatePreset>('lifetime')
   const [dateRange, setDateRange] = useState<DateRange | undefined>()
   const [showCalendar, setShowCalendar] = useState(false)
+  const [showTodayOnly, setShowTodayOnly] = useState(false)
 
   useEffect(() => {
     fetchAccounts()
@@ -218,8 +219,22 @@ export default function AdsManagerPage() {
     return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  const totalSpend = campaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
-  const activeCampaigns = campaigns.filter(c => c.status === 'ACTIVE').length
+  // Filter campaigns created today
+  const filteredCampaigns = showTodayOnly 
+    ? campaigns.filter(c => {
+        const createdDate = new Date(c.created_time)
+        const today = new Date()
+        return createdDate.toDateString() === today.toDateString()
+      })
+    : campaigns
+
+  const totalSpend = filteredCampaigns.reduce((sum, c) => sum + parseFloat(c.spend || '0'), 0)
+  const activeCampaigns = filteredCampaigns.filter(c => c.status === 'ACTIVE').length
+  const todayCampaignsCount = campaigns.filter(c => {
+    const createdDate = new Date(c.created_time)
+    const today = new Date()
+    return createdDate.toDateString() === today.toDateString()
+  }).length
 
   if (loading) {
     return (
@@ -277,6 +292,22 @@ export default function AdsManagerPage() {
               ))}
             </SelectContent>
           </Select>
+          
+          {/* Today's Campaigns Toggle */}
+          <Button
+            variant={showTodayOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowTodayOnly(!showTodayOnly)}
+            className={showTodayOnly ? "bg-primary" : "bg-card"}
+          >
+            <CalendarIcon className="w-4 h-4 mr-2" />
+            Today&apos;s Campaigns
+            {todayCampaignsCount > 0 && (
+              <Badge variant="secondary" className="ml-2 px-1.5 py-0 text-xs">
+                {todayCampaignsCount}
+              </Badge>
+            )}
+          </Button>
           
           {/* Date Range Selector */}
           <Popover open={showCalendar} onOpenChange={setShowCalendar}>
@@ -376,8 +407,10 @@ export default function AdsManagerPage() {
                 <Megaphone className="w-6 h-6 text-blue-500" />
               </div>
               <div>
-                <p className="text-3xl font-bold text-foreground">{campaigns.length}</p>
-                <p className="text-sm text-muted-foreground">Total Campaigns</p>
+                <p className="text-3xl font-bold text-foreground">{filteredCampaigns.length}</p>
+                <p className="text-sm text-muted-foreground">
+                  {showTodayOnly ? "Today's Campaigns" : "Total Campaigns"}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -391,10 +424,17 @@ export default function AdsManagerPage() {
             <div className="flex items-center justify-center py-16">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
-          ) : campaigns.length === 0 ? (
+          ) : filteredCampaigns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2">
               <Megaphone className="w-10 h-10 text-muted-foreground/50" />
-              <p className="text-muted-foreground">No campaigns found</p>
+              <p className="text-muted-foreground">
+                {showTodayOnly ? "No campaigns created today" : "No campaigns found"}
+              </p>
+              {showTodayOnly && (
+                <Button variant="ghost" size="sm" onClick={() => setShowTodayOnly(false)}>
+                  Show all campaigns
+                </Button>
+              )}
             </div>
           ) : (
             <Table>
@@ -407,7 +447,7 @@ export default function AdsManagerPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {campaigns.map((campaign) => (
+                {filteredCampaigns.map((campaign) => (
                   <TableRow key={`${campaign.accountId}-${campaign.id}`}>
                     <TableCell>
                       <div>
