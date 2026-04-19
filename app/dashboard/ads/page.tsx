@@ -406,10 +406,10 @@ export default function AdsManagerPage() {
     const account = accounts.find(a => a.id === accountId)
     if (!acc[accountId]) {
       // Use account-level spend from FB, fallback to 0
-      // Balance from FB is in cents and negative means amount owed
+      // Balance from FB is in cents - positive means amount owed to Facebook
       const balanceCents = parseFloat(account?.balance || '0')
-      console.log("[v0] Account balance debug:", accountName, "balance raw:", account?.balance, "balanceCents:", balanceCents)
-      const balanceOwed = balanceCents < 0 ? Math.abs(balanceCents) / 100 : 0
+      // Convert cents to currency units (divide by 100)
+      const balanceOwed = Math.abs(balanceCents) / 100
       acc[accountId] = { 
         name: accountName, 
         spend: accountSpends[accountId] || 0, // Use FB account spend
