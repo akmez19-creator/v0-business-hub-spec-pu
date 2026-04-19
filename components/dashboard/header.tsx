@@ -164,7 +164,8 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
 
   // Get current page title with smart detection
   const getPageTitle = () => {
-    // Check for specific inventory/finance pages first (they're under /deliveries URL but belong to different sections)
+    // Check for specific pages first
+    if (pathname.includes('/ads')) return 'Ads Manager'
     if (pathname.includes('/inventory')) return 'Products'
     if (pathname.includes('/purchase-orders')) return 'Purchase Orders'
     if (pathname.includes('/stock') && !pathname.includes('/contractors') && !pathname.includes('/riders')) return 'Stock In/Out'
