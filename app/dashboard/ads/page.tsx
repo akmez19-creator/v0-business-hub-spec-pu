@@ -33,7 +33,24 @@ import {
   ChevronDown,
   TrendingUp,
   Megaphone,
+  Package,
+  Link2,
+  X,
 } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import { format, subDays, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 import { DateRange } from 'react-day-picker'
 
@@ -59,6 +76,21 @@ interface Campaign {
   accountName?: string
 }
 
+interface Product {
+  id: string
+  name: string
+  price: number
+  quantity: number
+}
+
+interface CampaignProductLink {
+  campaign_id: string
+  campaign_name: string
+  product_id: string | null
+  account_id: string
+  products?: Product
+}
+
 type DatePreset = 'today' | 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'lifetime' | 'custom'
 
 const DATE_PRESETS: { value: DatePreset; label: string }[] = [
@@ -78,6 +110,13 @@ export default function AdsManagerPage() {
   const [selectedAccount, setSelectedAccount] = useState<string>('all')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [accountSpends, setAccountSpends] = useState<Record<string, number>>({}) // Account-level spend from FB
+  
+  // Product linking state
+  const [products, setProducts] = useState<Product[]>([])
+  const [campaignLinks, setCampaignLinks] = useState<Record<string, CampaignProductLink>>({})
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
+  const [linkingProduct, setLinkingProduct] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingCampaigns, setLoadingCampaigns] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,6 +135,8 @@ export default function AdsManagerPage() {
   // Initial load - use cached API for instant data
   useEffect(() => {
     fetchCachedData()
+    fetchProducts()
+    fetchCampaignLinks()
   }, [])
   
   // Countdown timer that syncs with server cache
@@ -225,6 +266,77 @@ export default function AdsManagerPage() {
     }
     
     setLoadingCampaigns(false)
+  }
+  
+  async function fetchProducts() {
+    try {
+      const res = await fetch('/api/products')
+      const data = await res.json()
+      setProducts(data || [])
+    } catch {
+      console.error('Failed to fetch products')
+    }
+  }
+  
+  async function fetchCampaignLinks() {
+    try {
+      const res = await fetch('/api/campaign-links')
+      const data = await res.json()
+      const linksMap: Record<string, CampaignProductLink> = {}
+      for (const link of (data.data || [])) {
+        linksMap[link.campaign_id] = link
+      }
+      setCampaignLinks(linksMap)
+    } catch {
+      console.error('Failed to fetch campaign links')
+    }
+  }
+  
+  async function linkProductToCampaign(productId: string | null) {
+    if (!selectedCampaign) return
+    
+    setLinkingProduct(true)
+    try {
+      await fetch('/api/campaign-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaign_id: selectedCampaign.id,
+          campaign_name: selectedCampaign.name,
+          product_id: productId,
+          account_id: selectedCampaign.accountId
+        })
+      })
+      
+      // Update local state
+      if (productId) {
+        const product = products.find(p => p.id === productId)
+        setCampaignLinks(prev => ({
+          ...prev,
+          [selectedCampaign.id]: {
+            campaign_id: selectedCampaign.id,
+            campaign_name: selectedCampaign.name,
+            product_id: productId,
+            account_id: selectedCampaign.accountId || '',
+            products: product
+          }
+        }))
+      } else {
+        // Remove link
+        setCampaignLinks(prev => {
+          const newLinks = { ...prev }
+          delete newLinks[selectedCampaign.id]
+          return newLinks
+        })
+      }
+      
+      setLinkDialogOpen(false)
+      setSelectedCampaign(null)
+    } catch {
+      console.error('Failed to link product')
+    } finally {
+      setLinkingProduct(false)
+    }
   }
 
   const handleDatePresetChange = (preset: DatePreset) => {
@@ -584,8 +696,9 @@ export default function AdsManagerPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[40%]">Campaign</TableHead>
+                  <TableHead className="w-[35%]">Campaign</TableHead>
                   {selectedAccount === 'all' && <TableHead>Account</TableHead>}
+                  <TableHead>Product</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Spend</TableHead>
                 </TableRow>
@@ -606,6 +719,40 @@ export default function AdsManagerPage() {
                         <span className="text-sm text-muted-foreground">{campaign.accountName}</span>
                       </TableCell>
                     )}
+                    <TableCell>
+                      {campaignLinks[campaign.id]?.products ? (
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 font-normal">
+                            <Package className="w-3 h-3 mr-1" />
+                            {campaignLinks[campaign.id].products?.name}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              setSelectedCampaign(campaign)
+                              linkProductToCampaign(null)
+                            }}
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
+                          onClick={() => {
+                            setSelectedCampaign(campaign)
+                            setLinkDialogOpen(true)
+                          }}
+                        >
+                          <Link2 className="w-3 h-3 mr-1" />
+                          Link Product
+                        </Button>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge className={getStatusBadge(campaign.status)}>
                         {campaign.status}
@@ -628,6 +775,51 @@ export default function AdsManagerPage() {
           )}
         </CardContent>
       </Card>
+      
+      {/* Link Product Dialog */}
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Link Product to Campaign</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Campaign: <span className="font-medium text-foreground">{selectedCampaign?.name}</span>
+            </div>
+            <Command className="border rounded-lg">
+              <CommandInput placeholder="Search products..." />
+              <CommandList className="max-h-[300px]">
+                <CommandEmpty>No products found.</CommandEmpty>
+                <CommandGroup>
+                  {products.map((product) => (
+                    <CommandItem
+                      key={product.id}
+                      value={product.name}
+                      onSelect={() => linkProductToCampaign(product.id)}
+                      className="cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-muted-foreground" />
+                          <span>{product.name}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          Rs {product.price}
+                        </span>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+            {linkingProduct && (
+              <div className="flex items-center justify-center py-2">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
