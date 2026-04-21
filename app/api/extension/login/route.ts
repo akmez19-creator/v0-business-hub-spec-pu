@@ -1,4 +1,4 @@
-import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
 // CORS headers for Chrome extension
@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { email, password } = body
 
+    console.log('[Extension Login] Attempting login for:', email)
+
     if (!email || !password) {
       return NextResponse.json({ 
         success: false, 
@@ -29,17 +31,19 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Create Supabase admin client for direct auth
-    const supabase = createAdminClient(
+    // Use anon key for signInWithPassword - this creates a proper user session
+    const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
 
-    // Attempt to sign in using admin client
+    // Attempt to sign in
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
+    
+    console.log('[Extension Login] signInWithPassword result:', data?.user?.id || 'no user', 'error:', error?.message || 'none')
 
     if (error) {
       return NextResponse.json({ 

@@ -26,20 +26,24 @@ async function getUserFromToken(request: NextRequest) {
   }
   
   const token = authHeader.replace('Bearer ', '')
-  console.log('[Extension API] Token length:', token.length, 'starts with:', token.substring(0, 20))
+  console.log('[Extension API] Token length:', token.length)
   
+  // Use service role key to validate the token - this can validate any token
   const supabase = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
   
+  // Try to get user with the access token
   const { data: { user }, error } = await supabase.auth.getUser(token)
   console.log('[Extension API] getUser result:', user?.id || 'no user', 'error:', error?.message || 'none')
   
   if (error || !user) {
+    console.log('[Extension API] Token validation failed')
     return null
   }
   
+  console.log('[Extension API] Token validated successfully for user:', user.email)
   return { user, supabase }
 }
 
