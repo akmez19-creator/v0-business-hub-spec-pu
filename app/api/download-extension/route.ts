@@ -449,6 +449,43 @@ toggleBtn.addEventListener('click',()=>{
 });
 document.getElementById('akmez-close').addEventListener('click',()=>widget.style.display='none');
 
+// Settings button
+document.getElementById('akmez-settings').addEventListener('click',()=>{
+  const body=document.getElementById('akmez-body');
+  chrome.storage.local.get(['userName'],stored=>{
+    body.innerHTML=\`
+      <div class="akmez-settings-panel">
+        <h3 style="color:#f97316;font-size:14px;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Settings</h3>
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">Logged in as</div>
+          <div style="font-size:14px;font-weight:600;color:#fff;">\${stored.userName||'User'}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">Version</div>
+          <div style="font-size:14px;font-weight:600;color:#fff;">Quick Order v3.0</div>
+        </div>
+        <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-refresh">Refresh Data</button>
+        <button class="akmez-btn" style="width:100%;background:rgba(239,68,68,0.2);color:#ef4444;border-color:rgba(239,68,68,0.3);" id="settings-logout">Sign Out</button>
+        <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="settings-back">← Back</button>
+      </div>
+    \`;
+    document.getElementById('settings-back').onclick=()=>{
+      if(currentTab==='orders')loadData();
+      else renderWorktime();
+    };
+    document.getElementById('settings-refresh').onclick=()=>{
+      toast('Refreshing data...');
+      loadData();
+    };
+    document.getElementById('settings-logout').onclick=()=>{
+      chrome.storage.local.remove(['authToken','tokenExpiry','userName']);
+      authToken=null;
+      toast('Signed out');
+      showLogin();
+    };
+  });
+});
+
 // Tab switching
 document.querySelectorAll('.akmez-tab').forEach(tab=>{
   tab.addEventListener('click',()=>{
