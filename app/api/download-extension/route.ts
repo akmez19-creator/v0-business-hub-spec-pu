@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -746,31 +746,43 @@ function loadData(){
   const body=document.getElementById('akmez-body');
   body.innerHTML='<div class="akmez-loading"><div class="akmez-spinner"></div><p>Connecting...</p></div>';
   
-  // If we already have authToken in memory, use it directly
-  if(authToken){
-    fetchWithToken(authToken);
-    return;
-  }
-  
-  // Otherwise try to get from storage
+  // Always read from storage to ensure we have latest token
   chrome.storage.local.get(['authToken','tokenExpiry'],stored=>{
-    if(stored.authToken && stored.tokenExpiry && Date.now()<stored.tokenExpiry*1000){
-      authToken=stored.authToken;
-      fetchWithToken(authToken);
-    }else{
-      showLogin();
+    console.log('[v0] loadData - stored:', stored.authToken ? 'has token' : 'no token', 'expiry:', stored.tokenExpiry, 'now:', Date.now());
+    
+    if(stored.authToken){
+      // Check if token is expired (tokenExpiry is Unix timestamp in seconds)
+      const isExpired = stored.tokenExpiry && Date.now() > stored.tokenExpiry * 1000;
+      console.log('[v0] Token expired?', isExpired);
+      
+      if(!isExpired){
+        authToken = stored.authToken;
+        fetchWithToken(authToken);
+        return;
+      }
     }
+    
+    // No valid token, show login
+    showLogin();
   });
 }
 
 function fetchWithToken(token){
   const body=document.getElementById('akmez-body');
+  console.log('[v0] fetchWithToken - calling API with token:', token.substring(0,20)+'...');
+  
   fetch(API_BASE+'/api/extension',{
     headers:{'Authorization':'Bearer '+token}
   })
-  .then(r=>r.json())
+  .then(r=>{
+    console.log('[v0] API response status:', r.status);
+    return r.json();
+  })
   .then(data=>{
+    console.log('[v0] API response data:', data.authenticated, data.products?.length || 0, 'products');
+    
     if(!data.authenticated){
+      console.log('[v0] Not authenticated - clearing token');
       chrome.storage.local.remove(['authToken','tokenExpiry']);
       authToken=null;
       showLogin();
@@ -781,6 +793,7 @@ function fetchWithToken(token){
     renderForm();
   })
   .catch(e=>{
+    console.log('[v0] Fetch error:', e);
     body.innerHTML='<div class="akmez-login"><p>Connection failed</p><button class="akmez-login-btn" id="retry-btn">Retry</button></div>';
     document.getElementById('retry-btn').onclick=()=>loadData();
   });
