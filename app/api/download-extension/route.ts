@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.8",
+  "version": "3.0.9",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -217,18 +217,24 @@ const POPUP_JS = `const API_BASE = 'https://www.akmez.tech';
 const content = document.getElementById('content');
 
 async function init() {
-  const stored = await chrome.storage.local.get(['authToken', 'tokenExpiry', 'userName']);
-  if (stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000) {
-    // Verify token still works
+  const stored = await chrome.storage.local.get(['authToken', 'userName']);
+  console.log('[Popup] init - authToken:', stored.authToken ? 'exists' : 'missing');
+  
+  if (stored.authToken) {
+    // Verify token still works with API
     try {
       const res = await fetch(API_BASE + '/api/extension', { headers: { 'Authorization': 'Bearer ' + stored.authToken } });
       const data = await res.json();
+      console.log('[Popup] API response:', data.authenticated);
+      
       if (data.authenticated) {
-        showConnected(stored.userName || data.userName || 'User');
+        showConnected(stored.userName || 'User');
         return;
       }
-    } catch (e) {}
-    // Token invalid
+    } catch (e) {
+      console.log('[Popup] API error:', e);
+    }
+    // Token invalid - clear it
     await chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName']);
   }
   showLogin();
@@ -748,29 +754,21 @@ function loadData(){
   
   // Check memory variable first (set after successful login)
   if(authToken){
-    console.log('[v0] loadData - using memory token');
+    console.log('[Content] loadData - using memory token');
     fetchWithToken(authToken);
     return;
   }
   
-  // Fall back to storage
-  chrome.storage.local.get(['authToken','tokenExpiry'],stored=>{
-    console.log('[v0] loadData - stored:', stored.authToken ? 'has token' : 'no token', 'expiry:', stored.tokenExpiry, 'now:', Date.now());
+  // Fall back to storage - just check if token exists, API will validate
+  chrome.storage.local.get(['authToken'],stored=>{
+    console.log('[Content] loadData - stored token:', stored.authToken ? 'exists' : 'missing');
     
     if(stored.authToken){
-      // Check if token is expired (tokenExpiry is Unix timestamp in seconds)
-      const isExpired = stored.tokenExpiry && Date.now() > stored.tokenExpiry * 1000;
-      console.log('[v0] Token expired?', isExpired);
-      
-      if(!isExpired){
-        authToken = stored.authToken;
-        fetchWithToken(authToken);
-        return;
-      }
+      authToken = stored.authToken;
+      fetchWithToken(authToken);
+    }else{
+      showLogin();
     }
-    
-    // No valid token, show login
-    showLogin();
   });
 }
 
@@ -1287,7 +1285,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.8.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.9.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
