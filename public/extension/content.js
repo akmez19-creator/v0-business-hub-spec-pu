@@ -9,6 +9,34 @@ toggleBtn.innerHTML = '<span>A</span>';
 toggleBtn.title = 'Open Akmez Quick Order';
 document.body.appendChild(toggleBtn);
 
+// Update toggle button based on auth state
+function updateToggleButton() {
+  chrome.storage.local.get(['authToken', 'tokenExpiry'], stored => {
+    const isLoggedIn = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
+    if (isLoggedIn) {
+      toggleBtn.classList.add('logged-in');
+      toggleBtn.title = 'Open Akmez Quick Order (Signed In)';
+    } else {
+      toggleBtn.classList.remove('logged-in');
+      toggleBtn.title = 'Open Akmez Quick Order (Sign In Required)';
+    }
+  });
+}
+
+// Listen for auth state changes from popup
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && (changes.authToken || changes.tokenExpiry)) {
+    updateToggleButton();
+    // If widget is open, reload data
+    if (widget.style.display !== 'none') {
+      loadData();
+    }
+  }
+});
+
+// Check auth state on load
+updateToggleButton();
+
 // Create floating widget with tabs
 const widget = document.createElement('div');
 widget.id = 'akmez-widget';
@@ -38,9 +66,11 @@ document.body.appendChild(widget);
 // Styles
 const style = document.createElement('style');
 style.textContent = `
-#akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(249,115,22,0.5);font-family:sans-serif;}
+#akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#6b7280,#4b5563);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(107,114,128,0.5);font-family:sans-serif;transition:all 0.3s ease;}
 #akmez-toggle:hover{transform:scale(1.1);}
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
+#akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
+#akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
 #akmez-widget{position:fixed;top:60px;right:20px;width:400px;max-height:600px;background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
 .akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:move;user-select:none;}
 .akmez-logo{width:32px;height:32px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;}
@@ -195,29 +225,42 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2500);
 }
 
-// Load data via background script
+// Load data via background script - uses shared auth from chrome.storage
 async function loadData() {
   const body = document.getElementById('akmez-body');
   body.innerHTML = '<div class="akmez-loading"><div class="akmez-spinner"></div></div>';
   
-  chrome.runtime.sendMessage({ action: 'fetchData' }, response => {
-    if (!response || !response.success) {
-      renderLogin('Connection failed');
+  // First check if user is logged in via popup (shared storage)
+  chrome.storage.local.get(['authToken', 'tokenExpiry', 'userName'], stored => {
+    const isLoggedIn = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
+    
+    if (!isLoggedIn) {
+      renderLogin('Please sign in via the extension popup');
       return;
     }
-    const data = response.data;
-    if (!data.authenticated) {
-      renderLogin();
-      return;
-    }
-    products = data.products || [];
-    regions = data.regions || [];
-    worktimeData = data.worktime || worktimeData;
-    renderCurrentTab();
+    
+    // Fetch data using shared auth token
+    chrome.runtime.sendMessage({ action: 'fetchData' }, response => {
+      if (!response || !response.success) {
+        renderLogin('Connection failed');
+        return;
+      }
+      const data = response.data;
+      if (!data.authenticated) {
+        // Token might be invalid, clear it
+        chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName', 'userEmail']);
+        renderLogin('Session expired. Please sign in again.');
+        return;
+      }
+      products = data.products || [];
+      regions = data.regions || [];
+      worktimeData = data.worktime || worktimeData;
+      renderCurrentTab();
+    });
   });
 }
 
-// Render login form
+// Render login form - synced with extension popup
 function renderLogin(error) {
   const body = document.getElementById('akmez-body');
   body.innerHTML = `
@@ -231,9 +274,20 @@ function renderLogin(error) {
         <input type="password" id="login-password" placeholder="Password" />
       </div>
       <button class="akmez-login-btn" id="login-btn">Sign In</button>
+      <div class="akmez-login-hint" style="margin-top:12px;font-size:10px;color:#888;text-align:center;">
+        You can also sign in via the extension icon in the toolbar
+      </div>
     </div>
   `;
   if (error) document.getElementById('login-error').style.display = 'block';
+  
+  // Enter key support
+  document.getElementById('login-email').addEventListener('keypress', e => {
+    if (e.key === 'Enter') document.getElementById('login-password').focus();
+  });
+  document.getElementById('login-password').addEventListener('keypress', e => {
+    if (e.key === 'Enter') document.getElementById('login-btn').click();
+  });
   
   document.getElementById('login-btn').onclick = async () => {
     const email = document.getElementById('login-email').value.trim();
@@ -250,6 +304,7 @@ function renderLogin(error) {
     btn.disabled = true;
     btn.textContent = 'Signing in...';
     
+    // Use background script login which stores token in shared storage
     chrome.runtime.sendMessage({ action: 'login', email, password }, response => {
       if (response && response.success) {
         loadData();

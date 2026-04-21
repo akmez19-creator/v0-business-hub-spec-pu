@@ -78,10 +78,65 @@ export async function GET(request: NextRequest) {
     
     const regions = (localities || []).map(l => l.name)
     
+    // Get worktime data for the user
+    const today = new Date().toISOString().split('T')[0]
+    const { data: todayShift } = await supabase
+      .from('staff_shifts')
+      .select('*')
+      .eq('staff_id', user.id)
+      .eq('staff_type', 'profile')
+      .eq('shift_date', today)
+      .single()
+    
+    // Get recent history (last 7 days)
+    const weekAgo = new Date()
+    weekAgo.setDate(weekAgo.getDate() - 7)
+    
+    const { data: history } = await supabase
+      .from('staff_shifts')
+      .select('shift_date, actual_clock_in, actual_clock_out, status')
+      .eq('staff_id', user.id)
+      .eq('staff_type', 'profile')
+      .gte('shift_date', weekAgo.toISOString().split('T')[0])
+      .order('shift_date', { ascending: false })
+      .limit(7)
+    
+    const isClockedIn = todayShift?.status === 'in_progress' && todayShift?.actual_clock_in
+    const clockInTime = todayShift?.actual_clock_in || null
+    
+    // Calculate today's hours
+    let todayHours = 0
+    if (todayShift?.actual_clock_in && todayShift?.actual_clock_out) {
+      const start = new Date(todayShift.actual_clock_in)
+      const end = new Date(todayShift.actual_clock_out)
+      todayHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60)
+    }
+    
+    // Format history
+    const formattedHistory = (history || []).map(h => {
+      let hours = '0.00'
+      if (h.actual_clock_in && h.actual_clock_out) {
+        const start = new Date(h.actual_clock_in)
+        const end = new Date(h.actual_clock_out)
+        hours = ((end.getTime() - start.getTime()) / (1000 * 60 * 60)).toFixed(2)
+      }
+      return {
+        date: new Date(h.shift_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+        hours,
+        status: h.status
+      }
+    })
+    
     return NextResponse.json({
       authenticated: true,
       products: products || [],
-      regions
+      regions,
+      worktime: {
+        isClockedIn,
+        clockInTime,
+        todayHours,
+        history: formattedHistory
+      }
     }, { headers: corsHeaders })
   } catch (error) {
     console.error('Extension API error:', error)
