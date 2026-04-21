@@ -449,26 +449,167 @@ toggleBtn.addEventListener('click',()=>{
 });
 document.getElementById('akmez-close').addEventListener('click',()=>widget.style.display='none');
 
+// Calibration state
+let calibrating=null;
+let calibrationOverlay=null;
+
+function startCalibration(field){
+  calibrating=field;
+  widget.style.display='none';
+  
+  // Create overlay
+  calibrationOverlay=document.createElement('div');
+  calibrationOverlay.id='akmez-calibration-overlay';
+  calibrationOverlay.innerHTML=\`
+    <div style="position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f97316;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:2147483647;box-shadow:0 4px 20px rgba(249,115,22,0.4);">
+      Click on the element containing <strong>\${field}</strong> | <span style="cursor:pointer;text-decoration:underline;" id="cancel-calibration">Cancel</span>
+    </div>
+  \`;
+  document.body.appendChild(calibrationOverlay);
+  
+  document.getElementById('cancel-calibration').onclick=(e)=>{
+    e.stopPropagation();
+    endCalibration();
+  };
+  
+  // Highlight elements on hover
+  document.addEventListener('mouseover',highlightElement);
+  document.addEventListener('mouseout',unhighlightElement);
+  document.addEventListener('click',selectElement,true);
+}
+
+function highlightElement(e){
+  if(!calibrating)return;
+  if(e.target.closest('#akmez-widget')||e.target.closest('#akmez-toggle')||e.target.closest('#akmez-calibration-overlay'))return;
+  e.target.style.outline='3px solid #f97316';
+  e.target.style.outlineOffset='2px';
+}
+
+function unhighlightElement(e){
+  if(!calibrating)return;
+  e.target.style.outline='';
+  e.target.style.outlineOffset='';
+}
+
+function selectElement(e){
+  if(!calibrating)return;
+  if(e.target.closest('#akmez-widget')||e.target.closest('#akmez-toggle')||e.target.closest('#akmez-calibration-overlay'))return;
+  
+  e.preventDefault();
+  e.stopPropagation();
+  
+  const selector=generateSelector(e.target);
+  const fieldKey='selector_'+calibrating.replace(/\\s+/g,'_').toLowerCase();
+  
+  chrome.storage.local.set({[fieldKey]:selector},()=>{
+    toast(calibrating+' selector saved!');
+    endCalibration();
+  });
+}
+
+function generateSelector(el){
+  // Generate a unique CSS selector for the element
+  if(el.id)return '#'+el.id;
+  
+  let path=[];
+  while(el&&el.nodeType===Node.ELEMENT_NODE){
+    let selector=el.nodeName.toLowerCase();
+    if(el.className&&typeof el.className==='string'){
+      const classes=el.className.trim().split(/\\s+/).filter(c=>c&&!c.includes('akmez')).slice(0,2);
+      if(classes.length)selector+='.'+classes.join('.');
+    }
+    path.unshift(selector);
+    el=el.parentNode;
+    if(path.length>4)break;
+  }
+  return path.join(' > ');
+}
+
+function endCalibration(){
+  calibrating=null;
+  document.removeEventListener('mouseover',highlightElement);
+  document.removeEventListener('mouseout',unhighlightElement);
+  document.removeEventListener('click',selectElement,true);
+  if(calibrationOverlay){
+    calibrationOverlay.remove();
+    calibrationOverlay=null;
+  }
+  // Remove any leftover outlines
+  document.querySelectorAll('[style*="outline"]').forEach(el=>{
+    el.style.outline='';
+    el.style.outlineOffset='';
+  });
+  widget.style.display='block';
+  document.getElementById('akmez-settings').click();
+}
+
 // Settings button
 document.getElementById('akmez-settings').addEventListener('click',()=>{
   const body=document.getElementById('akmez-body');
-  chrome.storage.local.get(['userName'],stored=>{
+  chrome.storage.local.get(['userName','selector_customer_name','selector_contact_1','selector_contact_2'],stored=>{
     body.innerHTML=\`
       <div class="akmez-settings-panel">
         <h3 style="color:#f97316;font-size:14px;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Settings</h3>
+        
         <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
           <div style="font-size:11px;color:#888;margin-bottom:4px;">Logged in as</div>
           <div style="font-size:14px;font-weight:600;color:#fff;">\${stored.userName||'User'}</div>
         </div>
+        
+        <h4 style="color:#888;font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px;">Element Calibration</h4>
+        <p style="font-size:11px;color:#666;margin-bottom:12px;">Click to select elements on the page for auto-fill</p>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Customer Name">
+          <div>
+            <div style="font-size:12px;color:#fff;">Customer Name</div>
+            <div style="font-size:10px;color:\${stored.selector_customer_name?'#22c55e':'#888'};">\${stored.selector_customer_name?'Configured':'Not set'}</div>
+          </div>
+          <div style="color:#f97316;font-size:18px;">⊕</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 1">
+          <div>
+            <div style="font-size:12px;color:#fff;">Contact 1 (Phone)</div>
+            <div style="font-size:10px;color:\${stored.selector_contact_1?'#22c55e':'#888'};">\${stored.selector_contact_1?'Configured':'Not set'}</div>
+          </div>
+          <div style="color:#f97316;font-size:18px;">⊕</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 2">
+          <div>
+            <div style="font-size:12px;color:#fff;">Contact 2 (Phone)</div>
+            <div style="font-size:10px;color:\${stored.selector_contact_2?'#22c55e':'#888'};">\${stored.selector_contact_2?'Configured':'Not set'}</div>
+          </div>
+          <div style="color:#f97316;font-size:18px;">⊕</div>
+        </div>
+        
+        <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-clear-selectors">Clear All Selectors</button>
+        
+        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:16px 0;"></div>
+        
         <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
           <div style="font-size:11px;color:#888;margin-bottom:4px;">Version</div>
           <div style="font-size:14px;font-weight:600;color:#fff;">Quick Order v3.0</div>
         </div>
+        
         <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-refresh">Refresh Data</button>
         <button class="akmez-btn" style="width:100%;background:rgba(239,68,68,0.2);color:#ef4444;border-color:rgba(239,68,68,0.3);" id="settings-logout">Sign Out</button>
         <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="settings-back">← Back</button>
       </div>
     \`;
+    
+    // Calibration item clicks
+    document.querySelectorAll('.calibration-item').forEach(item=>{
+      item.onclick=()=>startCalibration(item.dataset.field);
+    });
+    
+    document.getElementById('settings-clear-selectors').onclick=()=>{
+      chrome.storage.local.remove(['selector_customer_name','selector_contact_1','selector_contact_2'],()=>{
+        toast('Selectors cleared');
+        document.getElementById('akmez-settings').click();
+      });
+    };
+    
     document.getElementById('settings-back').onclick=()=>{
       if(currentTab==='orders')loadData();
       else renderWorktime();
@@ -715,6 +856,40 @@ function renderForm(){
         updateSubmitState();
       }catch(e){}
     });
+  });
+  
+  // Auto-fill from calibrated selectors
+  chrome.storage.local.get(['selector_customer_name','selector_contact_1','selector_contact_2'],stored=>{
+    if(stored.selector_customer_name){
+      try{
+        const el=document.querySelector(stored.selector_customer_name);
+        if(el){
+          const text=el.textContent||el.innerText||el.value||'';
+          if(text.trim())document.getElementById('ak-name').value=text.trim();
+        }
+      }catch(e){}
+    }
+    if(stored.selector_contact_1){
+      try{
+        const el=document.querySelector(stored.selector_contact_1);
+        if(el){
+          const text=el.textContent||el.innerText||el.value||'';
+          const phone=text.replace(/[^0-9+]/g,'');
+          if(phone)document.getElementById('ak-c1').value=phone;
+        }
+      }catch(e){}
+    }
+    if(stored.selector_contact_2){
+      try{
+        const el=document.querySelector(stored.selector_contact_2);
+        if(el){
+          const text=el.textContent||el.innerText||el.value||'';
+          const phone=text.replace(/[^0-9+]/g,'');
+          if(phone)document.getElementById('ak-c2').value=phone;
+        }
+      }catch(e){}
+    }
+    updateSubmitState();
   });
   
   // Product selection
