@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -217,25 +217,24 @@ const POPUP_JS = `const API_BASE = 'https://www.akmez.tech';
 const content = document.getElementById('content');
 
 async function init() {
-  const stored = await chrome.storage.local.get(['authToken', 'userName']);
-  console.log('[Popup] init - authToken:', stored.authToken ? 'exists' : 'missing');
+  const stored = await chrome.storage.local.get(['authToken', 'refreshToken', 'userName']);
   
   if (stored.authToken) {
     // Verify token still works with API
     try {
-      const res = await fetch(API_BASE + '/api/extension', { headers: { 'Authorization': 'Bearer ' + stored.authToken } });
+      const headers = { 'Authorization': 'Bearer ' + stored.authToken };
+      if (stored.refreshToken) headers['X-Refresh-Token'] = stored.refreshToken;
+      
+      const res = await fetch(API_BASE + '/api/extension', { headers });
       const data = await res.json();
-      console.log('[Popup] API response:', data.authenticated);
       
       if (data.authenticated) {
         showConnected(stored.userName || 'User');
         return;
       }
-    } catch (e) {
-      console.log('[Popup] API error:', e);
-    }
+    } catch (e) {}
     // Token invalid - clear it
-    await chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName']);
+    await chrome.storage.local.remove(['authToken', 'refreshToken', 'tokenExpiry', 'userName']);
   }
   showLogin();
 }
@@ -277,6 +276,7 @@ function showLogin() {
         const name = data.user?.name || data.userName || 'User';
         await chrome.storage.local.set({
           authToken: data.accessToken,
+          refreshToken: data.refreshToken || '',
           tokenExpiry: data.expiresAt,
           userName: name
         });
@@ -303,7 +303,7 @@ init();`
 
 // CONTENT.JS - FULL FUNCTIONALITY (floating A button)
 const CONTENT_JS = `const API_BASE='https://www.akmez.tech';
-let products=[],regions=[],cart={},authToken=null,currentTab='orders',clockedIn=false,clockInTime=null,timerInterval=null;
+let products=[],regions=[],cart={},authToken=null,refreshToken=null,currentTab='orders',clockedIn=false,clockInTime=null,timerInterval=null;
 
 // Create toggle button
 const toggleBtn=document.createElement('div');
@@ -754,45 +754,39 @@ function loadData(){
   
   // Check memory variable first (set after successful login)
   if(authToken){
-    console.log('[Content] loadData - using memory token');
-    fetchWithToken(authToken);
-    return;
+  fetchWithToken(authToken, refreshToken);
+  return;
   }
   
   // Fall back to storage - just check if token exists, API will validate
-  chrome.storage.local.get(['authToken'],stored=>{
-    console.log('[Content] loadData - stored token:', stored.authToken ? 'exists' : 'missing');
-    
-    if(stored.authToken){
-      authToken = stored.authToken;
-      fetchWithToken(authToken);
-    }else{
-      showLogin();
-    }
-  });
-}
-
-function fetchWithToken(token){
-  const body=document.getElementById('akmez-body');
-  console.log('[v0] fetchWithToken - calling API with token:', token.substring(0,20)+'...');
+  chrome.storage.local.get(['authToken','refreshToken'],stored=>{
   
-  fetch(API_BASE+'/api/extension',{
-    headers:{'Authorization':'Bearer '+token}
-  })
-  .then(r=>{
-    console.log('[v0] API response status:', r.status);
-    return r.json();
-  })
+  if(stored.authToken){
+  authToken = stored.authToken;
+  refreshToken = stored.refreshToken || null;
+  fetchWithToken(authToken, refreshToken);
+  }else{
+  showLogin();
+  }
+  });
+  }
+
+function fetchWithToken(token, refresh){
+  const body=document.getElementById('akmez-body');
+  
+  const headers = {'Authorization':'Bearer '+token};
+  if(refresh) headers['X-Refresh-Token'] = refresh;
+  
+  fetch(API_BASE+'/api/extension',{ headers })
+  .then(r=>r.json())
   .then(data=>{
-    console.log('[v0] API response data:', data.authenticated, data.products?.length || 0, 'products');
-    
-    if(!data.authenticated){
-      console.log('[v0] Not authenticated - clearing token');
-      chrome.storage.local.remove(['authToken','tokenExpiry']);
-      authToken=null;
-      showLogin();
-      return;
-    }
+  if(!data.authenticated){
+  chrome.storage.local.remove(['authToken','refreshToken','tokenExpiry']);
+  authToken=null;
+  refreshToken=null;
+  showLogin();
+  return;
+  }
     products=data.products||[];
     regions=data.regions||[];
     renderForm();
@@ -1285,7 +1279,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.1.1.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.1.2.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',

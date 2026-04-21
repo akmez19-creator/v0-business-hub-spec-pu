@@ -18,33 +18,42 @@ export async function OPTIONS() {
 // Helper to get user from Authorization header token
 async function getUserFromToken(request: NextRequest) {
   const authHeader = request.headers.get('Authorization')
-  console.log('[Extension API] Auth header present:', !!authHeader)
+  const refreshToken = request.headers.get('X-Refresh-Token')
   
   if (!authHeader?.startsWith('Bearer ')) {
-    console.log('[Extension API] No Bearer token found')
     return null
   }
   
-  const token = authHeader.replace('Bearer ', '')
-  console.log('[Extension API] Token length:', token.length)
+  const accessToken = authHeader.replace('Bearer ', '')
   
-  // Use service role key to validate the token - this can validate any token
-  const supabase = createAdminClient(
+  // Create admin client for database operations
+  const adminSupabase = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
   
-  // Try to get user with the access token
-  const { data: { user }, error } = await supabase.auth.getUser(token)
-  console.log('[Extension API] getUser result:', user?.id || 'no user', 'error:', error?.message || 'none')
+  // Create anon client and set the session to validate the token
+  const anonSupabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
   
-  if (error || !user) {
-    console.log('[Extension API] Token validation failed')
-    return null
+  // Set the session on the anon client - this validates the token
+  const { data: sessionData, error: sessionError } = await anonSupabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken || ''
+  })
+  
+  if (sessionError || !sessionData.user) {
+    // Try direct getUser as fallback (works with service role)
+    const { data: { user }, error } = await adminSupabase.auth.getUser(accessToken)
+    if (error || !user) {
+      return null
+    }
+    return { user, supabase: adminSupabase }
   }
   
-  console.log('[Extension API] Token validated successfully for user:', user.email)
-  return { user, supabase }
+  return { user: sessionData.user, supabase: adminSupabase }
 }
 
 // GET - Fetch products and regions for extension
