@@ -29,7 +29,7 @@ import {
 
 // Current extension version - update this when making changes
 const EXTENSION_VERSION = '3.0.0'
-const LAST_UPDATED = '2026-04-03'
+const LAST_UPDATED = '2026-04-21'
 
 export function ToolsDownloadPage() {
   const [downloading, setDownloading] = useState(false)
