@@ -118,25 +118,55 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2000);
 }
 
-// Load API via background script
+// Load API via background script - syncs with popup login
 async function loadData() {
   const body = document.getElementById('akmez-body');
   body.innerHTML = '<div class="akmez-loading"><div class="akmez-spinner"></div></div>';
   
-  chrome.runtime.sendMessage({ action: 'fetchData' }, response => {
-    if (!response || !response.success) {
-      body.innerHTML = '<div class="akmez-error">Connection failed - try the extension popup instead</div>';
+  // Check if logged in via popup (shared chrome.storage)
+  chrome.storage.local.get(['authToken', 'tokenExpiry'], stored => {
+    const isLoggedIn = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
+    
+    if (!isLoggedIn) {
+      // Show login prompt - direct to extension popup
+      body.innerHTML = `
+        <div class="akmez-login">
+          <p>Sign in via the extension popup</p>
+          <p style="font-size:10px;color:#888;margin:8px 0;">Click the Akmez icon in your toolbar</p>
+          <button id="akmez-login-btn" style="margin-top:8px;">Open Extension Popup</button>
+        </div>
+      `;
+      document.getElementById('akmez-login-btn').onclick = () => {
+        // This triggers the extension popup to open
+        chrome.runtime.sendMessage({ action: 'openPopup' });
+        toast('Click the Akmez icon in your browser toolbar');
+      };
       return;
     }
-    const data = response.data;
-    if (!data.authenticated) {
-      body.innerHTML = '<div class="akmez-login"><p>Log in to Akmez first</p><button id="akmez-login-btn">Open Login</button></div>';
-      document.getElementById('akmez-login-btn').onclick = () => window.open(API_BASE + '/auth/sign-in', '_blank');
-      return;
-    }
-    products = data.products || [];
-    regions = data.regions || [];
-    renderForm();
+    
+    // Logged in - fetch data
+    chrome.runtime.sendMessage({ action: 'fetchData' }, response => {
+      if (!response || !response.success) {
+        body.innerHTML = '<div class="akmez-error">Connection failed - try the extension popup instead</div>';
+        return;
+      }
+      const data = response.data;
+      if (!data.authenticated) {
+        // Token expired or invalid - clear and show login
+        chrome.storage.local.remove(['authToken', 'tokenExpiry', 'userName']);
+        body.innerHTML = `
+          <div class="akmez-login">
+            <p>Session expired - sign in again</p>
+            <button id="akmez-login-btn">Open Extension Popup</button>
+          </div>
+        `;
+        document.getElementById('akmez-login-btn').onclick = () => toast('Click the Akmez icon in your browser toolbar');
+        return;
+      }
+      products = data.products || [];
+      regions = data.regions || [];
+      renderForm();
+    });
   });
 }
 
