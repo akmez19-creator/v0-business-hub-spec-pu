@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -336,7 +336,7 @@ style.textContent=\`
 #akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(249,115,22,0.5);font-family:sans-serif;transition:transform 0.2s;}
 #akmez-toggle:hover{transform:scale(1.1);}
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
-#akmez-widget{position:fixed;top:60px;right:20px;width:380px;background:#0f0f1a;border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;}
+#akmez-widget{position:fixed;top:60px;right:20px;width:420px;max-width:95vw;background:#0f0f1a;border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;}
 .akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:move;border-radius:14px 14px 0 0;user-select:none;}
 .akmez-logo{width:32px;height:32px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;}
 .akmez-title{flex:1;}
@@ -349,7 +349,7 @@ style.textContent=\`
 .akmez-tab{flex:1;padding:12px;background:none;border:none;color:#888;font-size:12px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;}
 .akmez-tab:hover{color:#fff;background:rgba(255,255,255,0.05);}
 .akmez-tab.active{color:#f97316;border-bottom-color:#f97316;background:rgba(249,115,22,0.1);}
-.akmez-body{padding:14px;max-height:500px;overflow-y:auto;}
+.akmez-body{padding:14px;max-height:500px;overflow-y:auto;overflow-x:hidden;}
 .akmez-loading{text-align:center;padding:40px;color:#888;}
 .akmez-spinner{width:32px;height:32px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:akmez-spin 0.8s linear infinite;margin:0 auto 12px;}
 @keyframes akmez-spin{to{transform:rotate(360deg);}}
