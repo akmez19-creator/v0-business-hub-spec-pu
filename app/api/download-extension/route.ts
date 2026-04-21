@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -376,14 +376,32 @@ style.textContent=\`
 .akmez-select:focus{border-color:#f97316;}
 .akmez-select option{background:#1a1a2e;color:#fff;}
 .akmez-section{font-size:11px;font-weight:600;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:16px 0 10px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);}
-.akmez-products{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-height:180px;overflow-y:auto;margin-bottom:10px;}
-.akmez-product{position:relative;padding:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-size:11px;transition:all 0.15s;}
+.akmez-products{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-height:220px;overflow-y:auto;margin-bottom:10px;}
+.akmez-product{position:relative;padding:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-size:11px;transition:all 0.15s;display:flex;gap:8px;align-items:flex-start;}
 .akmez-product:hover{background:rgba(249,115,22,0.15);border-color:#f97316;}
 .akmez-product.sel{background:linear-gradient(135deg,#f97316,#ea580c);border-color:#f97316;}
-.akmez-product .name{font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.akmez-product .img{width:40px;height:40px;border-radius:6px;object-fit:cover;background:rgba(255,255,255,0.1);flex-shrink:0;}
+.akmez-product .img-placeholder{width:40px;height:40px;border-radius:6px;background:rgba(255,255,255,0.1);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:14px;}
+.akmez-product .info{flex:1;min-width:0;}
+.akmez-product .name{font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.2;}
 .akmez-product .price{font-size:10px;color:#888;margin-top:2px;}
 .akmez-product.sel .price{color:rgba(255,255,255,0.8);}
+.akmez-product .tags{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;}
+.akmez-product .tag{font-size:8px;padding:2px 4px;border-radius:3px;background:rgba(249,115,22,0.2);color:#f97316;}
+.akmez-product.sel .tag{background:rgba(255,255,255,0.2);color:#fff;}
 .akmez-product .badge{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;background:#10b981;border-radius:9px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+.akmez-variant-modal{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:100;border-radius:14px;}
+.akmez-variant-content{background:#1a1a2e;border-radius:12px;padding:16px;width:90%;max-width:320px;max-height:80%;overflow-y:auto;}
+.akmez-variant-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.akmez-variant-header h4{color:#fff;font-size:14px;margin:0;}
+.akmez-variant-close{background:none;border:none;color:#888;font-size:18px;cursor:pointer;}
+.akmez-variant-img{width:60px;height:60px;border-radius:8px;object-fit:cover;margin-bottom:12px;}
+.akmez-variant-list{display:flex;flex-direction:column;gap:6px;}
+.akmez-variant-item{display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;}
+.akmez-variant-item:hover{border-color:#f97316;}
+.akmez-variant-item .attr{color:#fff;font-size:12px;}
+.akmez-variant-item .stock{font-size:10px;color:#888;}
+.akmez-variant-item .vprice{color:#f97316;font-size:12px;font-weight:600;}
 .akmez-cart{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px 12px;display:none;justify-content:space-between;font-size:12px;margin-bottom:10px;}
 .akmez-cart .items{color:#6ee7b7;}
 .akmez-cart .total{color:#10b981;font-weight:700;}
@@ -893,8 +911,18 @@ function renderForm(){
     <input type="text" class="akmez-input" id="ak-search" placeholder="Type to search \${products.length} products..." style="margin-bottom:8px;">
     <div id="ak-hint" style="text-align:center;color:#666;font-size:11px;padding:10px;">Type at least 2 letters to search</div>
     <div class="akmez-products" id="ak-products" style="display:none;">
-      \${products.map(p=>'<div class="akmez-product" data-id="'+p.id+'" data-name="'+p.name+'" data-price="'+p.price+'"><div class="name">'+p.name+'</div><div class="price">Rs '+p.price+'</div></div>').join('')}
+      \${products.map(p=>{
+        const imgHtml=p.image_url?'<img class="img" src="'+p.image_url+'" alt="">':'<div class="img-placeholder">📦</div>';
+        const tags=[];
+        if(p.is_b1g1)tags.push('<span class="tag">B1G1</span>');
+        if(p.bundle_prices&&Object.keys(p.bundle_prices).length>0)tags.push('<span class="tag">Bundle</span>');
+        if(p.has_variants&&p.variants&&p.variants.length>0)tags.push('<span class="tag">'+p.variants.length+' variants</span>');
+        const tagsHtml=tags.length>0?'<div class="tags">'+tags.join('')+'</div>':'';
+        const variantsData=p.has_variants&&p.variants?JSON.stringify(p.variants).replace(/"/g,'&quot;'):'[]';
+        return '<div class="akmez-product" data-id="'+p.id+'" data-name="'+p.name+'" data-price="'+p.price+'" data-img="'+(p.image_url||'')+'" data-b1g1="'+(p.is_b1g1?'1':'0')+'" data-bundles="'+(p.bundle_prices?JSON.stringify(p.bundle_prices).replace(/"/g,'&quot;'):'{}')+'" data-variants="'+variantsData+'" data-has-variants="'+(p.has_variants?'1':'0')+'">'+imgHtml+'<div class="info"><div class="name">'+p.name+'</div><div class="price">Rs '+p.price+'</div>'+tagsHtml+'</div></div>';
+      }).join('')}
     </div>
+    <div id="ak-variant-modal" class="akmez-variant-modal" style="display:none;"></div>
     <div class="akmez-cart" id="ak-cart"><span class="items">0 items</span><span class="total">Rs 0</span></div>
     <button class="akmez-submit" id="ak-submit" disabled>Create Order</button>
   \`;
@@ -914,7 +942,7 @@ function renderForm(){
     productsDiv.style.display='grid';
     hint.style.display='none';
     document.querySelectorAll('.akmez-product').forEach(el=>{
-      el.style.display=el.dataset.name.toLowerCase().includes(q)?'block':'none';
+      el.style.display=el.dataset.name.toLowerCase().includes(q)?'flex':'none';
     });
   });
   
@@ -961,21 +989,81 @@ function renderForm(){
     updateSubmitState();
   });
   
+  // Variant modal
+  const variantModal=document.getElementById('ak-variant-modal');
+  
+  function showVariantModal(productEl){
+    const name=productEl.dataset.name;
+    const price=productEl.dataset.price;
+    const img=productEl.dataset.img;
+    const variants=JSON.parse(productEl.dataset.variants||'[]');
+    const productId=productEl.dataset.id;
+    
+    const imgHtml=img?'<img class="akmez-variant-img" src="'+img+'" alt="">':'';
+    
+    variantModal.innerHTML=\`
+      <div class="akmez-variant-content">
+        <div class="akmez-variant-header">
+          <h4>\${name}</h4>
+          <button class="akmez-variant-close">×</button>
+        </div>
+        \${imgHtml}
+        <p style="color:#888;font-size:11px;margin-bottom:12px;">Select a variant:</p>
+        <div class="akmez-variant-list">
+          \${variants.map(v=>\`
+            <div class="akmez-variant-item" data-product-id="\${productId}" data-variant-id="\${v.id}" data-variant-name="\${v.attribute_name}: \${v.attribute_value}" data-price="\${v.price_override||price}">
+              <div>
+                <div class="attr">\${v.attribute_name}: \${v.attribute_value}</div>
+                <div class="stock">Stock: \${v.quantity}</div>
+              </div>
+              <div class="vprice">Rs \${v.price_override||price}</div>
+            </div>
+          \`).join('')}
+        </div>
+      </div>
+    \`;
+    
+    variantModal.style.display='flex';
+    
+    variantModal.querySelector('.akmez-variant-close').onclick=()=>variantModal.style.display='none';
+    
+    variantModal.querySelectorAll('.akmez-variant-item').forEach(vItem=>{
+      vItem.onclick=()=>{
+        const cartKey=vItem.dataset.productId+'_'+vItem.dataset.variantId;
+        if(!cart[cartKey])cart[cartKey]={qty:0,name:name+' ('+vItem.dataset.variantName+')',price:parseFloat(vItem.dataset.price)};
+        cart[cartKey].qty++;
+        updateCart();
+        updateSubmitState();
+        variantModal.style.display='none';
+      };
+    });
+  }
+  
   // Product selection
   document.querySelectorAll('.akmez-product').forEach(el=>{
     el.addEventListener('click',()=>{
+      const hasVariants=el.dataset.hasVariants==='1';
+      const variants=JSON.parse(el.dataset.variants||'[]');
+      
+      if(hasVariants&&variants.length>0){
+        showVariantModal(el);
+        return;
+      }
+      
       const id=el.dataset.id;
-      if(!cart[id])cart[id]=0;
-      cart[id]++;
+      if(!cart[id])cart[id]={qty:0,name:el.dataset.name,price:parseFloat(el.dataset.price)};
+      cart[id].qty++;
       updateCart();
       updateSubmitState();
     });
     el.addEventListener('contextmenu',e=>{
       e.preventDefault();
       const id=el.dataset.id;
-      if(cart[id]&&cart[id]>0){
-        cart[id]--;
-        if(cart[id]===0)delete cart[id];
+      // Find matching cart entry (could be base product or variant)
+      const cartKey=Object.keys(cart).find(k=>k===id||k.startsWith(id+'_'));
+      if(cartKey&&cart[cartKey]&&cart[cartKey].qty>0){
+        cart[cartKey].qty--;
+        if(cart[cartKey].qty===0)delete cart[cartKey];
         updateCart();
         updateSubmitState();
       }
@@ -994,59 +1082,76 @@ function renderForm(){
 
 function updateCart(){
   const cartDiv=document.getElementById('ak-cart');
-  const entries=Object.entries(cart).filter(([,q])=>q>0);
+  const entries=Object.entries(cart).filter(([,item])=>item.qty>0);
   if(!entries.length){
-    cartDiv.style.display='none';
-    return;
+  cartDiv.style.display='none';
+  // Clear badges
+  document.querySelectorAll('.akmez-product .badge').forEach(b=>b.remove());
+  return;
   }
-  let qty=0,amt=0;
-  entries.forEach(([id,q])=>{
-    qty+=q;
-    const p=products.find(x=>x.id===id);
-    if(p)amt+=parseFloat(p.price)*q;
+  let totalQty=0,totalAmt=0;
+  entries.forEach(([key,item])=>{
+  totalQty+=item.qty;
+  totalAmt+=item.price*item.qty;
   });
   cartDiv.style.display='flex';
-  cartDiv.querySelector('.items').textContent=qty+' item'+(qty>1?'s':'');
-  cartDiv.querySelector('.total').textContent='Rs '+amt.toLocaleString();
+  cartDiv.querySelector('.items').textContent=totalQty+' item'+(totalQty>1?'s':'');
+  cartDiv.querySelector('.total').textContent='Rs '+totalAmt.toLocaleString();
   
+  // Update badges on products
   document.querySelectorAll('.akmez-product').forEach(el=>{
-    const q=cart[el.dataset.id]||0;
-    el.classList.toggle('sel',q>0);
-    let badge=el.querySelector('.badge');
-    if(q>0){
-      if(!badge){badge=document.createElement('span');badge.className='badge';el.appendChild(badge);}
-      badge.textContent=q;
-    }else if(badge){
-      badge.remove();
+    const existingBadge=el.querySelector('.badge');
+    if(existingBadge)existingBadge.remove();
+    
+    const productId=el.dataset.id;
+    // Count all cart items for this product (base + variants)
+    let productQty=0;
+    Object.entries(cart).forEach(([key,item])=>{
+      if(key===productId||key.startsWith(productId+'_')){
+        productQty+=item.qty;
+      }
+    });
+    
+    if(productQty>0){
+      el.classList.add('sel');
+      const badge=document.createElement('div');
+      badge.className='badge';
+      badge.textContent=productQty;
+      el.appendChild(badge);
+    }else{
+      el.classList.remove('sel');
     }
   });
-}
-
-function updateSubmitState(){
+  
+  }
+  
+  function updateSubmitState(){
   const name=document.getElementById('ak-name').value.trim();
   const c1=document.getElementById('ak-c1').value.trim();
   const region=document.getElementById('ak-region').value;
-  const hasProducts=Object.values(cart).some(q=>q>0);
+  const hasProducts=Object.values(cart).some(item=>item.qty>0);
   document.getElementById('ak-submit').disabled=!name||!c1||!region||!hasProducts;
-}
-
-function submitOrder(){
+  }
+  
+  function submitOrder(){
   const btn=document.getElementById('ak-submit');
   const err=document.getElementById('form-error');
   btn.disabled=true;
   btn.textContent='Creating...';
   err.style.display='none';
   
+  // Build products array from new cart structure
+  const cartProducts=Object.entries(cart).filter(([,item])=>item.qty>0).map(([key,item])=>{
+    return {name:item.name,price:item.price,qty:item.qty};
+  });
+  
   const data={
-    customerName:document.getElementById('ak-name').value.trim(),
-    contact1:document.getElementById('ak-c1').value.trim(),
-    contact2:document.getElementById('ak-c2').value.trim(),
-    region:document.getElementById('ak-region').value,
-    deliveryDate:document.getElementById('ak-date').value,
-    products:Object.entries(cart).filter(([,q])=>q>0).map(([id,q])=>{
-      const p=products.find(x=>x.id===id);
-      return p?{name:p.name,price:p.price,qty:q}:null;
-    }).filter(Boolean)
+  customerName:document.getElementById('ak-name').value.trim(),
+  contact1:document.getElementById('ak-c1').value.trim(),
+  contact2:document.getElementById('ak-c2').value.trim(),
+  region:document.getElementById('ak-region').value,
+  deliveryDate:document.getElementById('ak-date').value,
+  products:cartProducts
   };
   
   chrome.runtime.sendMessage({action:'createOrder',data},res=>{
