@@ -65,12 +65,19 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Check if user has permission to use the extension
-    const { data: profile } = await supabase
+    // Use admin client to check profile (bypasses RLS)
+    const adminSupabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    
+    const { data: profile, error: profileError } = await adminSupabase
       .from('profiles')
       .select('role, name')
       .eq('id', data.user.id)
       .single()
+    
+    console.log('[Extension Login] Profile query:', profile?.role || 'no profile', 'error:', profileError?.message || 'none')
 
     if (!profile || !['admin', 'manager', 'marketing_agent', 'marketing_back_office', 'marketing_front_office'].includes(profile.role)) {
       return NextResponse.json({ 
