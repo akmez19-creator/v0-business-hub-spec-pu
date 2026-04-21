@@ -62,12 +62,37 @@ export async function GET(request: NextRequest) {
       }, { headers: corsHeaders })
     }
     
-    // Get products
+    // Get products with images, pricing, and variants
     const { data: products } = await supabase
       .from('products')
-      .select('id, name, price')
+      .select('id, name, price, image_url, bundle_prices, is_b1g1, has_variants')
       .eq('is_active', true)
       .order('name', { ascending: true })
+    
+    // Get variants for products that have them
+    const productsWithVariants = products?.filter(p => p.has_variants).map(p => p.id) || []
+    let variantsMap: Record<string, any[]> = {}
+    
+    if (productsWithVariants.length > 0) {
+      const { data: variants } = await supabase
+        .from('product_variants')
+        .select('id, product_id, attribute_name, attribute_value, quantity, price_override')
+        .in('product_id', productsWithVariants)
+        .eq('is_active', true)
+        .order('attribute_name', { ascending: true })
+      
+      // Group variants by product_id
+      (variants || []).forEach(v => {
+        if (!variantsMap[v.product_id]) variantsMap[v.product_id] = []
+        variantsMap[v.product_id].push(v)
+      })
+    }
+    
+    // Attach variants to products
+    const productsWithVariantData = (products || []).map(p => ({
+      ...p,
+      variants: variantsMap[p.id] || []
+    }))
     
     // Get localities (regions)
     const { data: localities } = await supabase
@@ -127,9 +152,9 @@ export async function GET(request: NextRequest) {
       }
     })
     
-    return NextResponse.json({
-      authenticated: true,
-      products: products || [],
+return NextResponse.json({
+  authenticated: true,
+  products: productsWithVariantData || [],
       regions,
       worktime: {
         isClockedIn,
