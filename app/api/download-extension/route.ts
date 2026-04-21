@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -301,7 +301,14 @@ function showLogin() {
 init();`
 
 // CONTENT.JS - FULL FUNCTIONALITY (floating A button)
-const CONTENT_JS = `const API_BASE='https://www.akmez.tech';
+const CONTENT_JS = `(function(){
+'use strict';
+
+// Prevent multiple injections
+if(window.akmezLoaded)return;
+window.akmezLoaded=true;
+
+const API_BASE='https://www.akmez.tech';
 let products=[],regions=[],cart={},authToken=null,currentTab='orders',clockedIn=false,clockInTime=null,timerInterval=null,isAdmin=false,dbSelectors={},userName='User';
 
 // Create toggle button
@@ -1136,10 +1143,11 @@ sel.onclick=async e=>{
     toast('Copied: '+t.substring(0,20));
     sel.style.display='none';
     window.getSelection().removeAllRanges();
-    updateSubmitState();
+  updateSubmitState();
   }
-};
-`
+  };
+
+})();`
 
 const CONTENT_CSS = ``
 
@@ -1163,7 +1171,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.1.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.2.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
