@@ -1331,7 +1331,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.0.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.6.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
