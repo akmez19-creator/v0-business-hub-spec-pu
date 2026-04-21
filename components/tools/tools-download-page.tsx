@@ -144,16 +144,76 @@ export function ToolsDownloadPage() {
               </div>
             </div>
             
-            {/* Right side - Actual Extension Preview */}
+            {/* Right side - Extension Preview Mockup */}
             <div className="relative">
-              <div className="relative rounded-2xl overflow-hidden border border-border/50 shadow-2xl transform rotate-2 hover:rotate-0 transition-transform duration-500">
-                <Image
-                  src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-XB3iQJjH6XkQRxDIJ4oU5X4820B24f.png"
-                  alt="Akmez Quick Order Extension Preview"
-                  width={280}
-                  height={500}
-                  className="object-cover"
-                />
+              <div className="relative rounded-2xl overflow-hidden border border-border/50 shadow-2xl transform rotate-2 hover:rotate-0 transition-transform duration-500 bg-card p-4" style={{ width: 320 }}>
+                {/* Extension Header */}
+                <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-orange-500/20 to-orange-500/5 rounded-xl border border-orange-500/20 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold text-lg">A</div>
+                  <div className="flex-1">
+                    <div className="font-semibold text-foreground text-sm">Quick Order v3.0</div>
+                    <div className="text-xs text-muted-foreground">Create orders from anywhere</div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-6 h-6 rounded bg-muted/50 flex items-center justify-center">
+                      <Settings className="w-3 h-3 text-muted-foreground" />
+                    </div>
+                    <div className="w-6 h-6 rounded bg-muted/50 flex items-center justify-center">
+                      <span className="text-muted-foreground text-xs">×</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Connected Status */}
+                <div className="flex items-center gap-2 mb-4 px-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-xs text-emerald-400 font-medium">Connected</span>
+                </div>
+                
+                {/* Form Fields Preview */}
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">NAME *</div>
+                    <div className="h-9 rounded-lg bg-muted/30 border border-border/50 flex items-center px-3">
+                      <span className="text-sm text-muted-foreground">Customer name</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">CONTACT 1 *</div>
+                      <div className="h-9 rounded-lg bg-muted/30 border border-border/50 flex items-center px-3">
+                        <span className="text-sm text-muted-foreground">Phone</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">CONTACT 2</div>
+                      <div className="h-9 rounded-lg bg-muted/30 border border-border/50 flex items-center px-3">
+                        <span className="text-sm text-muted-foreground">Optional</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Product Search */}
+                  <div>
+                    <div className="text-xs text-orange-400 mb-1 font-medium">ADD PRODUCTS</div>
+                    <div className="h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center px-3">
+                      <Search className="w-4 h-4 text-orange-400 mr-2" />
+                      <span className="text-sm text-orange-400/70">Search products...</span>
+                    </div>
+                  </div>
+                  
+                  {/* Product chips preview */}
+                  <div className="flex flex-wrap gap-1">
+                    <div className="px-2 py-1 text-xs bg-muted/50 rounded border border-border/50 text-muted-foreground">Vacuum Cup</div>
+                    <div className="px-2 py-1 text-xs bg-muted/50 rounded border border-border/50 text-muted-foreground">Gel Stamp</div>
+                    <div className="px-2 py-1 text-xs bg-muted/50 rounded border border-border/50 text-muted-foreground">+more</div>
+                  </div>
+                  
+                  {/* Create Order Button */}
+                  <div className="h-11 rounded-lg bg-orange-500 flex items-center justify-center text-white font-medium text-sm mt-2">
+                    CREATE ORDER
+                  </div>
+                </div>
               </div>
               
               {/* Floating badges */}
@@ -161,7 +221,7 @@ export function ToolsDownloadPage() {
                 Free
               </div>
               <div className="absolute -bottom-3 -left-3 px-3 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium">
-                Live Preview
+                v3.0 Preview
               </div>
             </div>
           </div>
