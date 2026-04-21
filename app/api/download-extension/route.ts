@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import JSZip from 'jszip'
 
-// Embedded extension files - Updated 2026-04-21
+// Embedded extension files - Updated 2026-04-21 v3.0.1
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -1163,7 +1163,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.0.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.1.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
