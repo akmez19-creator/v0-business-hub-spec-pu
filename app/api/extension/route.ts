@@ -18,11 +18,15 @@ export async function OPTIONS() {
 // Helper to get user from Authorization header token
 async function getUserFromToken(request: NextRequest) {
   const authHeader = request.headers.get('Authorization')
+  console.log('[Extension API] Auth header present:', !!authHeader)
+  
   if (!authHeader?.startsWith('Bearer ')) {
+    console.log('[Extension API] No Bearer token found')
     return null
   }
   
   const token = authHeader.replace('Bearer ', '')
+  console.log('[Extension API] Token length:', token.length, 'starts with:', token.substring(0, 20))
   
   const supabase = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,6 +34,8 @@ async function getUserFromToken(request: NextRequest) {
   )
   
   const { data: { user }, error } = await supabase.auth.getUser(token)
+  console.log('[Extension API] getUser result:', user?.id || 'no user', 'error:', error?.message || 'none')
+  
   if (error || !user) {
     return null
   }
