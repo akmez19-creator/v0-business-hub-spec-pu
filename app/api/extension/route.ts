@@ -78,24 +78,6 @@ export async function GET(request: NextRequest) {
     
     const regions = (localities || []).map(l => l.name)
     
-    // Get user profile with role
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role, name')
-      .eq('id', user.id)
-      .single()
-    
-    const isAdmin = profile?.role === 'admin'
-    
-    // Get calibration selectors from settings
-    const { data: selectorSettings } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'extension_selectors')
-      .single()
-    
-    const selectors = selectorSettings?.value || {}
-    
     // Get worktime data for the user
     const today = new Date().toISOString().split('T')[0]
     const { data: todayShift } = await supabase
@@ -147,11 +129,8 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({
       authenticated: true,
-      isAdmin,
-      userName: profile?.name || 'User',
       products: products || [],
       regions,
-      selectors,
       worktime: {
         isClockedIn,
         clockInTime,
