@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -268,12 +268,13 @@ function showLogin() {
       });
       const data = await res.json();
       if (data.success && data.accessToken) {
+        const name = data.user?.name || data.userName || 'User';
         await chrome.storage.local.set({
           authToken: data.accessToken,
           tokenExpiry: data.expiresAt,
-          userName: data.userName
+          userName: name
         });
-        showConnected(data.userName || 'User');
+        showConnected(name);
       } else {
         err.textContent = data.error || 'Invalid credentials';
         err.style.display = 'block';
@@ -795,14 +796,14 @@ function showLogin(){
     err.style.display='none';
     
     try{
-      const res=await fetch(API_BASE+'/api/extension/auth',{
+      const res=await fetch(API_BASE+'/api/extension/login',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({email,password:pass})
       });
       const data=await res.json();
       
-      if(!res.ok||!data.accessToken){
+      if(!res.ok||!data.success||!data.accessToken){
         err.textContent=data.error||'Invalid credentials';
         err.style.display='block';
         btn.disabled=false;
