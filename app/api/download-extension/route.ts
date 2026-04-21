@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -746,28 +746,43 @@ function loadData(){
   const body=document.getElementById('akmez-body');
   body.innerHTML='<div class="akmez-loading"><div class="akmez-spinner"></div><p>Connecting...</p></div>';
   
+  // If we already have authToken in memory, use it directly
+  if(authToken){
+    fetchWithToken(authToken);
+    return;
+  }
+  
+  // Otherwise try to get from storage
   chrome.storage.local.get(['authToken','tokenExpiry'],stored=>{
     if(stored.authToken && stored.tokenExpiry && Date.now()<stored.tokenExpiry*1000){
       authToken=stored.authToken;
-      chrome.runtime.sendMessage({action:'fetchData'},res=>{
-        if(!res||!res.success){
-          body.innerHTML='<div class="akmez-login"><p>Connection failed</p><button class="akmez-login-btn" onclick="location.reload()">Retry</button></div>';
-          return;
-        }
-        const data=res.data;
-        if(!data.authenticated){
-          chrome.storage.local.remove(['authToken','tokenExpiry']);
-          authToken=null;
-          showLogin();
-          return;
-        }
-        products=data.products||[];
-        regions=data.regions||[];
-        renderForm();
-      });
+      fetchWithToken(authToken);
     }else{
       showLogin();
     }
+  });
+}
+
+function fetchWithToken(token){
+  const body=document.getElementById('akmez-body');
+  fetch(API_BASE+'/api/extension',{
+    headers:{'Authorization':'Bearer '+token}
+  })
+  .then(r=>r.json())
+  .then(data=>{
+    if(!data.authenticated){
+      chrome.storage.local.remove(['authToken','tokenExpiry']);
+      authToken=null;
+      showLogin();
+      return;
+    }
+    products=data.products||[];
+    regions=data.regions||[];
+    renderForm();
+  })
+  .catch(e=>{
+    body.innerHTML='<div class="akmez-login"><p>Connection failed</p><button class="akmez-login-btn" id="retry-btn">Retry</button></div>';
+    document.getElementById('retry-btn').onclick=()=>loadData();
   });
 }
 
