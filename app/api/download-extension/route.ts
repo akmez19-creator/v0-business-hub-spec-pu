@@ -451,10 +451,14 @@ document.getElementById('akmez-close').addEventListener('click',()=>widget.style
 
 // Calibration state
 let calibrating=null;
+let calibratingPlatform=null;
 let calibrationOverlay=null;
 
-function startCalibration(field){
+const PLATFORMS=['Messenger','WhatsApp','Instagram','Other'];
+
+function startCalibration(field,platform){
   calibrating=field;
+  calibratingPlatform=platform;
   widget.style.display='none';
   
   // Create overlay
@@ -462,7 +466,7 @@ function startCalibration(field){
   calibrationOverlay.id='akmez-calibration-overlay';
   calibrationOverlay.innerHTML=\`
     <div style="position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f97316;color:#fff;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:2147483647;box-shadow:0 4px 20px rgba(249,115,22,0.4);">
-      Click on the element containing <strong>\${field}</strong> | <span style="cursor:pointer;text-decoration:underline;" id="cancel-calibration">Cancel</span>
+      Click on the element containing <strong>\${field}</strong> for <strong>\${platform}</strong> | <span style="cursor:pointer;text-decoration:underline;" id="cancel-calibration">Cancel</span>
     </div>
   \`;
   document.body.appendChild(calibrationOverlay);
@@ -476,6 +480,57 @@ function startCalibration(field){
   document.addEventListener('mouseover',highlightElement);
   document.addEventListener('mouseout',unhighlightElement);
   document.addEventListener('click',selectElement,true);
+}
+
+function showPlatformPicker(field){
+  const body=document.getElementById('akmez-body');
+  chrome.storage.local.get(null,stored=>{
+    const fieldKey=field.replace(/\\s+/g,'_').toLowerCase();
+    const existingSelectors=PLATFORMS.map(p=>{
+      const key='selector_'+fieldKey+'_'+p.toLowerCase();
+      return {platform:p,selector:stored[key]||null};
+    });
+    
+    body.innerHTML=\`
+      <div class="akmez-settings-panel">
+        <h3 style="color:#f97316;font-size:14px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">\${field}</h3>
+        <p style="font-size:11px;color:#666;margin-bottom:16px;">Add selectors for different platforms</p>
+        
+        \${existingSelectors.map(s=>\`
+          <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="flex:1;">
+              <div style="font-size:12px;color:#fff;display:flex;align-items:center;gap:6px;">
+                \${s.platform==='Messenger'?'💬':s.platform==='WhatsApp'?'📱':s.platform==='Instagram'?'📷':'🌐'} \${s.platform}
+              </div>
+              <div style="font-size:10px;color:\${s.selector?'#22c55e':'#888'};margin-top:2px;">\${s.selector?'Configured':'Not set'}</div>
+            </div>
+            <div style="display:flex;gap:4px;">
+              <button class="platform-calibrate" data-platform="\${s.platform}" style="background:#f97316;border:none;color:#fff;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer;">\${s.selector?'Update':'Add'}</button>
+              \${s.selector?\`<button class="platform-remove" data-platform="\${s.platform}" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;">×</button>\`:''}
+            </div>
+          </div>
+        \`).join('')}
+        
+        <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="platform-back">← Back to Settings</button>
+      </div>
+    \`;
+    
+    document.querySelectorAll('.platform-calibrate').forEach(btn=>{
+      btn.onclick=()=>startCalibration(field,btn.dataset.platform);
+    });
+    
+    document.querySelectorAll('.platform-remove').forEach(btn=>{
+      btn.onclick=()=>{
+        const key='selector_'+fieldKey+'_'+btn.dataset.platform.toLowerCase();
+        chrome.storage.local.remove([key],()=>{
+          toast(btn.dataset.platform+' selector removed');
+          showPlatformPicker(field);
+        });
+      };
+    });
+    
+    document.getElementById('platform-back').onclick=()=>document.getElementById('akmez-settings').click();
+  });
 }
 
 function highlightElement(e){
@@ -499,11 +554,11 @@ function selectElement(e){
   e.stopPropagation();
   
   const selector=generateSelector(e.target);
-  const fieldKey='selector_'+calibrating.replace(/\\s+/g,'_').toLowerCase();
+  const fieldKey='selector_'+calibrating.replace(/\\s+/g,'_').toLowerCase()+'_'+calibratingPlatform.toLowerCase();
   
   chrome.storage.local.set({[fieldKey]:selector},()=>{
-    toast(calibrating+' selector saved!');
-    endCalibration();
+    toast(calibrating+' ('+calibratingPlatform+') saved!');
+    endCalibration(calibrating);
   });
 }
 
@@ -525,8 +580,10 @@ function generateSelector(el){
   return path.join(' > ');
 }
 
-function endCalibration(){
+function endCalibration(returnToField){
+  const field=calibrating;
   calibrating=null;
+  calibratingPlatform=null;
   document.removeEventListener('mouseover',highlightElement);
   document.removeEventListener('mouseout',unhighlightElement);
   document.removeEventListener('click',selectElement,true);
@@ -540,13 +597,22 @@ function endCalibration(){
     el.style.outlineOffset='';
   });
   widget.style.display='block';
-  document.getElementById('akmez-settings').click();
+  if(returnToField)showPlatformPicker(returnToField);
+  else document.getElementById('akmez-settings').click();
+}
+
+function countConfiguredPlatforms(stored,fieldKey){
+  return PLATFORMS.filter(p=>stored['selector_'+fieldKey+'_'+p.toLowerCase()]).length;
 }
 
 // Settings button
 document.getElementById('akmez-settings').addEventListener('click',()=>{
   const body=document.getElementById('akmez-body');
-  chrome.storage.local.get(['userName','selector_customer_name','selector_contact_1','selector_contact_2'],stored=>{
+  chrome.storage.local.get(null,stored=>{
+    const nameCount=countConfiguredPlatforms(stored,'customer_name');
+    const c1Count=countConfiguredPlatforms(stored,'contact_1');
+    const c2Count=countConfiguredPlatforms(stored,'contact_2');
+    
     body.innerHTML=\`
       <div class="akmez-settings-panel">
         <h3 style="color:#f97316;font-size:14px;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Settings</h3>
@@ -557,30 +623,30 @@ document.getElementById('akmez-settings').addEventListener('click',()=>{
         </div>
         
         <h4 style="color:#888;font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px;">Element Calibration</h4>
-        <p style="font-size:11px;color:#666;margin-bottom:12px;">Click to select elements on the page for auto-fill</p>
+        <p style="font-size:11px;color:#666;margin-bottom:12px;">Configure selectors for different platforms (Messenger, WhatsApp, etc.)</p>
         
         <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Customer Name">
           <div>
             <div style="font-size:12px;color:#fff;">Customer Name</div>
-            <div style="font-size:10px;color:\${stored.selector_customer_name?'#22c55e':'#888'};">\${stored.selector_customer_name?'Configured':'Not set'}</div>
+            <div style="font-size:10px;color:\${nameCount>0?'#22c55e':'#888'};">\${nameCount>0?nameCount+' platform(s) configured':'Not set'}</div>
           </div>
-          <div style="color:#f97316;font-size:18px;">⊕</div>
+          <div style="color:#f97316;font-size:14px;">→</div>
         </div>
         
         <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 1">
           <div>
             <div style="font-size:12px;color:#fff;">Contact 1 (Phone)</div>
-            <div style="font-size:10px;color:\${stored.selector_contact_1?'#22c55e':'#888'};">\${stored.selector_contact_1?'Configured':'Not set'}</div>
+            <div style="font-size:10px;color:\${c1Count>0?'#22c55e':'#888'};">\${c1Count>0?c1Count+' platform(s) configured':'Not set'}</div>
           </div>
-          <div style="color:#f97316;font-size:18px;">⊕</div>
+          <div style="color:#f97316;font-size:14px;">→</div>
         </div>
         
         <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 2">
           <div>
             <div style="font-size:12px;color:#fff;">Contact 2 (Phone)</div>
-            <div style="font-size:10px;color:\${stored.selector_contact_2?'#22c55e':'#888'};">\${stored.selector_contact_2?'Configured':'Not set'}</div>
+            <div style="font-size:10px;color:\${c2Count>0?'#22c55e':'#888'};">\${c2Count>0?c2Count+' platform(s) configured':'Not set'}</div>
           </div>
-          <div style="color:#f97316;font-size:18px;">⊕</div>
+          <div style="color:#f97316;font-size:14px;">→</div>
         </div>
         
         <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-clear-selectors">Clear All Selectors</button>
@@ -598,14 +664,20 @@ document.getElementById('akmez-settings').addEventListener('click',()=>{
       </div>
     \`;
     
-    // Calibration item clicks
+    // Calibration item clicks - now opens platform picker
     document.querySelectorAll('.calibration-item').forEach(item=>{
-      item.onclick=()=>startCalibration(item.dataset.field);
+      item.onclick=()=>showPlatformPicker(item.dataset.field);
     });
     
     document.getElementById('settings-clear-selectors').onclick=()=>{
-      chrome.storage.local.remove(['selector_customer_name','selector_contact_1','selector_contact_2'],()=>{
-        toast('Selectors cleared');
+      const keysToRemove=[];
+      PLATFORMS.forEach(p=>{
+        keysToRemove.push('selector_customer_name_'+p.toLowerCase());
+        keysToRemove.push('selector_contact_1_'+p.toLowerCase());
+        keysToRemove.push('selector_contact_2_'+p.toLowerCase());
+      });
+      chrome.storage.local.remove(keysToRemove,()=>{
+        toast('All selectors cleared');
         document.getElementById('akmez-settings').click();
       });
     };
@@ -858,37 +930,34 @@ function renderForm(){
     });
   });
   
-  // Auto-fill from calibrated selectors
-  chrome.storage.local.get(['selector_customer_name','selector_contact_1','selector_contact_2'],stored=>{
-    if(stored.selector_customer_name){
-      try{
-        const el=document.querySelector(stored.selector_customer_name);
-        if(el){
-          const text=el.textContent||el.innerText||el.value||'';
-          if(text.trim())document.getElementById('ak-name').value=text.trim();
+  // Auto-fill from calibrated selectors - try all platforms
+  chrome.storage.local.get(null,stored=>{
+    const platforms=['messenger','whatsapp','instagram','other'];
+    
+    // Helper to try all platform selectors for a field
+    function trySelectors(fieldKey,inputId,isPhone){
+      for(const p of platforms){
+        const selector=stored['selector_'+fieldKey+'_'+p];
+        if(selector){
+          try{
+            const el=document.querySelector(selector);
+            if(el){
+              let text=el.textContent||el.innerText||el.value||'';
+              if(isPhone)text=text.replace(/[^0-9+]/g,'');
+              if(text.trim()){
+                document.getElementById(inputId).value=text.trim();
+                return true;
+              }
+            }
+          }catch(e){}
         }
-      }catch(e){}
+      }
+      return false;
     }
-    if(stored.selector_contact_1){
-      try{
-        const el=document.querySelector(stored.selector_contact_1);
-        if(el){
-          const text=el.textContent||el.innerText||el.value||'';
-          const phone=text.replace(/[^0-9+]/g,'');
-          if(phone)document.getElementById('ak-c1').value=phone;
-        }
-      }catch(e){}
-    }
-    if(stored.selector_contact_2){
-      try{
-        const el=document.querySelector(stored.selector_contact_2);
-        if(el){
-          const text=el.textContent||el.innerText||el.value||'';
-          const phone=text.replace(/[^0-9+]/g,'');
-          if(phone)document.getElementById('ak-c2').value=phone;
-        }
-      }catch(e){}
-    }
+    
+    trySelectors('customer_name','ak-name',false);
+    trySelectors('contact_1','ak-c1',true);
+    trySelectors('contact_2','ak-c2',true);
     updateSubmitState();
   });
   
