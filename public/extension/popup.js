@@ -1,4 +1,4 @@
-// Akmez Quick Order - Extension Popup v2.5.0
+// Akmez Quick Order - Extension Popup v3.0.0
 const API_BASE = 'https://www.akmez.tech';
 const content = document.getElementById('content');
 
