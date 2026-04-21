@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.7",
+  "version": "3.0.8",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -811,63 +811,12 @@ function showLogin(){
   body.innerHTML=\`
     <div class="akmez-login">
       <p>Sign in to create orders</p>
-      <input type="email" class="akmez-input" id="login-email" placeholder="Email">
-      <input type="password" class="akmez-input" id="login-pass" placeholder="Password" style="margin-top:8px;">
-      <div class="akmez-error" id="login-error" style="display:none;"></div>
-      <button class="akmez-login-btn" id="akmez-do-login">Sign In</button>
+      <small style="color:#888;display:block;margin-bottom:16px;">Click the Akmez icon in your browser toolbar to sign in</small>
+      <button class="akmez-login-btn" id="akmez-refresh-auth">Check Login Status</button>
     </div>
   \`;
   
-  document.getElementById('akmez-do-login').onclick=async()=>{
-    const email=document.getElementById('login-email').value.trim();
-    const pass=document.getElementById('login-pass').value;
-    const err=document.getElementById('login-error');
-    const btn=document.getElementById('akmez-do-login');
-    
-    if(!email||!pass){err.textContent='Enter email and password';err.style.display='block';return;}
-    
-    btn.disabled=true;
-    btn.textContent='Signing in...';
-    err.style.display='none';
-    
-    try{
-      const res=await fetch(API_BASE+'/api/extension/login',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({email,password:pass})
-      });
-      const data=await res.json();
-      
-      if(!res.ok||!data.success||!data.accessToken){
-        err.textContent=data.error||'Invalid credentials';
-        err.style.display='block';
-        btn.disabled=false;
-        btn.textContent='Sign In';
-        return;
-      }
-      
-      // Store auth token
-      authToken=data.accessToken;
-      chrome.storage.local.set({
-        authToken:data.accessToken,
-        tokenExpiry:data.expiresAt,
-        userName:data.user?.name||'User'
-      },()=>{
-        toast('Signed in successfully');
-        loadData();
-      });
-    }catch(e){
-      err.textContent='Connection failed';
-      err.style.display='block';
-      btn.disabled=false;
-      btn.textContent='Sign In';
-    }
-  };
-  
-  // Allow enter key to submit
-  document.getElementById('login-pass').onkeydown=e=>{
-    if(e.key==='Enter')document.getElementById('akmez-do-login').click();
-  };
+  document.getElementById('akmez-refresh-auth').onclick=()=>loadData();
 }
 
 // Listen for auth changes from popup
@@ -1338,7 +1287,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.7.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.8.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
