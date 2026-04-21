@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import JSZip from 'jszip'
 
-// Embedded extension files - Updated 2026-04-21 v3.0.1
+// Embedded extension files - Updated 2026-04-21
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.2",
+  "version": "3.0.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -52,12 +52,6 @@ if(request.action==='createOrder'){
 if(request.action==='worktime'){
   chrome.storage.local.get(['authToken'],stored=>{
     fetch(API_BASE+'/api/extension/worktime',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(stored.authToken||'')},body:JSON.stringify(request.data)}).then(r=>r.json()).then(d=>sendResponse({success:true,data:d})).catch(e=>sendResponse({success:false,error:e.message}));
-  });
-  return true;
-}
-if(request.action==='saveSelectors'){
-  chrome.storage.local.get(['authToken'],stored=>{
-    fetch(API_BASE+'/api/extension/selectors',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(stored.authToken||'')},body:JSON.stringify({selectors:request.selectors})}).then(r=>r.json()).then(d=>sendResponse(d)).catch(e=>sendResponse({success:false,error:e.message}));
   });
   return true;
 }
@@ -301,15 +295,8 @@ function showLogin() {
 init();`
 
 // CONTENT.JS - FULL FUNCTIONALITY (floating A button)
-const CONTENT_JS = `(function(){
-'use strict';
-
-// Prevent multiple injections
-if(window.akmezLoaded)return;
-window.akmezLoaded=true;
-
-const API_BASE='https://www.akmez.tech';
-let products=[],regions=[],cart={},authToken=null,currentTab='orders',clockedIn=false,clockInTime=null,timerInterval=null,isAdmin=false,dbSelectors={},userName='User';
+const CONTENT_JS = `const API_BASE='https://www.akmez.tech';
+let products=[],regions=[],cart={},authToken=null,currentTab='orders',clockedIn=false,clockInTime=null,timerInterval=null;
 
 // Create toggle button
 const toggleBtn=document.createElement('div');
@@ -497,57 +484,53 @@ function startCalibration(field,platform){
 
 function showPlatformPicker(field){
   const body=document.getElementById('akmez-body');
-  const fieldKey=field.replace(/\\s+/g,'_').toLowerCase();
-  const existingSelectors=PLATFORMS.map(p=>{
-    const key=fieldKey+'_'+p.toLowerCase();
-    return {platform:p,selector:dbSelectors[key]||null};
-  });
-  
-  body.innerHTML=\`
-    <div class="akmez-settings-panel">
-      <h3 style="color:#f97316;font-size:14px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">\${field}</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:16px;">Add selectors for different platforms (saved for all users)</p>
-      
-      \${existingSelectors.map(s=>\`
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
-          <div style="flex:1;">
-            <div style="font-size:12px;color:#fff;display:flex;align-items:center;gap:6px;">
-              \${s.platform==='Messenger'?'💬':s.platform==='WhatsApp'?'📱':s.platform==='Instagram'?'📷':'🌐'} \${s.platform}
+  chrome.storage.local.get(null,stored=>{
+    const fieldKey=field.replace(/\\s+/g,'_').toLowerCase();
+    const existingSelectors=PLATFORMS.map(p=>{
+      const key='selector_'+fieldKey+'_'+p.toLowerCase();
+      return {platform:p,selector:stored[key]||null};
+    });
+    
+    body.innerHTML=\`
+      <div class="akmez-settings-panel">
+        <h3 style="color:#f97316;font-size:14px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">\${field}</h3>
+        <p style="font-size:11px;color:#666;margin-bottom:16px;">Add selectors for different platforms</p>
+        
+        \${existingSelectors.map(s=>\`
+          <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="flex:1;">
+              <div style="font-size:12px;color:#fff;display:flex;align-items:center;gap:6px;">
+                \${s.platform==='Messenger'?'💬':s.platform==='WhatsApp'?'📱':s.platform==='Instagram'?'📷':'🌐'} \${s.platform}
+              </div>
+              <div style="font-size:10px;color:\${s.selector?'#22c55e':'#888'};margin-top:2px;">\${s.selector?'Configured':'Not set'}</div>
             </div>
-            <div style="font-size:10px;color:\${s.selector?'#22c55e':'#888'};margin-top:2px;">\${s.selector?'Configured':'Not set'}</div>
+            <div style="display:flex;gap:4px;">
+              <button class="platform-calibrate" data-platform="\${s.platform}" style="background:#f97316;border:none;color:#fff;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer;">\${s.selector?'Update':'Add'}</button>
+              \${s.selector?\`<button class="platform-remove" data-platform="\${s.platform}" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;">×</button>\`:''}
+            </div>
           </div>
-          <div style="display:flex;gap:4px;">
-            <button class="platform-calibrate" data-platform="\${s.platform}" style="background:#f97316;border:none;color:#fff;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer;">\${s.selector?'Update':'Add'}</button>
-            \${s.selector?\`<button class="platform-remove" data-platform="\${s.platform}" style="background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;">×</button>\`:''}
-          </div>
-        </div>
-      \`).join('')}
-      
-      <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="platform-back">← Back to Settings</button>
-    </div>
-  \`;
-  
-  document.querySelectorAll('.platform-calibrate').forEach(btn=>{
-    btn.onclick=()=>startCalibration(field,btn.dataset.platform);
-  });
-  
-  document.querySelectorAll('.platform-remove').forEach(btn=>{
-    btn.onclick=()=>{
-      const key=fieldKey+'_'+btn.dataset.platform.toLowerCase();
-      delete dbSelectors[key];
-      // Save to database
-      chrome.runtime.sendMessage({action:'saveSelectors',selectors:dbSelectors},response=>{
-        if(response&&response.success){
-          toast(btn.dataset.platform+' selector removed for all users');
+        \`).join('')}
+        
+        <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="platform-back">← Back to Settings</button>
+      </div>
+    \`;
+    
+    document.querySelectorAll('.platform-calibrate').forEach(btn=>{
+      btn.onclick=()=>startCalibration(field,btn.dataset.platform);
+    });
+    
+    document.querySelectorAll('.platform-remove').forEach(btn=>{
+      btn.onclick=()=>{
+        const key='selector_'+fieldKey+'_'+btn.dataset.platform.toLowerCase();
+        chrome.storage.local.remove([key],()=>{
+          toast(btn.dataset.platform+' selector removed');
           showPlatformPicker(field);
-        }else{
-          toast('Failed to remove selector');
-        }
-      });
-    };
+        });
+      };
+    });
+    
+    document.getElementById('platform-back').onclick=()=>document.getElementById('akmez-settings').click();
   });
-  
-  document.getElementById('platform-back').onclick=()=>document.getElementById('akmez-settings').click();
 }
 
 function highlightElement(e){
@@ -571,18 +554,11 @@ function selectElement(e){
   e.stopPropagation();
   
   const selector=generateSelector(e.target);
-  const fieldKey=calibrating.replace(/\\s+/g,'_').toLowerCase()+'_'+calibratingPlatform.toLowerCase();
+  const fieldKey='selector_'+calibrating.replace(/\\s+/g,'_').toLowerCase()+'_'+calibratingPlatform.toLowerCase();
   
-  // Save to database for all users
-  dbSelectors[fieldKey]=selector;
-  chrome.runtime.sendMessage({action:'saveSelectors',selectors:dbSelectors},response=>{
-    if(response&&response.success){
-      toast(calibrating+' ('+calibratingPlatform+') saved for all users!');
-      endCalibration(calibrating);
-    }else{
-      toast('Failed to save selector');
-      endCalibration();
-    }
+  chrome.storage.local.set({[fieldKey]:selector},()=>{
+    toast(calibrating+' ('+calibratingPlatform+') saved!');
+    endCalibration(calibrating);
   });
 }
 
@@ -625,95 +601,86 @@ function endCalibration(returnToField){
   else document.getElementById('akmez-settings').click();
 }
 
-function countConfiguredPlatforms(fieldKey){
-  return PLATFORMS.filter(p=>dbSelectors[fieldKey+'_'+p.toLowerCase()]).length;
+function countConfiguredPlatforms(stored,fieldKey){
+  return PLATFORMS.filter(p=>stored['selector_'+fieldKey+'_'+p.toLowerCase()]).length;
 }
 
 // Settings button
 document.getElementById('akmez-settings').addEventListener('click',()=>{
   const body=document.getElementById('akmez-body');
-  const nameCount=countConfiguredPlatforms('customer_name');
-  const c1Count=countConfiguredPlatforms('contact_1');
-  const c2Count=countConfiguredPlatforms('contact_2');
-  
-  // Admin calibration section - only shown to admins
-  const calibrationHtml=isAdmin?\`
-    <h4 style="color:#888;font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px;">Element Calibration (Admin)</h4>
-    <p style="font-size:11px;color:#666;margin-bottom:12px;">Configure selectors for all marketing users</p>
+  chrome.storage.local.get(null,stored=>{
+    const nameCount=countConfiguredPlatforms(stored,'customer_name');
+    const c1Count=countConfiguredPlatforms(stored,'contact_1');
+    const c2Count=countConfiguredPlatforms(stored,'contact_2');
     
-    <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Customer Name">
-      <div>
-        <div style="font-size:12px;color:#fff;">Customer Name</div>
-        <div style="font-size:10px;color:\${nameCount>0?'#22c55e':'#888'};">\${nameCount>0?nameCount+' platform(s) configured':'Not set'}</div>
+    body.innerHTML=\`
+      <div class="akmez-settings-panel">
+        <h3 style="color:#f97316;font-size:14px;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Settings</h3>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">Logged in as</div>
+          <div style="font-size:14px;font-weight:600;color:#fff;">\${stored.userName||'User'}</div>
+        </div>
+        
+        <h4 style="color:#888;font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px;">Element Calibration</h4>
+        <p style="font-size:11px;color:#666;margin-bottom:12px;">Configure selectors for different platforms (Messenger, WhatsApp, etc.)</p>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Customer Name">
+          <div>
+            <div style="font-size:12px;color:#fff;">Customer Name</div>
+            <div style="font-size:10px;color:\${nameCount>0?'#22c55e':'#888'};">\${nameCount>0?nameCount+' platform(s) configured':'Not set'}</div>
+          </div>
+          <div style="color:#f97316;font-size:14px;">→</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 1">
+          <div>
+            <div style="font-size:12px;color:#fff;">Contact 1 (Phone)</div>
+            <div style="font-size:10px;color:\${c1Count>0?'#22c55e':'#888'};">\${c1Count>0?c1Count+' platform(s) configured':'Not set'}</div>
+          </div>
+          <div style="color:#f97316;font-size:14px;">→</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 2">
+          <div>
+            <div style="font-size:12px;color:#fff;">Contact 2 (Phone)</div>
+            <div style="font-size:10px;color:\${c2Count>0?'#22c55e':'#888'};">\${c2Count>0?c2Count+' platform(s) configured':'Not set'}</div>
+          </div>
+          <div style="color:#f97316;font-size:14px;">→</div>
+        </div>
+        
+        <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-clear-selectors">Clear All Selectors</button>
+        
+        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:16px 0;"></div>
+        
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
+          <div style="font-size:11px;color:#888;margin-bottom:4px;">Version</div>
+          <div style="font-size:14px;font-weight:600;color:#fff;">Quick Order v3.0</div>
+        </div>
+        
+        <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-refresh">Refresh Data</button>
+        <button class="akmez-btn" style="width:100%;background:rgba(239,68,68,0.2);color:#ef4444;border-color:rgba(239,68,68,0.3);" id="settings-logout">Sign Out</button>
+        <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="settings-back">← Back</button>
       </div>
-      <div style="color:#f97316;font-size:14px;">→</div>
-    </div>
+    \`;
     
-    <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 1">
-      <div>
-        <div style="font-size:12px;color:#fff;">Contact 1 (Phone)</div>
-        <div style="font-size:10px;color:\${c1Count>0?'#22c55e':'#888'};">\${c1Count>0?c1Count+' platform(s) configured':'Not set'}</div>
-      </div>
-      <div style="color:#f97316;font-size:14px;">→</div>
-    </div>
-    
-    <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" class="calibration-item" data-field="Contact 2">
-      <div>
-        <div style="font-size:12px;color:#fff;">Contact 2 (Phone)</div>
-        <div style="font-size:10px;color:\${c2Count>0?'#22c55e':'#888'};">\${c2Count>0?c2Count+' platform(s) configured':'Not set'}</div>
-      </div>
-      <div style="color:#f97316;font-size:14px;">→</div>
-    </div>
-    
-    <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-clear-selectors">Clear All Selectors</button>
-    
-    <div style="border-top:1px solid rgba(255,255,255,0.1);margin:16px 0;"></div>
-  \`:'';
-  
-  body.innerHTML=\`
-    <div class="akmez-settings-panel">
-      <h3 style="color:#f97316;font-size:14px;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Settings</h3>
-      
-      <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
-        <div style="font-size:11px;color:#888;margin-bottom:4px;">Logged in as</div>
-        <div style="font-size:14px;font-weight:600;color:#fff;">\${userName}</div>
-        \${isAdmin?'<div style="font-size:10px;color:#f97316;margin-top:4px;">Administrator</div>':''}
-      </div>
-      
-      \${calibrationHtml}
-      
-      <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px;">
-        <div style="font-size:11px;color:#888;margin-bottom:4px;">Version</div>
-        <div style="font-size:14px;font-weight:600;color:#fff;">Quick Order v3.0</div>
-      </div>
-      
-      <button class="akmez-btn" style="width:100%;background:rgba(255,255,255,0.1);margin-bottom:8px;" id="settings-refresh">Refresh Data</button>
-      <button class="akmez-btn" style="width:100%;background:rgba(239,68,68,0.2);color:#ef4444;border-color:rgba(239,68,68,0.3);" id="settings-logout">Sign Out</button>
-      <button class="akmez-btn" style="width:100%;background:transparent;margin-top:16px;" id="settings-back">← Back</button>
-    </div>
-  \`;
-  
-  // Calibration item clicks - only for admins
-  if(isAdmin){
+    // Calibration item clicks - now opens platform picker
     document.querySelectorAll('.calibration-item').forEach(item=>{
       item.onclick=()=>showPlatformPicker(item.dataset.field);
     });
     
-    const clearBtn=document.getElementById('settings-clear-selectors');
-    if(clearBtn){
-      clearBtn.onclick=()=>{
-        dbSelectors={};
-        chrome.runtime.sendMessage({action:'saveSelectors',selectors:dbSelectors},response=>{
-          if(response&&response.success){
-            toast('All selectors cleared for all users');
-            document.getElementById('akmez-settings').click();
-          }else{
-            toast('Failed to clear selectors');
-          }
-        });
-      };
-    }
-  }
+    document.getElementById('settings-clear-selectors').onclick=()=>{
+      const keysToRemove=[];
+      PLATFORMS.forEach(p=>{
+        keysToRemove.push('selector_customer_name_'+p.toLowerCase());
+        keysToRemove.push('selector_contact_1_'+p.toLowerCase());
+        keysToRemove.push('selector_contact_2_'+p.toLowerCase());
+      });
+      chrome.storage.local.remove(keysToRemove,()=>{
+        toast('All selectors cleared');
+        document.getElementById('akmez-settings').click();
+      });
+    };
     
     document.getElementById('settings-back').onclick=()=>{
       if(currentTab==='orders')loadData();
@@ -774,12 +741,9 @@ function loadData(){
           showLogin();
           return;
         }
-products=data.products||[];
-  regions=data.regions||[];
-  isAdmin=data.isAdmin||false;
-  dbSelectors=data.selectors||{};
-  userName=data.userName||'User';
-  renderForm();
+        products=data.products||[];
+        regions=data.regions||[];
+        renderForm();
       });
     }else{
       showLogin();
@@ -966,34 +930,36 @@ function renderForm(){
     });
   });
   
-  // Auto-fill from database selectors - try all platforms
-  const platforms=['messenger','whatsapp','instagram','other'];
-  
-  // Helper to try all platform selectors for a field
-  function trySelectors(fieldKey,inputId,isPhone){
-    for(const p of platforms){
-      const selector=dbSelectors[fieldKey+'_'+p];
-      if(selector){
-        try{
-          const el=document.querySelector(selector);
-          if(el){
-            let text=el.textContent||el.innerText||el.value||'';
-            if(isPhone)text=text.replace(/[^0-9+]/g,'');
-            if(text.trim()){
-              document.getElementById(inputId).value=text.trim();
-              return true;
+  // Auto-fill from calibrated selectors - try all platforms
+  chrome.storage.local.get(null,stored=>{
+    const platforms=['messenger','whatsapp','instagram','other'];
+    
+    // Helper to try all platform selectors for a field
+    function trySelectors(fieldKey,inputId,isPhone){
+      for(const p of platforms){
+        const selector=stored['selector_'+fieldKey+'_'+p];
+        if(selector){
+          try{
+            const el=document.querySelector(selector);
+            if(el){
+              let text=el.textContent||el.innerText||el.value||'';
+              if(isPhone)text=text.replace(/[^0-9+]/g,'');
+              if(text.trim()){
+                document.getElementById(inputId).value=text.trim();
+                return true;
+              }
             }
-          }
-        }catch(e){}
+          }catch(e){}
+        }
       }
+      return false;
     }
-    return false;
-  }
-  
-  trySelectors('customer_name','ak-name',false);
-  trySelectors('contact_1','ak-c1',true);
-  trySelectors('contact_2','ak-c2',true);
-  updateSubmitState();
+    
+    trySelectors('customer_name','ak-name',false);
+    trySelectors('contact_1','ak-c1',true);
+    trySelectors('contact_2','ak-c2',true);
+    updateSubmitState();
+  });
   
   // Product selection
   document.querySelectorAll('.akmez-product').forEach(el=>{
@@ -1143,11 +1109,10 @@ sel.onclick=async e=>{
     toast('Copied: '+t.substring(0,20));
     sel.style.display='none';
     window.getSelection().removeAllRanges();
-  updateSubmitState();
+    updateSubmitState();
   }
-  };
-
-})();`
+};
+`
 
 const CONTENT_CSS = ``
 
@@ -1171,7 +1136,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.2.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.0.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
