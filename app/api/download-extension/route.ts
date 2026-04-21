@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -746,7 +746,14 @@ function loadData(){
   const body=document.getElementById('akmez-body');
   body.innerHTML='<div class="akmez-loading"><div class="akmez-spinner"></div><p>Connecting...</p></div>';
   
-  // Always read from storage to ensure we have latest token
+  // Check memory variable first (set after successful login)
+  if(authToken){
+    console.log('[v0] loadData - using memory token');
+    fetchWithToken(authToken);
+    return;
+  }
+  
+  // Fall back to storage
   chrome.storage.local.get(['authToken','tokenExpiry'],stored=>{
     console.log('[v0] loadData - stored:', stored.authToken ? 'has token' : 'no token', 'expiry:', stored.tokenExpiry, 'now:', Date.now());
     
@@ -1331,7 +1338,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.6.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.0.7.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
