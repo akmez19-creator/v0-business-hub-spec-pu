@@ -6,10 +6,11 @@ const API_BASE = 'https://www.akmez.tech';
 // Helper to get auth headers from stored token
 async function getAuthHeaders() {
   return new Promise(resolve => {
-    chrome.storage.local.get(['authToken', 'tokenExpiry'], stored => {
-      const isValid = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
-      if (isValid) {
-        resolve({ 'Authorization': `Bearer ${stored.authToken}`, 'Content-Type': 'application/json' });
+    chrome.storage.local.get(['authToken', 'refreshToken'], stored => {
+      if (stored.authToken) {
+        const headers = { 'Authorization': `Bearer ${stored.authToken}`, 'Content-Type': 'application/json' };
+        if (stored.refreshToken) headers['X-Refresh-Token'] = stored.refreshToken;
+        resolve(headers);
       } else {
         resolve({ 'Content-Type': 'application/json' });
       }
@@ -61,6 +62,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Store auth info (shared between popup and content script)
           await chrome.storage.local.set({
             authToken: data.accessToken,
+            refreshToken: data.refreshToken || '',
             tokenExpiry: data.expiresAt,
             userName: data.user?.name || request.email.split('@')[0],
             userEmail: request.email
