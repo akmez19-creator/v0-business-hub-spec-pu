@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.3.0'
+const EXTENSION_VERSION = '4.4.0'
 const LAST_UPDATED = '2026-07-07'
 
 export function ToolsDownloadPage() {
@@ -81,6 +81,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: MousePointer2, text: 'Customer name auto-fills and follows the open conversation' },
     { icon: Clock, text: 'Login automatically clocks you in - working time starts on sign in' },
     { icon: Shield, text: 'Auto clock-out and logout after 5 minutes of inactivity' },
     { icon: RefreshCw, text: 'Sessions stay signed in - automatic token refresh' },
