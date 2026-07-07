@@ -44,7 +44,7 @@ widget.innerHTML = `
   <div class="akmez-header" id="akmez-drag">
     <div class="akmez-logo">A</div>
     <div style="flex:1">
-      <span>Quick Order v3.0</span>
+      <span>Quick Order v3.2</span>
       <div style="font-size:10px;opacity:0.7">Create orders from anywhere</div>
     </div>
     <div class="akmez-header-btns">
