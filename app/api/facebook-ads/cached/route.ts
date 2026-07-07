@@ -22,32 +22,37 @@ export async function GET(request: Request) {
   
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
   
+  // Load any existing cache up front so we can fall back to it if Facebook fails
+  const { data: cached } = await supabase
+    .from('ads_cache')
+    .select('*')
+    .eq('cache_key', cacheKey)
+    .single()
+  
+  // Helper to return cached (possibly stale) data with an optional error message
+  const returnCache = (stale: boolean, errorMessage?: string) => {
+    if (!cached) return null
+    const lastRefresh = new Date(cached.last_refresh)
+    const ageSeconds = (Date.now() - lastRefresh.getTime()) / 1000
+    const remainingSeconds = Math.max(0, CACHE_TTL_SECONDS - ageSeconds)
+    return NextResponse.json({
+      accounts: cached.accounts,
+      campaigns: cached.campaigns,
+      accountSpends: cached.account_spends,
+      lastRefresh: cached.last_refresh,
+      nextRefreshIn: Math.round(remainingSeconds),
+      fromCache: true,
+      stale,
+      ...(errorMessage ? { error: errorMessage } : {})
+    })
+  }
+  
   try {
-    // Check if we have valid cached data
-    if (!forceRefresh) {
-      const { data: cached } = await supabase
-        .from('ads_cache')
-        .select('*')
-        .eq('cache_key', cacheKey)
-        .single()
-      
-      if (cached) {
-        const lastRefresh = new Date(cached.last_refresh)
-        const now = new Date()
-        const ageSeconds = (now.getTime() - lastRefresh.getTime()) / 1000
-        const remainingSeconds = Math.max(0, CACHE_TTL_SECONDS - ageSeconds)
-        
-        // Return cached data if still valid
-        if (ageSeconds < CACHE_TTL_SECONDS) {
-          return NextResponse.json({
-            accounts: cached.accounts,
-            campaigns: cached.campaigns,
-            accountSpends: cached.account_spends,
-            lastRefresh: cached.last_refresh,
-            nextRefreshIn: Math.round(remainingSeconds),
-            fromCache: true
-          })
-        }
+    // Return cached data if still valid
+    if (!forceRefresh && cached) {
+      const ageSeconds = (Date.now() - new Date(cached.last_refresh).getTime()) / 1000
+      if (ageSeconds < CACHE_TTL_SECONDS) {
+        return returnCache(false)!
       }
     }
     
@@ -55,10 +60,9 @@ export async function GET(request: Request) {
     const accessToken = process.env.FACEBOOK_ACCESS_TOKEN
     
     if (!accessToken) {
-      return NextResponse.json(
-        { error: 'Facebook access token not configured' },
-        { status: 500 }
-      )
+      // Fall back to stale cache if available
+      return returnCache(true, 'Facebook access token not configured') ??
+        NextResponse.json({ error: 'Facebook access token not configured' }, { status: 500 })
     }
     
     // Fetch all accounts including billing info
@@ -71,7 +75,11 @@ export async function GET(request: Request) {
     
     if (!accountsResponse.ok) {
       const error = await accountsResponse.json()
-      throw new Error(error.error?.message || 'Failed to fetch ad accounts')
+      const message = error.error?.message || 'Failed to fetch ad accounts'
+      // Fall back to stale cache instead of crashing (e.g. expired token)
+      const fallback = returnCache(true, message)
+      if (fallback) return fallback
+      throw new Error(message)
     }
     
     const accountsData = await accountsResponse.json()
@@ -167,9 +175,10 @@ export async function GET(request: Request) {
     
   } catch (error) {
     console.error('Cached Facebook API Error:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch ads data' },
-      { status: 500 }
-    )
+    const message = error instanceof Error ? error.message : 'Failed to fetch ads data'
+    // Fall back to stale cache if we have any, otherwise return the error
+    const fallback = returnCache(true, message)
+    if (fallback) return fallback
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

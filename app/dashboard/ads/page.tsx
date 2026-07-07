@@ -179,16 +179,18 @@ export default function AdsManagerPage() {
       const res = await fetch(`/api/facebook-ads/cached${forceRefresh ? '?forceRefresh=true' : ''}`)
       const data = await res.json()
       
-      if (data.error) {
-        setError(data.error)
-        return
+      // If we got data (even stale), render it. Show the error as a warning if present.
+      if (data.accounts || data.campaigns) {
+        setAccounts(data.accounts || [])
+        setCampaigns(data.campaigns || [])
+        setAccountSpends(data.accountSpends || {})
+        if (data.lastRefresh) setLastRefresh(new Date(data.lastRefresh))
+        setCountdown(data.nextRefreshIn || AUTO_REFRESH_INTERVAL)
       }
       
-      setAccounts(data.accounts || [])
-      setCampaigns(data.campaigns || [])
-      setAccountSpends(data.accountSpends || {})
-      setLastRefresh(new Date(data.lastRefresh))
-      setCountdown(data.nextRefreshIn || AUTO_REFRESH_INTERVAL)
+      if (data.error) {
+        setError(data.error)
+      }
     } catch {
       setError('Failed to fetch ads data')
     } finally {
@@ -472,7 +474,7 @@ export default function AdsManagerPage() {
           <Megaphone className="w-8 h-8 text-red-500" />
         </div>
         <p className="text-lg text-red-500 text-center">{error}</p>
-        <Button onClick={fetchAccounts} variant="outline">
+        <Button onClick={() => fetchCachedData(true)} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
           Retry
         </Button>
