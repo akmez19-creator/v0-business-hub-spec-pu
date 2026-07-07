@@ -239,7 +239,7 @@ export async function POST(request: NextRequest) {
     }
     
     const body = await request.json()
-    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes } = body
+    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId } = body
     
     // Validate required fields
     if (!customerName?.trim()) {
@@ -269,6 +269,7 @@ export async function POST(request: NextRequest) {
       qty: qty || 1,
       amount: amount || 0,
       notes: notes?.trim() || null,
+      ad_id: adId?.trim() || null,
       status: 'pending',
       entry_date: new Date().toISOString().split('T')[0],
       delivery_date: deliveryDate || new Date().toISOString().split('T')[0],
