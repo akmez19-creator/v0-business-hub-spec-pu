@@ -1,7 +1,6 @@
-// Akmez Quick Order - Extension Popup v3.2.0
+// Akmez Quick Order - Extension Popup v4.0.0
 // This popup shows CONNECTION STATUS ONLY. All login and features are in the floating button (content.js).
 
-const API_BASE = 'https://www.akmez.tech';
 const content = document.getElementById('content');
 
 // Check authentication status on load
@@ -17,29 +16,22 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function checkAuth() {
   content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
 
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail'], async (stored) => {
-    if (stored.authToken) {
-      // Verify token is still valid with server
-      try {
-        const res = await fetch(`${API_BASE}/api/extension`, {
-          headers: { 'Authorization': `Bearer ${stored.authToken}` }
-        });
-        const data = await res.json();
-
-        if (data.authenticated) {
-          renderConnected(stored.userName || 'User', stored.userEmail || '');
-          return;
-        }
-        // Token invalid, clear it
-        chrome.storage.local.remove(['authToken', 'refreshToken', 'tokenExpiry', 'userName', 'userEmail']);
-        renderDisconnected();
-      } catch (err) {
-        // Network error - show connected state optimistically since a token exists
-        renderConnected(stored.userName || 'User', stored.userEmail || '');
-      }
-    } else {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail'], (stored) => {
+    if (!stored.authToken) {
       renderDisconnected();
+      return;
     }
+    // Verify via background script - it auto-refreshes expired sessions
+    chrome.runtime.sendMessage({ action: 'fetchData' }, (response) => {
+      if (response && response.success && response.data && response.data.authenticated) {
+        renderConnected(stored.userName || 'User', stored.userEmail || '');
+      } else if (response && !response.success) {
+        // Network error - show connected optimistically since a token exists
+        renderConnected(stored.userName || 'User', stored.userEmail || '');
+      } else {
+        renderDisconnected();
+      }
+    });
   });
 }
 
@@ -62,7 +54,7 @@ function renderConnected(name, email) {
   `;
 
   document.getElementById('logout-btn').onclick = () => {
-    chrome.storage.local.remove(['authToken', 'refreshToken', 'tokenExpiry', 'userName', 'userEmail'], () => {
+    chrome.runtime.sendMessage({ action: 'logout' }, () => {
       renderDisconnected();
     });
   };
