@@ -101,10 +101,10 @@ export async function GET(request: NextRequest) {
         .order('attribute_name', { ascending: true })
       
       // Group variants by product_id
-      (variants || []).forEach(v => {
+      for (const v of variants || []) {
         if (!variantsMap[v.product_id]) variantsMap[v.product_id] = []
         variantsMap[v.product_id].push(v)
-      })
+      }
     }
     
     // Attach variants to products
