@@ -28,8 +28,8 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '3.0.0'
-const LAST_UPDATED = '2026-04-21'
+const EXTENSION_VERSION = '3.2.0'
+const LAST_UPDATED = '2026-07-07'
 
 export function ToolsDownloadPage() {
   const [downloading, setDownloading] = useState(false)
@@ -41,7 +41,7 @@ export function ToolsDownloadPage() {
       const link = document.createElement('a')
       // Add timestamp to bust cache
       link.href = '/api/download-extension?v=' + Date.now()
-      link.download = 'akmez-quick-order-v3.0.0.zip'
+      link.download = 'akmez-quick-order-v3.2.0.zip'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -151,7 +151,7 @@ export function ToolsDownloadPage() {
                 <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-orange-500/20 to-orange-500/5 rounded-xl border border-orange-500/20 mb-4">
                   <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold text-lg">A</div>
                   <div className="flex-1">
-                    <div className="font-semibold text-foreground text-sm">Quick Order v3.0</div>
+                    <div className="font-semibold text-foreground text-sm">Quick Order v3.2</div>
                     <div className="text-xs text-muted-foreground">Create orders from anywhere</div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -221,7 +221,7 @@ export function ToolsDownloadPage() {
                 Free
               </div>
               <div className="absolute -bottom-3 -left-3 px-3 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium">
-                v3.0 Preview
+                v3.2 Preview
               </div>
             </div>
           </div>
