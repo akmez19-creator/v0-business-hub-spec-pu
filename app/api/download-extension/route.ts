@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 const MANIFEST = `{
   "manifest_version": 3,
   "name": "Akmez Quick Order v3.0",
-  "version": "3.1.2",
+  "version": "3.2.0",
   "description": "Create delivery orders directly from Facebook Business Suite",
   "permissions": ["activeTab", "clipboardRead", "clipboardWrite", "storage", "scripting"],
   "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
@@ -200,7 +200,7 @@ const POPUP_HTML = `<!DOCTYPE html>
     <div class="logo">A</div>
     <div class="header-text">
       <h1>Akmez Quick Order</h1>
-      <div class="sub">Login to get started</div>
+      <div class="sub">Connection status</div>
     </div>
   </div>
   <div class="content" id="content">
@@ -248,56 +248,16 @@ function showConnected(name) {
 }
 
 function showLogin() {
-  content.innerHTML = '<div class="status disconnected"><div class="status-icon">!</div><h2>Not Connected</h2><p>Sign in to create orders</p></div><div class="login-form"><div class="error" id="error"></div><div class="field"><input type="email" id="email" placeholder="Email address"></div><div class="field"><input type="password" id="password" placeholder="Password"></div><button class="btn btn-primary" id="loginBtn">Sign In</button><div class="divider"><span>or</span></div><button class="btn btn-secondary" id="openBtn">Open Akmez Website</button></div>';
-  
-  const btn = document.getElementById('loginBtn');
-  const err = document.getElementById('error');
-  const email = document.getElementById('email');
-  const pwd = document.getElementById('password');
-  
-  btn.addEventListener('click', async () => {
-    if (!email.value.trim() || !pwd.value) {
-      err.textContent = 'Enter email and password';
-      err.style.display = 'block';
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = 'Signing in...';
-    err.style.display = 'none';
-    
-    try {
-      const res = await fetch(API_BASE + '/api/extension/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.value.trim(), password: pwd.value })
-      });
-      const data = await res.json();
-      if (data.success && data.accessToken) {
-        const name = data.user?.name || data.userName || 'User';
-        await chrome.storage.local.set({
-          authToken: data.accessToken,
-          refreshToken: data.refreshToken || '',
-          tokenExpiry: data.expiresAt,
-          userName: name
-        });
-        showConnected(name);
-      } else {
-        err.textContent = data.error || 'Invalid credentials';
-        err.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'Sign In';
-      }
-    } catch (e) {
-      err.textContent = 'Connection error';
-      err.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Sign In';
-    }
-  });
-  
-  pwd.addEventListener('keypress', (e) => { if (e.key === 'Enter') btn.click(); });
-  document.getElementById('openBtn').addEventListener('click', () => { chrome.tabs.create({ url: API_BASE + '/auth/sign-in' }); });
+  content.innerHTML = '<div class="status disconnected"><div class="status-icon disconnected">!</div><h2>Not Signed In</h2><p>You are not logged in yet.</p></div><div class="hint"><p>Click the floating <strong>A button</strong> on any page to sign in and start creating orders.</p></div><button class="btn btn-secondary" id="refreshBtn">Refresh Status</button>';
+  document.getElementById('refreshBtn').addEventListener('click', () => { init(); });
 }
+
+// Update status live if auth changes (e.g. signed in via the floating button)
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.authToken) {
+    init();
+  }
+});
 
 init();`
 
@@ -801,14 +761,68 @@ function fetchWithToken(token, refresh){
 function showLogin(){
   const body=document.getElementById('akmez-body');
   body.innerHTML=\`
-    <div class="akmez-login">
-      <p>Sign in to create orders</p>
-      <small style="color:#888;display:block;margin-bottom:16px;">Click the Akmez icon in your browser toolbar to sign in</small>
-      <button class="akmez-login-btn" id="akmez-refresh-auth">Check Login Status</button>
+    <div class="akmez-login" style="text-align:left;padding:24px 20px;">
+      <p style="text-align:center;margin-bottom:16px;">Sign in to create orders</p>
+      <div class="akmez-error" id="ak-login-error"></div>
+      <div class="akmez-input-wrap" style="margin-bottom:12px;">
+        <input type="email" class="akmez-input" id="ak-login-email" placeholder="Email address" autocomplete="username">
+      </div>
+      <div class="akmez-input-wrap" style="margin-bottom:12px;">
+        <input type="password" class="akmez-input" id="ak-login-password" placeholder="Password" autocomplete="current-password">
+      </div>
+      <button class="akmez-login-btn" id="ak-login-btn">Sign In</button>
     </div>
   \`;
   
-  document.getElementById('akmez-refresh-auth').onclick=()=>loadData();
+  const btn=document.getElementById('ak-login-btn');
+  const err=document.getElementById('ak-login-error');
+  const emailEl=document.getElementById('ak-login-email');
+  const pwdEl=document.getElementById('ak-login-password');
+  
+  const doLogin=async()=>{
+    const email=emailEl.value.trim();
+    const password=pwdEl.value;
+    if(!email||!password){
+      err.textContent='Enter email and password';
+      err.style.display='block';
+      return;
+    }
+    btn.disabled=true;
+    btn.textContent='Signing in...';
+    err.style.display='none';
+    
+    try{
+      const res=await fetch(API_BASE+'/api/extension/login',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({email,password})
+      });
+      const data=await res.json();
+      if(data.success && data.accessToken){
+        authToken=data.accessToken;
+        refreshToken=data.refreshToken||null;
+        chrome.storage.local.set({
+          authToken:data.accessToken,
+          refreshToken:data.refreshToken||'',
+          tokenExpiry:data.expiresAt,
+          userName:(data.user&&data.user.name)||data.userName||'User'
+        },()=>{ loadData(); });
+      }else{
+        err.textContent=data.error||'Invalid credentials';
+        err.style.display='block';
+        btn.disabled=false;
+        btn.textContent='Sign In';
+      }
+    }catch(e){
+      err.textContent='Connection error';
+      err.style.display='block';
+      btn.disabled=false;
+      btn.textContent='Sign In';
+    }
+  };
+  
+  btn.onclick=doLogin;
+  pwdEl.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)doLogin(); });
 }
 
 // Listen for auth changes from popup
@@ -1279,7 +1293,7 @@ export async function GET() {
     return new NextResponse(zipContent, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.1.2.zip"',
+        'Content-Disposition': 'attachment; filename="akmez-quick-order-v3.2.0.zip"',
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
