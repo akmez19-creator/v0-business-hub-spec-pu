@@ -1,4 +1,4 @@
-// Akmez Quick Order v3.0 - Draggable Floating Widget with Full Functionality
+// Akmez Quick Order v4.0 - Draggable Floating Widget with Full Functionality
 
 const API_BASE = 'https://www.akmez.tech';
 
@@ -11,8 +11,8 @@ document.body.appendChild(toggleBtn);
 
 // Update toggle button based on auth state
 function updateToggleButton() {
-  chrome.storage.local.get(['authToken', 'tokenExpiry'], stored => {
-    const isLoggedIn = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
+  chrome.storage.local.get(['authToken'], stored => {
+    const isLoggedIn = !!stored.authToken;
     if (isLoggedIn) {
       toggleBtn.classList.add('logged-in');
       toggleBtn.title = 'Open Akmez Quick Order (Signed In)';
@@ -44,7 +44,7 @@ widget.innerHTML = `
   <div class="akmez-header" id="akmez-drag">
     <div class="akmez-logo">A</div>
     <div style="flex:1">
-      <span>Quick Order v3.2</span>
+      <span>Quick Order v4.0</span>
       <div style="font-size:10px;opacity:0.7">Create orders from anywhere</div>
     </div>
     <div class="akmez-header-btns">
@@ -230,11 +230,9 @@ async function loadData() {
   const body = document.getElementById('akmez-body');
   body.innerHTML = '<div class="akmez-loading"><div class="akmez-spinner"></div></div>';
   
-  // First check if user is logged in via popup (shared storage)
-  chrome.storage.local.get(['authToken', 'tokenExpiry', 'userName'], stored => {
-    const isLoggedIn = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
-    
-    if (!isLoggedIn) {
+  // Check if a token exists - the background script handles validation and refresh
+  chrome.storage.local.get(['authToken', 'userName'], stored => {
+    if (!stored.authToken) {
       renderLogin('');
       return;
     }
