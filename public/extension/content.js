@@ -235,7 +235,7 @@ async function loadData() {
     const isLoggedIn = stored.authToken && stored.tokenExpiry && Date.now() < stored.tokenExpiry * 1000;
     
     if (!isLoggedIn) {
-      renderLogin('Please sign in via the extension popup');
+      renderLogin('');
       return;
     }
     
@@ -275,7 +275,7 @@ function renderLogin(error) {
       </div>
       <button class="akmez-login-btn" id="login-btn">Sign In</button>
       <div class="akmez-login-hint" style="margin-top:12px;font-size:10px;color:#888;text-align:center;">
-        You can also sign in via the extension icon in the toolbar
+        Sign in to create orders and manage working time
       </div>
     </div>
   `;

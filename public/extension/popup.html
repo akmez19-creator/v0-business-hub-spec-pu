@@ -95,6 +95,36 @@
       transition: all 0.15s;
     }
     .logout-btn:hover { background: rgba(239, 68, 68, 0.2); }
+
+    /* Disconnected state */
+    .disconnected { text-align: center; }
+    .disconnected .status-icon {
+      width: 60px;
+      height: 60px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      margin: 0 auto 16px;
+    }
+    .refresh-btn {
+      width: 100%;
+      padding: 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .refresh-btn:hover { background: rgba(255,255,255,0.1); }
     
     /* Login form */
     .login-form { }
@@ -177,7 +207,7 @@
     <div class="logo">A</div>
     <div class="header-title">
       <h1>Akmez Quick Order</h1>
-      <div class="sub">Account Settings</div>
+      <div class="sub">Connection status</div>
     </div>
   </div>
   <div class="content" id="content">
