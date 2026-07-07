@@ -232,7 +232,7 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors'], stored => {
     const signedIn = !!stored.authToken;
     const renderSelList = (arr, kind, emptyMsg) => (arr.length
       ? arr.map((s, i) => `
@@ -243,8 +243,10 @@ function renderSettings() {
       : `<div class="akmez-sel-empty">${emptyMsg}</div>`);
     const nameSel = Array.isArray(stored.nameSelectors) ? stored.nameSelectors : [];
     const phoneSel = Array.isArray(stored.phoneSelectors) ? stored.phoneSelectors : [];
+    const adidSel = Array.isArray(stored.adidSelectors) ? stored.adidSelectors : [];
     const nameHtml = renderSelList(nameSel, 'name', 'No selectors yet. Click "Pick name from page" then click the customer name in the conversation.');
     const phoneHtml = renderSelList(phoneSel, 'phone', 'No selectors yet. Click "Pick phone from page" then click the phone number (e.g. in the contact panel).');
+    const adidHtml = renderSelList(adidSel, 'adid', 'No selectors yet. Click "Pick ad id from page" then click the ad_id label in the contact panel.');
     body.innerHTML = `
       <div class="akmez-settings-panel">
         <div class="akmez-section">Account</div>
@@ -275,7 +277,12 @@ function renderSettings() {
         <div class="akmez-section">Phone Number Auto-Fill</div>
         <div class="akmez-sel-list">${phoneHtml}</div>
         <button class="akmez-set-btn" id="set-pick-phone">&#9678; Pick phone from page</button>
-        <div class="akmez-hint-text">On WhatsApp the number shows in the right contact panel. Pick it once and Contact 1 auto-fills. Digits are extracted automatically.</div>
+        <div class="akmez-hint-text">On WhatsApp the number shows in the right contact panel. Pick it once and Contact 1 auto-fills. The +230 code is removed automatically.</div>
+        
+        <div class="akmez-section">Ad ID Auto-Fill</div>
+        <div class="akmez-sel-list">${adidHtml}</div>
+        <button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button>
+        <div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>
         
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
@@ -299,6 +306,7 @@ function renderSettings() {
     document.getElementById('set-refresh').onclick = () => { toast('Refreshing...'); loadData(); };
     document.getElementById('set-pick-name').onclick = () => startPicker('name');
     document.getElementById('set-pick-phone').onclick = () => startPicker('phone');
+    document.getElementById('set-pick-adid').onclick = () => startPicker('adid');
     body.querySelectorAll('.akmez-sel-del').forEach(b => {
       b.onclick = () => {
         const kind = b.dataset.kind;
@@ -330,7 +338,7 @@ function renderSettings() {
 }
 
 // ===== Auto-fill selectors: name + phone, multiple per field (Facebook, WhatsApp, etc.) =====
-const SEL_KEYS = { name: 'nameSelectors', phone: 'phoneSelectors' };
+const SEL_KEYS = { name: 'nameSelectors', phone: 'phoneSelectors', adid: 'adidSelectors' };
 
 function getSelectors(kind, cb) {
   const key = SEL_KEYS[kind];
@@ -355,12 +363,24 @@ function readFromSelectors(kind, cb) {
   });
 }
 function readCustomerName(cb) { readFromSelectors('name', cb); }
-// Extract a clean phone number (keep leading +, strip spaces/brackets/dashes)
+// Extract a clean local phone number: strips Mauritius country code 230 -> 5XXXXXXX
 function readCustomerPhone(cb) {
   readFromSelectors('phone', raw => {
     if (!raw) { cb(''); return; }
     const m = raw.match(/\+?\d[\d\s().-]{5,}\d/);
-    cb(m ? m[0].replace(/[^\d+]/g, '') : '');
+    if (!m) { cb(''); return; }
+    let digits = m[0].replace(/[^\d]/g, '');
+    // Drop the +230 country code so it stores as the local 8-digit number
+    if (digits.startsWith('230') && digits.length > 8) digits = digits.slice(3);
+    cb(digits);
+  });
+}
+// Extract the ad id (e.g. "ad_id.120248441310790621" -> "120248441310790621")
+function readCustomerAdId(cb) {
+  readFromSelectors('adid', raw => {
+    if (!raw) { cb(''); return; }
+    const m = raw.match(/(\d{6,})/);
+    cb(m ? m[1] : raw.trim());
   });
 }
 // Build a reasonably stable CSS selector for a clicked element
@@ -603,6 +623,15 @@ function renderOrdersForm() {
         <input type="date" id="ak-date" class="akmez-input" value="${new Date().toISOString().split('T')[0]}">
       </div>
     </div>
+    <div class="akmez-row">
+      <div class="akmez-field">
+        <div class="akmez-label">Ad ID</div>
+        <div class="akmez-input-wrap">
+          <input type="text" id="ak-adid" class="akmez-input" placeholder="Ad ID (auto)">
+          <button class="akmez-paste" data-t="ak-adid">PASTE</button>
+        </div>
+      </div>
+    </div>
     <div class="akmez-section">Add Products</div>
     <input type="text" class="akmez-product-search" id="ak-search" placeholder="Type to search ${products.length} products...">
     <div class="akmez-products" id="ak-products">
@@ -630,13 +659,15 @@ function renderOrdersForm() {
     };
   });
   
-  // Auto-fill name + phone - continuously follows the currently open conversation
+  // Auto-fill name + phone + ad id - continuously follows the currently open conversation
   const nameInput = document.getElementById('ak-name');
   const phoneInput = document.getElementById('ak-c1');
-  let nameEdited = false, phoneEdited = false;
-  let lastName = null, lastPhone = null;
+  const adidInput = document.getElementById('ak-adid');
+  let nameEdited = false, phoneEdited = false, adidEdited = false;
+  let lastName = null, lastPhone = null, lastAdid = null;
   nameInput.addEventListener('input', () => { nameEdited = true; });
   phoneInput.addEventListener('input', () => { phoneEdited = true; });
+  adidInput.addEventListener('input', () => { adidEdited = true; });
   
   function syncFields() {
     // Self-clean if the order form is no longer on screen
@@ -658,11 +689,23 @@ function renderOrdersForm() {
     readCustomerPhone(num => {
       if (!num) return;
       if (num !== lastPhone) {
+        // Conversation changed - follow it and drop any stale manual edit
         lastPhone = num;
         phoneEdited = false;
         phoneInput.value = num;
-      } else if (!phoneEdited && !phoneInput.value) {
+      } else if (!phoneEdited) {
         phoneInput.value = num;
+      }
+    });
+    readCustomerAdId(id => {
+      if (!id) return;
+      if (id !== lastAdid) {
+        // Conversation changed - follow it and drop any stale manual edit
+        lastAdid = id;
+        adidEdited = false;
+        adidInput.value = id;
+      } else if (!adidEdited) {
+        adidInput.value = id;
       }
     });
   }
@@ -741,6 +784,7 @@ function submitOrder() {
   const c2 = document.getElementById('ak-c2').value.trim();
   const region = document.getElementById('ak-region').value;
   const date = document.getElementById('ak-date').value;
+  const adId = document.getElementById('ak-adid').value.trim();
   const err = document.getElementById('ak-err');
   const btn = document.getElementById('ak-submit');
   
@@ -776,7 +820,7 @@ function submitOrder() {
   
   chrome.runtime.sendMessage({
     action: 'createOrder',
-    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt }
+    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId }
   }, response => {
     if (!response || !response.success) {
       err.textContent = 'Connection failed';
