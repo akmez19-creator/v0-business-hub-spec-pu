@@ -660,54 +660,44 @@ function renderOrdersForm() {
   });
   
   // Auto-fill name + phone + ad id - continuously follows the currently open conversation
-  const nameInput = document.getElementById('ak-name');
-  const phoneInput = document.getElementById('ak-c1');
-  const adidInput = document.getElementById('ak-adid');
-  let nameEdited = false, phoneEdited = false, adidEdited = false;
-  let lastName = null, lastPhone = null, lastAdid = null;
-  nameInput.addEventListener('input', () => { nameEdited = true; });
-  phoneInput.addEventListener('input', () => { phoneEdited = true; });
-  adidInput.addEventListener('input', () => { adidEdited = true; });
-  
+  const fields = {
+    name:  { input: document.getElementById('ak-name'), edited: false, last: null, emptyStreak: 0 },
+    phone: { input: document.getElementById('ak-c1'),   edited: false, last: null, emptyStreak: 0 },
+    adid:  { input: document.getElementById('ak-adid'), edited: false, last: null, emptyStreak: 0 },
+  };
+  Object.values(fields).forEach(f => f.input.addEventListener('input', () => { f.edited = true; }));
+
+  // Apply a freshly detected value, or clear the field once its selector stops matching.
+  function applyField(f, val) {
+    if (val) {
+      f.emptyStreak = 0;
+      if (val !== f.last) {
+        // Conversation changed - follow it and drop any stale manual edit
+        f.last = val;
+        f.edited = false;
+        f.input.value = val;
+      } else if (!f.edited) {
+        f.input.value = val;
+      }
+    } else if (!f.edited && f.last !== null) {
+      // Selector no longer matches (switched to a conversation without this value).
+      // Require 2 consecutive empty reads to avoid clearing during Meta's re-renders.
+      if (++f.emptyStreak >= 2) {
+        f.last = null;
+        f.input.value = '';
+      }
+    }
+  }
+
   function syncFields() {
     // Self-clean if the order form is no longer on screen
     if (!document.getElementById('ak-name')) {
       if (window.__akmezSyncTimer) { clearInterval(window.__akmezSyncTimer); window.__akmezSyncTimer = null; }
       return;
     }
-    readCustomerName(txt => {
-      if (!txt) return;
-      if (txt !== lastName) {
-        // Conversation changed - follow it and drop any stale manual edit
-        lastName = txt;
-        nameEdited = false;
-        nameInput.value = txt;
-      } else if (!nameEdited) {
-        nameInput.value = txt;
-      }
-    });
-    readCustomerPhone(num => {
-      if (!num) return;
-      if (num !== lastPhone) {
-        // Conversation changed - follow it and drop any stale manual edit
-        lastPhone = num;
-        phoneEdited = false;
-        phoneInput.value = num;
-      } else if (!phoneEdited) {
-        phoneInput.value = num;
-      }
-    });
-    readCustomerAdId(id => {
-      if (!id) return;
-      if (id !== lastAdid) {
-        // Conversation changed - follow it and drop any stale manual edit
-        lastAdid = id;
-        adidEdited = false;
-        adidInput.value = id;
-      } else if (!adidEdited) {
-        adidInput.value = id;
-      }
-    });
+    readCustomerName(txt => applyField(fields.name, txt));
+    readCustomerPhone(num => applyField(fields.phone, num));
+    readCustomerAdId(id => applyField(fields.adid, id));
   }
   syncFields();
   if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
