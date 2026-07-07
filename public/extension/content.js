@@ -154,6 +154,18 @@ style.textContent = `
 .wt-history-item .date{color:#888;}
 .wt-history-item .hours{color:#10b981;font-weight:600;}
 
+/* Settings Styles */
+.akmez-settings-panel{padding:4px 2px;}
+.akmez-set-row{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;margin-bottom:6px;font-size:12px;}
+.akmez-set-label{color:#888;}
+.akmez-set-value{color:#fff;font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.akmez-set-btn{width:100%;padding:12px;margin-bottom:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;text-align:left;transition:all 0.15s;}
+.akmez-set-btn:hover{background:rgba(249,115,22,0.15);border-color:#f97316;}
+.akmez-set-btn.danger{color:#fca5a5;border-color:rgba(239,68,68,0.3);}
+.akmez-set-btn.danger:hover{background:rgba(239,68,68,0.15);border-color:#ef4444;}
+.akmez-set-btn.back{text-align:center;margin-top:10px;background:rgba(249,115,22,0.15);border-color:rgba(249,115,22,0.4);color:#f97316;}
+.akmez-set-btn:disabled{opacity:0.5;cursor:not-allowed;}
+
 /* Login Styles */
 .akmez-login{text-align:center;padding:20px;}
 .akmez-login p{color:#fca5a5;margin-bottom:12px;font-size:12px;}
@@ -205,6 +217,78 @@ toggleBtn.addEventListener('click', () => {
   if (widget.style.display === 'block') loadData();
 });
 document.getElementById('akmez-close').addEventListener('click', () => widget.style.display = 'none');
+
+// Settings panel
+document.getElementById('akmez-settings').addEventListener('click', () => renderSettings());
+
+function renderSettings() {
+  const body = document.getElementById('akmez-body');
+  const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
+  
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail'], stored => {
+    const signedIn = !!stored.authToken;
+    body.innerHTML = `
+      <div class="akmez-settings-panel">
+        <div class="akmez-section">Account</div>
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Status</span>
+          <span class="akmez-set-value" style="color:${signedIn ? '#10b981' : '#ef4444'}">${signedIn ? 'Signed in' : 'Not signed in'}</span>
+        </div>
+        ${signedIn ? `
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Name</span>
+          <span class="akmez-set-value">${(stored.userName || 'User').replace(/</g, '&lt;')}</span>
+        </div>
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Email</span>
+          <span class="akmez-set-value">${(stored.userEmail || '-').replace(/</g, '&lt;')}</span>
+        </div>` : ''}
+        
+        <div class="akmez-section">Actions</div>
+        <button class="akmez-set-btn" id="set-refresh">&#8635; Refresh Data</button>
+        <button class="akmez-set-btn" id="set-reset-pos">&#8982; Reset Widget Position</button>
+        ${signedIn ? '<button class="akmez-set-btn danger" id="set-logout">&#10162; Sign Out (clocks you out)</button>' : ''}
+        
+        <div class="akmez-section">About</div>
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Version</span>
+          <span class="akmez-set-value">v${version}</span>
+        </div>
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Auto clock-in</span>
+          <span class="akmez-set-value">On login</span>
+        </div>
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Auto clock-out</span>
+          <span class="akmez-set-value">After 5 min idle</span>
+        </div>
+        
+        <button class="akmez-set-btn back" id="set-back">&#8592; Back</button>
+      </div>
+    `;
+    
+    document.getElementById('set-back').onclick = () => renderCurrentTab();
+    document.getElementById('set-refresh').onclick = () => { toast('Refreshing...'); loadData(); };
+    document.getElementById('set-reset-pos').onclick = () => {
+      widget.style.left = 'auto';
+      widget.style.top = '60px';
+      widget.style.right = '20px';
+      toast('Position reset');
+    };
+    const logoutBtn = document.getElementById('set-logout');
+    if (logoutBtn) {
+      logoutBtn.onclick = () => {
+        logoutBtn.disabled = true;
+        logoutBtn.textContent = 'Signing out...';
+        chrome.runtime.sendMessage({ action: 'logout' }, () => {
+          toast('Signed out');
+          updateToggleButton();
+          renderLogin('');
+        });
+      };
+    }
+  });
+}
 
 // Tab switching
 document.querySelectorAll('.akmez-tab').forEach(tab => {
