@@ -232,16 +232,19 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors'], stored => {
     const signedIn = !!stored.authToken;
-    const selectors = Array.isArray(stored.nameSelectors) ? stored.nameSelectors : [];
-    const selHtml = selectors.length
-      ? selectors.map((s, i) => `
+    const renderSelList = (arr, kind, emptyMsg) => (arr.length
+      ? arr.map((s, i) => `
         <div class="akmez-sel-row">
           <span class="akmez-sel-text" title="${s.replace(/"/g, '&quot;')}">${s.replace(/</g, '&lt;')}</span>
-          <button class="akmez-sel-del" data-i="${i}" title="Remove">&times;</button>
+          <button class="akmez-sel-del" data-kind="${kind}" data-i="${i}" title="Remove">&times;</button>
         </div>`).join('')
-      : '<div class="akmez-sel-empty">No selectors yet. Click "Pick from page" then click the customer name in the conversation.</div>';
+      : `<div class="akmez-sel-empty">${emptyMsg}</div>`);
+    const nameSel = Array.isArray(stored.nameSelectors) ? stored.nameSelectors : [];
+    const phoneSel = Array.isArray(stored.phoneSelectors) ? stored.phoneSelectors : [];
+    const nameHtml = renderSelList(nameSel, 'name', 'No selectors yet. Click "Pick name from page" then click the customer name in the conversation.');
+    const phoneHtml = renderSelList(phoneSel, 'phone', 'No selectors yet. Click "Pick phone from page" then click the phone number (e.g. in the contact panel).');
     body.innerHTML = `
       <div class="akmez-settings-panel">
         <div class="akmez-section">Account</div>
@@ -265,9 +268,14 @@ function renderSettings() {
         ${signedIn ? '<button class="akmez-set-btn danger" id="set-logout">&#10162; Sign Out (clocks you out)</button>' : ''}
         
         <div class="akmez-section">Customer Name Auto-Fill</div>
-        <div class="akmez-sel-list">${selHtml}</div>
-        <button class="akmez-set-btn" id="set-pick">&#9678; Pick from page</button>
-        <div class="akmez-hint-text">Add one selector per platform (Facebook, WhatsApp, etc.). When you open the order form, the first matching selector auto-fills the Name box.</div>
+        <div class="akmez-sel-list">${nameHtml}</div>
+        <button class="akmez-set-btn" id="set-pick-name">&#9678; Pick name from page</button>
+        <div class="akmez-hint-text">Add one selector per platform (Facebook, WhatsApp, etc.). The first matching selector auto-fills the Name box.</div>
+        
+        <div class="akmez-section">Phone Number Auto-Fill</div>
+        <div class="akmez-sel-list">${phoneHtml}</div>
+        <button class="akmez-set-btn" id="set-pick-phone">&#9678; Pick phone from page</button>
+        <div class="akmez-hint-text">On WhatsApp the number shows in the right contact panel. Pick it once and Contact 1 auto-fills. Digits are extracted automatically.</div>
         
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
@@ -289,12 +297,14 @@ function renderSettings() {
     
     document.getElementById('set-back').onclick = () => renderCurrentTab();
     document.getElementById('set-refresh').onclick = () => { toast('Refreshing...'); loadData(); };
-    document.getElementById('set-pick').onclick = () => startNamePicker();
+    document.getElementById('set-pick-name').onclick = () => startPicker('name');
+    document.getElementById('set-pick-phone').onclick = () => startPicker('phone');
     body.querySelectorAll('.akmez-sel-del').forEach(b => {
       b.onclick = () => {
-        getNameSelectors(list => {
+        const kind = b.dataset.kind;
+        getSelectors(kind, list => {
           list.splice(parseInt(b.dataset.i, 10), 1);
-          saveNameSelectors(list, () => renderSettings());
+          saveSelectors(kind, list, () => renderSettings());
         });
       };
     });
@@ -319,16 +329,19 @@ function renderSettings() {
   });
 }
 
-// ===== Customer name auto-fill: multiple selectors (Facebook, WhatsApp, etc.) =====
-function getNameSelectors(cb) {
-  chrome.storage.local.get(['nameSelectors'], s => cb(Array.isArray(s.nameSelectors) ? s.nameSelectors : []));
+// ===== Auto-fill selectors: name + phone, multiple per field (Facebook, WhatsApp, etc.) =====
+const SEL_KEYS = { name: 'nameSelectors', phone: 'phoneSelectors' };
+
+function getSelectors(kind, cb) {
+  const key = SEL_KEYS[kind];
+  chrome.storage.local.get([key], s => cb(Array.isArray(s[key]) ? s[key] : []));
 }
-function saveNameSelectors(list, cb) {
-  chrome.storage.local.set({ nameSelectors: list }, () => cb && cb());
+function saveSelectors(kind, list, cb) {
+  chrome.storage.local.set({ [SEL_KEYS[kind]]: list }, () => cb && cb());
 }
 // Try each saved selector in order; return the first non-empty text found
-function readCustomerName(cb) {
-  getNameSelectors(selectors => {
+function readFromSelectors(kind, cb) {
+  getSelectors(kind, selectors => {
     for (const sel of selectors) {
       try {
         const el = document.querySelector(sel);
@@ -339,6 +352,15 @@ function readCustomerName(cb) {
       } catch (e) { /* invalid selector, skip */ }
     }
     cb('');
+  });
+}
+function readCustomerName(cb) { readFromSelectors('name', cb); }
+// Extract a clean phone number (keep leading +, strip spaces/brackets/dashes)
+function readCustomerPhone(cb) {
+  readFromSelectors('phone', raw => {
+    if (!raw) { cb(''); return; }
+    const m = raw.match(/\+?\d[\d\s().-]{5,}\d/);
+    cb(m ? m[0].replace(/[^\d+]/g, '') : '');
   });
 }
 // Build a reasonably stable CSS selector for a clicked element
@@ -366,13 +388,14 @@ function buildSelector(el) {
   }
   return parts.join(' > ');
 }
-// Highlight click-to-pick: user clicks the customer name on the page
-function startNamePicker() {
-  toast('Click the customer name on the page (ESC to cancel)');
+// Highlight click-to-pick: user clicks the name or phone on the page
+function startPicker(kind) {
+  const label = kind === 'phone' ? 'phone number' : 'customer name';
+  toast('Click the ' + label + ' on the page (ESC to cancel)');
   widget.style.display = 'none';
 
   const hint = document.createElement('div');
-  hint.textContent = 'Click the customer name  -  press ESC to cancel';
+  hint.textContent = 'Click the ' + label + '  -  press ESC to cancel';
   hint.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#f97316;color:#fff;padding:10px 18px;border-radius:8px;font:600 13px system-ui,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,0.4);pointer-events:none;';
   document.body.appendChild(hint);
 
@@ -407,9 +430,9 @@ function startNamePicker() {
     if (!el) return;
     const sel = buildSelector(el);
     const preview = (el.textContent || '').trim().slice(0, 30);
-    getNameSelectors(list => {
+    getSelectors(kind, list => {
       if (!list.includes(sel)) list.push(sel);
-      saveNameSelectors(list, () => {
+      saveSelectors(kind, list, () => {
         renderSettings();
         toast('Saved: "' + preview + '"');
       });
@@ -555,7 +578,7 @@ function renderOrdersForm() {
       <div class="akmez-field">
         <div class="akmez-label">Contact 1 <span class="req">*</span></div>
         <div class="akmez-input-wrap">
-          <input type="text" id="ak-c1" class="akmez-input" placeholder="Phone">
+          <input type="text" id="ak-c1" class="akmez-input" placeholder="Phone (auto)">
           <button class="akmez-paste" data-t="ak-c1">PASTE</button>
         </div>
       </div>
@@ -607,33 +630,45 @@ function renderOrdersForm() {
     };
   });
   
-  // Auto-fill customer name - continuously follows the currently open conversation
+  // Auto-fill name + phone - continuously follows the currently open conversation
   const nameInput = document.getElementById('ak-name');
-  let nameManuallyEdited = false;
-  let lastDetectedName = null;
-  nameInput.addEventListener('input', () => { nameManuallyEdited = true; });
+  const phoneInput = document.getElementById('ak-c1');
+  let nameEdited = false, phoneEdited = false;
+  let lastName = null, lastPhone = null;
+  nameInput.addEventListener('input', () => { nameEdited = true; });
+  phoneInput.addEventListener('input', () => { phoneEdited = true; });
   
-  function syncName() {
+  function syncFields() {
     // Self-clean if the order form is no longer on screen
     if (!document.getElementById('ak-name')) {
-      if (window.__akmezNameTimer) { clearInterval(window.__akmezNameTimer); window.__akmezNameTimer = null; }
+      if (window.__akmezSyncTimer) { clearInterval(window.__akmezSyncTimer); window.__akmezSyncTimer = null; }
       return;
     }
     readCustomerName(txt => {
       if (!txt) return;
-      if (txt !== lastDetectedName) {
-        // The client/conversation changed - follow it and drop any stale manual edit
-        lastDetectedName = txt;
-        nameManuallyEdited = false;
+      if (txt !== lastName) {
+        // Conversation changed - follow it and drop any stale manual edit
+        lastName = txt;
+        nameEdited = false;
         nameInput.value = txt;
-      } else if (!nameManuallyEdited) {
+      } else if (!nameEdited) {
         nameInput.value = txt;
       }
     });
+    readCustomerPhone(num => {
+      if (!num) return;
+      if (num !== lastPhone) {
+        lastPhone = num;
+        phoneEdited = false;
+        phoneInput.value = num;
+      } else if (!phoneEdited && !phoneInput.value) {
+        phoneInput.value = num;
+      }
+    });
   }
-  syncName();
-  if (window.__akmezNameTimer) clearInterval(window.__akmezNameTimer);
-  window.__akmezNameTimer = setInterval(syncName, 1200);
+  syncFields();
+  if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
+  window.__akmezSyncTimer = setInterval(syncFields, 1200);
   
   // Product search
   document.getElementById('ak-search').addEventListener('input', e => {
