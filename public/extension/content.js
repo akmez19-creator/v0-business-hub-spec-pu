@@ -689,20 +689,22 @@ function renderOrdersForm() {
     readCustomerPhone(num => {
       if (!num) return;
       if (num !== lastPhone) {
+        // Conversation changed - follow it and drop any stale manual edit
         lastPhone = num;
         phoneEdited = false;
         phoneInput.value = num;
-      } else if (!phoneEdited && !phoneInput.value) {
+      } else if (!phoneEdited) {
         phoneInput.value = num;
       }
     });
     readCustomerAdId(id => {
       if (!id) return;
       if (id !== lastAdid) {
+        // Conversation changed - follow it and drop any stale manual edit
         lastAdid = id;
         adidEdited = false;
         adidInput.value = id;
-      } else if (!adidEdited && !adidInput.value) {
+      } else if (!adidEdited) {
         adidInput.value = id;
       }
     });
