@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     
     const { user, supabase } = tokenAuth
     const body = await request.json()
-    const { action, pin } = body
+    const { action, pin, auto } = body
     
     if (!action || !['clock_in', 'clock_out'].includes(action)) {
       return NextResponse.json({ 
@@ -144,48 +144,52 @@ export async function POST(request: NextRequest) {
       })
     }
     
-    // Validate PIN (4 digits)
-    if (!pin || !/^\d{4}$/.test(pin)) {
-      return NextResponse.json({ 
-        error: 'Please enter a valid 4-digit PIN' 
-      }, { 
-        status: 400, 
-        headers: corsHeaders 
-      })
-    }
-    
-    // Get user profile and verify PIN
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id, name, clock_pin')
-      .eq('id', user.id)
-      .single()
-    
-    if (!profile) {
-      return NextResponse.json({ 
-        error: 'Profile not found' 
-      }, { 
-        status: 404, 
-        headers: corsHeaders 
-      })
-    }
-    
-    // If user has a PIN set, verify it
-    if (profile.clock_pin && profile.clock_pin !== pin) {
-      return NextResponse.json({ 
-        error: 'Invalid PIN' 
-      }, { 
-        status: 403, 
-        headers: corsHeaders 
-      })
-    }
-    
-    // If no PIN is set, set it to the provided PIN
-    if (!profile.clock_pin) {
-      await supabase
+    // Auto mode: triggered by login (clock in) or idle detection (clock out).
+    // The user already authenticated with email + password, so no PIN is needed.
+    if (!auto) {
+      // Validate PIN (4 digits)
+      if (!pin || !/^\d{4}$/.test(pin)) {
+        return NextResponse.json({ 
+          error: 'Please enter a valid 4-digit PIN' 
+        }, { 
+          status: 400, 
+          headers: corsHeaders 
+        })
+      }
+      
+      // Get user profile and verify PIN
+      const { data: profile } = await supabase
         .from('profiles')
-        .update({ clock_pin: pin })
+        .select('id, name, clock_pin')
         .eq('id', user.id)
+        .single()
+      
+      if (!profile) {
+        return NextResponse.json({ 
+          error: 'Profile not found' 
+        }, { 
+          status: 404, 
+          headers: corsHeaders 
+        })
+      }
+      
+      // If user has a PIN set, verify it
+      if (profile.clock_pin && profile.clock_pin !== pin) {
+        return NextResponse.json({ 
+          error: 'Invalid PIN' 
+        }, { 
+          status: 403, 
+          headers: corsHeaders 
+        })
+      }
+      
+      // If no PIN is set, set it to the provided PIN
+      if (!profile.clock_pin) {
+        await supabase
+          .from('profiles')
+          .update({ clock_pin: pin })
+          .eq('id', user.id)
+      }
     }
     
     const today = new Date().toISOString().split('T')[0]
@@ -195,13 +199,21 @@ export async function POST(request: NextRequest) {
       // Check if already clocked in
       const { data: existing } = await supabase
         .from('staff_shifts')
-        .select('id, status')
+        .select('id, status, actual_clock_in')
         .eq('staff_id', user.id)
         .eq('staff_type', 'profile')
         .eq('shift_date', today)
         .single()
       
       if (existing?.status === 'in_progress') {
+        // In auto mode (login), already being clocked in is fine - keep the running shift
+        if (auto) {
+          return NextResponse.json({
+            success: true,
+            message: 'Already clocked in',
+            clockInTime: existing.actual_clock_in
+          }, { headers: corsHeaders })
+        }
         return NextResponse.json({ 
           error: 'Already clocked in' 
         }, { 
@@ -251,6 +263,13 @@ export async function POST(request: NextRequest) {
         .single()
       
       if (!shift) {
+        // In auto mode (idle logout), not being clocked in is fine
+        if (auto) {
+          return NextResponse.json({
+            success: true,
+            message: 'Not clocked in'
+          }, { headers: corsHeaders })
+        }
         return NextResponse.json({ 
           error: 'Not currently clocked in' 
         }, { 

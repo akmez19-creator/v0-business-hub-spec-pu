@@ -113,6 +113,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             userName: data.user?.name || request.email.split('@')[0],
             userEmail: request.email
           });
+          
+          // Auto clock-in: logging in starts the working time
+          try {
+            await fetchWithAuth(API_BASE + '/api/extension/worktime', {
+              method: 'POST',
+              body: JSON.stringify({ action: 'clock_in', auto: true })
+            });
+          } catch (e) {
+            // Clock-in failure should not block login
+          }
+          
           sendResponse({ success: true, data });
         } else {
           sendResponse({ success: false, error: data.error || 'Login failed' });
@@ -124,6 +135,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'logout') {
+      // Clock out before clearing the session - logging out ends the working time
+      try {
+        await fetchWithAuth(API_BASE + '/api/extension/worktime', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'clock_out', auto: true })
+        });
+      } catch (e) {
+        // Clock-out failure should not block logout
+      }
       await chrome.storage.local.remove(['authToken', 'refreshToken', 'tokenExpiry', 'userName', 'userEmail']);
       sendResponse({ success: true });
       return;
@@ -156,3 +176,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   return true; // Keep channel open for async response
 });
+
+// ===== Idle detection: 5 minutes of inactivity = auto clock-out + logout =====
+const IDLE_SECONDS = 300; // 5 minutes
+
+if (chrome.idle) {
+  chrome.idle.setDetectionInterval(IDLE_SECONDS);
+
+  chrome.idle.onStateChanged.addListener(async (state) => {
+    // 'idle' = no mouse/keyboard input for IDLE_SECONDS; 'locked' = screen locked
+    if (state !== 'idle' && state !== 'locked') return;
+
+    const stored = await getStoredAuth();
+    if (!stored.authToken) return; // Not signed in - nothing to do
+
+    // Clock out first so the shift records the correct end time
+    try {
+      await fetchWithAuth(API_BASE + '/api/extension/worktime', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'clock_out', auto: true })
+      });
+    } catch (e) {
+      // Even if clock-out fails (network), still log out for security
+    }
+
+    // Log out - clear the session
+    await chrome.storage.local.remove(['authToken', 'refreshToken', 'tokenExpiry', 'userName', 'userEmail']);
+  });
+}
