@@ -612,14 +612,39 @@ function renderOrdersForm() {
     };
   });
   
-  // Auto-fill customer name from the conversation using saved selectors
+  // Auto-fill customer name - continuously follows the currently open conversation
   const nameInput = document.getElementById('ak-name');
-  readCustomerName(txt => { if (txt && !nameInput.value) nameInput.value = txt; });
+  let nameManuallyEdited = false;
+  let lastDetectedName = null;
+  nameInput.addEventListener('input', () => { nameManuallyEdited = true; });
   
-  // GRAB button - re-capture the name on demand
-  document.getElementById('ak-grab').onclick = () => {
+  function syncName() {
+    // Self-clean if the order form is no longer on screen
+    if (!document.getElementById('ak-name')) {
+      if (window.__akmezNameTimer) { clearInterval(window.__akmezNameTimer); window.__akmezNameTimer = null; }
+      return;
+    }
     readCustomerName(txt => {
-      if (txt) { nameInput.value = txt; toast('Name captured'); }
+      if (!txt) return;
+      if (txt !== lastDetectedName) {
+        // The client/conversation changed - follow it and drop any stale manual edit
+        lastDetectedName = txt;
+        nameManuallyEdited = false;
+        nameInput.value = txt;
+      } else if (!nameManuallyEdited) {
+        nameInput.value = txt;
+      }
+    });
+  }
+  syncName();
+  if (window.__akmezNameTimer) clearInterval(window.__akmezNameTimer);
+  window.__akmezNameTimer = setInterval(syncName, 1200);
+  
+  // GRAB button - force a fresh capture even if the field was edited
+  document.getElementById('ak-grab').onclick = () => {
+    nameManuallyEdited = false;
+    readCustomerName(txt => {
+      if (txt) { lastDetectedName = txt; nameInput.value = txt; toast('Name captured'); }
       else toast('No name found - add a selector in Settings');
     });
   };
