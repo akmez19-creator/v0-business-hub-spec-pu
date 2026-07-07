@@ -472,7 +472,7 @@ export default function AdsManagerPage() {
           <Megaphone className="w-8 h-8 text-red-500" />
         </div>
         <p className="text-lg text-red-500 text-center">{error}</p>
-        <Button onClick={fetchAccounts} variant="outline">
+        <Button onClick={() => fetchCachedData(true)} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
           Retry
         </Button>
