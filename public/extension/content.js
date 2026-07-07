@@ -100,9 +100,6 @@ style.textContent = `
 .akmez-input::placeholder{color:#555;}
 .akmez-paste{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:rgba(249,115,22,0.3);border:none;border-radius:5px;padding:6px 10px;color:#f97316;font-size:9px;font-weight:700;cursor:pointer;text-transform:uppercase;}
 .akmez-paste:hover{background:rgba(249,115,22,0.5);}
-.akmez-input-name{padding-right:104px;}
-.akmez-grab{position:absolute;right:52px;top:50%;transform:translateY(-50%);background:#f97316;border:none;border-radius:5px;padding:6px 10px;color:#fff;font-size:9px;font-weight:700;cursor:pointer;text-transform:uppercase;}
-.akmez-grab:hover{background:#ea580c;}
 .akmez-sel-list{margin-bottom:8px;}
 .akmez-sel-row{display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:6px;margin-bottom:4px;}
 .akmez-sel-text{flex:1;font-size:11px;color:#ccc;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -550,9 +547,7 @@ function renderOrdersForm() {
       <div class="akmez-field">
         <div class="akmez-label">Name <span class="req">*</span></div>
         <div class="akmez-input-wrap">
-          <input type="text" id="ak-name" class="akmez-input akmez-input-name" placeholder="Customer name">
-          <button class="akmez-grab" id="ak-grab" title="Capture name from the page">GRAB</button>
-          <button class="akmez-paste" data-t="ak-name">PASTE</button>
+          <input type="text" id="ak-name" class="akmez-input" placeholder="Auto-filled from conversation">
         </div>
       </div>
     </div>
@@ -639,15 +634,6 @@ function renderOrdersForm() {
   syncName();
   if (window.__akmezNameTimer) clearInterval(window.__akmezNameTimer);
   window.__akmezNameTimer = setInterval(syncName, 1200);
-  
-  // GRAB button - force a fresh capture even if the field was edited
-  document.getElementById('ak-grab').onclick = () => {
-    nameManuallyEdited = false;
-    readCustomerName(txt => {
-      if (txt) { lastDetectedName = txt; nameInput.value = txt; toast('Name captured'); }
-      else toast('No name found - add a selector in Settings');
-    });
-  };
   
   // Product search
   document.getElementById('ak-search').addEventListener('input', e => {
