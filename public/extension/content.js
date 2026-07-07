@@ -100,6 +100,16 @@ style.textContent = `
 .akmez-input::placeholder{color:#555;}
 .akmez-paste{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:rgba(249,115,22,0.3);border:none;border-radius:5px;padding:6px 10px;color:#f97316;font-size:9px;font-weight:700;cursor:pointer;text-transform:uppercase;}
 .akmez-paste:hover{background:rgba(249,115,22,0.5);}
+.akmez-input-name{padding-right:104px;}
+.akmez-grab{position:absolute;right:52px;top:50%;transform:translateY(-50%);background:#f97316;border:none;border-radius:5px;padding:6px 10px;color:#fff;font-size:9px;font-weight:700;cursor:pointer;text-transform:uppercase;}
+.akmez-grab:hover{background:#ea580c;}
+.akmez-sel-list{margin-bottom:8px;}
+.akmez-sel-row{display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:6px;margin-bottom:4px;}
+.akmez-sel-text{flex:1;font-size:11px;color:#ccc;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.akmez-sel-del{background:rgba(239,68,68,0.15);border:none;color:#fca5a5;width:22px;height:22px;border-radius:4px;cursor:pointer;font-size:15px;line-height:1;flex-shrink:0;}
+.akmez-sel-del:hover{background:rgba(239,68,68,0.3);}
+.akmez-sel-empty{font-size:11px;color:#777;padding:8px;text-align:center;line-height:1.4;}
+.akmez-hint-text{font-size:10px;color:#777;margin:6px 0 4px;line-height:1.4;}
 .akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;cursor:pointer;}
 .akmez-select:focus{border-color:#f97316;}
 .akmez-select option{background:#1a1a2e;color:white;}
@@ -225,8 +235,16 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors'], stored => {
     const signedIn = !!stored.authToken;
+    const selectors = Array.isArray(stored.nameSelectors) ? stored.nameSelectors : [];
+    const selHtml = selectors.length
+      ? selectors.map((s, i) => `
+        <div class="akmez-sel-row">
+          <span class="akmez-sel-text" title="${s.replace(/"/g, '&quot;')}">${s.replace(/</g, '&lt;')}</span>
+          <button class="akmez-sel-del" data-i="${i}" title="Remove">&times;</button>
+        </div>`).join('')
+      : '<div class="akmez-sel-empty">No selectors yet. Click "Pick from page" then click the customer name in the conversation.</div>';
     body.innerHTML = `
       <div class="akmez-settings-panel">
         <div class="akmez-section">Account</div>
@@ -249,6 +267,11 @@ function renderSettings() {
         <button class="akmez-set-btn" id="set-reset-pos">&#8982; Reset Widget Position</button>
         ${signedIn ? '<button class="akmez-set-btn danger" id="set-logout">&#10162; Sign Out (clocks you out)</button>' : ''}
         
+        <div class="akmez-section">Customer Name Auto-Fill</div>
+        <div class="akmez-sel-list">${selHtml}</div>
+        <button class="akmez-set-btn" id="set-pick">&#9678; Pick from page</button>
+        <div class="akmez-hint-text">Add one selector per platform (Facebook, WhatsApp, etc.). When you open the order form, the first matching selector auto-fills the Name box.</div>
+        
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
           <span class="akmez-set-label">Version</span>
@@ -269,6 +292,15 @@ function renderSettings() {
     
     document.getElementById('set-back').onclick = () => renderCurrentTab();
     document.getElementById('set-refresh').onclick = () => { toast('Refreshing...'); loadData(); };
+    document.getElementById('set-pick').onclick = () => startNamePicker();
+    body.querySelectorAll('.akmez-sel-del').forEach(b => {
+      b.onclick = () => {
+        getNameSelectors(list => {
+          list.splice(parseInt(b.dataset.i, 10), 1);
+          saveNameSelectors(list, () => renderSettings());
+        });
+      };
+    });
     document.getElementById('set-reset-pos').onclick = () => {
       widget.style.left = 'auto';
       widget.style.top = '60px';
@@ -288,6 +320,110 @@ function renderSettings() {
       };
     }
   });
+}
+
+// ===== Customer name auto-fill: multiple selectors (Facebook, WhatsApp, etc.) =====
+function getNameSelectors(cb) {
+  chrome.storage.local.get(['nameSelectors'], s => cb(Array.isArray(s.nameSelectors) ? s.nameSelectors : []));
+}
+function saveNameSelectors(list, cb) {
+  chrome.storage.local.set({ nameSelectors: list }, () => cb && cb());
+}
+// Try each saved selector in order; return the first non-empty text found
+function readCustomerName(cb) {
+  getNameSelectors(selectors => {
+    for (const sel of selectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) {
+          const text = (el.value || el.textContent || '').trim();
+          if (text) { cb(text); return; }
+        }
+      } catch (e) { /* invalid selector, skip */ }
+    }
+    cb('');
+  });
+}
+// Build a reasonably stable CSS selector for a clicked element
+function buildSelector(el) {
+  if (el.id) return '#' + CSS.escape(el.id);
+  const parts = [];
+  let node = el, depth = 0;
+  while (node && node.nodeType === 1 && depth < 6) {
+    let part = node.tagName.toLowerCase();
+    const cls = (node.className && typeof node.className === 'string')
+      ? node.className.trim().split(/\s+/).filter(c => c && !/\d{4,}/.test(c) && c.length < 25)
+      : [];
+    if (cls.length) part += '.' + CSS.escape(cls[0]);
+    const parent = node.parentElement;
+    if (parent) {
+      const sameTag = Array.from(parent.children).filter(c => c.tagName === node.tagName);
+      if (sameTag.length > 1) {
+        part += ':nth-of-type(' + (Array.from(parent.children).indexOf(node) + 1) + ')';
+      }
+    }
+    parts.unshift(part);
+    try { if (document.querySelectorAll(parts.join(' > ')).length === 1) break; } catch (e) {}
+    node = node.parentElement;
+    depth++;
+  }
+  return parts.join(' > ');
+}
+// Highlight click-to-pick: user clicks the customer name on the page
+function startNamePicker() {
+  toast('Click the customer name on the page (ESC to cancel)');
+  widget.style.display = 'none';
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Click the customer name  -  press ESC to cancel';
+  hint.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#f97316;color:#fff;padding:10px 18px;border-radius:8px;font:600 13px system-ui,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,0.4);pointer-events:none;';
+  document.body.appendChild(hint);
+
+  const hl = document.createElement('div');
+  hl.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(249,115,22,0.25);border:2px solid #f97316;border-radius:4px;pointer-events:none;transition:all 0.05s;';
+  document.body.appendChild(hl);
+
+  let lastEl = null;
+  function onMove(e) {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === hl || el === hint) return;
+    lastEl = el;
+    const r = el.getBoundingClientRect();
+    hl.style.left = r.left + 'px';
+    hl.style.top = r.top + 'px';
+    hl.style.width = r.width + 'px';
+    hl.style.height = r.height + 'px';
+  }
+  function cleanup() {
+    document.removeEventListener('mousemove', onMove, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    hl.remove();
+    hint.remove();
+    widget.style.display = 'block';
+  }
+  function onClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = lastEl || document.elementFromPoint(e.clientX, e.clientY);
+    cleanup();
+    if (!el) return;
+    const sel = buildSelector(el);
+    const preview = (el.textContent || '').trim().slice(0, 30);
+    getNameSelectors(list => {
+      if (!list.includes(sel)) list.push(sel);
+      saveNameSelectors(list, () => {
+        renderSettings();
+        toast('Saved: "' + preview + '"');
+      });
+    });
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') { cleanup(); toast('Cancelled'); }
+  }
+  document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKey, true);
 }
 
 // Tab switching
@@ -414,7 +550,8 @@ function renderOrdersForm() {
       <div class="akmez-field">
         <div class="akmez-label">Name <span class="req">*</span></div>
         <div class="akmez-input-wrap">
-          <input type="text" id="ak-name" class="akmez-input" placeholder="Customer name">
+          <input type="text" id="ak-name" class="akmez-input akmez-input-name" placeholder="Customer name">
+          <button class="akmez-grab" id="ak-grab" title="Capture name from the page">GRAB</button>
           <button class="akmez-paste" data-t="ak-name">PASTE</button>
         </div>
       </div>
@@ -474,6 +611,18 @@ function renderOrdersForm() {
       } catch(e) {}
     };
   });
+  
+  // Auto-fill customer name from the conversation using saved selectors
+  const nameInput = document.getElementById('ak-name');
+  readCustomerName(txt => { if (txt && !nameInput.value) nameInput.value = txt; });
+  
+  // GRAB button - re-capture the name on demand
+  document.getElementById('ak-grab').onclick = () => {
+    readCustomerName(txt => {
+      if (txt) { nameInput.value = txt; toast('Name captured'); }
+      else toast('No name found - add a selector in Settings');
+    });
+  };
   
   // Product search
   document.getElementById('ak-search').addEventListener('input', e => {
