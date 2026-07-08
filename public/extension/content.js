@@ -114,7 +114,7 @@ style.textContent = `
 .akmez-autocomplete{position:relative;}
 .akmez-suggest{position:absolute;left:0;right:0;top:100%;margin-top:2px;z-index:10;background:#1a1a2e;border:1px solid rgba(249,115,22,0.4);border-radius:8px;max-height:160px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,0.4);display:none;}
 .akmez-suggest-item{padding:9px 12px;font-size:12px;color:#eee;cursor:pointer;}
-.akmez-suggest-item:hover{background:rgba(249,115,22,0.2);color:#fff;}
+.akmez-suggest-item:hover,.akmez-suggest-item.active{background:rgba(249,115,22,0.35);color:#fff;}
 .akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
 .akmez-cutoff-input:focus{border-color:#f97316;}
 .akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);font-weight:600;}
@@ -791,29 +791,79 @@ function renderOrdersForm() {
   bindProductClicks();
   document.getElementById('ak-submit').onclick = submitOrder;
 
-  // Region autocomplete - filters the loaded regions as the agent types
+  // Region autocomplete - type-to-search with full keyboard navigation
   const regionInput = document.getElementById('ak-region');
   const regionSuggest = document.getElementById('ak-region-suggest');
+  let regionMatches = [];   // currently shown regions
+  let regionActive = -1;    // index of the highlighted suggestion
+
+  // Rank: prefix matches first (Cur -> Curepipe before Cite la Cure), then other contains
+  function rankRegions(q) {
+    if (!q) return regions.slice(0, 8);
+    const starts = [], contains = [];
+    for (const r of regions) {
+      const l = r.toLowerCase();
+      if (l.startsWith(q)) starts.push(r);
+      else if (l.includes(q)) contains.push(r);
+    }
+    return starts.concat(contains).slice(0, 8);
+  }
+
+  function paintActive() {
+    regionSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => {
+      el.classList.toggle('active', i === regionActive);
+      if (i === regionActive) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
   function showRegionSuggestions() {
     const q = regionInput.value.toLowerCase().trim();
-    const matches = (q ? regions.filter(r => r.toLowerCase().includes(q)) : regions).slice(0, 8);
-    if (!matches.length) { regionSuggest.style.display = 'none'; return; }
-    regionSuggest.innerHTML = matches.map(r =>
-      `<div class="akmez-suggest-item" data-v="${r.replace(/"/g, '&quot;')}">${r.replace(/</g, '&lt;')}</div>`
+    regionMatches = rankRegions(q);
+    if (!regionMatches.length) { regionSuggest.style.display = 'none'; return; }
+    // Highlight the first match by default so Enter/Tab accepts it immediately
+    regionActive = 0;
+    regionSuggest.innerHTML = regionMatches.map((r, i) =>
+      `<div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">${r.replace(/</g, '&lt;')}</div>`
     ).join('');
     regionSuggest.style.display = 'block';
     regionSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
       // mousedown fires before blur so the value is set before the list hides
-      it.onmousedown = e => {
-        e.preventDefault();
-        regionInput.value = it.dataset.v;
-        regionSuggest.style.display = 'none';
-      };
+      it.onmousedown = e => { e.preventDefault(); selectRegion(parseInt(it.dataset.i, 10)); };
     });
   }
+
+  function selectRegion(i) {
+    if (i < 0 || i >= regionMatches.length) return;
+    regionInput.value = regionMatches[i];
+    regionSuggest.style.display = 'none';
+    regionActive = -1;
+  }
+
   regionInput.addEventListener('input', showRegionSuggestions);
   regionInput.addEventListener('focus', showRegionSuggestions);
   regionInput.addEventListener('blur', () => setTimeout(() => { regionSuggest.style.display = 'none'; }, 150));
+  regionInput.addEventListener('keydown', e => {
+    const open = regionSuggest.style.display === 'block' && regionMatches.length;
+    if (e.key === 'ArrowDown') {
+      if (!open) { showRegionSuggestions(); return; }
+      e.preventDefault();
+      regionActive = (regionActive + 1) % regionMatches.length;
+      paintActive();
+    } else if (e.key === 'ArrowUp') {
+      if (!open) return;
+      e.preventDefault();
+      regionActive = (regionActive - 1 + regionMatches.length) % regionMatches.length;
+      paintActive();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      // Accept the highlighted match; Enter stays in the form, Tab moves on
+      if (open && regionActive >= 0) {
+        if (e.key === 'Enter') e.preventDefault();
+        selectRegion(regionActive);
+      }
+    } else if (e.key === 'Escape') {
+      regionSuggest.style.display = 'none';
+    }
+  });
 
   // Delivery date - default to next working day (or +1 after cut-off), block Sundays + holidays
   const dateInput = document.getElementById('ak-date');
@@ -1047,8 +1097,11 @@ function renderWorktime() {
   if (timerInterval) clearInterval(timerInterval);
   if (isClockedIn && clockInTime) {
     timerInterval = setInterval(() => {
+      const el = document.getElementById('wt-timer');
+      // Stop ticking if the agent has left the Working Time tab (element is gone)
+      if (!el) { clearInterval(timerInterval); timerInterval = null; return; }
       const elapsed = (Date.now() - new Date(clockInTime).getTime()) / 1000;
-      document.getElementById('wt-timer').textContent = formatTime(elapsed);
+      el.textContent = formatTime(elapsed);
     }, 1000);
   }
 }
