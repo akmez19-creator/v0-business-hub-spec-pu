@@ -1097,8 +1097,11 @@ function renderWorktime() {
   if (timerInterval) clearInterval(timerInterval);
   if (isClockedIn && clockInTime) {
     timerInterval = setInterval(() => {
+      const el = document.getElementById('wt-timer');
+      // Stop ticking if the agent has left the Working Time tab (element is gone)
+      if (!el) { clearInterval(timerInterval); timerInterval = null; return; }
       const elapsed = (Date.now() - new Date(clockInTime).getTime()) / 1000;
-      document.getElementById('wt-timer').textContent = formatTime(elapsed);
+      el.textContent = formatTime(elapsed);
     }, 1000);
   }
 }
