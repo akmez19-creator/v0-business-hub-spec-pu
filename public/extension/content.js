@@ -121,6 +121,8 @@ style.textContent = `
 .akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
 .akmez-cutoff-input:focus{border-color:#f97316;}
 .akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);font-weight:600;}
+.akmez-subsection{font-size:11px;color:#bbb;font-weight:600;margin:12px 0 6px;}
+.akmez-managed-tag{background:rgba(16,185,129,0.15);color:#10b981;font-size:8px;padding:2px 6px;border-radius:4px;margin-left:6px;letter-spacing:0.5px;vertical-align:middle;}
 .akmez-product-search{width:100%;background:rgba(255,255,255,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;margin-bottom:10px;}
 .akmez-product-search:focus{border-color:#f97316;background:rgba(249,115,22,0.1);}
 .akmez-product-search::placeholder{color:#888;}
@@ -246,16 +248,17 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole'], stored => {
     const signedIn = !!stored.authToken;
+    const isAdmin = stored.userRole === 'admin';
     const cutoff = stored.cutoffTime || '20:00';
     const renderSelList = (arr, kind, emptyMsg) => (arr.length
       ? arr.map((s, i) => `
         <div class="akmez-sel-row">
           <span class="akmez-sel-text" title="${s.replace(/"/g, '&quot;')}">${s.replace(/</g, '&lt;')}</span>
-          <button class="akmez-sel-del" data-kind="${kind}" data-i="${i}" title="Remove">&times;</button>
+          ${isAdmin ? `<button class="akmez-sel-del" data-kind="${kind}" data-i="${i}" title="Remove">&times;</button>` : ''}
         </div>`).join('')
-      : `<div class="akmez-sel-empty">${emptyMsg}</div>`);
+      : `<div class="akmez-sel-empty">${isAdmin ? emptyMsg : 'Not configured by your admin yet.'}</div>`);
     const nameSel = Array.isArray(stored.nameSelectors) ? stored.nameSelectors : [];
     const phoneSel = Array.isArray(stored.phoneSelectors) ? stored.phoneSelectors : [];
     const adidSel = Array.isArray(stored.adidSelectors) ? stored.adidSelectors : [];
@@ -284,27 +287,27 @@ function renderSettings() {
         <button class="akmez-set-btn" id="set-reset-pos">&#8982; Reset Widget Position</button>
         ${signedIn ? '<button class="akmez-set-btn danger" id="set-logout">&#10162; Sign Out (clocks you out)</button>' : ''}
         
-        <div class="akmez-section">Customer Name Auto-Fill</div>
+        <div class="akmez-section">Auto-Fill &amp; Delivery ${isAdmin ? '' : '<span class="akmez-managed-tag">Managed by admin</span>'}</div>
+        ${isAdmin ? '' : '<div class="akmez-hint-text">These settings are configured by your administrator and apply to everyone. They cannot be changed here.</div>'}
+        
+        <div class="akmez-subsection">Customer Name Auto-Fill</div>
         <div class="akmez-sel-list">${nameHtml}</div>
-        <button class="akmez-set-btn" id="set-pick-name">&#9678; Pick name from page</button>
-        <div class="akmez-hint-text">Add one selector per platform (Facebook, WhatsApp, etc.). The first matching selector auto-fills the Name box.</div>
+        ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-name">&#9678; Pick name from page</button><div class="akmez-hint-text">Add one selector per platform (Facebook, WhatsApp, etc.). The first matching selector auto-fills the Name box.</div>' : ''}
         
-        <div class="akmez-section">Phone Number Auto-Fill</div>
+        <div class="akmez-subsection">Phone Number Auto-Fill</div>
         <div class="akmez-sel-list">${phoneHtml}</div>
-        <button class="akmez-set-btn" id="set-pick-phone">&#9678; Pick phone from page</button>
-        <div class="akmez-hint-text">On WhatsApp the number shows in the right contact panel. Pick it once and Contact 1 auto-fills. The +230 code is removed automatically.</div>
+        ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-phone">&#9678; Pick phone from page</button><div class="akmez-hint-text">On WhatsApp the number shows in the right contact panel. Pick it once and Contact 1 auto-fills. The +230 code is removed automatically.</div>' : ''}
         
-        <div class="akmez-section">Ad ID Auto-Fill</div>
+        <div class="akmez-subsection">Ad ID Auto-Fill</div>
         <div class="akmez-sel-list">${adidHtml}</div>
-        <button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button>
-        <div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>
+        ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button><div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>' : ''}
         
-        <div class="akmez-section">Delivery Cut-off</div>
+        <div class="akmez-subsection">Delivery Cut-off</div>
         <div class="akmez-set-row">
           <span class="akmez-set-label">Cut-off time</span>
-          <input type="time" id="set-cutoff" class="akmez-cutoff-input" value="${cutoff}">
+          <input type="time" id="set-cutoff" class="akmez-cutoff-input" value="${cutoff}"${isAdmin ? '' : ' disabled'}>
         </div>
-        <div class="akmez-hint-text">Orders before cut-off deliver the next working day. After cut-off the picking list is closed, so delivery skips to the working day after. Sundays and Mauritius public holidays are never selectable.</div>
+        ${isAdmin ? '<div class="akmez-hint-text">Orders before cut-off deliver the next working day. After cut-off the picking list is closed, so delivery skips to the working day after. Sundays and Mauritius public holidays are never selectable.</div>' : ''}
         
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
@@ -326,22 +329,24 @@ function renderSettings() {
     
     document.getElementById('set-back').onclick = () => renderCurrentTab();
     document.getElementById('set-refresh').onclick = () => { toast('Refreshing...'); loadData(); };
-    document.getElementById('set-pick-name').onclick = () => startPicker('name');
-    document.getElementById('set-pick-phone').onclick = () => startPicker('phone');
-    document.getElementById('set-pick-adid').onclick = () => startPicker('adid');
-    document.getElementById('set-cutoff').onchange = e => {
-      const v = e.target.value || '20:00';
-      chrome.storage.local.set({ cutoffTime: v }, () => toast('Cut-off saved: ' + v));
-    };
-    body.querySelectorAll('.akmez-sel-del').forEach(b => {
-      b.onclick = () => {
-        const kind = b.dataset.kind;
-        getSelectors(kind, list => {
-          list.splice(parseInt(b.dataset.i, 10), 1);
-          saveSelectors(kind, list, () => renderSettings());
-        });
+    if (isAdmin) {
+      document.getElementById('set-pick-name').onclick = () => startPicker('name');
+      document.getElementById('set-pick-phone').onclick = () => startPicker('phone');
+      document.getElementById('set-pick-adid').onclick = () => startPicker('adid');
+      document.getElementById('set-cutoff').onchange = e => {
+        const v = e.target.value || '20:00';
+        chrome.storage.local.set({ cutoffTime: v }, () => pushSharedSettings('Cut-off saved for all users'));
       };
-    });
+      body.querySelectorAll('.akmez-sel-del').forEach(b => {
+        b.onclick = () => {
+          const kind = b.dataset.kind;
+          getSelectors(kind, list => {
+            list.splice(parseInt(b.dataset.i, 10), 1);
+            saveSelectors(kind, list, () => { pushSharedSettings('Removed for all users'); renderSettings(); });
+          });
+        };
+      });
+    }
     document.getElementById('set-reset-pos').onclick = () => {
       widget.style.left = 'auto';
       widget.style.top = '60px';
@@ -372,6 +377,23 @@ function getSelectors(kind, cb) {
 }
 function saveSelectors(kind, list, cb) {
   chrome.storage.local.set({ [SEL_KEYS[kind]]: list }, () => cb && cb());
+}
+// Admin-only: push the locally-edited settings to the server so all users inherit them
+function pushSharedSettings(successMsg) {
+  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime'], s => {
+    chrome.runtime.sendMessage({
+      action: 'saveSettings',
+      data: {
+        nameSelectors: s.nameSelectors || [],
+        phoneSelectors: s.phoneSelectors || [],
+        adidSelectors: s.adidSelectors || [],
+        cutoffTime: s.cutoffTime || '20:00',
+      }
+    }, resp => {
+      if (resp && resp.success) toast(successMsg || 'Settings saved for all users');
+      else toast('Save failed: ' + ((resp && resp.error) || 'try again'));
+    });
+  });
 }
 // Try each saved selector in order; return the first non-empty text found
 function readFromSelectors(kind, cb) {
@@ -531,10 +553,10 @@ function startPicker(kind) {
     const preview = (el.textContent || '').trim().slice(0, 30);
     getSelectors(kind, list => {
       if (!list.includes(sel)) list.push(sel);
-      saveSelectors(kind, list, () => {
-        renderSettings();
-        toast('Saved: "' + preview + '"');
-      });
+    saveSelectors(kind, list, () => {
+      pushSharedSettings('Saved for all users: "' + preview + '"');
+      renderSettings();
+    });
     });
   }
   function onKey(e) {
@@ -592,7 +614,16 @@ async function loadData() {
       products = data.products || [];
       regions = data.regions || [];
       worktimeData = data.worktime || worktimeData;
-      renderCurrentTab();
+      // Mirror the shared, admin-configured settings into local storage so the
+      // auto-fill readers (which read these keys) inherit them for every user.
+      const s = data.settings || {};
+      chrome.storage.local.set({
+        userRole: data.role || null,
+        nameSelectors: Array.isArray(s.nameSelectors) ? s.nameSelectors : [],
+        phoneSelectors: Array.isArray(s.phoneSelectors) ? s.phoneSelectors : [],
+        adidSelectors: Array.isArray(s.adidSelectors) ? s.adidSelectors : [],
+        cutoffTime: s.cutoffTime || '20:00',
+      }, () => renderCurrentTab());
     });
   });
 }
