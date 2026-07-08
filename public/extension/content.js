@@ -66,12 +66,13 @@ document.body.appendChild(widget);
 // Styles
 const style = document.createElement('style');
 style.textContent = `
+#akmez-widget, #akmez-widget *{box-sizing:border-box;}
 #akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#6b7280,#4b5563);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(107,114,128,0.5);font-family:sans-serif;transition:all 0.3s ease;}
 #akmez-toggle:hover{transform:scale(1.1);}
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
 #akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
 #akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
-#akmez-widget{position:fixed;top:60px;right:20px;width:400px;max-height:600px;background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
+#akmez-widget{position:fixed;top:40px;right:20px;width:440px;max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:900px;background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
 .akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:move;user-select:none;}
 .akmez-logo{width:32px;height:32px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;}
 .akmez-header span{font-weight:700;font-size:14px;}
@@ -82,7 +83,7 @@ style.textContent = `
 .akmez-tab{flex:1;padding:10px 12px;background:none;border:none;color:#888;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;border-bottom:2px solid transparent;transition:all 0.15s;}
 .akmez-tab:hover{color:#fff;background:rgba(255,255,255,0.05);}
 .akmez-tab.active{color:#f97316;border-bottom-color:#f97316;background:rgba(249,115,22,0.1);}
-.akmez-body{padding:12px;overflow-y:auto;flex:1;max-height:480px;}
+.akmez-body{padding:12px;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;}
 .akmez-loading{text-align:center;padding:40px;color:#888;}
 .akmez-spinner{width:32px;height:32px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px;}
 @keyframes spin{to{transform:rotate(360deg);}}
@@ -107,6 +108,8 @@ style.textContent = `
 .akmez-sel-del:hover{background:rgba(239,68,68,0.3);}
 .akmez-sel-empty{font-size:11px;color:#777;padding:8px;text-align:center;line-height:1.4;}
 .akmez-hint-text{font-size:10px;color:#777;margin:6px 0 4px;line-height:1.4;}
+.akmez-adid-toggle{font-size:11px;color:#f97316;cursor:pointer;margin:2px 0 8px;user-select:none;display:inline-block;}
+.akmez-adid-toggle:hover{text-decoration:underline;}
 .akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;cursor:pointer;}
 .akmez-select:focus{border-color:#f97316;}
 .akmez-select option{background:#1a1a2e;color:white;}
@@ -121,7 +124,7 @@ style.textContent = `
 .akmez-product-search{width:100%;background:rgba(255,255,255,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;margin-bottom:10px;}
 .akmez-product-search:focus{border-color:#f97316;background:rgba(249,115,22,0.1);}
 .akmez-product-search::placeholder{color:#888;}
-.akmez-products{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-height:200px;overflow-y:auto;padding:2px;}
+.akmez-products{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-height:280px;overflow-y:auto;overflow-x:hidden;padding:2px;}
 .akmez-product{position:relative;padding:10px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:white;font-size:11px;font-weight:500;cursor:pointer;transition:all 0.15s;text-align:left;}
 .akmez-product:hover{border-color:#f97316;background:rgba(249,115,22,0.15);transform:scale(1.02);}
 .akmez-product.sel{background:linear-gradient(135deg,#f97316,#ea580c);border-color:#f97316;}
@@ -693,7 +696,8 @@ function renderOrdersForm() {
         <input type="date" id="ak-date" class="akmez-input akmez-input-plain">
       </div>
     </div>
-    <div class="akmez-row">
+    <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
+    <div class="akmez-row akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field">
         <div class="akmez-label">Ad ID</div>
         <div class="akmez-input-wrap">
@@ -790,6 +794,15 @@ function renderOrdersForm() {
   
   bindProductClicks();
   document.getElementById('ak-submit').onclick = submitOrder;
+
+  // Ad ID stays hidden (auto-captured in the background); agent can reveal it if needed
+  const adidToggle = document.getElementById('ak-adid-toggle');
+  const adidRow = document.getElementById('ak-adid-row');
+  adidToggle.onclick = () => {
+    const show = adidRow.style.display === 'none';
+    adidRow.style.display = show ? '' : 'none';
+    adidToggle.textContent = show ? 'Hide Ad ID' : 'Show Ad ID (auto-captured)';
+  };
 
   // Region autocomplete - type-to-search with full keyboard navigation
   const regionInput = document.getElementById('ak-region');
