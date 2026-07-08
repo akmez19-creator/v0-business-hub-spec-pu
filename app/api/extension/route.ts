@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 // CORS headers for Chrome extension
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
@@ -145,6 +145,27 @@ export async function GET(request: NextRequest) {
       .order('shift_date', { ascending: false })
       .limit(7)
     
+    // Get the user's role (controls whether they can edit shared settings)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+    const role = profile?.role || null
+
+    // Get shared, admin-configured extension settings (single row, id=1)
+    const { data: settingsRow } = await supabase
+      .from('extension_settings')
+      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time')
+      .eq('id', 1)
+      .single()
+    const settings = {
+      nameSelectors: settingsRow?.name_selectors || [],
+      phoneSelectors: settingsRow?.phone_selectors || [],
+      adidSelectors: settingsRow?.adid_selectors || [],
+      cutoffTime: settingsRow?.cutoff_time || '20:00',
+    }
+
     const isClockedIn = todayShift?.status === 'in_progress' && todayShift?.actual_clock_in
     const clockInTime = todayShift?.actual_clock_in || null
     
@@ -175,6 +196,8 @@ return NextResponse.json({
   authenticated: true,
   products: productsWithVariantData || [],
       regions,
+      role,
+      settings,
       worktime: {
         isClockedIn,
         clockInTime,
@@ -305,5 +328,58 @@ export async function POST(request: NextRequest) {
       status: 500, 
       headers: corsHeaders 
     })
+  }
+}
+
+// PUT - Save shared extension settings (admin only)
+export async function PUT(request: NextRequest) {
+  try {
+    const tokenAuth = await getUserFromToken(request)
+    let user = tokenAuth?.user
+    let supabase = tokenAuth?.supabase
+    
+    if (!user) {
+      const cookieSupabase = await createClient()
+      const { data: { user: cookieUser } } = await cookieSupabase.auth.getUser()
+      user = cookieUser
+      supabase = cookieSupabase as any
+    }
+    
+    if (!user || !supabase) {
+      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401, headers: corsHeaders })
+    }
+    
+    // Only admins may change the shared configuration
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+    
+    if (profile?.role !== 'admin') {
+      return NextResponse.json({ success: false, error: 'Only admins can change extension settings' }, { status: 403, headers: corsHeaders })
+    }
+    
+    const body = await request.json()
+    const asArray = (v: unknown) => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
+    
+    const { error } = await supabase.from('extension_settings').upsert({
+      id: 1,
+      name_selectors: asArray(body.nameSelectors),
+      phone_selectors: asArray(body.phoneSelectors),
+      adid_selectors: asArray(body.adidSelectors),
+      cutoff_time: typeof body.cutoffTime === 'string' && body.cutoffTime ? body.cutoffTime : '20:00',
+      updated_at: new Date().toISOString(),
+      updated_by: user.id,
+    })
+    
+    if (error) {
+      return NextResponse.json({ success: false, error: 'Failed to save settings: ' + error.message }, { status: 500, headers: corsHeaders })
+    }
+    
+    return NextResponse.json({ success: true, message: 'Settings saved for all users' }, { headers: corsHeaders })
+  } catch (error) {
+    console.error('Extension settings save error:', error)
+    return NextResponse.json({ success: false, error: 'Server error' }, { status: 500, headers: corsHeaders })
   }
 }

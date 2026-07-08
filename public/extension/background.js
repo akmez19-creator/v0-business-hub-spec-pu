@@ -95,6 +95,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'saveSettings') {
+      // Admin-only: push shared extension settings to the server
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/extension', {
+          method: 'PUT',
+          body: JSON.stringify(request.data)
+        });
+        sendResponse({ success: !!data.success, data, error: data.error });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'login') {
       try {
         const res = await fetch(API_BASE + '/api/extension/login', {
