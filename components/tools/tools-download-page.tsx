@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.9.0'
+const EXTENSION_VERSION = '4.10.0'
 const LAST_UPDATED = '2026-07-07'
 
 export function ToolsDownloadPage() {
@@ -81,12 +81,12 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Search, text: 'Region field is now type-to-search with instant suggestions' },
+    { icon: Clock, text: 'Delivery date defaults to the next working day (Sundays and MU holidays blocked)' },
+    { icon: Settings, text: 'Configurable order cut-off time (default 20:00) rolls the date forward' },
     { icon: MousePointer2, text: 'Name, phone and ad ID auto-fill and follow the open conversation' },
-    { icon: Clock, text: 'Login automatically clocks you in - working time starts on sign in' },
     { icon: Shield, text: 'Auto clock-out and logout after 5 minutes of inactivity' },
-    { icon: RefreshCw, text: 'Sessions stay signed in - automatic token refresh' },
-    { icon: Lock, text: 'Login form inside the floating A button' },
-    { icon: Sparkles, text: 'Toolbar popup shows connection status only' }
+    { icon: RefreshCw, text: 'Sessions stay signed in - automatic token refresh' }
   ]
 
   const installSteps = [
