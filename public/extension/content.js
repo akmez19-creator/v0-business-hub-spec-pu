@@ -110,6 +110,13 @@ style.textContent = `
 .akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;cursor:pointer;}
 .akmez-select:focus{border-color:#f97316;}
 .akmez-select option{background:#1a1a2e;color:white;}
+.akmez-input-plain{padding-right:12px;}
+.akmez-autocomplete{position:relative;}
+.akmez-suggest{position:absolute;left:0;right:0;top:100%;margin-top:2px;z-index:10;background:#1a1a2e;border:1px solid rgba(249,115,22,0.4);border-radius:8px;max-height:160px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,0.4);display:none;}
+.akmez-suggest-item{padding:9px 12px;font-size:12px;color:#eee;cursor:pointer;}
+.akmez-suggest-item:hover{background:rgba(249,115,22,0.2);color:#fff;}
+.akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
+.akmez-cutoff-input:focus{border-color:#f97316;}
 .akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);font-weight:600;}
 .akmez-product-search{width:100%;background:rgba(255,255,255,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;margin-bottom:10px;}
 .akmez-product-search:focus{border-color:#f97316;background:rgba(249,115,22,0.1);}
@@ -232,8 +239,9 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime'], stored => {
     const signedIn = !!stored.authToken;
+    const cutoff = stored.cutoffTime || '20:00';
     const renderSelList = (arr, kind, emptyMsg) => (arr.length
       ? arr.map((s, i) => `
         <div class="akmez-sel-row">
@@ -284,6 +292,13 @@ function renderSettings() {
         <button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button>
         <div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>
         
+        <div class="akmez-section">Delivery Cut-off</div>
+        <div class="akmez-set-row">
+          <span class="akmez-set-label">Cut-off time</span>
+          <input type="time" id="set-cutoff" class="akmez-cutoff-input" value="${cutoff}">
+        </div>
+        <div class="akmez-hint-text">Orders before cut-off deliver the next working day. After cut-off the picking list is closed, so delivery skips to the working day after. Sundays and Mauritius public holidays are never selectable.</div>
+        
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
           <span class="akmez-set-label">Version</span>
@@ -307,6 +322,10 @@ function renderSettings() {
     document.getElementById('set-pick-name').onclick = () => startPicker('name');
     document.getElementById('set-pick-phone').onclick = () => startPicker('phone');
     document.getElementById('set-pick-adid').onclick = () => startPicker('adid');
+    document.getElementById('set-cutoff').onchange = e => {
+      const v = e.target.value || '20:00';
+      chrome.storage.local.set({ cutoffTime: v }, () => toast('Cut-off saved: ' + v));
+    };
     body.querySelectorAll('.akmez-sel-del').forEach(b => {
       b.onclick = () => {
         const kind = b.dataset.kind;
@@ -383,6 +402,59 @@ function readCustomerAdId(cb) {
     cb(m ? m[1] : raw.trim());
   });
 }
+
+// ===== Delivery date rules: no deliveries on Sundays or Mauritius public holidays =====
+// Official Mauritius public holidays 2026 (General Notice No. 1195 of 2025)
+const MU_HOLIDAYS = [
+  '2026-01-01', // New Year
+  '2026-01-02', // New Year
+  '2026-02-01', // Abolition of Slavery / Thaipoosam Cavadee
+  '2026-02-15', // Maha Shivaratree
+  '2026-02-17', // Chinese Spring Festival
+  '2026-03-12', // Independence and Republic Day
+  '2026-03-19', // Ugaadi
+  '2026-03-21', // Eid-Ul-Fitr (subject to moon)
+  '2026-05-01', // Labour Day
+  '2026-08-15', // Assumption
+  '2026-09-16', // Ganesh Chaturthi
+  '2026-11-02', // Arrival of Indentured Labourers
+  '2026-11-08', // Divali
+  '2026-12-25', // Christmas
+];
+function ymd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// Sunday (getDay()===0) or a listed public holiday
+function isNonWorking(d) {
+  return d.getDay() === 0 || MU_HOLIDAYS.includes(ymd(d));
+}
+// First working day on or after the given date
+function nextWorkingOnOrAfter(date) {
+  const x = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  while (isNonWorking(x)) x.setDate(x.getDate() + 1);
+  return x;
+}
+// Add N working days (skipping Sundays + holidays) to a starting date
+function addWorkingDays(from, n) {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  let added = 0;
+  while (added < n) {
+    d.setDate(d.getDate() + 1);
+    if (!isNonWorking(d)) added++;
+  }
+  return d;
+}
+function getCutoff(cb) {
+  chrome.storage.local.get(['cutoffTime'], s => cb(s.cutoffTime || '20:00'));
+}
+// Default delivery date = next working day, or the one after if past the cut-off (picking list closed)
+function computeDefaultDeliveryDate(cutoff, cb) {
+  const now = new Date();
+  const [ch, cm] = (cutoff || '20:00').split(':').map(Number);
+  const afterCutoff = now.getHours() > ch || (now.getHours() === ch && now.getMinutes() >= cm);
+  cb(addWorkingDays(now, afterCutoff ? 2 : 1), afterCutoff);
+}
+
 // Build a reasonably stable CSS selector for a clicked element
 function buildSelector(el) {
   if (el.id) return '#' + CSS.escape(el.id);
@@ -611,16 +683,14 @@ function renderOrdersForm() {
       </div>
     </div>
     <div class="akmez-row">
-      <div class="akmez-field">
+      <div class="akmez-field akmez-autocomplete">
         <div class="akmez-label">Region <span class="req">*</span></div>
-        <select id="ak-region" class="akmez-select">
-          <option value="">Select...</option>
-          ${regions.map(r => '<option value="' + r + '">' + r + '</option>').join('')}
-        </select>
+        <input type="text" id="ak-region" class="akmez-input akmez-input-plain" placeholder="Type region..." autocomplete="off">
+        <div class="akmez-suggest" id="ak-region-suggest"></div>
       </div>
       <div class="akmez-field">
         <div class="akmez-label">Date <span class="req">*</span></div>
-        <input type="date" id="ak-date" class="akmez-input" value="${new Date().toISOString().split('T')[0]}">
+        <input type="date" id="ak-date" class="akmez-input akmez-input-plain">
       </div>
     </div>
     <div class="akmez-row">
@@ -720,6 +790,50 @@ function renderOrdersForm() {
   
   bindProductClicks();
   document.getElementById('ak-submit').onclick = submitOrder;
+
+  // Region autocomplete - filters the loaded regions as the agent types
+  const regionInput = document.getElementById('ak-region');
+  const regionSuggest = document.getElementById('ak-region-suggest');
+  function showRegionSuggestions() {
+    const q = regionInput.value.toLowerCase().trim();
+    const matches = (q ? regions.filter(r => r.toLowerCase().includes(q)) : regions).slice(0, 8);
+    if (!matches.length) { regionSuggest.style.display = 'none'; return; }
+    regionSuggest.innerHTML = matches.map(r =>
+      `<div class="akmez-suggest-item" data-v="${r.replace(/"/g, '&quot;')}">${r.replace(/</g, '&lt;')}</div>`
+    ).join('');
+    regionSuggest.style.display = 'block';
+    regionSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
+      // mousedown fires before blur so the value is set before the list hides
+      it.onmousedown = e => {
+        e.preventDefault();
+        regionInput.value = it.dataset.v;
+        regionSuggest.style.display = 'none';
+      };
+    });
+  }
+  regionInput.addEventListener('input', showRegionSuggestions);
+  regionInput.addEventListener('focus', showRegionSuggestions);
+  regionInput.addEventListener('blur', () => setTimeout(() => { regionSuggest.style.display = 'none'; }, 150));
+
+  // Delivery date - default to next working day (or +1 after cut-off), block Sundays + holidays
+  const dateInput = document.getElementById('ak-date');
+  dateInput.min = ymd(new Date());
+  getCutoff(cutoff => {
+    computeDefaultDeliveryDate(cutoff, (d, afterCutoff) => {
+      dateInput.value = ymd(d);
+      if (afterCutoff) toast('After ' + cutoff + ' cut-off - delivery set to ' + ymd(d));
+    });
+  });
+  dateInput.addEventListener('change', () => {
+    if (!dateInput.value) return;
+    const picked = new Date(dateInput.value + 'T00:00:00');
+    if (isNonWorking(picked)) {
+      const fixed = nextWorkingOnOrAfter(picked);
+      dateInput.value = ymd(fixed);
+      const why = picked.getDay() === 0 ? 'Sundays' : 'public holidays';
+      toast('No deliveries on ' + why + ' - moved to ' + ymd(fixed));
+    }
+  });
 }
 
 function bindProductClicks() {
@@ -782,6 +896,12 @@ function submitOrder() {
   
   if (!name || !c1 || !region || !date) {
     err.textContent = 'Please fill all required fields';
+    err.style.display = 'block';
+    return;
+  }
+  
+  if (isNonWorking(new Date(date + 'T00:00:00'))) {
+    err.textContent = 'No deliveries on Sundays or public holidays. Pick another date.';
     err.style.display = 'block';
     return;
   }
