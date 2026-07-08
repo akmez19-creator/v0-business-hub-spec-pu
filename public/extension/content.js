@@ -66,12 +66,13 @@ document.body.appendChild(widget);
 // Styles
 const style = document.createElement('style');
 style.textContent = `
+#akmez-widget, #akmez-widget *{box-sizing:border-box;}
 #akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#6b7280,#4b5563);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(107,114,128,0.5);font-family:sans-serif;transition:all 0.3s ease;}
 #akmez-toggle:hover{transform:scale(1.1);}
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
 #akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
 #akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
-#akmez-widget{position:fixed;top:60px;right:20px;width:400px;max-height:600px;background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
+#akmez-widget{position:fixed;top:40px;right:20px;width:440px;max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:900px;background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
 .akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:move;user-select:none;}
 .akmez-logo{width:32px;height:32px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;}
 .akmez-header span{font-weight:700;font-size:14px;}
@@ -82,7 +83,7 @@ style.textContent = `
 .akmez-tab{flex:1;padding:10px 12px;background:none;border:none;color:#888;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;border-bottom:2px solid transparent;transition:all 0.15s;}
 .akmez-tab:hover{color:#fff;background:rgba(255,255,255,0.05);}
 .akmez-tab.active{color:#f97316;border-bottom-color:#f97316;background:rgba(249,115,22,0.1);}
-.akmez-body{padding:12px;overflow-y:auto;flex:1;max-height:480px;}
+.akmez-body{padding:12px;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;}
 .akmez-loading{text-align:center;padding:40px;color:#888;}
 .akmez-spinner{width:32px;height:32px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px;}
 @keyframes spin{to{transform:rotate(360deg);}}
@@ -107,6 +108,8 @@ style.textContent = `
 .akmez-sel-del:hover{background:rgba(239,68,68,0.3);}
 .akmez-sel-empty{font-size:11px;color:#777;padding:8px;text-align:center;line-height:1.4;}
 .akmez-hint-text{font-size:10px;color:#777;margin:6px 0 4px;line-height:1.4;}
+.akmez-adid-toggle{font-size:11px;color:#f97316;cursor:pointer;margin:2px 0 8px;user-select:none;display:inline-block;}
+.akmez-adid-toggle:hover{text-decoration:underline;}
 .akmez-select{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;cursor:pointer;}
 .akmez-select:focus{border-color:#f97316;}
 .akmez-select option{background:#1a1a2e;color:white;}
@@ -121,14 +124,18 @@ style.textContent = `
 .akmez-product-search{width:100%;background:rgba(255,255,255,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:8px;padding:10px 12px;color:white;font-size:13px;outline:none;margin-bottom:10px;}
 .akmez-product-search:focus{border-color:#f97316;background:rgba(249,115,22,0.1);}
 .akmez-product-search::placeholder{color:#888;}
-.akmez-products{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;max-height:200px;overflow-y:auto;padding:2px;}
-.akmez-product{position:relative;padding:10px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:white;font-size:11px;font-weight:500;cursor:pointer;transition:all 0.15s;text-align:left;}
-.akmez-product:hover{border-color:#f97316;background:rgba(249,115,22,0.15);transform:scale(1.02);}
-.akmez-product.sel{background:linear-gradient(135deg,#f97316,#ea580c);border-color:#f97316;}
-.akmez-product .name{font-weight:600;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-.akmez-product .price{font-size:10px;color:#888;display:block;margin-top:2px;}
-.akmez-product.sel .price{color:rgba(255,255,255,0.8);}
-.akmez-product .badge{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;background:#10b981;border-radius:9px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;box-shadow:0 2px 4px rgba(0,0,0,0.3);}
+.akmez-suggest-price{color:#10b981;font-weight:700;font-size:11px;margin-left:8px;white-space:nowrap;}
+.akmez-suggest-item{display:flex;justify-content:space-between;align-items:center;}
+.akmez-cart-list{display:flex;flex-direction:column;gap:6px;margin-top:4px;}
+.akmez-cart-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;}
+.akmez-cart-item-name{font-size:12px;font-weight:600;color:#fff;line-height:1.2;}
+.akmez-cart-item-price{font-size:10px;color:#888;margin-top:2px;}
+.akmez-qty{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+.akmez-qty-btn{width:24px;height:24px;border:1px solid rgba(249,115,22,0.4);background:rgba(249,115,22,0.12);color:#f97316;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
+.akmez-qty-btn:hover{background:rgba(249,115,22,0.3);}
+.akmez-qty-val{min-width:20px;text-align:center;font-size:12px;font-weight:700;color:#fff;}
+.akmez-qty-del{border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.12);color:#ef4444;margin-left:2px;}
+.akmez-qty-del:hover{background:rgba(239,68,68,0.3);}
 .akmez-cart{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px 12px;margin-top:10px;display:flex;justify-content:space-between;font-size:12px;}
 .akmez-cart .items{color:#6ee7b7;}
 .akmez-cart .total{color:#10b981;font-weight:700;}
@@ -693,7 +700,8 @@ function renderOrdersForm() {
         <input type="date" id="ak-date" class="akmez-input akmez-input-plain">
       </div>
     </div>
-    <div class="akmez-row">
+    <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
+    <div class="akmez-row akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field">
         <div class="akmez-label">Ad ID</div>
         <div class="akmez-input-wrap">
@@ -703,15 +711,11 @@ function renderOrdersForm() {
       </div>
     </div>
     <div class="akmez-section">Add Products</div>
-    <input type="text" class="akmez-product-search" id="ak-search" placeholder="Type to search ${products.length} products...">
-    <div class="akmez-products" id="ak-products">
-      ${products.slice(0, 50).map(p => `
-        <div class="akmez-product" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}">
-          <div class="name">${p.name}</div>
-          <span class="price">Rs ${p.price}</span>
-        </div>
-      `).join('')}
+    <div class="akmez-autocomplete">
+      <input type="text" class="akmez-product-search" id="ak-search" placeholder="Type to search ${products.length} products..." autocomplete="off">
+      <div class="akmez-suggest" id="ak-prod-suggest"></div>
     </div>
+    <div class="akmez-cart-list" id="ak-cart-list"></div>
     <div class="akmez-cart" id="ak-cart" style="display:none">
       <span class="items">0 items</span>
       <span class="total">Rs 0</span>
@@ -773,23 +777,94 @@ function renderOrdersForm() {
   if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
   window.__akmezSyncTimer = setInterval(syncFields, 1200);
   
-  // Product search
-  document.getElementById('ak-search').addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    const container = document.getElementById('ak-products');
-    const filtered = q ? products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 50) : products.slice(0, 50);
-    container.innerHTML = filtered.map(p => `
-      <div class="akmez-product ${cart[p.id] ? 'sel' : ''}" data-id="${p.id}" data-name="${p.name}" data-price="${p.price}">
-        <div class="name">${p.name}</div>
-        <span class="price">Rs ${p.price}</span>
-        ${cart[p.id] ? '<span class="badge">' + cart[p.id] + '</span>' : ''}
-      </div>
-    `).join('');
-    bindProductClicks();
+  // Product search - type-to-search autocomplete with keyboard navigation
+  const prodInput = document.getElementById('ak-search');
+  const prodSuggest = document.getElementById('ak-prod-suggest');
+  let prodMatches = [];
+  let prodActive = -1;
+
+  // Prefix matches first, then other contains matches
+  function rankProducts(q) {
+    if (!q) return products.slice(0, 8);
+    const starts = [], contains = [];
+    for (const p of products) {
+      const l = p.name.toLowerCase();
+      if (l.startsWith(q)) starts.push(p);
+      else if (l.includes(q)) contains.push(p);
+    }
+    return starts.concat(contains).slice(0, 8);
+  }
+
+  function paintProdActive() {
+    prodSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => {
+      el.classList.toggle('active', i === prodActive);
+      if (i === prodActive) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function showProdSuggestions() {
+    const q = prodInput.value.toLowerCase().trim();
+    prodMatches = rankProducts(q);
+    if (!prodMatches.length) { prodSuggest.style.display = 'none'; return; }
+    prodActive = 0;
+    prodSuggest.innerHTML = prodMatches.map((p, i) => `
+      <div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
+        <span>${p.name.replace(/</g, '&lt;')}</span>
+        <span class="akmez-suggest-price">Rs ${p.price}</span>
+      </div>`).join('');
+    prodSuggest.style.display = 'block';
+    prodSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
+      it.onmousedown = e => { e.preventDefault(); pickProduct(parseInt(it.dataset.i, 10)); };
+    });
+  }
+
+  function pickProduct(i) {
+    if (i < 0 || i >= prodMatches.length) return;
+    const p = prodMatches[i];
+    cart[p.id] = (cart[p.id] || 0) + 1;
+    updateCart();
+    // Clear the query so the agent can immediately search the next product
+    prodInput.value = '';
+    prodSuggest.style.display = 'none';
+    prodInput.focus();
+  }
+
+  prodInput.addEventListener('input', showProdSuggestions);
+  prodInput.addEventListener('focus', showProdSuggestions);
+  prodInput.addEventListener('blur', () => setTimeout(() => { prodSuggest.style.display = 'none'; }, 150));
+  prodInput.addEventListener('keydown', e => {
+    const open = prodSuggest.style.display === 'block' && prodMatches.length;
+    if (e.key === 'ArrowDown') {
+      if (!open) { showProdSuggestions(); return; }
+      e.preventDefault();
+      prodActive = (prodActive + 1) % prodMatches.length;
+      paintProdActive();
+    } else if (e.key === 'ArrowUp') {
+      if (!open) return;
+      e.preventDefault();
+      prodActive = (prodActive - 1 + prodMatches.length) % prodMatches.length;
+      paintProdActive();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (open && prodActive >= 0) {
+        if (e.key === 'Enter') e.preventDefault();
+        pickProduct(prodActive);
+      }
+    } else if (e.key === 'Escape') {
+      prodSuggest.style.display = 'none';
+    }
   });
-  
-  bindProductClicks();
+
+  updateCart();
   document.getElementById('ak-submit').onclick = submitOrder;
+
+  // Ad ID stays hidden (auto-captured in the background); agent can reveal it if needed
+  const adidToggle = document.getElementById('ak-adid-toggle');
+  const adidRow = document.getElementById('ak-adid-row');
+  adidToggle.onclick = () => {
+    const show = adidRow.style.display === 'none';
+    adidRow.style.display = show ? '' : 'none';
+    adidToggle.textContent = show ? 'Hide Ad ID' : 'Show Ad ID (auto-captured)';
+  };
 
   // Region autocomplete - type-to-search with full keyboard navigation
   const regionInput = document.getElementById('ak-region');
@@ -886,50 +961,52 @@ function renderOrdersForm() {
   });
 }
 
-function bindProductClicks() {
-  document.querySelectorAll('.akmez-product').forEach(el => {
-    el.onclick = () => {
-      const id = el.dataset.id;
-      cart[id] = (cart[id] || 0) + 1;
+function updateCart() {
+  const c = document.getElementById('ak-cart');
+  const list = document.getElementById('ak-cart-list');
+  if (!c || !list) return;
+  const entries = Object.entries(cart).filter(([,q]) => q > 0);
+  if (!entries.length) {
+    c.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  let qty = 0, amt = 0;
+  // Render each selected product with quantity controls
+  list.innerHTML = entries.map(([id, q]) => {
+    const p = products.find(x => x.id === id);
+    if (!p) return '';
+    qty += q;
+    amt += parseFloat(p.price) * q;
+    return `
+      <div class="akmez-cart-item" data-id="${id}">
+        <div class="akmez-cart-item-info">
+          <div class="akmez-cart-item-name">${p.name.replace(/</g, '&lt;')}</div>
+          <div class="akmez-cart-item-price">Rs ${p.price}</div>
+        </div>
+        <div class="akmez-qty">
+          <button class="akmez-qty-btn" data-act="dec" data-id="${id}">-</button>
+          <span class="akmez-qty-val">${q}</span>
+          <button class="akmez-qty-btn" data-act="inc" data-id="${id}">+</button>
+          <button class="akmez-qty-btn akmez-qty-del" data-act="del" data-id="${id}" title="Remove">&times;</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  list.querySelectorAll('.akmez-qty-btn').forEach(b => {
+    b.onclick = () => {
+      const id = b.dataset.id;
+      if (b.dataset.act === 'inc') cart[id] = (cart[id] || 0) + 1;
+      else if (b.dataset.act === 'dec') cart[id] = Math.max(0, (cart[id] || 0) - 1);
+      else if (b.dataset.act === 'del') cart[id] = 0;
       updateCart();
     };
   });
-}
 
-function updateCart() {
-  const c = document.getElementById('ak-cart');
-  const entries = Object.entries(cart).filter(([,q]) => q > 0);
-  if (!entries.length) { 
-    c.style.display = 'none'; 
-    return; 
-  }
-  
-  let qty = 0, amt = 0;
-  entries.forEach(([id, q]) => {
-    qty += q;
-    const p = products.find(x => x.id === id);
-    if (p) amt += parseFloat(p.price) * q;
-  });
-  
   c.style.display = 'flex';
   c.querySelector('.items').textContent = qty + ' item' + (qty !== 1 ? 's' : '');
   c.querySelector('.total').textContent = 'Rs ' + amt.toFixed(0);
-  
-  document.querySelectorAll('.akmez-product').forEach(el => {
-    const q = cart[el.dataset.id] || 0;
-    el.classList.toggle('sel', q > 0);
-    let badge = el.querySelector('.badge');
-    if (q > 0) {
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'badge';
-        el.appendChild(badge);
-      }
-      badge.textContent = q;
-    } else if (badge) {
-      badge.remove();
-    }
-  });
 }
 
 function submitOrder() {
