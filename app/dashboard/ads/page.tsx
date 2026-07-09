@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,6 +36,8 @@ import {
   Package,
   Link2,
   X,
+  ChevronRight,
+  Boxes,
 } from 'lucide-react'
 import {
   Dialog,
@@ -132,6 +134,19 @@ export default function AdsManagerPage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [countdown, setCountdown] = useState(15 * 60) // 15 minutes in seconds
   const AUTO_REFRESH_INTERVAL = 15 * 60 // 15 minutes in seconds
+  
+  // Product grouping view (a product can have multiple campaigns)
+  const [groupByProduct, setGroupByProduct] = useState(true)
+  const [collapsedProducts, setCollapsedProducts] = useState<Set<string>>(new Set())
+  
+  const toggleProductGroup = (key: string) => {
+    setCollapsedProducts(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   // Initial load - use cached API for instant data
   useEffect(() => {
@@ -391,6 +406,36 @@ export default function AdsManagerPage() {
     ? campaigns.filter(c => parseFloat(c.spend || '0') > 0)
     : campaigns
 
+  // Group campaigns by their linked product (a product may have multiple campaigns)
+  const UNLINKED_KEY = '__unlinked__'
+  const productGroupsMap = filteredCampaigns.reduce((acc, campaign) => {
+    const product = campaignLinks[campaign.id]?.products
+    const key = product?.id || UNLINKED_KEY
+    if (!acc[key]) {
+      acc[key] = {
+        key,
+        productId: product?.id || null,
+        productName: product?.name || 'Unlinked Campaigns',
+        productPrice: product?.price,
+        campaigns: [],
+        totalSpend: 0,
+      }
+    }
+    acc[key].campaigns.push(campaign)
+    acc[key].totalSpend += parseFloat(campaign.spend || '0')
+    return acc
+  }, {} as Record<string, { key: string; productId: string | null; productName: string; productPrice?: number; campaigns: Campaign[]; totalSpend: number }>)
+
+  const productGroups = Object.values(productGroupsMap).sort((a, b) => {
+    // Keep the unlinked group at the bottom, otherwise sort by spend desc
+    if (a.key === UNLINKED_KEY) return 1
+    if (b.key === UNLINKED_KEY) return -1
+    return b.totalSpend - a.totalSpend
+  })
+
+  // Number of columns shown in the campaigns table (drives colSpan for group headers)
+  const tableCols = selectedAccount === 'all' ? 4 : 3
+
   // Use account-level spend from Facebook (more accurate than summing campaigns)
   const totalSpendFromAccounts = Object.values(accountSpends).reduce((sum, spend) => sum + spend, 0)
   // Fallback to campaign sum if account spend not available
@@ -536,6 +581,17 @@ export default function AdsManagerPage() {
                 {campaignsWithSpendCount}
               </Badge>
             )}
+          </Button>
+          
+          {/* Group by Product Toggle */}
+          <Button
+            variant={groupByProduct ? "default" : "outline"}
+            size="sm"
+            onClick={() => setGroupByProduct(!groupByProduct)}
+            className={groupByProduct ? "bg-primary" : "bg-card"}
+          >
+            <Boxes className="w-4 h-4 mr-2" />
+            Group by Product
           </Button>
           
           {/* Date Range Selector */}
@@ -721,15 +777,125 @@ export default function AdsManagerPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[35%]">Campaign</TableHead>
+                  <TableHead className="w-[35%]">{groupByProduct ? 'Product / Campaign' : 'Campaign'}</TableHead>
                   {selectedAccount === 'all' && <TableHead>Account</TableHead>}
-                  <TableHead>Product</TableHead>
+                  {!groupByProduct && <TableHead>Product</TableHead>}
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Spend</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredCampaigns.map((campaign) => (
+                {groupByProduct ? (
+                  productGroups.map((group) => {
+                    const isCollapsed = collapsedProducts.has(group.key)
+                    const isUnlinked = group.key === UNLINKED_KEY
+                    return (
+                      <Fragment key={group.key}>
+                        {/* Product group header */}
+                        <TableRow
+                          className="cursor-pointer bg-muted/30 hover:bg-muted/50 border-t-2 border-border"
+                          onClick={() => toggleProductGroup(group.key)}
+                        >
+                          <TableCell colSpan={tableCols - 1}>
+                            <div className="flex items-center gap-2">
+                              {isCollapsed ? (
+                                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                              )}
+                              {isUnlinked ? (
+                                <Link2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                              ) : (
+                                <Package className="w-4 h-4 text-primary shrink-0" />
+                              )}
+                              <span className={`font-semibold ${isUnlinked ? 'text-muted-foreground' : 'text-foreground'}`}>
+                                {group.productName}
+                              </span>
+                              {group.productPrice != null && (
+                                <span className="text-xs text-muted-foreground">Rs {group.productPrice}</span>
+                              )}
+                              <Badge variant="secondary" className="ml-1 px-2 py-0 text-xs">
+                                {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className={`font-bold ${group.totalSpend > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                              {formatSpend(group.totalSpend.toString())}
+                            </span>
+                            {group.totalSpend > 0 && (
+                              <p className="text-xs text-muted-foreground/70">{formatUsd(group.totalSpend.toString())}</p>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        
+                        {/* Campaigns within the product */}
+                        {!isCollapsed && group.campaigns.map((campaign) => (
+                          <TableRow key={`${campaign.accountId}-${campaign.id}`} className="group">
+                            <TableCell>
+                              <div className="flex items-center gap-2 pl-6">
+                                <div className="min-w-0">
+                                  <p className="font-medium text-foreground truncate">{campaign.name}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {campaign.objective?.replace(/_/g, ' ')}
+                                  </p>
+                                </div>
+                                {isUnlinked ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs text-muted-foreground hover:text-primary shrink-0"
+                                    onClick={() => {
+                                      setSelectedCampaign(campaign)
+                                      setLinkDialogOpen(true)
+                                    }}
+                                  >
+                                    <Link2 className="w-3 h-3 mr-1" />
+                                    Link
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Unlink product"
+                                    onClick={() => {
+                                      setSelectedCampaign(campaign)
+                                      linkProductToCampaign(null)
+                                    }}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                            {selectedAccount === 'all' && (
+                              <TableCell>
+                                <span className="text-sm text-muted-foreground">{campaign.accountName}</span>
+                              </TableCell>
+                            )}
+                            <TableCell>
+                              <Badge className={getStatusBadge(campaign.status)}>
+                                {campaign.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div>
+                                <span className={`font-semibold ${parseFloat(campaign.spend) > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                                  {formatSpend(campaign.spend)}
+                                </span>
+                                {parseFloat(campaign.spend) > 0 && (
+                                  <p className="text-xs text-muted-foreground/70">{formatUsd(campaign.spend)}</p>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
+                    )
+                  })
+                ) : (
+                  filteredCampaigns.map((campaign) => (
                   <TableRow key={`${campaign.accountId}-${campaign.id}`}>
                     <TableCell>
                       <div>
@@ -794,7 +960,8 @@ export default function AdsManagerPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  ))
+                )}
               </TableBody>
             </Table>
           )}
