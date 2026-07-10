@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, ThumbsUp, ThumbsDown, Minus, Sparkles } from 'lucide-react'
-import { CLIENT_STATUS_COLORS } from '@/lib/types'
+import { CLIENT_STATUS_COLORS, BAD_SEVERITY_COLORS, type BadSeverity } from '@/lib/types'
 
 interface RatingInfo {
   found: boolean
@@ -14,6 +14,7 @@ interface RatingInfo {
   cms?: number
   deliveredPct?: number | null
   totalSales?: number
+  badSeverity?: BadSeverity | null
 }
 
 const RATING_ICONS = {
@@ -81,6 +82,11 @@ export function ClientRatingBadge({ phone }: { phone: string }) {
         <Icon className="mr-1 h-3 w-3" />
         {label} client
       </Badge>
+      {info.rating === 'bad' && info.badSeverity && (
+        <Badge className={BAD_SEVERITY_COLORS[info.badSeverity.level]}>
+          {info.badSeverity.label} · {info.badSeverity.failedOrders} failed
+        </Badge>
+      )}
       <span className="text-muted-foreground">
         {info.name} · {info.totalOrders} orders
         {info.deliveredPct !== null && info.deliveredPct !== undefined && ` · ${info.deliveredPct}% delivered`}

@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getBadSeverity } from '@/lib/types'
 import { NextRequest, NextResponse } from 'next/server'
 
 // CORS headers so the Chrome extension can call this endpoint
@@ -60,6 +61,11 @@ export async function GET(request: NextRequest) {
   const rated = (client.delivered_orders || 0) + (client.cms_orders || 0)
   const deliveredPct = rated > 0 ? Math.round(((client.delivered_orders || 0) / rated) * 100) : null
 
+  // For bad clients, grade how bad by the number of failed (CMS) orders
+  const badSeverity = client.client_status === 'bad'
+    ? getBadSeverity(client.cms_orders || 0)
+    : null
+
   return NextResponse.json({
     found: true,
     phone,
@@ -72,5 +78,6 @@ export async function GET(request: NextRequest) {
     deliveredPct,
     totalSales: Number(client.total_sales || 0),
     lastOrderDate: client.last_order_date,
+    badSeverity,
   }, { headers: corsHeaders })
 }

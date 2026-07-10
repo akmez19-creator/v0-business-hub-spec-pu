@@ -1168,7 +1168,15 @@ function renderOrdersForm() {
         } else {
           detail = '<span style="color:#64748b;font-size:11px;">No order history</span>';
         }
-        box.innerHTML = `<span style="display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:700;background:${c.bg};color:${c.fg};margin-right:6px;">${c.label}</span>${detail}`;
+        // For bad clients, grade severity by failed (CMS) orders
+        let severity = '';
+        if (d.rating === 'bad' && d.badSeverity) {
+          const sevBg = { low: '#fee2e2', moderate: '#fecaca', high: '#fca5a5', critical: '#dc2626' };
+          const sevFg = { low: '#b91c1c', moderate: '#b91c1c', high: '#7f1d1d', critical: '#ffffff' };
+          const lvl = d.badSeverity.level;
+          severity = `<span style="display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:700;background:${sevBg[lvl] || sevBg.low};color:${sevFg[lvl] || sevFg.low};margin-right:6px;">${d.badSeverity.label.toUpperCase()} &middot; ${d.badSeverity.failedOrders} FAILED</span>`;
+        }
+        box.innerHTML = `<span style="display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:700;background:${c.bg};color:${c.fg};margin-right:6px;">${c.label}</span>${severity}${detail}`;
         box.style.display = 'block';
         box.style.padding = '4px 2px';
       });

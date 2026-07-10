@@ -139,6 +139,31 @@ export const CLIENT_STATUS_COLORS: Record<Client['client_status'], string> = {
   new: 'bg-muted text-muted-foreground',
 }
 
+// How bad is a "bad" client, graded by the number of failed (CMS / non-delivered)
+// orders they have caused. More failed orders = more costly repeat offender.
+export type BadSeverityLevel = 'low' | 'moderate' | 'high' | 'critical'
+
+export interface BadSeverity {
+  level: BadSeverityLevel
+  label: string
+  failedOrders: number
+}
+
+export function getBadSeverity(cmsOrders: number): BadSeverity {
+  const failed = Math.max(0, cmsOrders || 0)
+  if (failed >= 10) return { level: 'critical', label: 'Critical', failedOrders: failed }
+  if (failed >= 6) return { level: 'high', label: 'High risk', failedOrders: failed }
+  if (failed >= 3) return { level: 'moderate', label: 'Moderate', failedOrders: failed }
+  return { level: 'low', label: 'Low', failedOrders: failed }
+}
+
+export const BAD_SEVERITY_COLORS: Record<BadSeverityLevel, string> = {
+  low: 'bg-destructive/10 text-destructive',
+  moderate: 'bg-destructive/20 text-destructive',
+  high: 'bg-destructive/30 text-destructive',
+  critical: 'bg-destructive text-destructive-foreground',
+}
+
 export interface Product {
   id: string
   name: string

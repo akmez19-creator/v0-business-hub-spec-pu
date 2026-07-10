@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { MoreHorizontal, Pencil, Trash2, Phone, Mail, MapPin } from 'lucide-react'
 import { EditClientDialog } from './edit-client-dialog'
 import { deleteClient } from '@/lib/client-actions'
-import { CLIENT_STATUS_LABELS, CLIENT_STATUS_COLORS } from '@/lib/types'
+import { CLIENT_STATUS_LABELS, CLIENT_STATUS_COLORS, BAD_SEVERITY_COLORS, getBadSeverity } from '@/lib/types'
 import type { Client } from '@/lib/types'
 
 interface ClientsTableProps {
@@ -133,9 +133,23 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
                   )}
                 </TableCell>
                 <TableCell>
-                  <Badge className={CLIENT_STATUS_COLORS[client.client_status] || CLIENT_STATUS_COLORS.new}>
-                    {CLIENT_STATUS_LABELS[client.client_status] || 'New'}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Badge className={CLIENT_STATUS_COLORS[client.client_status] || CLIENT_STATUS_COLORS.new}>
+                      {CLIENT_STATUS_LABELS[client.client_status] || 'New'}
+                    </Badge>
+                    {client.client_status === 'bad' && (() => {
+                      const sev = getBadSeverity(client.cms_orders || 0)
+                      return (
+                        <Badge
+                          variant="outline"
+                          className={BAD_SEVERITY_COLORS[sev.level]}
+                          title={`${sev.failedOrders} failed (CMS) order${sev.failedOrders === 1 ? '' : 's'}`}
+                        >
+                          {sev.label} · {sev.failedOrders} failed
+                        </Badge>
+                      )
+                    })()}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right text-sm">
                   {(client.total_orders || 0).toLocaleString()}
