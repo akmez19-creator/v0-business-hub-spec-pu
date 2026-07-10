@@ -29,8 +29,8 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.19.0'
-const LAST_UPDATED = '2026-07-10'
+const EXTENSION_VERSION = '4.20.0'
+const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
   const [downloading, setDownloading] = useState(false)

@@ -185,6 +185,8 @@ style.textContent = `
 
 #akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;align-items:center;gap:4px;}
 .akmez-page-badge-logo{width:14px;height:14px;border-radius:50%;object-fit:cover;background:#fff;flex-shrink:0;}
+.akmez-logo-img{width:100%;height:100%;border-radius:8px;object-fit:cover;display:block;}
+.akmez-toggle-img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;}
 .akmez-pagemap-thumb{width:22px;height:22px;border-radius:6px;object-fit:cover;background:#1e293b;flex-shrink:0;margin-right:6px;}
 .akmez-pagemap-thumb.placeholder{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#94a3b8;border:1px dashed #334155;}
 .akmez-sel-logo{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 4px;flex-shrink:0;}
@@ -245,16 +247,21 @@ chrome.storage.local.get(['pageMappings'], s => {
 });
 
 // Detect which Facebook page the current conversation belongs to by matching
-// admin-defined text against the tab title, URL, and page headings.
+// admin-defined text against the tab title, URL, headings, nav and aria labels.
+let __akmezLastPageKey = null;
 function detectSourcePage() {
-  const badge = document.getElementById('akmez-page-badge');
-  if (!badge) return;
   let found = null;
   if (pageMappings.length) {
-    const haystacks = [document.title || '', location.href];
-    document.querySelectorAll('h1, [role="banner"] span').forEach(el => {
+    const haystacks = [document.title || '', decodeURIComponent(location.href)];
+    // Page name can live in many spots: headings, banner, nav, aria-labels,
+    // og:title meta (covers Messenger, Business Suite inbox, page view, etc.)
+    const og = document.querySelector('meta[property="og:title"]');
+    if (og && og.content) haystacks.push(og.content);
+    document.querySelectorAll('h1, h2, [role="banner"] span, [role="navigation"] span, a[aria-label], div[aria-label], span[aria-label]').forEach(el => {
       const t = (el.textContent || '').trim();
       if (t && t.length < 120) haystacks.push(t);
+      const al = el.getAttribute && el.getAttribute('aria-label');
+      if (al && al.length < 120) haystacks.push(al);
     });
     const joined = haystacks.join(' | ').toLowerCase();
     for (const m of pageMappings) {
@@ -262,21 +269,60 @@ function detectSourcePage() {
       if (needle && joined.includes(needle)) { found = m; break; }
     }
   }
-  if (found) {
-    // Render logo (if the admin uploaded one) next to the code
-    badge.textContent = '';
-    if (found.logo && found.logo.indexOf('data:image/') === 0) {
-      const img = document.createElement('img');
-      img.src = found.logo;
-      img.alt = '';
-      img.className = 'akmez-page-badge-logo';
-      badge.appendChild(img);
+  // Skip DOM updates when nothing changed (runs every 1.2s) — but re-apply
+  // if the widget was re-created and the badge lost its state
+  const key = found ? (found.code + '|' + (found.logo ? found.logo.length : 0)) : null;
+  const badgeEl = document.getElementById('akmez-page-badge');
+  const badgeStale = found && badgeEl && badgeEl.style.display === 'none';
+  if (key === __akmezLastPageKey && !badgeStale) return;
+  __akmezLastPageKey = key;
+
+  const hasLogo = !!(found && found.logo && found.logo.indexOf('data:image/') === 0);
+
+  // 1. Header badge (code + small logo)
+  const badge = document.getElementById('akmez-page-badge');
+  if (badge) {
+    if (found) {
+      badge.textContent = '';
+      if (hasLogo) {
+        const img = document.createElement('img');
+        img.src = found.logo;
+        img.alt = '';
+        img.className = 'akmez-page-badge-logo';
+        badge.appendChild(img);
+      }
+      badge.appendChild(document.createTextNode(found.code));
+      badge.title = 'Message from: ' + found.match;
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
     }
-    badge.appendChild(document.createTextNode(found.code));
-    badge.title = 'Message from: ' + found.match;
-    badge.style.display = 'inline-flex';
-  } else {
-    badge.style.display = 'none';
+  }
+
+  // 2. Header "A" square: show the page logo instead when detected
+  const headerLogo = document.querySelector('#akmez-widget .akmez-logo');
+  if (headerLogo) {
+    if (hasLogo) {
+      headerLogo.innerHTML = '<img src="' + found.logo + '" alt="" class="akmez-logo-img">';
+      headerLogo.title = found.match;
+    } else if (found) {
+      headerLogo.textContent = found.code.slice(0, 3);
+      headerLogo.title = found.match;
+    } else {
+      headerLogo.textContent = 'A';
+      headerLogo.title = '';
+    }
+  }
+
+  // 3. Floating toggle button: swap the "A" for the page logo too
+  if (toggleBtn) {
+    if (hasLogo) {
+      toggleBtn.innerHTML = '<img src="' + found.logo + '" alt="" class="akmez-toggle-img">';
+      toggleBtn.title = 'Akmez Quick Order — ' + found.match;
+    } else {
+      toggleBtn.innerHTML = '<span>A</span>';
+      toggleBtn.title = 'Open Akmez Quick Order';
+    }
   }
 }
 let isDragging = false, dragOffset = {x:0,y:0};
