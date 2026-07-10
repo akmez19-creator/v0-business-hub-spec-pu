@@ -367,6 +367,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
               </TableHead>
               <TableHead>RTE</TableHead>
               <TableHead>Entry Date</TableHead>
+              <TableHead>Agent</TableHead>
               <TableHead>Delivery Date</TableHead>
               <TableHead>Index</TableHead>
               <TableHead>Customer</TableHead>
@@ -388,7 +389,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
           <TableBody>
             {deliveries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={19} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={20} className="text-center py-8 text-muted-foreground">
                   No deliveries found
                 </TableCell>
               </TableRow>
@@ -403,7 +404,17 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                   </TableCell>
                   <TableCell className="font-mono text-xs">{delivery.rte || '-'}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
-                    {delivery.entry_date ? new Date(delivery.entry_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '-'}
+                    <div>
+                      <p>{delivery.entry_date ? new Date(delivery.entry_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '-'}</p>
+                      {delivery.created_at && (
+                        <p className="text-muted-foreground">
+                          {new Date(delivery.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs whitespace-nowrap">
+                    {delivery.agent_name || '-'}
                   </TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
                     {delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '-'}

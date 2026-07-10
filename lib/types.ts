@@ -71,6 +71,7 @@ export interface Delivery {
   // Joined fields
   rider?: Profile
   contractor?: Profile
+  agent_name?: string | null
 }
 
 export interface Rider {

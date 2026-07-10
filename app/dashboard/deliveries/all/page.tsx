@@ -111,7 +111,29 @@ export default async function AllDeliveriesPage({ searchParams }: Props) {
   ])
   
   const totalPages = Math.ceil((totalCount || 0) / pageSize)
-  
+
+  // Resolve the agent (profile) that created each delivery so the table can
+  // show who made the entry. Only fetch the profiles referenced on this page.
+  const creatorIds = Array.from(
+    new Set((deliveries || []).map(d => d.created_by).filter(Boolean))
+  ) as string[]
+
+  let deliveriesWithAgent = deliveries || []
+  if (creatorIds.length > 0) {
+    const { data: creatorProfiles } = await adminDb
+      .from('profiles')
+      .select('id, name, email')
+      .in('id', creatorIds)
+
+    const nameById = new Map(
+      (creatorProfiles || []).map(p => [p.id, p.name || p.email || null])
+    )
+    deliveriesWithAgent = (deliveries || []).map(d => ({
+      ...d,
+      agent_name: d.created_by ? (nameById.get(d.created_by) ?? null) : null,
+    }))
+  }
+
   // regions (locality names) already fetched above
   
   // Get riders from riders table
@@ -152,7 +174,7 @@ export default async function AllDeliveriesPage({ searchParams }: Props) {
       />
       
       <DeliveriesTable 
-        deliveries={(deliveries || []) as Delivery[]}
+        deliveries={deliveriesWithAgent as Delivery[]}
         riders={(riders || []) as Rider[]}
         contractors={(contractors || []) as Profile[]}
         currentPage={currentPage}
