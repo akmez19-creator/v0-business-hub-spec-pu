@@ -37,6 +37,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 // Check auth state on load
 updateToggleButton();
 
+// Real extension version from the manifest (single source of truth)
+const EXT_VERSION = (() => {
+  try { return chrome.runtime.getManifest().version; } catch { return ''; }
+})();
+
 // Create floating widget with tabs
 const widget = document.createElement('div');
 widget.id = 'akmez-widget';
@@ -44,7 +49,7 @@ widget.innerHTML = `
   <div class="akmez-header" id="akmez-drag">
     <div class="akmez-logo">A</div>
     <div style="flex:1">
-      <span>Quick Order v4.0</span>
+      <span>Quick Order${EXT_VERSION ? ' v' + EXT_VERSION : ''}</span>
       <div style="font-size:10px;opacity:0.7">Create orders from anywhere</div>
     </div>
     <div class="akmez-header-btns">
@@ -246,7 +251,7 @@ document.getElementById('akmez-settings').addEventListener('click', () => render
 
 function renderSettings() {
   const body = document.getElementById('akmez-body');
-  const version = chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '4.1.0';
+  const version = EXT_VERSION || (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '');
   
   chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole'], stored => {
     const signedIn = !!stored.authToken;
