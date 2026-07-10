@@ -42,6 +42,7 @@ import {
   Check,
   ExternalLink,
   Users,
+  ArrowUpDown,
 } from 'lucide-react'
 import {
   Dialog,
@@ -146,6 +147,8 @@ export default function AdsManagerPage() {
   // Product grouping view (a product can have multiple campaigns)
   const [groupByProduct, setGroupByProduct] = useState(true)
   const [collapsedProducts, setCollapsedProducts] = useState<Set<string>>(new Set())
+  // How to sort product groups: by spend, cost-per-client (CAC), or client count
+  const [groupSort, setGroupSort] = useState<'spend' | 'cac_desc' | 'cac_asc' | 'clients_desc'>('spend')
   
   const toggleProductGroup = (key: string) => {
     setCollapsedProducts(prev => {
@@ -541,10 +544,36 @@ export default function AdsManagerPage() {
     return acc
   }, {} as Record<string, { key: string; productId: string | null; productName: string; productPrice?: number; campaigns: Campaign[]; totalSpend: number }>)
 
+  // Cost per client (CAC) in Rs for a group, or null when it can't be computed
+  const groupCac = (g: { productName: string; totalSpend: number }) => {
+    const clients = productClientStats[g.productName]?.clientCount ?? 0
+    if (g.totalSpend <= 0 || clients <= 0) return null
+    return (g.totalSpend * USD_TO_RS) / clients
+  }
+
   const productGroups = Object.values(productGroupsMap).sort((a, b) => {
-    // Keep the unlinked group at the bottom, otherwise sort by spend desc
+    // Always keep the unlinked group pinned to the bottom
     if (a.key === UNLINKED_KEY) return 1
     if (b.key === UNLINKED_KEY) return -1
+
+    if (groupSort === 'clients_desc') {
+      const ca = productClientStats[a.productName]?.clientCount ?? 0
+      const cb = productClientStats[b.productName]?.clientCount ?? 0
+      if (cb !== ca) return cb - ca
+      return b.totalSpend - a.totalSpend
+    }
+
+    if (groupSort === 'cac_desc' || groupSort === 'cac_asc') {
+      const ca = groupCac(a)
+      const cb = groupCac(b)
+      // Groups without a computable CAC (no spend or no clients) sink to the bottom
+      if (ca === null && cb === null) return b.totalSpend - a.totalSpend
+      if (ca === null) return 1
+      if (cb === null) return -1
+      return groupSort === 'cac_desc' ? cb - ca : ca - cb
+    }
+
+    // Default: highest spend first
     return b.totalSpend - a.totalSpend
   })
 
@@ -708,6 +737,22 @@ export default function AdsManagerPage() {
             <Boxes className="w-4 h-4 mr-2" />
             Group by Product
           </Button>
+
+          {/* Product group sort */}
+          {groupByProduct && (
+            <Select value={groupSort} onValueChange={(v) => setGroupSort(v as typeof groupSort)}>
+              <SelectTrigger className="w-[190px] bg-card" size="sm">
+                <ArrowUpDown className="w-4 h-4 mr-2 shrink-0" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="spend">Highest spend</SelectItem>
+                <SelectItem value="cac_desc">Cost/client: high to low</SelectItem>
+                <SelectItem value="cac_asc">Cost/client: low to high</SelectItem>
+                <SelectItem value="clients_desc">Most clients</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           
           {/* Date Range Selector */}
           <Popover open={showCalendar} onOpenChange={setShowCalendar}>
