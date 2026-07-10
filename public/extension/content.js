@@ -133,9 +133,20 @@ style.textContent = `
 .akmez-product-search:focus{border-color:#f97316;background:rgba(249,115,22,0.1);}
 .akmez-product-search::placeholder{color:#888;}
 .akmez-suggest-price{color:#10b981;font-weight:700;font-size:11px;margin-left:8px;white-space:nowrap;}
-.akmez-suggest-item{display:flex;justify-content:space-between;align-items:center;}
+.akmez-suggest-item{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.akmez-suggest-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;}
+.akmez-suggest-thumb,.akmez-cart-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;background:#1e293b;flex-shrink:0;cursor:zoom-in;border:1px solid rgba(255,255,255,0.12);}
+.akmez-suggest-thumb.placeholder,.akmez-cart-thumb.placeholder{cursor:default;background:repeating-linear-gradient(45deg,#1e293b,#1e293b 4px,#243244 4px,#243244 8px);}
+.akmez-offer-badge{display:inline-block;background:rgba(249,115,22,0.2);color:#fb923c;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;letter-spacing:0.3px;}
+.akmez-cart-item-price s{color:#64748b;font-weight:400;margin-left:4px;}
+#akmez-img-overlay{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.82);display:none;align-items:center;justify-content:center;padding:24px;}
+.akmez-img-box{position:relative;max-width:90vw;max-height:88vh;display:flex;flex-direction:column;align-items:center;gap:10px;}
+.akmez-img-box img{max-width:90vw;max-height:80vh;border-radius:10px;box-shadow:0 12px 48px rgba(0,0,0,0.6);object-fit:contain;background:#0f172a;}
+.akmez-img-cap{color:#fff;font-size:13px;font-weight:600;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+.akmez-img-close{position:absolute;top:-14px;right:-14px;width:34px;height:34px;border-radius:50%;border:none;background:#f97316;color:#fff;font-size:20px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 4px 12px rgba(0,0,0,0.4);}
 .akmez-cart-list{display:flex;flex-direction:column;gap:6px;margin-top:4px;}
 .akmez-cart-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;}
+.akmez-cart-item-info{flex:1;min-width:0;}
 .akmez-cart-item-name{font-size:12px;font-weight:600;color:#fff;line-height:1.2;}
 .akmez-cart-item-price{font-size:10px;color:#888;margin-top:2px;}
 .akmez-qty{display:flex;align-items:center;gap:4px;flex-shrink:0;}
@@ -1177,14 +1188,28 @@ function renderOrdersForm() {
     prodMatches = rankProducts(q);
     if (!prodMatches.length) { prodSuggest.style.display = 'none'; return; }
     prodActive = 0;
-    prodSuggest.innerHTML = prodMatches.map((p, i) => `
+    prodSuggest.innerHTML = prodMatches.map((p, i) => {
+      const offer = akmezOfferLabel(p);
+      return `
       <div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
-        <span>${p.name.replace(/</g, '&lt;')}</span>
+        ${akmezThumb(p, 'akmez-suggest-thumb')}
+        <span class="akmez-suggest-name">${p.name.replace(/</g, '&lt;')}${offer ? ` <span class="akmez-offer-badge">${offer}</span>` : ''}</span>
         <span class="akmez-suggest-price">Rs ${p.price}</span>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     prodSuggest.style.display = 'block';
     prodSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
-      it.onmousedown = e => { e.preventDefault(); pickProduct(parseInt(it.dataset.i, 10)); };
+      it.onmousedown = e => {
+        // Tapping the thumbnail enlarges it instead of adding to cart
+        if (e.target.classList.contains('akmez-suggest-thumb')) {
+          e.preventDefault();
+          const p = prodMatches[parseInt(it.dataset.i, 10)];
+          if (p) akmezShowImage(p.image_url, p.name);
+          return;
+        }
+        e.preventDefault();
+        pickProduct(parseInt(it.dataset.i, 10));
+      };
     });
   }
 
@@ -1382,6 +1407,73 @@ function renderOrdersForm() {
   });
 }
 
+// Compute the total price for `q` units of product `p`, honouring inventory
+// pricing rules so the extension always matches the admin inventory:
+//   - B1G1 (buy one get one free): pay for ceil(q/2) units
+//   - Bundle prices e.g. { "2": 775 }: "2 for 775". Uses DP to find the
+//     cheapest combination of bundles + singles for the chosen quantity.
+function akmezPriceFor(p, q) {
+  q = Math.max(0, parseInt(q, 10) || 0);
+  if (q === 0 || !p) return 0;
+  const unit = parseFloat(p.price) || 0;
+  if (p.is_b1g1) return unit * Math.ceil(q / 2);
+  const bp = p.bundle_prices && typeof p.bundle_prices === 'object' ? p.bundle_prices : null;
+  if (bp) {
+    const tiers = Object.keys(bp)
+      .map(k => ({ n: parseInt(k, 10), price: parseFloat(bp[k]) }))
+      .filter(t => t.n > 0 && t.price > 0);
+    if (tiers.length) {
+      const cost = new Array(q + 1).fill(Infinity);
+      cost[0] = 0;
+      for (let i = 1; i <= q; i++) {
+        cost[i] = cost[i - 1] + unit; // one more at unit price
+        for (const t of tiers) {
+          if (t.n <= i && cost[i - t.n] + t.price < cost[i]) cost[i] = cost[i - t.n] + t.price;
+        }
+      }
+      if (isFinite(cost[q])) return cost[q];
+    }
+  }
+  return unit * q;
+}
+
+// A short label describing the active offer, shown as a badge
+function akmezOfferLabel(p) {
+  if (!p) return '';
+  if (p.is_b1g1) return 'B1G1';
+  const bp = p.bundle_prices && typeof p.bundle_prices === 'object' ? p.bundle_prices : null;
+  if (bp) {
+    const keys = Object.keys(bp).map(k => parseInt(k, 10)).filter(n => n > 0).sort((a, b) => a - b);
+    if (keys.length) { const n = keys[0]; return n + ' for Rs' + Math.round(parseFloat(bp[String(n)])); }
+  }
+  return '';
+}
+
+// Fullscreen image preview so agents can inspect the product photo
+function akmezShowImage(src, name) {
+  if (!src) return;
+  let ov = document.getElementById('akmez-img-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'akmez-img-overlay';
+    ov.innerHTML = '<div class="akmez-img-box"><img alt=""><div class="akmez-img-cap"></div><button class="akmez-img-close" title="Close">&times;</button></div>';
+    document.body.appendChild(ov);
+    const close = () => { ov.style.display = 'none'; };
+    ov.addEventListener('click', e => { if (e.target === ov || e.target.classList.contains('akmez-img-close')) close(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  }
+  ov.querySelector('img').src = src;
+  ov.querySelector('.akmez-img-cap').textContent = name || '';
+  ov.style.display = 'flex';
+}
+
+// Small helper to render a product thumbnail (or a placeholder square)
+function akmezThumb(p, cls) {
+  const url = p && p.image_url ? p.image_url : '';
+  if (url) return '<img src="' + url + '" alt="" class="' + cls + '" data-img="' + url.replace(/"/g, '&quot;') + '">';
+  return '<span class="' + cls + ' placeholder"></span>';
+}
+
 function updateCart() {
   const c = document.getElementById('ak-cart');
   const list = document.getElementById('ak-cart-list');
@@ -1399,12 +1491,22 @@ function updateCart() {
     const p = products.find(x => x.id === id);
     if (!p) return '';
     qty += q;
-    amt += parseFloat(p.price) * q;
+    const unit = parseFloat(p.price) || 0;
+    const line = akmezPriceFor(p, q);       // price after B1G1 / bundle rules
+    const listTotal = unit * q;              // price with no offer
+    amt += line;
+    const offer = akmezOfferLabel(p);
+    const saved = listTotal - line;
+    // Show the discounted line total, with the struck-through list price + offer
+    const priceHtml = saved > 0.5
+      ? `Rs ${line.toFixed(0)} <s>Rs ${listTotal.toFixed(0)}</s>${offer ? ` <span class="akmez-offer-badge">${offer}</span>` : ''}`
+      : `Rs ${line.toFixed(0)}`;
     return `
       <div class="akmez-cart-item" data-id="${id}">
+        ${akmezThumb(p, 'akmez-cart-thumb')}
         <div class="akmez-cart-item-info">
           <div class="akmez-cart-item-name">${p.name.replace(/</g, '&lt;')}</div>
-          <div class="akmez-cart-item-price">Rs ${p.price}</div>
+          <div class="akmez-cart-item-price">${priceHtml}</div>
         </div>
         <div class="akmez-qty">
           <button class="akmez-qty-btn" data-act="dec" data-id="${id}">-</button>
@@ -1423,6 +1525,11 @@ function updateCart() {
       else if (b.dataset.act === 'del') cart[id] = 0;
       updateCart();
     };
+  });
+
+  // Clicking a cart thumbnail enlarges the product photo
+  list.querySelectorAll('.akmez-cart-thumb[data-img]').forEach(img => {
+    img.onclick = () => akmezShowImage(img.getAttribute('data-img'), '');
   });
 
   c.style.display = 'flex';
@@ -1473,7 +1580,7 @@ function submitOrder() {
   entries.forEach(([id, q]) => {
     qty += q;
     const p = products.find(x => x.id === id);
-    if (p) amt += parseFloat(p.price) * q;
+    if (p) amt += akmezPriceFor(p, q); // honour B1G1 / bundle pricing
   });
   
   // The detected page's code becomes the order's MEDIUM (e.g. MBM / DBM),

@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.22.0'
+const EXTENSION_VERSION = '4.23.0'
 const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,8 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Package, text: 'Product search now shows each product photo (tap to enlarge) so agents can visually confirm the item before adding it' },
+    { icon: Package, text: 'Widget pricing now matches inventory exactly, auto-applying bundle offers (e.g. 2 for Rs775) and Buy-One-Get-One-Free, with savings shown in the cart' },
     { icon: Sparkles, text: 'Orders now record the source page code (e.g. MBM) in the MEDIUM column instead of "Extension", matching the import sheet' },
     { icon: Sparkles, text: 'Rock-solid page detection: link a page to its Facebook ID once (Settings, link button) and its code + logo show instantly on every conversation for that page' },
     { icon: Sparkles, text: 'Page detection also reads the full conversation text (e.g. "reply to Destockage By Moris") across Business Suite, Messenger and Instagram inboxes' },
