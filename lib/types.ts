@@ -107,11 +107,11 @@ export interface Client {
   address: string | null
   city: string | null
   notes: string | null
-  source: 'manual' | 'import' | 'website' | 'facebook' | 'history_import'
+  source: 'manual' | 'import' | 'website' | 'facebook' | 'history_import' | 'delivery'
   created_by: string | null
   created_at: string
   updated_at: string
-  // Aggregate order history stats (from past-data imports)
+  // Aggregate order history stats (from imports + live deliveries)
   total_orders: number
   delivered_orders: number
   cms_orders: number
@@ -121,6 +121,22 @@ export interface Client {
   last_order_date: string | null
   region: string | null
   client_status: 'good' | 'average' | 'bad' | 'new'
+}
+
+export interface ClientOrderHistoryItem {
+  id: string
+  delivery_date: string | null
+  entry_date: string | null
+  status: DeliveryStatus
+  sales_type: SalesType | null
+  products: string | null
+  qty: number | null
+  amount: number | null
+  locality: string | null
+  medium: string | null
+  return_product: string | null
+  notes: string | null
+  created_at: string
 }
 
 export type ClientSortKey = 'total_sales' | 'total_orders' | 'delivered_rate'

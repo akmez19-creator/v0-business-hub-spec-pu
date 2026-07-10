@@ -2,7 +2,7 @@
 
 import { createClient as createSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { Client, ClientSortKey } from '@/lib/types'
+import type { Client, ClientSortKey, ClientOrderHistoryItem } from '@/lib/types'
 
 export async function getClients(filters?: {
   search?: string
@@ -218,6 +218,33 @@ export async function getClientsPage(opts: {
     return { clients: [] as Client[], total: 0 }
   }
   return { clients: (data || []) as Client[], total: count || 0 }
+}
+
+export async function getClientDetail(clientId: string) {
+  const supabase = await createSupabaseClient()
+
+  const { data: client, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  if (error || !client) {
+    return { client: null as Client | null, orders: [] as ClientOrderHistoryItem[] }
+  }
+
+  let orders: ClientOrderHistoryItem[] = []
+  if (client.phone) {
+    // Live delivery history matched by normalized phone (imported history is
+    // aggregate-only and has no per-order rows, so this covers app orders).
+    const { data: hist } = await supabase.rpc('get_client_order_history', {
+      p_phone: client.phone,
+      p_limit: 200,
+    })
+    orders = (hist || []) as ClientOrderHistoryItem[]
+  }
+
+  return { client: client as Client, orders }
 }
 
 export async function getClientStats() {

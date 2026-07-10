@@ -11,8 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, Search, Users, ThumbsUp, ThumbsDown, Minus, Trophy, History, ArrowUp, ArrowDown } from 'lucide-react'
-import Link from 'next/link'
+import { Plus, Search, Users, ThumbsUp, ThumbsDown, Minus, History, ArrowUp, ArrowDown } from 'lucide-react'
 import { ClientsTable } from '@/components/clients/clients-table'
 import { AddClientDialog } from '@/components/clients/add-client-dialog'
 import { ImportHistoryDialog } from '@/components/clients/import-history-dialog'
@@ -77,12 +76,6 @@ export default function ClientsPage() {
           <p className="text-muted-foreground">Client ratings based on delivery history</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/dashboard/clients/top">
-              <Trophy className="mr-2 h-4 w-4" />
-              Top 100
-            </Link>
-          </Button>
           <Button variant="outline" onClick={() => setShowHistoryImport(true)}>
             <History className="mr-2 h-4 w-4" />
             Import Past Data

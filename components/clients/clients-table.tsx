@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { MoreHorizontal, Pencil, Trash2, Phone, Mail, MapPin } from 'lucide-react'
 import { EditClientDialog } from './edit-client-dialog'
+import { ClientDetailSheet } from './client-detail-sheet'
 import { deleteClient } from '@/lib/client-actions'
 import { CLIENT_STATUS_LABELS, CLIENT_STATUS_COLORS, BAD_SEVERITY_COLORS, getBadSeverity } from '@/lib/types'
 import type { Client } from '@/lib/types'
@@ -31,6 +32,7 @@ interface ClientsTableProps {
 
 export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps) {
   const [editingClient, setEditingClient] = useState<Client | null>(null)
+  const [detailClient, setDetailClient] = useState<Client | null>(null)
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this client?')) return
@@ -87,7 +89,11 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
           </TableHeader>
           <TableBody>
             {clients.map((client) => (
-              <TableRow key={client.id}>
+              <TableRow
+                key={client.id}
+                className="cursor-pointer"
+                onClick={() => setDetailClient(client)}
+              >
                 <TableCell>
                   <div className="font-medium">{client.name}</div>
                   {client.notes && (
@@ -99,7 +105,7 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
                     {client.phone && (
                       <div className="flex items-center gap-1 text-sm">
                         <Phone className="h-3 w-3 text-muted-foreground" />
-                        <a href={`tel:${client.phone}`} className="hover:underline">
+                        <a href={`tel:${client.phone}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
                           {formatPhone(client.phone)}
                         </a>
                       </div>
@@ -107,7 +113,7 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
                     {client.email && (
                       <div className="flex items-center gap-1 text-sm">
                         <Mail className="h-3 w-3 text-muted-foreground" />
-                        <a href={`mailto:${client.email}`} className="hover:underline">
+                        <a href={`mailto:${client.email}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
                           {client.email}
                         </a>
                       </div>
@@ -167,7 +173,7 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
                     ? new Date(client.last_order_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
                     : '-'}
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon">
@@ -207,6 +213,12 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
           }}
         />
       )}
+
+      <ClientDetailSheet
+        client={detailClient}
+        open={!!detailClient}
+        onOpenChange={(open) => !open && setDetailClient(null)}
+      />
     </>
   )
 }
