@@ -179,14 +179,16 @@ export function AddDeliveryDialog() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="sales_type">Sales Type</Label>
-                <Select name="sales_type">
+                <Select name="sales_type" defaultValue="sale">
                   <SelectTrigger>
                     <SelectValue placeholder="Select..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="new">New</SelectItem>
-                    <SelectItem value="repeat">Repeat</SelectItem>
-                    <SelectItem value="referral">Referral</SelectItem>
+                    <SelectItem value="sale">Sale (Normal Delivery)</SelectItem>
+                    <SelectItem value="exchange">Exchange (Swap Product)</SelectItem>
+                    <SelectItem value="trade_in">Trade In (Upgrade/Downgrade)</SelectItem>
+                    <SelectItem value="refund">Refund (Return &amp; Cash Back)</SelectItem>
+                    <SelectItem value="drop_off">Drop Off (Just Deliver)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

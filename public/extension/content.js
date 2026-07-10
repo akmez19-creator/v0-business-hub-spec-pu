@@ -100,6 +100,10 @@ style.textContent = `
 .akmez-row{display:flex;gap:8px;margin-bottom:10px;}
 .akmez-field{flex:1;}
 .akmez-rating{margin-top:2px;line-height:1.4;display:flex;align-items:center;flex-wrap:wrap;gap:2px;}
+.akmez-salestype{display:flex;flex-wrap:wrap;gap:4px;}
+.akmez-st-pill{padding:3px 10px;border-radius:9999px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,0.18);background:transparent;color:#94a3b8;cursor:pointer;}
+.akmez-st-pill:hover{border-color:rgba(255,255,255,0.4);color:#e2e8f0;}
+.akmez-st-pill.active{background:#10b981;border-color:#10b981;color:#04110b;}
 .akmez-label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600;}
 .akmez-label .req{color:#f97316;}
 .akmez-input-wrap{position:relative;}
@@ -1064,6 +1068,16 @@ function renderOrdersForm() {
       </div>
     </div>
     <div class="akmez-region-delivery" id="ak-region-delivery" style="display:none;"></div>
+    <div class="akmez-field">
+      <div class="akmez-label">Sales Type</div>
+      <div class="akmez-salestype" id="ak-salestype">
+        <button type="button" class="akmez-st-pill active" data-st="sale">Sale</button>
+        <button type="button" class="akmez-st-pill" data-st="exchange">Exchange</button>
+        <button type="button" class="akmez-st-pill" data-st="trade_in">Trade In</button>
+        <button type="button" class="akmez-st-pill" data-st="refund">Refund</button>
+        <button type="button" class="akmez-st-pill" data-st="drop_off">Drop Off</button>
+      </div>
+    </div>
     <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
     <div class="akmez-row akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field">
@@ -1097,6 +1111,14 @@ function renderOrdersForm() {
         // Fire input so listeners react (e.g. instant client rating on C1)
         el.dispatchEvent(new Event('input', { bubbles: true }));
       } catch(e) {}
+    };
+  });
+
+  // Sales type pills: Sale / Exchange / Trade In / Refund / Drop Off
+  body.querySelectorAll('.akmez-st-pill').forEach(p => {
+    p.onclick = () => {
+      body.querySelectorAll('.akmez-st-pill').forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
     };
   });
   
@@ -1676,9 +1698,13 @@ function submitOrder() {
   // matching the import sheet. Falls back to "Extension" server-side if unknown.
   const pageCode = (window.__akmezDetectedPage && window.__akmezDetectedPage.code) || null;
 
+  // Selected sales type pill (sale / exchange / trade_in / refund / drop_off)
+  const stActive = document.querySelector('#ak-salestype .akmez-st-pill.active');
+  const salesType = stActive ? stActive.dataset.st : 'sale';
+
   chrome.runtime.sendMessage({
     action: 'createOrder',
-    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId, pageCode }
+    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId, pageCode, salesType }
   }, response => {
     if (!response || !response.success) {
       err.textContent = 'Connection failed';

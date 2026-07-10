@@ -274,7 +274,13 @@ export async function POST(request: NextRequest) {
     }
     
     const body = await request.json()
-    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode } = body
+    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode, salesType } = body
+
+    // Agents can log the order as Sale / Exchange / Trade In / Refund / Drop Off
+    const ALLOWED_SALES_TYPES = ['sale', 'exchange', 'trade_in', 'refund', 'drop_off']
+    const orderSalesType = ALLOWED_SALES_TYPES.includes(String(salesType || '').toLowerCase())
+      ? String(salesType).toLowerCase()
+      : 'sale'
     
     // Validate required fields
     if (!customerName?.trim()) {
@@ -305,7 +311,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle()
     
     // Insert delivery (mirrors the import sheet: INDEX and Payment Method
-    // stay blank, SalesType is SALES, RTE comes from the locality's route)
+    // stay blank, RTE comes from the locality's route)
     const { data: delivery, error } = await supabase.from('deliveries').insert({
       customer_name: customerName.trim(),
       contact_1: contact1.trim(),
@@ -315,7 +321,7 @@ export async function POST(request: NextRequest) {
       contractor_id: loc?.contractor_id || null,
       rider_id: loc?.default_rider_id || null,
       assigned_at: loc?.contractor_id ? new Date().toISOString() : null,
-      sales_type: 'SALES',
+      sales_type: orderSalesType,
       products: products,
       qty: qty || 1,
       amount: amount || 0,

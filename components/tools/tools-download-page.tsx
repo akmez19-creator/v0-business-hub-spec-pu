@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.26.0'
+const EXTENSION_VERSION = '4.27.0'
 const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Package, text: 'Sales Type pills in the order form: log each order as Sale, Exchange, Trade In, Refund or Drop Off with one tap, and it flows through to All Deliveries' },
     { icon: Shield, text: 'Instant client rating: as soon as a phone number lands in Contact 1, a badge shows GOOD / AVERAGE / BAD / NEW client with their order count, delivered % and total sales from past history' },
     { icon: MousePointer2, text: 'Quick-fill toolbar now appears on double-click as well as text selection, streamlined to just C1 and C2 for faster contact entry' },
     { icon: Package, text: 'Product photos now enlarge on hover as well, so agents can preview an item just by moving the mouse over its thumbnail' },
