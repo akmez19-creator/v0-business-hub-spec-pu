@@ -805,7 +805,20 @@ function renderOrdersForm() {
       if (window.__akmezSyncTimer) { clearInterval(window.__akmezSyncTimer); window.__akmezSyncTimer = null; }
       return;
     }
-    readCustomerName(txt => applyField(fields.name, txt));
+    readCustomerName(txt => {
+      const prevName = fields.name.last;
+      applyField(fields.name, txt);
+      // New conversation detected (name switched to a different client):
+      // reset the product cart so items from the previous client don't carry over.
+      if (txt && fields.name.last !== prevName && prevName !== null) {
+        if (Object.keys(cart).length) {
+          cart = {};
+          updateCart();
+        }
+        // Allow the new client's ad id to resolve its product again
+        window.__akmezLastResolvedAd = null;
+      }
+    });
     readCustomerPhone(num => applyField(fields.phone, num));
     readCustomerAdId(id => {
       const prev = fields.adid.last;
