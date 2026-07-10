@@ -41,6 +41,7 @@ import {
   Copy,
   Check,
   ExternalLink,
+  Users,
 } from 'lucide-react'
 import {
   Dialog,
@@ -122,6 +123,8 @@ export default function AdsManagerPage() {
   // Product linking state
   const [products, setProducts] = useState<Product[]>([])
   const [campaignLinks, setCampaignLinks] = useState<Record<string, CampaignProductLink>>({})
+  // Per-product client counts (for cost-per-client / CAC), keyed by product name
+  const [productClientStats, setProductClientStats] = useState<Record<string, { clientCount: number; deliveredClientCount: number; orderCount: number }>>({})
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [linkingProduct, setLinkingProduct] = useState(false)
@@ -266,6 +269,19 @@ export default function AdsManagerPage() {
     }
   }, [showTodayOnly])
 
+  // Refresh per-product client counts whenever the set of linked products changes
+  useEffect(() => {
+    const names = Array.from(
+      new Set(
+        Object.values(campaignLinks)
+          .map((l) => l.products?.name)
+          .filter((n): n is string => !!n)
+      )
+    )
+    fetchProductClientStats(names)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignLinks])
+
   async function fetchCachedData(forceRefresh = false) {
     setLoading(true)
     setLoadingCampaigns(true)
@@ -391,6 +407,24 @@ export default function AdsManagerPage() {
     }
   }
   
+  async function fetchProductClientStats(names: string[]) {
+    if (names.length === 0) {
+      setProductClientStats({})
+      return
+    }
+    try {
+      const res = await fetch('/api/product-client-stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ names }),
+      })
+      const data = await res.json()
+      setProductClientStats(data.stats || {})
+    } catch {
+      console.error('[v0] Failed to fetch product client stats')
+    }
+  }
+
   async function linkProductToCampaign(productId: string | null) {
     if (!selectedCampaign) return
     
@@ -898,6 +932,20 @@ export default function AdsManagerPage() {
                               <Badge variant="secondary" className="ml-1 px-2 py-0 text-xs">
                                 {group.campaigns.length} campaign{group.campaigns.length !== 1 ? 's' : ''}
                               </Badge>
+                              {!isUnlinked && (() => {
+                                const stat = productClientStats[group.productName]
+                                const clients = stat?.clientCount ?? 0
+                                return (
+                                  <Badge
+                                    variant="outline"
+                                    className="px-2 py-0 text-xs bg-primary/5 text-primary border-primary/20"
+                                    title={`${clients} distinct client${clients !== 1 ? 's' : ''} logged for this product${stat ? ` \u00b7 ${stat.deliveredClientCount} delivered` : ''}`}
+                                  >
+                                    <Users className="w-3 h-3 mr-1" />
+                                    {clients.toLocaleString()} client{clients !== 1 ? 's' : ''}
+                                  </Badge>
+                                )
+                              })()}
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
@@ -907,6 +955,16 @@ export default function AdsManagerPage() {
                             {group.totalSpend > 0 && (
                               <p className="text-xs text-muted-foreground/70">{formatUsd(group.totalSpend.toString())}</p>
                             )}
+                            {!isUnlinked && (() => {
+                              const clients = productClientStats[group.productName]?.clientCount ?? 0
+                              if (group.totalSpend <= 0 || clients <= 0) return null
+                              const cacRs = (group.totalSpend * USD_TO_RS) / clients
+                              return (
+                                <p className="mt-0.5 text-xs font-medium text-primary" title="Ad spend per client acquired (cost of a client)">
+                                  Rs {cacRs.toLocaleString('en-US', { maximumFractionDigits: 0 })}/client
+                                </p>
+                              )
+                            })()}
                           </TableCell>
                         </TableRow>
                         
