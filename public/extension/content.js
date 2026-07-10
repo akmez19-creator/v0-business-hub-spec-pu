@@ -263,6 +263,13 @@ function detectSourcePage() {
       const al = el.getAttribute && el.getAttribute('aria-label');
       if (al && al.length < 120) haystacks.push(al);
     });
+    // Fallback: scan the full visible page text. This catches inline mentions
+    // that live in plain divs — e.g. the Business Suite banner
+    // "This chat contains a reply to <Page>" and the page switcher label.
+    try {
+      const bodyText = (document.body && document.body.innerText) || '';
+      if (bodyText) haystacks.push(bodyText.slice(0, 50000));
+    } catch (e) { /* ignore */ }
     const joined = haystacks.join(' | ').toLowerCase();
     for (const m of pageMappings) {
       const needle = (m.match || '').toLowerCase().trim();
