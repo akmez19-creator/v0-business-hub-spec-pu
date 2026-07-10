@@ -184,6 +184,10 @@ style.textContent = `
 .wt-history-item .hours{color:#10b981;font-weight:600;}
 
 #akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;}
+.akmez-region-delivery{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:7px 10px;font-size:11px;color:#6ee7b7;margin:-4px 0 10px;line-height:1.4;}
+.akmez-region-delivery b{color:#10b981;}
+.akmez-region-delivery.warn{background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.3);color:#fcd34d;}
+.akmez-suggest-contractor{font-size:10px;color:#10b981;background:rgba(16,185,129,0.12);padding:1px 6px;border-radius:8px;margin-left:8px;white-space:nowrap;}
 .akmez-pagemap-form{display:flex;gap:6px;margin:6px 0 2px;flex-wrap:wrap;}
 .akmez-pagemap-input{flex:1;min-width:120px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:6px 8px;font-size:12px;}
 .akmez-pagemap-input.code{flex:0 0 90px;min-width:70px;text-transform:uppercase;}
@@ -226,6 +230,8 @@ document.head.appendChild(style);
 
 // State
 let products = [], regions = [], cart = {}, currentTab = 'orders';
+// Map: region name -> { contractor, rider } (delivery assignment set by admin)
+let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
 let pageMappings = [];
 chrome.storage.local.get(['pageMappings'], s => {
@@ -706,6 +712,7 @@ async function loadData() {
       }
       products = data.products || [];
       regions = data.regions || [];
+      regionDelivery = data.regionDelivery || {};
       worktimeData = data.worktime || worktimeData;
       // Mirror the shared, admin-configured settings into local storage so the
       // auto-fill readers (which read these keys) inherit them for every user.
@@ -825,6 +832,7 @@ function renderOrdersForm() {
         <input type="date" id="ak-date" class="akmez-input akmez-input-plain">
       </div>
     </div>
+    <div class="akmez-region-delivery" id="ak-region-delivery" style="display:none;"></div>
     <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
     <div class="akmez-row akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field">
@@ -1065,9 +1073,11 @@ function renderOrdersForm() {
     if (!regionMatches.length) { regionSuggest.style.display = 'none'; return; }
     // Highlight the first match by default so Enter/Tab accepts it immediately
     regionActive = 0;
-    regionSuggest.innerHTML = regionMatches.map((r, i) =>
-      `<div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">${r.replace(/</g, '&lt;')}</div>`
-    ).join('');
+    regionSuggest.innerHTML = regionMatches.map((r, i) => {
+      const d = regionDelivery[r];
+      const tag = d ? `<span class="akmez-suggest-contractor">${String(d.contractor).replace(/</g, '&lt;')}</span>` : '';
+      return `<div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">${r.replace(/</g, '&lt;')}${tag}</div>`;
+    }).join('');
     regionSuggest.style.display = 'block';
     regionSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
       // mousedown fires before blur so the value is set before the list hides
@@ -1080,9 +1090,36 @@ function renderOrdersForm() {
     regionInput.value = regionMatches[i];
     regionSuggest.style.display = 'none';
     regionActive = -1;
+    updateRegionDelivery();
   }
 
-  regionInput.addEventListener('input', showRegionSuggestions);
+  // Show which contractor/rider is assigned to deliver the chosen region
+  function updateRegionDelivery() {
+    const box = document.getElementById('ak-region-delivery');
+    if (!box) return;
+    const val = (regionInput.value || '').trim().toLowerCase();
+    let info = null;
+    if (val) {
+      for (const name in regionDelivery) {
+        if (name.toLowerCase() === val) { info = regionDelivery[name]; break; }
+      }
+    }
+    if (info) {
+      box.innerHTML = '&#128666; Delivered by: <b>' + String(info.contractor).replace(/</g, '&lt;') + '</b>'
+        + (info.rider ? ' &middot; Rider: <b>' + String(info.rider).replace(/</g, '&lt;') + '</b>' : '');
+      box.style.display = 'block';
+    } else if (val && regions.some(r => r.toLowerCase() === val)) {
+      box.innerHTML = '&#9888;&#65039; No contractor assigned to this region yet';
+      box.className = 'akmez-region-delivery warn';
+      box.style.display = 'block';
+      return;
+    } else {
+      box.style.display = 'none';
+    }
+    box.className = 'akmez-region-delivery';
+  }
+
+  regionInput.addEventListener('input', () => { showRegionSuggestions(); updateRegionDelivery(); });
   regionInput.addEventListener('focus', showRegionSuggestions);
   regionInput.addEventListener('blur', () => setTimeout(() => { regionSuggest.style.display = 'none'; }, 150));
   regionInput.addEventListener('keydown', e => {

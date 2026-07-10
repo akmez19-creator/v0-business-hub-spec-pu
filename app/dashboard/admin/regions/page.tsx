@@ -19,17 +19,46 @@ export default async function AdminRegionsPage() {
     redirect('/dashboard')
   }
 
-  // Fetch localities (the full route table)
-  const { data: localities } = await adminDb
-    .from('localities')
-    .select('*')
-    .eq('is_active', true)
-    .order('region', { ascending: true })
-    .order('route_code', { ascending: true })
+  // Fetch localities with their assigned contractor + default rider,
+  // plus the contractor/rider lists for the assignment editors
+  const [{ data: localities }, { data: contractors }, { data: riders }] = await Promise.all([
+    adminDb
+      .from('localities')
+      .select('*, contractor:contractors(id, name), rider:riders(id, name, contractor_id)')
+      .eq('is_active', true)
+      .order('route_code', { ascending: true })
+      .order('name', { ascending: true }),
+    adminDb
+      .from('contractors')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('name'),
+    adminDb
+      .from('riders')
+      .select('id, name, contractor_id')
+      .eq('is_active', true)
+      .order('name'),
+  ])
+
+  const mapped = (localities || []).map((l: any) => ({
+    id: l.id,
+    name: l.name,
+    region: l.route_code || 'UNASSIGNED',
+    district: l.district || '',
+    route_code: l.route_code || '',
+    is_active: l.is_active,
+    contractor_id: l.contractor_id || null,
+    contractor_name: l.contractor?.name || null,
+    default_rider_id: l.default_rider_id || null,
+    rider_name: l.rider?.name || null,
+  }))
 
   return (
     <AdminRegionsContent
-      localities={localities || []}
+      localities={mapped}
+      contractors={contractors || []}
+      riders={riders || []}
+      canEdit={['admin', 'manager'].includes(currentProfile.role)}
     />
   )
 }

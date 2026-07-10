@@ -113,14 +113,24 @@ export async function GET(request: NextRequest) {
       variants: variantsMap[p.id] || []
     }))
     
-    // Get localities (regions)
+    // Get localities (regions) with their assigned contractor / default rider
     const { data: localities } = await supabase
       .from('localities')
-      .select('name')
+      .select('name, contractor:contractors(name), rider:riders(name)')
       .eq('is_active', true)
       .order('name', { ascending: true })
     
     const regions = (localities || []).map(l => l.name)
+    // Map: region name -> { contractor, rider } for delivery display in the widget
+    const regionDelivery: Record<string, { contractor: string; rider: string | null }> = {}
+    for (const l of (localities || []) as any[]) {
+      if (l.contractor?.name) {
+        regionDelivery[l.name] = {
+          contractor: l.contractor.name,
+          rider: l.rider?.name || null,
+        }
+      }
+    }
     
     // Get worktime data for the user
     const today = new Date().toISOString().split('T')[0]
@@ -197,6 +207,7 @@ return NextResponse.json({
   authenticated: true,
   products: productsWithVariantData || [],
       regions,
+      regionDelivery,
       role,
       settings,
       worktime: {

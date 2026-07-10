@@ -13,6 +13,9 @@ import {
   Building2,
   Hash,
   Filter,
+  UserCheck,
+  Bike,
+  Pencil,
 } from 'lucide-react'
 import { getRegionImage } from '@/components/ui/region-avatar'
 
@@ -23,18 +26,157 @@ interface Locality {
   district: string
   route_code: string
   is_active: boolean
+  contractor_id: string | null
+  contractor_name: string | null
+  default_rider_id: string | null
+  rider_name: string | null
+}
+
+interface PersonOption {
+  id: string
+  name: string
+  contractor_id?: string
 }
 
 interface AdminRegionsContentProps {
   localities: Locality[]
+  contractors: PersonOption[]
+  riders: PersonOption[]
+  canEdit: boolean
 }
 
-export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
+export function AdminRegionsContent({ localities: initialLocalities, contractors, riders, canEdit }: AdminRegionsContentProps) {
+  const [localities, setLocalities] = useState<Locality[]>(initialLocalities)
   const [search, setSearch] = useState('')
   const [filterRegion, setFilterRegion] = useState<string>('all')
   const [filterDistrict, setFilterDistrict] = useState<string>('all')
   const [expandedRegions, setExpandedRegions] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<'table' | 'grouped'>('table')
+  // Assignment editing
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editContractor, setEditContractor] = useState<string>('')
+  const [editRider, setEditRider] = useState<string>('')
+  const [saving, setSaving] = useState(false)
+  const [bulkRegion, setBulkRegion] = useState<string | null>(null)
+
+  const contractorName = (id: string | null) => contractors.find(c => c.id === id)?.name || null
+  const riderName = (id: string | null) => riders.find(r => r.id === id)?.name || null
+
+  const startEdit = (l: Locality) => {
+    setEditingId(l.id)
+    setBulkRegion(null)
+    setEditContractor(l.contractor_id || '')
+    setEditRider(l.default_rider_id || '')
+  }
+
+  const applyLocal = (ids: string[], contractorId: string | null, riderId: string | null) => {
+    setLocalities(prev => prev.map(l => ids.includes(l.id)
+      ? {
+          ...l,
+          contractor_id: contractorId,
+          contractor_name: contractorName(contractorId),
+          default_rider_id: riderId,
+          rider_name: riderName(riderId),
+        }
+      : l))
+  }
+
+  const saveAssignment = async (target: { localityId?: string; routeCode?: string }) => {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/admin/localities', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...target,
+          contractorId: editContractor || null,
+          riderId: editRider || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed')
+      const contractorId = editContractor || null
+      const riderId = contractorId ? (editRider || null) : null
+      if (target.localityId) {
+        applyLocal([target.localityId], contractorId, riderId)
+      } else if (target.routeCode) {
+        applyLocal(localities.filter(l => l.route_code === target.routeCode).map(l => l.id), contractorId, riderId)
+      }
+      setEditingId(null)
+      setBulkRegion(null)
+    } catch {
+      // keep the editor open so the admin can retry
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Riders filtered by the selected contractor
+  const ridersForContractor = useMemo(
+    () => riders.filter(r => r.contractor_id === editContractor),
+    [riders, editContractor]
+  )
+
+  const renderAssignmentEditor = (onSave: () => void, onCancel: () => void) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <select
+        value={editContractor}
+        onChange={e => { setEditContractor(e.target.value); setEditRider('') }}
+        className="text-[11px] border border-border/60 rounded-md px-1.5 py-1 bg-card text-foreground max-w-[130px]"
+      >
+        <option value="">No contractor</option>
+        {contractors.map(c => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+      <select
+        value={editRider}
+        onChange={e => setEditRider(e.target.value)}
+        disabled={!editContractor}
+        className="text-[11px] border border-border/60 rounded-md px-1.5 py-1 bg-card text-foreground max-w-[120px] disabled:opacity-50"
+      >
+        <option value="">Any rider</option>
+        {ridersForContractor.map(r => (
+          <option key={r.id} value={r.id}>{r.name}</option>
+        ))}
+      </select>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="text-[10px] font-semibold px-2 py-1 rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+      >
+        {saving ? 'Saving...' : 'Save'}
+      </button>
+      <button
+        onClick={onCancel}
+        disabled={saving}
+        className="text-[10px] font-medium px-2 py-1 rounded-md border border-border/60 text-muted-foreground"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+
+  const renderAssignmentBadge = (l: Locality) => (
+    l.contractor_name ? (
+      <div className="flex flex-col">
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground">
+          <UserCheck className="w-3 h-3 text-emerald-500 shrink-0" />
+          {l.contractor_name}
+        </span>
+        {l.rider_name && (
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground pl-4">
+            <Bike className="w-2.5 h-2.5 shrink-0" />
+            {l.rider_name}
+          </span>
+        )}
+      </div>
+    ) : (
+      <span className="text-[10px] text-amber-600 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full font-medium">
+        Unassigned
+      </span>
+    )
+  )
 
   // Unique regions and districts for filters
   const uniqueRegions = useMemo(() =>
@@ -115,7 +257,7 @@ export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
           <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
             <Globe className="w-3.5 h-3.5" />
@@ -136,6 +278,16 @@ export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
             <span className="text-[10px] font-medium">Districts</span>
           </div>
           <p className="text-lg font-bold text-foreground">{uniqueDistricts.length}</p>
+        </div>
+        <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
+          <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
+            <UserCheck className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-medium">Assigned</span>
+          </div>
+          <p className="text-lg font-bold text-foreground">
+            {localities.filter(l => l.contractor_id).length}
+            <span className="text-[10px] font-normal text-muted-foreground ml-1">/ {localities.length}</span>
+          </p>
         </div>
       </div>
 
@@ -228,6 +380,12 @@ export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
                       Route
                     </div>
                   </th>
+                  <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    <div className="flex items-center gap-1">
+                      <UserCheck className="w-3 h-3" />
+                      Delivery
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -257,6 +415,27 @@ export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
                       <span className="text-xs font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
                         {l.route_code}
                       </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      {editingId === l.id ? (
+                        renderAssignmentEditor(
+                          () => saveAssignment({ localityId: l.id }),
+                          () => setEditingId(null)
+                        )
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          {renderAssignmentBadge(l)}
+                          {canEdit && (
+                            <button
+                              onClick={() => startEdit(l)}
+                              className="text-muted-foreground/50 hover:text-primary transition-colors"
+                              title="Edit assignment"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -321,6 +500,24 @@ export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
               {/* Localities list */}
               {expandedRegions.has(region) && (
                 <div className="divide-y divide-border/30">
+                  {canEdit && (
+                    <div className="px-3 py-2 bg-muted/20 flex flex-wrap items-center gap-2">
+                      {bulkRegion === region ? (
+                        renderAssignmentEditor(
+                          () => saveAssignment({ routeCode: region }),
+                          () => setBulkRegion(null)
+                        )
+                      ) : (
+                        <button
+                          onClick={() => { setBulkRegion(region); setEditingId(null); setEditContractor(''); setEditRider('') }}
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary hover:underline"
+                        >
+                          <UserCheck className="w-3 h-3" />
+                          Assign entire region to a contractor
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {locs.map((l, i) => (
                     <div
                       key={l.id}
@@ -331,8 +528,26 @@ export function AdminRegionsContent({ localities }: AdminRegionsContentProps) {
                     >
                       <Hash className="w-3 h-3 text-muted-foreground/40 shrink-0" />
                       <span className="text-xs font-medium text-foreground flex-1 min-w-0 truncate">{l.name}</span>
-                      <span className="text-[10px] text-muted-foreground hidden sm:block">{l.district}</span>
-                      <span className="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded shrink-0">
+                      {editingId === l.id ? (
+                        renderAssignmentEditor(
+                          () => saveAssignment({ localityId: l.id }),
+                          () => setEditingId(null)
+                        )
+                      ) : (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {renderAssignmentBadge(l)}
+                          {canEdit && (
+                            <button
+                              onClick={() => startEdit(l)}
+                              className="text-muted-foreground/50 hover:text-primary transition-colors"
+                              title="Edit assignment"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded shrink-0 hidden sm:block">
                         {l.route_code}
                       </span>
                     </div>
