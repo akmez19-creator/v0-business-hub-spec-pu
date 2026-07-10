@@ -16,8 +16,8 @@ import Link from 'next/link'
 import { ClientsTable } from '@/components/clients/clients-table'
 import { AddClientDialog } from '@/components/clients/add-client-dialog'
 import { ImportHistoryDialog } from '@/components/clients/import-history-dialog'
-import { getClientsPage, getClientStats, type ClientSortKey } from '@/lib/client-actions'
-import type { Client } from '@/lib/types'
+import { getClientsPage, getClientStats } from '@/lib/client-actions'
+import type { Client, ClientSortKey } from '@/lib/types'
 
 const SORT_LABELS: Record<ClientSortKey, string> = {
   total_sales: 'Total Sales',

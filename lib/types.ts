@@ -123,6 +123,8 @@ export interface Client {
   client_status: 'good' | 'average' | 'bad' | 'new'
 }
 
+export type ClientSortKey = 'total_sales' | 'total_orders' | 'delivered_rate'
+
 export const CLIENT_STATUS_LABELS: Record<Client['client_status'], string> = {
   good: 'Good',
   average: 'Average',

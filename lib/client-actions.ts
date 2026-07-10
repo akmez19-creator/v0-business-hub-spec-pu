@@ -2,7 +2,7 @@
 
 import { createClient as createSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { Client } from '@/lib/types'
+import type { Client, ClientSortKey } from '@/lib/types'
 
 export async function getClients(filters?: {
   search?: string
@@ -176,14 +176,6 @@ export async function importClients(clients: Array<{
 
 // Paginated + filtered listing that scales to 500k+ clients.
 // All filtering happens in Postgres against indexed columns.
-const CLIENT_SORT_COLUMNS = {
-  total_sales: 'total_sales',
-  total_orders: 'total_orders',
-  delivered_rate: 'delivered_rate',
-} as const
-
-export type ClientSortKey = keyof typeof CLIENT_SORT_COLUMNS
-
 export async function getClientsPage(opts: {
   search?: string
   status?: string
@@ -197,6 +189,11 @@ export async function getClientsPage(opts: {
   const pageSize = Math.min(100, Math.max(10, opts.pageSize || 50))
   const from = (page - 1) * pageSize
 
+  const CLIENT_SORT_COLUMNS: Record<ClientSortKey, string> = {
+    total_sales: 'total_sales',
+    total_orders: 'total_orders',
+    delivered_rate: 'delivered_rate',
+  }
   const sortColumn = CLIENT_SORT_COLUMNS[opts.sortBy || 'total_sales'] || 'total_sales'
   const ascending = opts.sortDir === 'asc'
 
