@@ -1722,26 +1722,34 @@ function formatTime(seconds) {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-// Text selection popup
+// Text selection popup (C1 / C2 quick-fill)
 const sel = document.createElement('div');
 sel.id = 'akmez-sel';
-sel.innerHTML = '<button data-f="name">Name</button><button data-f="c1">C1</button><button data-f="c2">C2</button>';
+sel.innerHTML = '<button data-f="c1">C1</button><button data-f="c2">C2</button>';
 document.body.appendChild(sel);
 
+// Show the toolbar next to the current text selection, if any
+function showSelToolbar() {
+  const s = window.getSelection(), t = s && s.toString().trim();
+  if (t && t.length > 0 && t.length < 200 && s.rangeCount) {
+    const r = s.getRangeAt(0).getBoundingClientRect();
+    sel.style.display = 'flex';
+    sel.style.left = Math.max(10, r.left) + 'px';
+    sel.style.top = (r.bottom + 8) + 'px';
+    sel.dataset.text = t;
+  } else {
+    sel.style.display = 'none';
+  }
+}
+
+// Trigger on both normal selection (mouseup) and double-click (word select)
 document.addEventListener('mouseup', e => {
   if (e.target.closest('#akmez-sel,#akmez-widget')) return;
-  setTimeout(() => {
-    const s = window.getSelection(), t = s.toString().trim();
-    if (t && t.length > 0 && t.length < 200) {
-      const r = s.getRangeAt(0).getBoundingClientRect();
-      sel.style.display = 'flex';
-      sel.style.left = Math.max(10, r.left) + 'px';
-      sel.style.top = (r.bottom + 8) + 'px';
-      sel.dataset.text = t;
-    } else {
-      sel.style.display = 'none';
-    }
-  }, 10);
+  setTimeout(showSelToolbar, 10);
+});
+document.addEventListener('dblclick', e => {
+  if (e.target.closest('#akmez-sel,#akmez-widget')) return;
+  setTimeout(showSelToolbar, 10);
 });
 
 document.addEventListener('mousedown', e => {
@@ -1756,7 +1764,7 @@ sel.onclick = async e => {
   const t = sel.dataset.text;
   if (t) {
     await navigator.clipboard.writeText(t);
-    const inp = document.getElementById('ak-' + b.dataset.f) || document.getElementById('ak-name');
+    const inp = document.getElementById('ak-' + b.dataset.f);
     if (inp) inp.value = t;
     toast('Copied: ' + t.substring(0, 20));
     sel.style.display = 'none';
