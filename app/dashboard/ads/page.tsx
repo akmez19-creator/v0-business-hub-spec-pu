@@ -40,6 +40,7 @@ import {
   Boxes,
   Copy,
   Check,
+  ExternalLink,
 } from 'lucide-react'
 import {
   Dialog,
@@ -78,6 +79,7 @@ interface Campaign {
   clicks: string
   reach: string
   adIds?: string[]
+  ads?: { id: string; postId: string | null }[]
   accountId?: string
   accountName?: string
 }
@@ -171,8 +173,11 @@ export default function AdsManagerPage() {
   }
   
   const renderAdIds = (campaign: Campaign) => {
-    const adIds = campaign.adIds || []
-    if (adIds.length === 0) {
+    // New shape: ads[{id, postId}]. Fall back to legacy adIds (stale cache).
+    const ads = campaign.ads && campaign.ads.length > 0
+      ? campaign.ads
+      : (campaign.adIds || []).map(id => ({ id, postId: null as string | null }))
+    if (ads.length === 0) {
       return <span className="text-xs text-muted-foreground/50">No ads</span>
     }
     const isOpen = revealedAdIds.has(campaign.id)
@@ -184,25 +189,39 @@ export default function AdsManagerPage() {
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
         >
           <Megaphone className="w-3 h-3" />
-          {isOpen ? 'Hide' : 'Show'} Ad ID{adIds.length > 1 ? `s (${adIds.length})` : ''}
+          {isOpen ? 'Hide' : 'Show'} Ad ID{ads.length > 1 ? `s (${ads.length})` : ''}
         </button>
         {isOpen && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {adIds.map((adId) => (
-              <button
-                key={adId}
-                type="button"
-                onClick={(e) => { e.stopPropagation(); copyAdId(adId) }}
-                title="Click to copy"
-                className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
-              >
-                {copiedAdId === adId ? (
-                  <Check className="w-3 h-3 text-green-500" />
-                ) : (
-                  <Copy className="w-3 h-3 opacity-60" />
+          <div className="mt-1 flex flex-col gap-1">
+            {ads.map((ad) => (
+              <div key={ad.id} className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); copyAdId(ad.id) }}
+                  title="Click to copy"
+                  className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+                >
+                  {copiedAdId === ad.id ? (
+                    <Check className="w-3 h-3 text-green-500" />
+                  ) : (
+                    <Copy className="w-3 h-3 opacity-60" />
+                  )}
+                  {ad.id}
+                </button>
+                {ad.postId && (
+                  <a
+                    href={`https://www.facebook.com/${ad.postId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Open post ${ad.postId}`}
+                    className="inline-flex items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-500 hover:bg-blue-500/20 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    View Post
+                  </a>
                 )}
-                {adId}
-              </button>
+              </div>
             ))}
           </div>
         )}

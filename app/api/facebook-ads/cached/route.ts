@@ -97,19 +97,24 @@ export async function GET(request: Request) {
         const [spendResponse, campaignsResponse, adsResponse] = await Promise.all([
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/insights?fields=spend&date_preset=today&access_token=${accessToken}`),
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,insights.date_preset(today){spend}&access_token=${accessToken}&limit=500`),
-          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/ads?fields=id,campaign_id&access_token=${accessToken}&limit=500`)
+          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/ads?fields=id,campaign_id,creative{effective_object_story_id}&access_token=${accessToken}&limit=500`)
         ])
         
         const spendData = await spendResponse.json()
         accountSpends[account.id] = parseFloat(spendData.data?.[0]?.spend || '0')
         
-        // Build a map of campaign_id -> [adId, ...] (with pagination)
-        const adsByCampaign: Record<string, string[]> = {}
-        const collectAds = (ads: { id: string; campaign_id?: string }[]) => {
+        // Build a map of campaign_id -> [{ id, postId }, ...] (with pagination).
+        // postId is the creative's effective_object_story_id (pageId_postId),
+        // which links directly to the boosted post: facebook.com/{postId}
+        const adsByCampaign: Record<string, { id: string; postId: string | null }[]> = {}
+        const collectAds = (ads: { id: string; campaign_id?: string; creative?: { effective_object_story_id?: string } }[]) => {
           for (const ad of ads) {
             if (!ad.campaign_id) continue
             if (!adsByCampaign[ad.campaign_id]) adsByCampaign[ad.campaign_id] = []
-            adsByCampaign[ad.campaign_id].push(ad.id)
+            adsByCampaign[ad.campaign_id].push({
+              id: ad.id,
+              postId: ad.creative?.effective_object_story_id || null
+            })
           }
         }
         const adsData = await adsResponse.json()
@@ -134,7 +139,7 @@ export async function GET(request: Request) {
             objective: campaign.objective,
             created_time: campaign.created_time,
             spend,
-            adIds: adsByCampaign[campaign.id] || [],
+            ads: adsByCampaign[campaign.id] || [],
             accountId: account.id,
             accountName: account.name || account.id
           })
@@ -154,7 +159,7 @@ export async function GET(request: Request) {
               objective: campaign.objective,
               created_time: campaign.created_time,
               spend,
-              adIds: adsByCampaign[campaign.id] || [],
+              ads: adsByCampaign[campaign.id] || [],
               accountId: account.id,
               accountName: account.name || account.id
             })
