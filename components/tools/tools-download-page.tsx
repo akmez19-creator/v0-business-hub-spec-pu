@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.24.0'
+const EXTENSION_VERSION = '4.25.0'
 const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
@@ -83,7 +83,7 @@ export function ToolsDownloadPage() {
 
   const newFeatures = [
     { icon: MousePointer2, text: 'Quick-fill toolbar now appears on double-click as well as text selection, streamlined to just C1 and C2 for faster contact entry' },
-    { icon: Package, text: 'Product search now shows each product photo (tap to enlarge) so agents can visually confirm the item before adding it' },
+    { icon: Package, text: 'Product photos now enlarge on hover as well, so agents can preview an item just by moving the mouse over its thumbnail' },
     { icon: Package, text: 'Widget pricing now matches inventory exactly, auto-applying bundle offers (e.g. 2 for Rs775) and Buy-One-Get-One-Free, with savings shown in the cart' },
     { icon: Sparkles, text: 'Orders now record the source page code (e.g. MBM) in the MEDIUM column instead of "Extension", matching the import sheet' },
     { icon: Sparkles, text: 'Rock-solid page detection: link a page to its Facebook ID once (Settings, link button) and its code + logo show instantly on every conversation for that page' },

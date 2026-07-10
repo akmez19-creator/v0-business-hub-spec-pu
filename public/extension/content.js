@@ -137,6 +137,8 @@ style.textContent = `
 .akmez-suggest-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;}
 .akmez-suggest-thumb,.akmez-cart-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;background:#1e293b;flex-shrink:0;cursor:zoom-in;border:1px solid rgba(255,255,255,0.12);}
 .akmez-suggest-thumb.placeholder,.akmez-cart-thumb.placeholder{cursor:default;background:repeating-linear-gradient(45deg,#1e293b,#1e293b 4px,#243244 4px,#243244 8px);}
+#akmez-hover-preview{position:fixed;z-index:2147483647;display:none;width:220px;height:220px;border-radius:12px;overflow:hidden;background:#0f172a;box-shadow:0 12px 40px rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15);pointer-events:none;}
+#akmez-hover-preview img{width:100%;height:100%;object-fit:contain;display:block;}
 .akmez-offer-badge{display:inline-block;background:rgba(249,115,22,0.2);color:#fb923c;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;letter-spacing:0.3px;}
 .akmez-cart-item-price s{color:#64748b;font-weight:400;margin-left:4px;}
 #akmez-img-overlay{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.82);display:none;align-items:center;justify-content:center;padding:24px;}
@@ -1466,6 +1468,42 @@ function akmezShowImage(src, name) {
   ov.querySelector('.akmez-img-cap').textContent = name || '';
   ov.style.display = 'flex';
 }
+
+// Floating preview shown while the mouse hovers a product thumbnail
+let __akmezHover = null;
+function akmezHoverShow(el) {
+  const src = el.getAttribute('data-img');
+  if (!src) return;
+  if (!__akmezHover) {
+    __akmezHover = document.createElement('div');
+    __akmezHover.id = 'akmez-hover-preview';
+    __akmezHover.innerHTML = '<img alt="">';
+    document.body.appendChild(__akmezHover);
+  }
+  __akmezHover.querySelector('img').src = src;
+  const r = el.getBoundingClientRect();
+  const size = 220;
+  // Prefer showing to the left of the widget/thumbnail; clamp to viewport
+  let left = r.left - size - 12;
+  if (left < 8) left = Math.min(r.right + 12, window.innerWidth - size - 8);
+  let top = r.top + r.height / 2 - size / 2;
+  top = Math.max(8, Math.min(top, window.innerHeight - size - 8));
+  __akmezHover.style.left = left + 'px';
+  __akmezHover.style.top = top + 'px';
+  __akmezHover.style.display = 'block';
+}
+function akmezHoverHide() {
+  if (__akmezHover) __akmezHover.style.display = 'none';
+}
+// Delegated hover handling covers both search results and cart thumbnails
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest && e.target.closest('.akmez-suggest-thumb[data-img],.akmez-cart-thumb[data-img]');
+  if (t) akmezHoverShow(t);
+});
+document.addEventListener('mouseout', e => {
+  const t = e.target.closest && e.target.closest('.akmez-suggest-thumb[data-img],.akmez-cart-thumb[data-img]');
+  if (t) akmezHoverHide();
+});
 
 // Small helper to render a product thumbnail (or a placeholder square)
 function akmezThumb(p, cls) {
