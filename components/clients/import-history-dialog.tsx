@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react'
 
 interface ImportHistoryDialogProps {
@@ -19,18 +20,52 @@ interface ImportHistoryDialogProps {
   onSuccess: () => void
 }
 
-type FileStatus = 'queued' | 'uploading' | 'done' | 'error'
+type FileStatus = 'queued' | 'parsing' | 'uploading' | 'done' | 'error'
+
+interface FileResult {
+  totalRows: number
+  newOrders: number
+  duplicatesSkipped: number
+  clientsUpserted: number
+}
 
 interface QueuedFile {
   file: File
   status: FileStatus
-  result?: {
-    totalRows: number
-    newOrders: number
-    duplicatesSkipped: number
-    clientsUpserted: number
-  }
+  progress: number // 0-100 while uploading chunks
+  result?: FileResult
   error?: string
+}
+
+// Rows per request: ~4000 rows is roughly 500KB of JSON, far below body limits
+const CHUNK_SIZE = 4000
+
+// Parse one Excel file in the browser and return lean row objects
+async function parseFile(file: File) {
+  // xlsx is loaded lazily so it never weighs down the normal clients page
+  const { read, utils } = await import('xlsx')
+  const buf = await file.arrayBuffer()
+  const wb = read(buf, { cellDates: true })
+  const sheetName = wb.SheetNames.includes('MAIN_DEL') ? 'MAIN_DEL' : wb.SheetNames[0]
+  const raw = utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: null })
+
+  return raw.map(r => {
+    // Headers in these sheets have whitespace quirks ("Qty ", " Amt ") — trim keys
+    const t: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(r)) t[k.trim()] = v
+    const date = t['Delivery Date'] || t['Entry Date']
+    return {
+      index: t['INDEX'] ?? null,
+      phone: t['Contact #1'] ?? null,
+      name: t['Customer Name'] ?? null,
+      region: t['Region'] ?? null,
+      status: t['Status'] ?? null,
+      salesType: t['SalesType'] ?? t['Sales Type'] ?? null,
+      amt: t['Amt'] ?? null,
+      qty: t['Qty'] ?? null,
+      date: date instanceof Date ? date.toISOString() : date ?? null,
+    }
+  })
 }
 
 export function ImportHistoryDialog({ open, onOpenChange, onSuccess }: ImportHistoryDialogProps) {
@@ -43,7 +78,7 @@ export function ImportHistoryDialog({ open, onOpenChange, onSuccess }: ImportHis
     const next: QueuedFile[] = []
     for (const f of Array.from(list)) {
       if (f.name.endsWith('.xlsx') || f.name.endsWith('.xls')) {
-        next.push({ file: f, status: 'queued' })
+        next.push({ file: f, status: 'queued', progress: 0 })
       }
     }
     setFiles(prev => [...prev, ...next])
@@ -59,23 +94,64 @@ export function ImportHistoryDialog({ open, onOpenChange, onSuccess }: ImportHis
     setFiles(prev => prev.filter((_, i) => i !== idx))
   }
 
+  const patchFile = (idx: number, patch: Partial<QueuedFile>) => {
+    setFiles(prev => prev.map((f, i) => (i === idx ? { ...f, ...patch } : f)))
+  }
+
   const runImport = async () => {
     setRunning(true)
-    // Upload files one by one so huge batches never overload a single request
     for (let i = 0; i < files.length; i++) {
       if (files[i].status === 'done') continue
-      setFiles(prev => prev.map((f, idx) => (idx === i ? { ...f, status: 'uploading', error: undefined } : f)))
+
+      // 1) Parse the Excel locally (no upload size limit)
+      patchFile(i, { status: 'parsing', error: undefined, progress: 0 })
+      let rows: Awaited<ReturnType<typeof parseFile>>
       try {
-        const fd = new FormData()
-        fd.append('file', files[i].file)
-        const res = await fetch('/api/clients/import-history', { method: 'POST', body: fd })
-        const json = await res.json()
-        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
-        setFiles(prev => prev.map((f, idx) => (idx === i ? { ...f, status: 'done', result: json } : f)))
-      } catch (err) {
-        setFiles(prev => prev.map((f, idx) => (idx === i
-          ? { ...f, status: 'error', error: err instanceof Error ? err.message : 'Upload failed' }
-          : f)))
+        rows = await parseFile(files[i].file)
+      } catch {
+        patchFile(i, { status: 'error', error: 'Could not parse this Excel file' })
+        continue
+      }
+      if (rows.length === 0) {
+        patchFile(i, { status: 'error', error: 'The sheet has no data rows' })
+        continue
+      }
+
+      // 2) Send rows to the server in small JSON chunks
+      patchFile(i, { status: 'uploading', progress: 0 })
+      const agg: FileResult = { totalRows: rows.length, newOrders: 0, duplicatesSkipped: 0, clientsUpserted: 0 }
+      let failed = false
+      for (let start = 0; start < rows.length; start += CHUNK_SIZE) {
+        const chunk = rows.slice(start, start + CHUNK_SIZE)
+        try {
+          const res = await fetch('/api/clients/import-history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows: chunk }),
+          })
+          const text = await res.text()
+          let json: Record<string, unknown>
+          try {
+            json = JSON.parse(text)
+          } catch {
+            throw new Error(`Server error (${res.status}): ${text.slice(0, 80)}`)
+          }
+          if (!res.ok) throw new Error(String(json.error || `HTTP ${res.status}`))
+          agg.newOrders += Number(json.newOrders) || 0
+          agg.duplicatesSkipped += Number(json.duplicatesSkipped) || 0
+          agg.clientsUpserted += Number(json.clientsUpserted) || 0
+          patchFile(i, { progress: Math.round(((start + chunk.length) / rows.length) * 100) })
+        } catch (err) {
+          patchFile(i, {
+            status: 'error',
+            error: err instanceof Error ? err.message : 'Upload failed',
+          })
+          failed = true
+          break
+        }
+      }
+      if (!failed) {
+        patchFile(i, { status: 'done', progress: 100, result: agg })
       }
     }
     setRunning(false)
@@ -107,8 +183,9 @@ export function ImportHistoryDialog({ open, onOpenChange, onSuccess }: ImportHis
         <DialogHeader>
           <DialogTitle>Import Past Order History</DialogTitle>
           <DialogDescription>
-            Upload one or many Excel files (MAIN_DEL format). Orders are matched by their INDEX so
-            re-uploading the same file never double-counts. Client ratings are recalculated automatically.
+            Upload one or many Excel files (MAIN_DEL format), any size. Files are read locally and sent in
+            small batches. Orders are matched by their INDEX so re-uploading never double-counts.
+            Refund amounts are deducted from client sales; Exchange, Trade In and Drop Off count as normal sales.
           </DialogDescription>
         </DialogHeader>
 
@@ -156,11 +233,19 @@ export function ImportHistoryDialog({ open, onOpenChange, onSuccess }: ImportHis
                     {f.status === 'queued' && (
                       <p className="text-xs text-muted-foreground">{(f.file.size / 1024).toFixed(0)} KB · queued</p>
                     )}
+                    {f.status === 'parsing' && (
+                      <p className="text-xs text-muted-foreground">Reading file…</p>
+                    )}
                     {f.status === 'uploading' && (
-                      <p className="text-xs text-muted-foreground">Processing…</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Progress value={f.progress} className="h-1.5 flex-1" />
+                        <span className="text-xs tabular-nums text-muted-foreground">{f.progress}%</span>
+                      </div>
                     )}
                   </div>
-                  {f.status === 'uploading' && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+                  {(f.status === 'uploading' || f.status === 'parsing') && (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                  )}
                   {f.status === 'done' && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />}
                   {f.status === 'error' && <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />}
                   {f.status === 'queued' && !running && (
@@ -196,7 +281,7 @@ export function ImportHistoryDialog({ open, onOpenChange, onSuccess }: ImportHis
             {running ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Importing {doneCount + 1}/{files.length}…
+                Importing {Math.min(doneCount + 1, files.length)}/{files.length}…
               </>
             ) : (
               `Import ${files.filter(f => f.status !== 'done').length} file(s)`
