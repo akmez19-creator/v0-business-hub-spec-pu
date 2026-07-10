@@ -802,7 +802,14 @@ function renderOrdersForm() {
     }
     readCustomerName(txt => applyField(fields.name, txt));
     readCustomerPhone(num => applyField(fields.phone, num));
-    readCustomerAdId(id => applyField(fields.adid, id));
+    readCustomerAdId(id => {
+      const prev = fields.adid.last;
+      applyField(fields.adid, id);
+      // When the ad id changes to a new value, auto-resolve its linked product
+      if (fields.adid.input.value && fields.adid.input.value !== prev) {
+        resolveProductFromAdId(fields.adid.input.value);
+      }
+    });
   }
   syncFields();
   if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
@@ -858,6 +865,28 @@ function renderOrdersForm() {
     prodInput.value = '';
     prodSuggest.style.display = 'none';
     prodInput.focus();
+  }
+
+  // Given a captured Ad ID, resolve its linked product (ad -> campaign -> product)
+  // and auto-add it to the cart. Guards against resolving the same ad twice.
+  function resolveProductFromAdId(adId) {
+    if (!adId || !/^\d+$/.test(adId)) return;
+    if (window.__akmezLastResolvedAd === adId) return;
+    window.__akmezLastResolvedAd = adId;
+    chrome.runtime.sendMessage({ action: 'resolveAdProduct', adId }, resp => {
+      if (chrome.runtime.lastError) return;
+      if (!resp || !resp.success || !resp.product) return;
+      // Only add if this ad id is still the one shown (conversation may have changed)
+      if (fields.adid.input.value !== adId) return;
+      // Match against a loaded product so the cart id lines up with the picker
+      const match = products.find(p => p.id === resp.product.id);
+      if (!match) return;
+      if (!cart[match.id]) {
+        cart[match.id] = 1;
+        updateCart();
+        toast('Product linked from Ad ID: ' + match.name);
+      }
+    });
   }
 
   prodInput.addEventListener('input', showProdSuggestions);

@@ -24,12 +24,13 @@ import {
   User,
   Clock,
   Shield,
-  LogIn
+  LogIn,
+  Package
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.14.0'
-const LAST_UPDATED = '2026-07-08'
+const EXTENSION_VERSION = '4.15.0'
+const LAST_UPDATED = '2026-07-10'
 
 export function ToolsDownloadPage() {
   const [downloading, setDownloading] = useState(false)
@@ -81,12 +82,12 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Package, text: 'Captured Ad ID now auto-adds its linked product to the order (ad to campaign to product)' },
     { icon: Shield, text: 'Admins configure auto-fill selectors and cut-off once; all agents inherit them automatically' },
     { icon: Lock, text: 'Non-admin agents see settings as read-only (managed by admin)' },
     { icon: Search, text: 'Products are now type-to-search with keyboard navigation (no more scrolling a big list)' },
     { icon: MousePointer2, text: 'Selected products show as a clean list with quantity +/- controls' },
-    { icon: Search, text: 'Region field is type-to-search with instant suggestions' },
-    { icon: Clock, text: 'Delivery date defaults to the next working day (Sundays and MU holidays blocked)' }
+    { icon: Search, text: 'Region field is type-to-search with instant suggestions' }
   ]
 
   const installSteps = [

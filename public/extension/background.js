@@ -95,6 +95,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'resolveAdProduct') {
+      // Resolve the product linked to a captured Ad ID (ad -> campaign -> product)
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/extension/resolve-ad?adId=' + encodeURIComponent(request.adId), {
+          method: 'GET'
+        });
+        sendResponse({ success: !!data.success, product: data.product || null, error: data.error });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'saveSettings') {
       // Admin-only: push shared extension settings to the server
       try {
