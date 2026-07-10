@@ -1050,6 +1050,7 @@ function renderOrdersForm() {
         </div>
       </div>
     </div>
+    <div id="ak-rating" class="akmez-rating" style="display:none;"></div>
     <div class="akmez-row">
       <div class="akmez-field akmez-autocomplete">
         <div class="akmez-label">Region <span class="req">*</span></div>
@@ -1103,6 +1104,52 @@ function renderOrdersForm() {
   };
   Object.values(fields).forEach(f => f.input.addEventListener('input', () => { f.edited = true; }));
 
+  // ===== Client rating lookup: shows Good/Average/Bad badge for the current phone =====
+  let __ratingLastPhone = null;
+  let __ratingTimer = null;
+  function refreshClientRating() {
+    const box = document.getElementById('ak-rating');
+    if (!box) return;
+    const digits = (fields.phone.input.value || '').replace(/\D/g, '');
+    if (digits.length < 7) {
+      __ratingLastPhone = null;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    if (digits === __ratingLastPhone) return; // same client - keep current badge
+    __ratingLastPhone = digits;
+    clearTimeout(__ratingTimer);
+    __ratingTimer = setTimeout(() => {
+      chrome.runtime.sendMessage({ action: 'getClientRating', phone: digits }, resp => {
+        // Ignore stale responses (user switched conversation meanwhile)
+        const nowDigits = (fields.phone.input.value || '').replace(/\D/g, '');
+        if (nowDigits !== digits) return;
+        if (!resp || !resp.success || !resp.data) { box.style.display = 'none'; return; }
+        const d = resp.data;
+        const colors = {
+          good:    { bg: '#dcfce7', fg: '#15803d', label: 'GOOD CLIENT' },
+          average: { bg: '#fef9c3', fg: '#a16207', label: 'AVERAGE CLIENT' },
+          bad:     { bg: '#fee2e2', fg: '#b91c1c', label: 'BAD CLIENT' },
+          new:     { bg: '#f1f5f9', fg: '#475569', label: 'NEW CLIENT' },
+        };
+        const c = colors[d.rating] || colors.new;
+        let detail = '';
+        if (d.found) {
+          const pct = (d.deliveredPct !== null && d.deliveredPct !== undefined) ? ` &middot; ${d.deliveredPct}% delivered` : '';
+          const sales = d.totalSales ? ` &middot; Rs ${Number(d.totalSales).toLocaleString()}` : '';
+          detail = `<span style="color:#64748b;font-size:11px;">${d.totalOrders} orders${pct}${sales}</span>`;
+        } else {
+          detail = '<span style="color:#64748b;font-size:11px;">No order history</span>';
+        }
+        box.innerHTML = `<span style="display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:700;background:${c.bg};color:${c.fg};margin-right:6px;">${c.label}</span>${detail}`;
+        box.style.display = 'block';
+        box.style.padding = '4px 2px';
+      });
+    }, 350);
+  }
+  fields.phone.input.addEventListener('input', refreshClientRating);
+
   // Apply a freshly detected value, or clear the field once its selector stops matching.
   function applyField(f, val) {
     if (val) {
@@ -1145,7 +1192,7 @@ function renderOrdersForm() {
         window.__akmezLastResolvedAd = null;
       }
     });
-    readCustomerPhone(num => applyField(fields.phone, num));
+    readCustomerPhone(num => { applyField(fields.phone, num); refreshClientRating(); });
     readCustomerAdId(id => {
       const prev = fields.adid.last;
       applyField(fields.adid, id);

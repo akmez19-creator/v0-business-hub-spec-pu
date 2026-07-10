@@ -26,11 +26,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Plus, Loader2 } from 'lucide-react'
+import { ClientRatingBadge } from '@/components/clients/client-rating-badge'
 
 export function AddDeliveryDialog() {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [contactPhone, setContactPhone] = useState('')
   const router = useRouter()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -82,7 +84,14 @@ export function AddDeliveryDialog() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="contact_1">Contact 1</Label>
-                <Input id="contact_1" name="contact_1" type="tel" />
+                <Input
+                  id="contact_1"
+                  name="contact_1"
+                  type="tel"
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                />
+                <ClientRatingBadge phone={contactPhone} />
               </div>
             </div>
 

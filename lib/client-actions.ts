@@ -174,36 +174,57 @@ export async function importClients(clients: Array<{
   return { data, imported: data?.length || 0 }
 }
 
+// Paginated + filtered listing that scales to 500k+ clients.
+// All filtering happens in Postgres against indexed columns.
+export async function getClientsPage(opts: {
+  search?: string
+  status?: string
+  page?: number
+  pageSize?: number
+}) {
+  const supabase = await createSupabaseClient()
+  const page = Math.max(1, opts.page || 1)
+  const pageSize = Math.min(100, Math.max(10, opts.pageSize || 50))
+  const from = (page - 1) * pageSize
+
+  let query = supabase
+    .from('clients')
+    .select('*', { count: 'exact' })
+    .order('total_sales', { ascending: false })
+    .order('created_at', { ascending: false })
+    .range(from, from + pageSize - 1)
+
+  if (opts.search) {
+    const s = opts.search.trim()
+    query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`)
+  }
+  if (opts.status && opts.status !== 'all') {
+    query = query.eq('client_status', opts.status)
+  }
+
+  const { data, count, error } = await query
+  if (error) {
+    console.error('Error fetching clients page:', error)
+    return { clients: [] as Client[], total: 0 }
+  }
+  return { clients: (data || []) as Client[], total: count || 0 }
+}
+
 export async function getClientStats() {
   const supabase = await createSupabaseClient()
-  
-  const { count: totalClients } = await supabase
-    .from('clients')
-    .select('*', { count: 'exact', head: true })
-  
-  const { data: sourceStats } = await supabase
-    .from('clients')
-    .select('source')
-  
-  const sourceCounts = sourceStats?.reduce((acc, client) => {
-    acc[client.source || 'manual'] = (acc[client.source || 'manual'] || 0) + 1
-    return acc
-  }, {} as Record<string, number>) || {}
-  
-  const { data: cityStats } = await supabase
-    .from('clients')
-    .select('city')
-  
-  const cityCounts = cityStats?.reduce((acc, client) => {
-    if (client.city) {
-      acc[client.city] = (acc[client.city] || 0) + 1
-    }
-    return acc
-  }, {} as Record<string, number>) || {}
-  
+
+  // Head-only count queries stay fast at 500k+ rows (indexed client_status)
+  const [totalRes, goodRes, avgRes, badRes] = await Promise.all([
+    supabase.from('clients').select('*', { count: 'exact', head: true }),
+    supabase.from('clients').select('*', { count: 'exact', head: true }).eq('client_status', 'good'),
+    supabase.from('clients').select('*', { count: 'exact', head: true }).eq('client_status', 'average'),
+    supabase.from('clients').select('*', { count: 'exact', head: true }).eq('client_status', 'bad'),
+  ])
+
   return {
-    totalClients: totalClients || 0,
-    sourceCounts,
-    cityCounts,
+    total: totalRes.count || 0,
+    good: goodRes.count || 0,
+    average: avgRes.count || 0,
+    bad: badRes.count || 0,
   }
 }

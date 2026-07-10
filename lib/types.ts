@@ -107,10 +107,34 @@ export interface Client {
   address: string | null
   city: string | null
   notes: string | null
-  source: 'manual' | 'import' | 'website' | 'facebook'
+  source: 'manual' | 'import' | 'website' | 'facebook' | 'history_import'
   created_by: string | null
   created_at: string
   updated_at: string
+  // Aggregate order history stats (from past-data imports)
+  total_orders: number
+  delivered_orders: number
+  cms_orders: number
+  total_sales: number
+  total_qty: number
+  first_order_date: string | null
+  last_order_date: string | null
+  region: string | null
+  client_status: 'good' | 'average' | 'bad' | 'new'
+}
+
+export const CLIENT_STATUS_LABELS: Record<Client['client_status'], string> = {
+  good: 'Good',
+  average: 'Average',
+  bad: 'Bad',
+  new: 'New',
+}
+
+export const CLIENT_STATUS_COLORS: Record<Client['client_status'], string> = {
+  good: 'bg-success/10 text-success',
+  average: 'bg-warning/10 text-warning-foreground',
+  bad: 'bg-destructive/10 text-destructive',
+  new: 'bg-muted text-muted-foreground',
 }
 
 export interface Product {

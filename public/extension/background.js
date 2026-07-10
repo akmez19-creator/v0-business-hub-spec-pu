@@ -95,6 +95,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'getClientRating') {
+      // Instant client rating lookup by phone (indexed point read on the server)
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/clients/rating?phone=' + encodeURIComponent(request.phone), {
+          method: 'GET'
+        });
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'resolveAdProduct') {
       // Resolve the product linked to a captured Ad ID (ad -> campaign -> product)
       try {

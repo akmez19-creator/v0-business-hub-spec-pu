@@ -107,6 +107,10 @@ const navItems: NavItem[] = [
     icon: Database,
     roles: ['admin', 'manager', 'marketing_agent'],
     color: '#ec4899',
+    subItems: [
+      { href: '/dashboard/clients', label: 'All Clients', icon: Database },
+      { href: '/dashboard/clients/top', label: 'Top 100', icon: TrendingUp },
+    ],
   },
   {
     href: '/dashboard/ads',

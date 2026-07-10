@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { MoreHorizontal, Pencil, Trash2, Phone, Mail, MapPin } from 'lucide-react'
 import { EditClientDialog } from './edit-client-dialog'
 import { deleteClient } from '@/lib/client-actions'
+import { CLIENT_STATUS_LABELS, CLIENT_STATUS_COLORS } from '@/lib/types'
 import type { Client } from '@/lib/types'
 
 interface ClientsTableProps {
@@ -50,17 +51,6 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
     return phone
   }
 
-  const getSourceBadge = (source: string) => {
-    const variants: Record<string, { variant: 'default' | 'secondary' | 'outline'; label: string }> = {
-      manual: { variant: 'secondary', label: 'Manual' },
-      import: { variant: 'outline', label: 'Import' },
-      website: { variant: 'default', label: 'Website' },
-      facebook: { variant: 'default', label: 'Facebook' },
-    }
-    const config = variants[source] || { variant: 'secondary', label: source }
-    return <Badge variant={config.variant}>{config.label}</Badge>
-  }
-
   if (loading) {
     return (
       <div className="flex h-48 items-center justify-center">
@@ -87,8 +77,11 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
               <TableHead>Name</TableHead>
               <TableHead>Contact</TableHead>
               <TableHead>Location</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Added</TableHead>
+              <TableHead>Rating</TableHead>
+              <TableHead className="text-right">Orders</TableHead>
+              <TableHead className="text-right">Delivered %</TableHead>
+              <TableHead className="text-right">Total Sales</TableHead>
+              <TableHead>Last Order</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
@@ -139,9 +132,26 @@ export function ClientsTable({ clients, loading, onRefresh }: ClientsTableProps)
                     <span className="text-sm text-muted-foreground">-</span>
                   )}
                 </TableCell>
-                <TableCell>{getSourceBadge(client.source)}</TableCell>
+                <TableCell>
+                  <Badge className={CLIENT_STATUS_COLORS[client.client_status] || CLIENT_STATUS_COLORS.new}>
+                    {CLIENT_STATUS_LABELS[client.client_status] || 'New'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right text-sm">
+                  {(client.total_orders || 0).toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right text-sm">
+                  {(client.delivered_orders || 0) + (client.cms_orders || 0) > 0
+                    ? `${Math.round(((client.delivered_orders || 0) / ((client.delivered_orders || 0) + (client.cms_orders || 0))) * 100)}%`
+                    : '-'}
+                </TableCell>
+                <TableCell className="text-right text-sm font-medium">
+                  {client.total_sales > 0 ? `Rs ${Number(client.total_sales).toLocaleString()}` : '-'}
+                </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
-                  {new Date(client.created_at).toLocaleDateString()}
+                  {client.last_order_date
+                    ? new Date(client.last_order_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                    : '-'}
                 </TableCell>
                 <TableCell>
                   <DropdownMenu>
