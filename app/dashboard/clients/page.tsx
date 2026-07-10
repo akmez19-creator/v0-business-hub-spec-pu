@@ -11,13 +11,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, Search, Upload, Users, ThumbsUp, ThumbsDown, Minus, Trophy, History } from 'lucide-react'
+import { Plus, Search, Users, ThumbsUp, ThumbsDown, Minus, Trophy, History, ArrowUp, ArrowDown } from 'lucide-react'
 import Link from 'next/link'
 import { ClientsTable } from '@/components/clients/clients-table'
 import { AddClientDialog } from '@/components/clients/add-client-dialog'
 import { ImportHistoryDialog } from '@/components/clients/import-history-dialog'
-import { getClientsPage, getClientStats } from '@/lib/client-actions'
+import { getClientsPage, getClientStats, type ClientSortKey } from '@/lib/client-actions'
 import type { Client } from '@/lib/types'
+
+const SORT_LABELS: Record<ClientSortKey, string> = {
+  total_sales: 'Total Sales',
+  total_orders: 'Orders',
+  delivered_rate: 'Delivered %',
+}
 
 const PAGE_SIZE = 50
 
@@ -28,6 +34,8 @@ export default function ClientsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [sortBy, setSortBy] = useState<ClientSortKey>('total_sales')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(1)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showHistoryImport, setShowHistoryImport] = useState(false)
@@ -36,7 +44,7 @@ export default function ClientsPage() {
   const loadData = async () => {
     setLoading(true)
     const [pageData, statsData] = await Promise.all([
-      getClientsPage({ search: searchQuery, status: statusFilter, page, pageSize: PAGE_SIZE }),
+      getClientsPage({ search: searchQuery, status: statusFilter, page, pageSize: PAGE_SIZE, sortBy, sortDir }),
       getClientStats(),
     ])
     setClients(pageData.clients)
@@ -48,7 +56,7 @@ export default function ClientsPage() {
   useEffect(() => {
     loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, statusFilter, page])
+  }, [searchQuery, statusFilter, page, sortBy, sortDir])
 
   // Debounce search typing so we don't fire a query per keystroke
   useEffect(() => {
@@ -131,7 +139,7 @@ export default function ClientsPage() {
         <CardHeader>
           <CardTitle>All Clients</CardTitle>
           <CardDescription>
-            {total.toLocaleString()} clients · sorted by total sales
+            {total.toLocaleString()} clients · sorted by {SORT_LABELS[sortBy].toLowerCase()} ({sortDir === 'desc' ? 'largest to smallest' : 'smallest to largest'})
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -146,7 +154,7 @@ export default function ClientsPage() {
               />
             </div>
             <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1) }}>
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Rating" />
               </SelectTrigger>
               <SelectContent>
@@ -157,6 +165,28 @@ export default function ClientsPage() {
                 <SelectItem value="new">New</SelectItem>
               </SelectContent>
             </Select>
+            <div className="flex items-center gap-2 sm:ml-auto">
+              <span className="text-sm text-muted-foreground">Sort by</span>
+              <Select value={sortBy} onValueChange={(v) => { setSortBy(v as ClientSortKey); setPage(1) }}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="total_sales">Total Sales</SelectItem>
+                  <SelectItem value="total_orders">Orders</SelectItem>
+                  <SelectItem value="delivered_rate">Delivered %</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => { setSortDir(d => (d === 'desc' ? 'asc' : 'desc')); setPage(1) }}
+                title={sortDir === 'desc' ? 'Largest to smallest' : 'Smallest to largest'}
+                aria-label={sortDir === 'desc' ? 'Sorted largest to smallest, click for smallest to largest' : 'Sorted smallest to largest, click for largest to smallest'}
+              >
+                {sortDir === 'desc' ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+              </Button>
+            </div>
           </div>
           <ClientsTable
             clients={clients}

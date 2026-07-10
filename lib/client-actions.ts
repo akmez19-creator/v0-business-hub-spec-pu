@@ -176,21 +176,34 @@ export async function importClients(clients: Array<{
 
 // Paginated + filtered listing that scales to 500k+ clients.
 // All filtering happens in Postgres against indexed columns.
+const CLIENT_SORT_COLUMNS = {
+  total_sales: 'total_sales',
+  total_orders: 'total_orders',
+  delivered_rate: 'delivered_rate',
+} as const
+
+export type ClientSortKey = keyof typeof CLIENT_SORT_COLUMNS
+
 export async function getClientsPage(opts: {
   search?: string
   status?: string
   page?: number
   pageSize?: number
+  sortBy?: ClientSortKey
+  sortDir?: 'asc' | 'desc'
 }) {
   const supabase = await createSupabaseClient()
   const page = Math.max(1, opts.page || 1)
   const pageSize = Math.min(100, Math.max(10, opts.pageSize || 50))
   const from = (page - 1) * pageSize
 
+  const sortColumn = CLIENT_SORT_COLUMNS[opts.sortBy || 'total_sales'] || 'total_sales'
+  const ascending = opts.sortDir === 'asc'
+
   let query = supabase
     .from('clients')
     .select('*', { count: 'exact' })
-    .order('total_sales', { ascending: false })
+    .order(sortColumn, { ascending })
     .order('created_at', { ascending: false })
     .range(from, from + pageSize - 1)
 
