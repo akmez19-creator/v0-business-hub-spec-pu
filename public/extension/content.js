@@ -99,6 +99,7 @@ style.textContent = `
 .akmez-user .dot{width:8px;height:8px;background:#10b981;border-radius:50%;}
 .akmez-row{display:flex;gap:8px;margin-bottom:10px;}
 .akmez-field{flex:1;}
+.akmez-rating{margin-top:2px;line-height:1.4;display:flex;align-items:center;flex-wrap:wrap;gap:2px;}
 .akmez-label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600;}
 .akmez-label .req{color:#f97316;}
 .akmez-input-wrap{position:relative;}
@@ -1091,7 +1092,10 @@ function renderOrdersForm() {
   body.querySelectorAll('.akmez-paste').forEach(b => {
     b.onclick = async () => {
       try {
-        document.getElementById(b.dataset.t).value = await navigator.clipboard.readText();
+        const el = document.getElementById(b.dataset.t);
+        el.value = await navigator.clipboard.readText();
+        // Fire input so listeners react (e.g. instant client rating on C1)
+        el.dispatchEvent(new Event('input', { bubbles: true }));
       } catch(e) {}
     };
   });
@@ -1850,7 +1854,11 @@ sel.onclick = async e => {
   if (t) {
     await navigator.clipboard.writeText(t);
     const inp = document.getElementById('ak-' + b.dataset.f);
-    if (inp) inp.value = t;
+    if (inp) {
+      inp.value = t;
+      // Fire input so listeners react (e.g. instant client rating on C1)
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     toast('Copied: ' + t.substring(0, 20));
     sel.style.display = 'none';
     window.getSelection().removeAllRanges();
