@@ -50,6 +50,7 @@ widget.innerHTML = `
     <div class="akmez-logo">A</div>
     <div style="flex:1">
       <span>Quick Order${EXT_VERSION ? ' v' + EXT_VERSION : ''}</span>
+      <span id="akmez-page-badge" style="display:none"></span>
       <div style="font-size:10px;opacity:0.7">Create orders from anywhere</div>
     </div>
     <div class="akmez-header-btns">
@@ -182,6 +183,11 @@ style.textContent = `
 .wt-history-item .date{color:#888;}
 .wt-history-item .hours{color:#10b981;font-weight:600;}
 
+#akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;}
+.akmez-pagemap-form{display:flex;gap:6px;margin:6px 0 2px;flex-wrap:wrap;}
+.akmez-pagemap-input{flex:1;min-width:120px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:6px 8px;font-size:12px;}
+.akmez-pagemap-input.code{flex:0 0 90px;min-width:70px;text-transform:uppercase;}
+.akmez-pagemap-form .akmez-set-btn{flex:0 0 auto;width:auto;margin:0;padding:6px 10px;}
 /* Settings Styles */
 .akmez-settings-panel{padding:4px 2px;}
 .akmez-set-row{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;margin-bottom:6px;font-size:12px;}
@@ -220,6 +226,38 @@ document.head.appendChild(style);
 
 // State
 let products = [], regions = [], cart = {}, currentTab = 'orders';
+// Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
+let pageMappings = [];
+chrome.storage.local.get(['pageMappings'], s => {
+  if (Array.isArray(s.pageMappings)) pageMappings = s.pageMappings;
+});
+
+// Detect which Facebook page the current conversation belongs to by matching
+// admin-defined text against the tab title, URL, and page headings.
+function detectSourcePage() {
+  const badge = document.getElementById('akmez-page-badge');
+  if (!badge) return;
+  let found = null;
+  if (pageMappings.length) {
+    const haystacks = [document.title || '', location.href];
+    document.querySelectorAll('h1, [role="banner"] span').forEach(el => {
+      const t = (el.textContent || '').trim();
+      if (t && t.length < 120) haystacks.push(t);
+    });
+    const joined = haystacks.join(' | ').toLowerCase();
+    for (const m of pageMappings) {
+      const needle = (m.match || '').toLowerCase().trim();
+      if (needle && joined.includes(needle)) { found = m; break; }
+    }
+  }
+  if (found) {
+    badge.textContent = found.code;
+    badge.title = 'Message from: ' + found.match;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
 let isDragging = false, dragOffset = {x:0,y:0};
 let worktimeData = { isClockedIn: false, clockInTime: null, todayHours: 0, history: [] };
 let timerInterval = null;
@@ -253,7 +291,7 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = EXT_VERSION || (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '');
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings'], stored => {
     const signedIn = !!stored.authToken;
     const isAdmin = stored.userRole === 'admin';
     const cutoff = stored.cutoffTime || '20:00';
@@ -307,6 +345,22 @@ function renderSettings() {
         <div class="akmez-sel-list">${adidHtml}</div>
         ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button><div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>' : ''}
         
+        <div class="akmez-subsection">Page Identification</div>
+        <div class="akmez-sel-list">${(Array.isArray(stored.pageMappings) && stored.pageMappings.length
+          ? stored.pageMappings.map((m, i) => `
+            <div class="akmez-sel-row">
+              <span class="akmez-sel-text" title="${(m.match || '').replace(/"/g, '&quot;')}">${(m.match || '').replace(/</g, '&lt;')} &rarr; <b>${(m.code || '').replace(/</g, '&lt;')}</b></span>
+              ${isAdmin ? `<button class="akmez-sel-del" data-kind="pagemap" data-i="${i}" title="Remove">&times;</button>` : ''}
+            </div>`).join('')
+          : `<div class="akmez-sel-empty">${isAdmin ? 'No pages defined yet. Add a page name and its short code below (e.g. Made By Moris → MBM).' : 'Not configured by your admin yet.'}</div>`)}</div>
+        ${isAdmin ? `
+        <div class="akmez-pagemap-form">
+          <input type="text" id="pagemap-match" class="akmez-pagemap-input" placeholder="Page name (e.g. Made By Moris)" maxlength="120">
+          <input type="text" id="pagemap-code" class="akmez-pagemap-input code" placeholder="Code (e.g. MBM)" maxlength="20">
+          <button class="akmez-set-btn" id="pagemap-add">+ Add Page</button>
+        </div>
+        <div class="akmez-hint-text">When the conversation&apos;s tab title, URL or heading contains the page name, its code shows as a badge in the widget header so agents instantly know which page the message came from.</div>` : ''}
+        
         <div class="akmez-subsection">Delivery Cut-off</div>
         <div class="akmez-set-row">
           <span class="akmez-set-label">Cut-off time</span>
@@ -345,12 +399,45 @@ function renderSettings() {
       body.querySelectorAll('.akmez-sel-del').forEach(b => {
         b.onclick = () => {
           const kind = b.dataset.kind;
+          if (kind === 'pagemap') {
+            chrome.storage.local.get(['pageMappings'], s => {
+              const list = Array.isArray(s.pageMappings) ? s.pageMappings : [];
+              list.splice(parseInt(b.dataset.i, 10), 1);
+              chrome.storage.local.set({ pageMappings: list }, () => {
+                pageMappings = list;
+                pushSharedSettings('Page removed for all users');
+                renderSettings();
+              });
+            });
+            return;
+          }
           getSelectors(kind, list => {
             list.splice(parseInt(b.dataset.i, 10), 1);
             saveSelectors(kind, list, () => { pushSharedSettings('Removed for all users'); renderSettings(); });
           });
         };
       });
+      const pagemapAdd = document.getElementById('pagemap-add');
+      if (pagemapAdd) {
+        pagemapAdd.onclick = () => {
+          const match = (document.getElementById('pagemap-match').value || '').trim();
+          const code = (document.getElementById('pagemap-code').value || '').trim().toUpperCase();
+          if (!match || !code) { toast('Enter both the page name and its code'); return; }
+          chrome.storage.local.get(['pageMappings'], s => {
+            const list = Array.isArray(s.pageMappings) ? s.pageMappings : [];
+            if (list.some(m => (m.match || '').toLowerCase() === match.toLowerCase())) {
+              toast('This page is already defined');
+              return;
+            }
+            list.push({ match, code });
+            chrome.storage.local.set({ pageMappings: list }, () => {
+              pageMappings = list;
+              pushSharedSettings('Page "' + match + '" saved as ' + code + ' for all users');
+              renderSettings();
+            });
+          });
+        };
+      }
     }
     document.getElementById('set-reset-pos').onclick = () => {
       widget.style.left = 'auto';
@@ -385,7 +472,7 @@ function saveSelectors(kind, list, cb) {
 }
 // Admin-only: push the locally-edited settings to the server so all users inherit them
 function pushSharedSettings(successMsg) {
-  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime'], s => {
+  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings'], s => {
     chrome.runtime.sendMessage({
       action: 'saveSettings',
       data: {
@@ -393,6 +480,7 @@ function pushSharedSettings(successMsg) {
         phoneSelectors: s.phoneSelectors || [],
         adidSelectors: s.adidSelectors || [],
         cutoffTime: s.cutoffTime || '20:00',
+        pageMappings: s.pageMappings || [],
       }
     }, resp => {
       if (resp && resp.success) toast(successMsg || 'Settings saved for all users');
@@ -628,7 +716,8 @@ async function loadData() {
         phoneSelectors: Array.isArray(s.phoneSelectors) ? s.phoneSelectors : [],
         adidSelectors: Array.isArray(s.adidSelectors) ? s.adidSelectors : [],
         cutoffTime: s.cutoffTime || '20:00',
-      }, () => renderCurrentTab());
+        pageMappings: Array.isArray(s.pageMappings) ? s.pageMappings : [],
+      }, () => { pageMappings = Array.isArray(s.pageMappings) ? s.pageMappings : []; renderCurrentTab(); });
     });
   });
 }
@@ -830,8 +919,9 @@ function renderOrdersForm() {
     });
   }
   syncFields();
+  detectSourcePage();
   if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
-  window.__akmezSyncTimer = setInterval(syncFields, 1200);
+  window.__akmezSyncTimer = setInterval(() => { syncFields(); detectSourcePage(); }, 1200);
   
   // Product search - type-to-search autocomplete with keyboard navigation
   const prodInput = document.getElementById('ak-search');

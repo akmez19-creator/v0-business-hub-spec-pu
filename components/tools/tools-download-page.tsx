@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.16.0'
+const EXTENSION_VERSION = '4.17.0'
 const LAST_UPDATED = '2026-07-10'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Shield, text: 'Admins can define page codes (e.g. Made By Moris = MBM); a badge in the widget shows which page each message comes from' },
     { icon: RefreshCw, text: 'Switching to a new customer now clears the product cart so items never carry over from the previous client' },
     { icon: Package, text: 'Captured Ad ID now auto-adds its linked product to the order (ad to campaign to product)' },
     { icon: Shield, text: 'Admins configure auto-fill selectors and cut-off once; all agents inherit them automatically' },

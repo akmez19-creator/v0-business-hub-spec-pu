@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     // Try token auth first
     const tokenAuth = await getUserFromToken(request)
     
-    let user = tokenAuth?.user
+    let user = tokenAuth?.user ?? null
     let supabase = tokenAuth?.supabase
     
     // Fallback to cookie auth
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
     // Get shared, admin-configured extension settings (single row, id=1)
     const { data: settingsRow } = await supabase
       .from('extension_settings')
-      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time')
+      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings')
       .eq('id', 1)
       .single()
     const settings = {
@@ -164,6 +164,7 @@ export async function GET(request: NextRequest) {
       phoneSelectors: settingsRow?.phone_selectors || [],
       adidSelectors: settingsRow?.adid_selectors || [],
       cutoffTime: settingsRow?.cutoff_time || '20:00',
+      pageMappings: settingsRow?.page_mappings || [],
     }
 
     const isClockedIn = todayShift?.status === 'in_progress' && todayShift?.actual_clock_in
@@ -223,7 +224,7 @@ export async function POST(request: NextRequest) {
     // Try token auth first
     const tokenAuth = await getUserFromToken(request)
     
-    let user = tokenAuth?.user
+    let user = tokenAuth?.user ?? null
     let supabase = tokenAuth?.supabase
     
     // Fallback to cookie auth
@@ -335,7 +336,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const tokenAuth = await getUserFromToken(request)
-    let user = tokenAuth?.user
+    let user = tokenAuth?.user ?? null
     let supabase = tokenAuth?.supabase
     
     if (!user) {
@@ -362,12 +363,23 @@ export async function PUT(request: NextRequest) {
     
     const body = await request.json()
     const asArray = (v: unknown) => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
+    // Page mappings: [{ match: "Made By Moris", code: "MBM" }, ...]
+    const asMappings = (v: unknown) => (Array.isArray(v)
+      ? v
+          .filter((m): m is { match: string; code: string } =>
+            !!m && typeof m === 'object' &&
+            typeof (m as any).match === 'string' && (m as any).match.trim() !== '' &&
+            typeof (m as any).code === 'string' && (m as any).code.trim() !== '')
+          .map(m => ({ match: m.match.trim().slice(0, 120), code: m.code.trim().slice(0, 20) }))
+          .slice(0, 50)
+      : [])
     
     const { error } = await supabase.from('extension_settings').upsert({
       id: 1,
       name_selectors: asArray(body.nameSelectors),
       phone_selectors: asArray(body.phoneSelectors),
       adid_selectors: asArray(body.adidSelectors),
+      page_mappings: asMappings(body.pageMappings),
       cutoff_time: typeof body.cutoffTime === 'string' && body.cutoffTime ? body.cutoffTime : '20:00',
       updated_at: new Date().toISOString(),
       updated_by: user.id,
