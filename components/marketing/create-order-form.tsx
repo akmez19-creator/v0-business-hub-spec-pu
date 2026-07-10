@@ -138,12 +138,28 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
       // Generate reply token for client link
       const replyToken = uuidv4()
 
+      // Resolve the region against the master localities list to stamp
+      // the route code (RTE) and assigned contractor/rider automatically
+      const { data: loc } = await supabase
+        .from('localities')
+        .select('route_code, contractor_id, default_rider_id')
+        .ilike('name', region)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle()
+
+      // INDEX and Payment Method stay blank (like the import sheet);
+      // SalesType defaults to SALES
       const { error } = await supabase.from('deliveries').insert({
         customer_name: customerName.trim(),
         contact_1: contact1.trim(),
         contact_2: contact2.trim() || null,
-        region,
-        locality: region, // Also set locality for compatibility
+        locality: region,
+        rte: loc?.route_code || null,
+        contractor_id: loc?.contractor_id || null,
+        rider_id: loc?.default_rider_id || null,
+        assigned_at: loc?.contractor_id ? new Date().toISOString() : null,
+        sales_type: 'SALES',
         products,
         qty: totalQty,
         amount: cartTotal,

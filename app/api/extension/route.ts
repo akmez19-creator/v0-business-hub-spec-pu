@@ -293,13 +293,29 @@ export async function POST(request: NextRequest) {
     // Generate reply token
     const replyToken = uuidv4()
     
-    // Insert delivery
+    // Resolve the chosen region against the master localities list to stamp
+    // the route code (RTE) and the assigned contractor/rider automatically
+    const localityName = region.trim().split('/')[0].trim()
+    const { data: loc } = await supabase
+      .from('localities')
+      .select('route_code, contractor_id, default_rider_id')
+      .ilike('name', localityName)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle()
+    
+    // Insert delivery (mirrors the import sheet: INDEX and Payment Method
+    // stay blank, SalesType is SALES, RTE comes from the locality's route)
     const { data: delivery, error } = await supabase.from('deliveries').insert({
       customer_name: customerName.trim(),
       contact_1: contact1.trim(),
       contact_2: contact2?.trim() || null,
-      region: region.trim().split('/')[0].trim(),
-      locality: region.trim().split('/')[0].trim(),
+      locality: localityName,
+      rte: loc?.route_code || null,
+      contractor_id: loc?.contractor_id || null,
+      rider_id: loc?.default_rider_id || null,
+      assigned_at: loc?.contractor_id ? new Date().toISOString() : null,
+      sales_type: 'SALES',
       products: products,
       qty: qty || 1,
       amount: amount || 0,
