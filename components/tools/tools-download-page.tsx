@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.21.0'
+const EXTENSION_VERSION = '4.22.0'
 const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
@@ -82,7 +82,9 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
-    { icon: Sparkles, text: 'Page detection is far more reliable: it now reads the full conversation text (e.g. "reply to Destockage By Moris"), so the page code and logo show up across Business Suite, Messenger and Instagram inboxes' },
+    { icon: Sparkles, text: 'Orders now record the source page code (e.g. MBM) in the MEDIUM column instead of "Extension", matching the import sheet' },
+    { icon: Sparkles, text: 'Rock-solid page detection: link a page to its Facebook ID once (Settings, link button) and its code + logo show instantly on every conversation for that page' },
+    { icon: Sparkles, text: 'Page detection also reads the full conversation text (e.g. "reply to Destockage By Moris") across Business Suite, Messenger and Instagram inboxes' },
     { icon: Sparkles, text: 'Page badges can now carry a logo: admins upload a picture per page and it shows next to the code (e.g. MBM) in the widget header' },
     { icon: Search, text: 'Picking a region now shows which contractor and rider handle its delivery (assigned by admin in the Regions module)' },
     { icon: Shield, text: 'Admins can define page codes (e.g. Made By Moris = MBM); a badge in the widget shows which page each message comes from' },

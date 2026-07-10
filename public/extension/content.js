@@ -189,7 +189,11 @@ style.textContent = `
 .akmez-toggle-img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;}
 .akmez-pagemap-thumb{width:22px;height:22px;border-radius:6px;object-fit:cover;background:#1e293b;flex-shrink:0;margin-right:6px;}
 .akmez-pagemap-thumb.placeholder{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#94a3b8;border:1px dashed #334155;}
-.akmez-sel-logo{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 4px;flex-shrink:0;}
+ .akmez-sel-logo{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 4px;flex-shrink:0;}
+.akmez-sel-link{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 4px;flex-shrink:0;}
+.akmez-sel-link:hover{color:#0ea5e9;}
+.akmez-sel-link.active{color:#10b981;}
+.akmez-linked{font-size:9px;color:#10b981;background:rgba(16,185,129,0.12);padding:1px 5px;border-radius:6px;margin-left:4px;white-space:nowrap;}
 .akmez-sel-logo:hover{color:#0ea5e9;}
 .akmez-pagemap-logo-preview{display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;margin:4px 0;}
 .akmez-region-delivery{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:7px 10px;font-size:11px;color:#6ee7b7;margin:-4px 0 10px;line-height:1.4;}
@@ -249,39 +253,92 @@ chrome.storage.local.get(['pageMappings'], s => {
 // Detect which Facebook page the current conversation belongs to by matching
 // admin-defined text against the tab title, URL, headings, nav and aria labels.
 let __akmezLastPageKey = null;
+// The page mapping detected for the current conversation (used by order create)
+window.__akmezDetectedPage = null;
+
+// Read the Facebook Page ID from the current URL. In Business Suite / Meta
+// inboxes this is the asset_id (falls back to page_id / business_id). This is
+// the ONE signal that is always present, regardless of conversation content.
+function getCurrentPageId() {
+  try {
+    const u = new URL(location.href);
+    return u.searchParams.get('asset_id')
+      || u.searchParams.get('page_id')
+      || u.searchParams.get('mailbox_id')
+      || null;
+  } catch (e) { return null; }
+}
+
+// Persist a learned Page ID onto a mapping so future detection is instant.
+// Only admins can push shared settings; for everyone else we still cache it
+// locally so it works for the rest of the session.
+function learnPageId(code, pageId) {
+  if (!code || !pageId) return;
+  let changed = false;
+  pageMappings = pageMappings.map(m => {
+    if (m.code === code && !m.pageId) { changed = true; return { ...m, pageId: String(pageId) }; }
+    return m;
+  });
+  if (!changed) return;
+  chrome.storage.local.set({ pageMappings }, () => {
+    // Push to the server only if this user is an admin (silent — no toast)
+    chrome.storage.local.get(['userRole'], s => {
+      if (s.userRole === 'admin' || s.userRole === 'manager') {
+        chrome.runtime.sendMessage({
+          action: 'saveSettings',
+          data: { pageMappings },
+        }, () => {});
+      }
+    });
+  });
+}
+
 function detectSourcePage() {
   let found = null;
+  const pageId = getCurrentPageId();
   if (pageMappings.length) {
-    const haystacks = [document.title || '', decodeURIComponent(location.href)];
-    // Page name can live in many spots: headings, banner, nav, aria-labels,
-    // og:title meta (covers Messenger, Business Suite inbox, page view, etc.)
-    const og = document.querySelector('meta[property="og:title"]');
-    if (og && og.content) haystacks.push(og.content);
-    document.querySelectorAll('h1, h2, [role="banner"] span, [role="navigation"] span, a[aria-label], div[aria-label], span[aria-label]').forEach(el => {
-      const t = (el.textContent || '').trim();
-      if (t && t.length < 120) haystacks.push(t);
-      const al = el.getAttribute && el.getAttribute('aria-label');
-      if (al && al.length < 120) haystacks.push(al);
-    });
-    // Fallback: scan the full visible page text. This catches inline mentions
-    // that live in plain divs — e.g. the Business Suite banner
-    // "This chat contains a reply to <Page>" and the page switcher label.
-    try {
-      const bodyText = (document.body && document.body.innerText) || '';
-      if (bodyText) haystacks.push(bodyText.slice(0, 50000));
-    } catch (e) { /* ignore */ }
-    const joined = haystacks.join(' | ').toLowerCase();
-    for (const m of pageMappings) {
-      const needle = (m.match || '').toLowerCase().trim();
-      if (needle && joined.includes(needle)) { found = m; break; }
+    // 1) Match by Page ID (asset_id) — bulletproof, works on every conversation
+    if (pageId) {
+      found = pageMappings.find(m => m.pageId && String(m.pageId) === String(pageId)) || null;
+    }
+    // 2) Fall back to matching the page NAME against everything visible
+    if (!found) {
+      const haystacks = [document.title || '', decodeURIComponent(location.href)];
+      const og = document.querySelector('meta[property="og:title"]');
+      if (og && og.content) haystacks.push(og.content);
+      document.querySelectorAll('h1, h2, [role="banner"] span, [role="navigation"] span, a[aria-label], div[aria-label], span[aria-label]').forEach(el => {
+        const t = (el.textContent || '').trim();
+        if (t && t.length < 120) haystacks.push(t);
+        const al = el.getAttribute && el.getAttribute('aria-label');
+        if (al && al.length < 120) haystacks.push(al);
+      });
+      // Full visible page text catches inline mentions in plain divs, e.g. the
+      // Business Suite banner "This chat contains a reply to <Page>".
+      try {
+        const bodyText = (document.body && document.body.innerText) || '';
+        if (bodyText) haystacks.push(bodyText.slice(0, 50000));
+      } catch (e) { /* ignore */ }
+      const joined = haystacks.join(' | ').toLowerCase();
+      for (const m of pageMappings) {
+        const needle = (m.match || '').toLowerCase().trim();
+        if (needle && joined.includes(needle)) { found = m; break; }
+      }
+      // Self-heal: once matched by name while a Page ID is in the URL, bind them
+      // so it detects instantly (by ID) on every future conversation.
+      if (found && pageId && !found.pageId) learnPageId(found.code, pageId);
     }
   }
+  window.__akmezDetectedPage = found;
   // Skip DOM updates when nothing changed (runs every 1.2s) — but re-apply
-  // if the widget was re-created and the badge lost its state
+  // if the widget was re-created and lost its state
   const key = found ? (found.code + '|' + (found.logo ? found.logo.length : 0)) : null;
   const badgeEl = document.getElementById('akmez-page-badge');
-  const badgeStale = found && badgeEl && badgeEl.style.display === 'none';
-  if (key === __akmezLastPageKey && !badgeStale) return;
+  const headerLogoEl = document.querySelector('#akmez-widget .akmez-logo');
+  const stale = found && (
+    (badgeEl && badgeEl.style.display === 'none') ||
+    (headerLogoEl && headerLogoEl.textContent === 'A')
+  );
+  if (key === __akmezLastPageKey && !stale) return;
   __akmezLastPageKey = key;
 
   const hasLogo = !!(found && found.logo && found.logo.indexOf('data:image/') === 0);
@@ -369,6 +426,7 @@ function renderSettings() {
     const signedIn = !!stored.authToken;
     const isAdmin = stored.userRole === 'admin';
     const cutoff = stored.cutoffTime || '20:00';
+    const currentPageId = getCurrentPageId();
     const renderSelList = (arr, kind, emptyMsg) => (arr.length
       ? arr.map((s, i) => `
         <div class="akmez-sel-row">
@@ -420,14 +478,15 @@ function renderSettings() {
         ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button><div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>' : ''}
         
         <div class="akmez-subsection">Page Identification</div>
+        ${isAdmin && currentPageId ? `<div class="akmez-hint-text">You are currently viewing page ID <b>${currentPageId}</b>. Use the &#128279; button on a page below to link it to this ID for instant, reliable detection.</div>` : ''}
         <div class="akmez-sel-list">${(Array.isArray(stored.pageMappings) && stored.pageMappings.length
           ? stored.pageMappings.map((m, i) => `
             <div class="akmez-sel-row">
               ${m.logo && m.logo.indexOf('data:image/') === 0
                 ? `<img src="${m.logo}" alt="" class="akmez-pagemap-thumb">`
                 : `<span class="akmez-pagemap-thumb placeholder">${(m.code || '?').slice(0, 2).replace(/</g, '&lt;')}</span>`}
-              <span class="akmez-sel-text" title="${(m.match || '').replace(/"/g, '&quot;')}">${(m.match || '').replace(/</g, '&lt;')} &rarr; <b>${(m.code || '').replace(/</g, '&lt;')}</b></span>
-              ${isAdmin ? `<button class="akmez-sel-logo" data-i="${i}" title="${m.logo ? 'Change logo' : 'Add logo'}">&#128247;</button><button class="akmez-sel-del" data-kind="pagemap" data-i="${i}" title="Remove">&times;</button>` : ''}
+              <span class="akmez-sel-text" title="${(m.match || '').replace(/"/g, '&quot;')}">${(m.match || '').replace(/</g, '&lt;')} &rarr; <b>${(m.code || '').replace(/</g, '&lt;')}</b>${m.pageId ? ` <span class="akmez-linked" title="Linked to page ID ${m.pageId}">&#128279; ${m.pageId}</span>` : ''}</span>
+              ${isAdmin ? `${currentPageId ? `<button class="akmez-sel-link ${m.pageId === currentPageId ? 'active' : ''}" data-i="${i}" title="${m.pageId === currentPageId ? 'Linked to the current page' : 'Link to current page (' + currentPageId + ')'}">&#128279;</button>` : ''}<button class="akmez-sel-logo" data-i="${i}" title="${m.logo ? 'Change logo' : 'Add logo'}">&#128247;</button><button class="akmez-sel-del" data-kind="pagemap" data-i="${i}" title="Remove">&times;</button>` : ''}
             </div>`).join('')
           : `<div class="akmez-sel-empty">${isAdmin ? 'No pages defined yet. Add a page name and its short code below (e.g. Made By Moris → MBM).' : 'Not configured by your admin yet.'}</div>`)}</div>
         ${isAdmin ? `
@@ -439,7 +498,7 @@ function renderSettings() {
           <input type="file" id="pagemap-logo-file" accept="image/*" style="display:none">
         </div>
         <div class="akmez-pagemap-logo-preview" id="pagemap-logo-preview" style="display:none"></div>
-        <div class="akmez-hint-text">When the conversation&apos;s tab title, URL or heading contains the page name, its code (and logo) shows as a badge in the widget header so agents instantly know which page the message came from. Use the &#128247; buttons to add or change a page&apos;s logo.</div>` : ''}
+        <div class="akmez-hint-text">Detection matches by the page&apos;s Facebook ID (most reliable) or by finding the page name in the conversation. Open a page&apos;s inbox, then press &#128279; here to bind it &mdash; after that the code and logo show instantly on every conversation for that page. Use &#128247; to add a logo.</div>` : ''}
         
         <div class="akmez-subsection">Delivery Cut-off</div>
         <div class="akmez-set-row">
@@ -555,6 +614,27 @@ function renderSettings() {
       if (logoBtn) logoBtn.onclick = () => { logoTargetIndex = null; logoFile.click(); };
       body.querySelectorAll('.akmez-sel-logo').forEach(b => {
         b.onclick = () => { logoTargetIndex = parseInt(b.dataset.i, 10); logoFile.click(); };
+      });
+      // Link a mapping to the Facebook Page ID of the inbox currently open
+      body.querySelectorAll('.akmez-sel-link').forEach(b => {
+        b.onclick = () => {
+          const idx = parseInt(b.dataset.i, 10);
+          const pid = getCurrentPageId();
+          if (!pid) { toast('No page ID found in the current tab. Open a page inbox first.'); return; }
+          chrome.storage.local.get(['pageMappings'], s => {
+            const list = Array.isArray(s.pageMappings) ? s.pageMappings : [];
+            if (!list[idx]) return;
+            // Clear this ID from any other mapping, then bind it here
+            list.forEach(m => { if (m.pageId === pid) delete m.pageId; });
+            list[idx].pageId = pid;
+            chrome.storage.local.set({ pageMappings: list }, () => {
+              pageMappings = list;
+              __akmezLastPageKey = null; // force re-detect
+              pushSharedSettings('Linked "' + list[idx].match + '" to page ID ' + pid);
+              renderSettings();
+            });
+          });
+        };
       });
       const pagemapAdd = document.getElementById('pagemap-add');
       if (pagemapAdd) {
@@ -1396,9 +1476,13 @@ function submitOrder() {
     if (p) amt += parseFloat(p.price) * q;
   });
   
+  // The detected page's code becomes the order's MEDIUM (e.g. MBM / DBM),
+  // matching the import sheet. Falls back to "Extension" server-side if unknown.
+  const pageCode = (window.__akmezDetectedPage && window.__akmezDetectedPage.code) || null;
+
   chrome.runtime.sendMessage({
     action: 'createOrder',
-    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId }
+    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId, pageCode }
   }, response => {
     if (!response || !response.success) {
       err.textContent = 'Connection failed';

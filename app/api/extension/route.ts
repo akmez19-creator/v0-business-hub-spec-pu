@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
     }
     
     const body = await request.json()
-    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId } = body
+    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode } = body
     
     // Validate required fields
     if (!customerName?.trim()) {
@@ -327,7 +327,9 @@ export async function POST(request: NextRequest) {
       reply_token: replyToken,
       reply_token_created_at: new Date().toISOString(),
       created_by: user.id,
-      medium: 'Extension',
+      // MEDIUM carries the source page code (e.g. MBM / DBM) like the import
+      // sheet; falls back to "Extension" when no page was detected
+      medium: (typeof pageCode === 'string' && pageCode.trim()) ? pageCode.trim().slice(0, 20) : 'Extension',
     }).select('id').single()
     
     if (error) {
@@ -393,18 +395,22 @@ export async function PUT(request: NextRequest) {
     // Page mappings: [{ match: "Made By Moris", code: "MBM", logo?: dataURL }, ...]
     const asMappings = (v: unknown) => (Array.isArray(v)
       ? v
-          .filter((m): m is { match: string; code: string; logo?: string } =>
+          .filter((m): m is { match: string; code: string; logo?: string; pageId?: string } =>
             !!m && typeof m === 'object' &&
             typeof (m as any).match === 'string' && (m as any).match.trim() !== '' &&
             typeof (m as any).code === 'string' && (m as any).code.trim() !== '')
           .map(m => {
-            const entry: { match: string; code: string; logo?: string } = {
+            const entry: { match: string; code: string; logo?: string; pageId?: string } = {
               match: m.match.trim().slice(0, 120),
               code: m.code.trim().slice(0, 20),
             }
             // Logo: small image data URL only (48px PNG from the widget, cap 100KB)
             if (typeof m.logo === 'string' && m.logo.startsWith('data:image/') && m.logo.length <= 100_000) {
               entry.logo = m.logo
+            }
+            // Page ID: the Facebook asset_id, used for instant/reliable detection
+            if (typeof m.pageId === 'string' && /^\d{1,25}$/.test(m.pageId.trim())) {
+              entry.pageId = m.pageId.trim()
             }
             return entry
           })
