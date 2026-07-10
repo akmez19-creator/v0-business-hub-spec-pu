@@ -183,7 +183,13 @@ style.textContent = `
 .wt-history-item .date{color:#888;}
 .wt-history-item .hours{color:#10b981;font-weight:600;}
 
-#akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;}
+#akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;align-items:center;gap:4px;}
+.akmez-page-badge-logo{width:14px;height:14px;border-radius:50%;object-fit:cover;background:#fff;flex-shrink:0;}
+.akmez-pagemap-thumb{width:22px;height:22px;border-radius:6px;object-fit:cover;background:#1e293b;flex-shrink:0;margin-right:6px;}
+.akmez-pagemap-thumb.placeholder{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#94a3b8;border:1px dashed #334155;}
+.akmez-sel-logo{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:13px;padding:2px 4px;flex-shrink:0;}
+.akmez-sel-logo:hover{color:#0ea5e9;}
+.akmez-pagemap-logo-preview{display:flex;align-items:center;gap:6px;font-size:11px;color:#6ee7b7;margin:4px 0;}
 .akmez-region-delivery{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:7px 10px;font-size:11px;color:#6ee7b7;margin:-4px 0 10px;line-height:1.4;}
 .akmez-region-delivery b{color:#10b981;}
 .akmez-region-delivery.warn{background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.3);color:#fcd34d;}
@@ -257,9 +263,18 @@ function detectSourcePage() {
     }
   }
   if (found) {
-    badge.textContent = found.code;
+    // Render logo (if the admin uploaded one) next to the code
+    badge.textContent = '';
+    if (found.logo && found.logo.indexOf('data:image/') === 0) {
+      const img = document.createElement('img');
+      img.src = found.logo;
+      img.alt = '';
+      img.className = 'akmez-page-badge-logo';
+      badge.appendChild(img);
+    }
+    badge.appendChild(document.createTextNode(found.code));
     badge.title = 'Message from: ' + found.match;
-    badge.style.display = 'inline-block';
+    badge.style.display = 'inline-flex';
   } else {
     badge.style.display = 'none';
   }
@@ -355,17 +370,23 @@ function renderSettings() {
         <div class="akmez-sel-list">${(Array.isArray(stored.pageMappings) && stored.pageMappings.length
           ? stored.pageMappings.map((m, i) => `
             <div class="akmez-sel-row">
+              ${m.logo && m.logo.indexOf('data:image/') === 0
+                ? `<img src="${m.logo}" alt="" class="akmez-pagemap-thumb">`
+                : `<span class="akmez-pagemap-thumb placeholder">${(m.code || '?').slice(0, 2).replace(/</g, '&lt;')}</span>`}
               <span class="akmez-sel-text" title="${(m.match || '').replace(/"/g, '&quot;')}">${(m.match || '').replace(/</g, '&lt;')} &rarr; <b>${(m.code || '').replace(/</g, '&lt;')}</b></span>
-              ${isAdmin ? `<button class="akmez-sel-del" data-kind="pagemap" data-i="${i}" title="Remove">&times;</button>` : ''}
+              ${isAdmin ? `<button class="akmez-sel-logo" data-i="${i}" title="${m.logo ? 'Change logo' : 'Add logo'}">&#128247;</button><button class="akmez-sel-del" data-kind="pagemap" data-i="${i}" title="Remove">&times;</button>` : ''}
             </div>`).join('')
           : `<div class="akmez-sel-empty">${isAdmin ? 'No pages defined yet. Add a page name and its short code below (e.g. Made By Moris → MBM).' : 'Not configured by your admin yet.'}</div>`)}</div>
         ${isAdmin ? `
         <div class="akmez-pagemap-form">
           <input type="text" id="pagemap-match" class="akmez-pagemap-input" placeholder="Page name (e.g. Made By Moris)" maxlength="120">
           <input type="text" id="pagemap-code" class="akmez-pagemap-input code" placeholder="Code (e.g. MBM)" maxlength="20">
+          <button class="akmez-set-btn" id="pagemap-logo-btn" title="Attach a logo (optional)">&#128247; Logo</button>
           <button class="akmez-set-btn" id="pagemap-add">+ Add Page</button>
+          <input type="file" id="pagemap-logo-file" accept="image/*" style="display:none">
         </div>
-        <div class="akmez-hint-text">When the conversation&apos;s tab title, URL or heading contains the page name, its code shows as a badge in the widget header so agents instantly know which page the message came from.</div>` : ''}
+        <div class="akmez-pagemap-logo-preview" id="pagemap-logo-preview" style="display:none"></div>
+        <div class="akmez-hint-text">When the conversation&apos;s tab title, URL or heading contains the page name, its code (and logo) shows as a badge in the widget header so agents instantly know which page the message came from. Use the &#128247; buttons to add or change a page&apos;s logo.</div>` : ''}
         
         <div class="akmez-subsection">Delivery Cut-off</div>
         <div class="akmez-set-row">
@@ -423,6 +444,65 @@ function renderSettings() {
           });
         };
       });
+      // --- Page logo upload (shrinks any image to a small 48px data URL) ---
+      const logoFile = document.getElementById('pagemap-logo-file');
+      let pendingLogo = null;      // logo staged for the "+ Add Page" form
+      let logoTargetIndex = null;  // when set, the upload replaces an existing mapping's logo
+      const resizePageLogo = (file, cb) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const img = new Image();
+          img.onload = () => {
+            const size = 48;
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const scale = Math.min(size / img.width, size / img.height);
+            const w = img.width * scale, h = img.height * scale;
+            ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+            cb(canvas.toDataURL('image/png'));
+          };
+          img.onerror = () => { toast('Could not read that image'); cb(null); };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      };
+      if (logoFile) {
+        logoFile.onchange = () => {
+          const f = logoFile.files && logoFile.files[0];
+          logoFile.value = '';
+          if (!f) return;
+          resizePageLogo(f, dataUrl => {
+            if (!dataUrl) return;
+            if (logoTargetIndex !== null) {
+              const idx = logoTargetIndex;
+              logoTargetIndex = null;
+              chrome.storage.local.get(['pageMappings'], s => {
+                const list = Array.isArray(s.pageMappings) ? s.pageMappings : [];
+                if (!list[idx]) return;
+                list[idx].logo = dataUrl;
+                chrome.storage.local.set({ pageMappings: list }, () => {
+                  pageMappings = list;
+                  pushSharedSettings('Logo updated for all users');
+                  renderSettings();
+                });
+              });
+            } else {
+              pendingLogo = dataUrl;
+              const prev = document.getElementById('pagemap-logo-preview');
+              if (prev) {
+                prev.innerHTML = '<img src="' + dataUrl + '" alt="" class="akmez-pagemap-thumb"> Logo ready &mdash; it will be attached when you add the page';
+                prev.style.display = 'flex';
+              }
+            }
+          });
+        };
+      }
+      const logoBtn = document.getElementById('pagemap-logo-btn');
+      if (logoBtn) logoBtn.onclick = () => { logoTargetIndex = null; logoFile.click(); };
+      body.querySelectorAll('.akmez-sel-logo').forEach(b => {
+        b.onclick = () => { logoTargetIndex = parseInt(b.dataset.i, 10); logoFile.click(); };
+      });
       const pagemapAdd = document.getElementById('pagemap-add');
       if (pagemapAdd) {
         pagemapAdd.onclick = () => {
@@ -435,9 +515,12 @@ function renderSettings() {
               toast('This page is already defined');
               return;
             }
-            list.push({ match, code });
+            const entry = { match, code };
+            if (pendingLogo) entry.logo = pendingLogo;
+            list.push(entry);
             chrome.storage.local.set({ pageMappings: list }, () => {
               pageMappings = list;
+              pendingLogo = null;
               pushSharedSettings('Page "' + match + '" saved as ' + code + ' for all users');
               renderSettings();
             });

@@ -374,14 +374,24 @@ export async function PUT(request: NextRequest) {
     
     const body = await request.json()
     const asArray = (v: unknown) => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
-    // Page mappings: [{ match: "Made By Moris", code: "MBM" }, ...]
+    // Page mappings: [{ match: "Made By Moris", code: "MBM", logo?: dataURL }, ...]
     const asMappings = (v: unknown) => (Array.isArray(v)
       ? v
-          .filter((m): m is { match: string; code: string } =>
+          .filter((m): m is { match: string; code: string; logo?: string } =>
             !!m && typeof m === 'object' &&
             typeof (m as any).match === 'string' && (m as any).match.trim() !== '' &&
             typeof (m as any).code === 'string' && (m as any).code.trim() !== '')
-          .map(m => ({ match: m.match.trim().slice(0, 120), code: m.code.trim().slice(0, 20) }))
+          .map(m => {
+            const entry: { match: string; code: string; logo?: string } = {
+              match: m.match.trim().slice(0, 120),
+              code: m.code.trim().slice(0, 20),
+            }
+            // Logo: small image data URL only (48px PNG from the widget, cap 100KB)
+            if (typeof m.logo === 'string' && m.logo.startsWith('data:image/') && m.logo.length <= 100_000) {
+              entry.logo = m.logo
+            }
+            return entry
+          })
           .slice(0, 50)
       : [])
     
