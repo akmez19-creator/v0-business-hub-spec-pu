@@ -92,14 +92,35 @@ export async function GET(request: Request) {
     // Process all accounts in parallel
     await Promise.all(accounts.map(async (account: { id: string; name?: string }) => {
       try {
-        // Get account-level spend AND campaigns with spend in one call using insights breakdown
-        const [spendResponse, campaignsResponse] = await Promise.all([
+        // Get account-level spend AND campaigns with spend in one call using insights breakdown.
+        // Also fetch all ads for the account so we can show each campaign's ad IDs.
+        const [spendResponse, campaignsResponse, adsResponse] = await Promise.all([
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/insights?fields=spend&date_preset=today&access_token=${accessToken}`),
-          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,insights.date_preset(today){spend}&access_token=${accessToken}&limit=500`)
+          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,insights.date_preset(today){spend}&access_token=${accessToken}&limit=500`),
+          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/ads?fields=id,campaign_id&access_token=${accessToken}&limit=500`)
         ])
         
         const spendData = await spendResponse.json()
         accountSpends[account.id] = parseFloat(spendData.data?.[0]?.spend || '0')
+        
+        // Build a map of campaign_id -> [adId, ...] (with pagination)
+        const adsByCampaign: Record<string, string[]> = {}
+        const collectAds = (ads: { id: string; campaign_id?: string }[]) => {
+          for (const ad of ads) {
+            if (!ad.campaign_id) continue
+            if (!adsByCampaign[ad.campaign_id]) adsByCampaign[ad.campaign_id] = []
+            adsByCampaign[ad.campaign_id].push(ad.id)
+          }
+        }
+        const adsData = await adsResponse.json()
+        collectAds(adsData.data || [])
+        let nextAdsUrl = adsData.paging?.next
+        while (nextAdsUrl) {
+          const r = await fetch(nextAdsUrl)
+          const d = await r.json()
+          collectAds(d.data || [])
+          nextAdsUrl = d.paging?.next
+        }
         
         const campaignsData = await campaignsResponse.json()
         const campaigns = campaignsData.data || []
@@ -113,6 +134,7 @@ export async function GET(request: Request) {
             objective: campaign.objective,
             created_time: campaign.created_time,
             spend,
+            adIds: adsByCampaign[campaign.id] || [],
             accountId: account.id,
             accountName: account.name || account.id
           })
@@ -132,6 +154,7 @@ export async function GET(request: Request) {
               objective: campaign.objective,
               created_time: campaign.created_time,
               spend,
+              adIds: adsByCampaign[campaign.id] || [],
               accountId: account.id,
               accountName: account.name || account.id
             })

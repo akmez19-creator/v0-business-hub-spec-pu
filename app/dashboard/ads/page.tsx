@@ -38,6 +38,8 @@ import {
   X,
   ChevronRight,
   Boxes,
+  Copy,
+  Check,
 } from 'lucide-react'
 import {
   Dialog,
@@ -75,6 +77,7 @@ interface Campaign {
   impressions: string
   clicks: string
   reach: string
+  adIds?: string[]
   accountId?: string
   accountName?: string
 }
@@ -146,6 +149,65 @@ export default function AdsManagerPage() {
       else next.add(key)
       return next
     })
+  }
+  
+  // Reveal/copy ad IDs per campaign
+  const [revealedAdIds, setRevealedAdIds] = useState<Set<string>>(new Set())
+  const [copiedAdId, setCopiedAdId] = useState<string | null>(null)
+  
+  const toggleAdIds = (campaignId: string) => {
+    setRevealedAdIds(prev => {
+      const next = new Set(prev)
+      if (next.has(campaignId)) next.delete(campaignId)
+      else next.add(campaignId)
+      return next
+    })
+  }
+  
+  const copyAdId = (adId: string) => {
+    navigator.clipboard?.writeText(adId)
+    setCopiedAdId(adId)
+    setTimeout(() => setCopiedAdId(prev => (prev === adId ? null : prev)), 1500)
+  }
+  
+  const renderAdIds = (campaign: Campaign) => {
+    const adIds = campaign.adIds || []
+    if (adIds.length === 0) {
+      return <span className="text-xs text-muted-foreground/50">No ads</span>
+    }
+    const isOpen = revealedAdIds.has(campaign.id)
+    return (
+      <div className="mt-1">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); toggleAdIds(campaign.id) }}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+        >
+          <Megaphone className="w-3 h-3" />
+          {isOpen ? 'Hide' : 'Show'} Ad ID{adIds.length > 1 ? `s (${adIds.length})` : ''}
+        </button>
+        {isOpen && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {adIds.map((adId) => (
+              <button
+                key={adId}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); copyAdId(adId) }}
+                title="Click to copy"
+                className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+              >
+                {copiedAdId === adId ? (
+                  <Check className="w-3 h-3 text-green-500" />
+                ) : (
+                  <Copy className="w-3 h-3 opacity-60" />
+                )}
+                {adId}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    )
   }
 
   // Initial load - use cached API for instant data
@@ -839,6 +901,7 @@ export default function AdsManagerPage() {
                                   <p className="text-xs text-muted-foreground">
                                     {campaign.objective?.replace(/_/g, ' ')}
                                   </p>
+                                  {renderAdIds(campaign)}
                                 </div>
                                 {isUnlinked ? (
                                   <Button
@@ -903,6 +966,7 @@ export default function AdsManagerPage() {
                         <p className="text-xs text-muted-foreground">
                           {campaign.objective?.replace(/_/g, ' ')}
                         </p>
+                        {renderAdIds(campaign)}
                       </div>
                     </TableCell>
                     {selectedAccount === 'all' && (
