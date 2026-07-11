@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
     }
     
     const body = await request.json()
-    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode, salesType } = body
+    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode, salesType, returnProduct } = body
 
     // Agents can log the order as Sale / Exchange / Trade In / Refund / Drop Off
     const ALLOWED_SALES_TYPES = ['sale', 'exchange', 'trade_in', 'refund', 'drop_off']
@@ -326,6 +326,9 @@ export async function POST(request: NextRequest) {
       qty: qty || 1,
       amount: amount || 0,
       notes: notes?.trim() || null,
+      // For Exchange / Trade In, the product the client is returning (what the
+      // rider must collect) so stock reconciliation stays accurate.
+      return_product: (typeof returnProduct === 'string' && returnProduct.trim()) ? returnProduct.trim() : null,
       ad_id: adId?.trim() || null,
       status: 'pending',
       entry_date: new Date().toISOString().split('T')[0],

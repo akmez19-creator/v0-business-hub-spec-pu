@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.28.0'
+const EXTENSION_VERSION = '4.29.0'
 const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Package, text: 'Exchange & Trade In now capture the returned item: pick the product the client currently has, and the widget records it in notes. Exchange (defective) charges nothing; Trade In charges only the price difference for an equivalent product (nil if the price matches)' },
     { icon: Shield, text: 'Bad clients now show a severity level (Low / Moderate / High risk / Critical) based on how many failed CMS orders they have, so you can spot repeat offenders at a glance' },
     { icon: Package, text: 'Sales Type pills in the order form: log each order as Sale, Exchange, Trade In, Refund or Drop Off with one tap, and it flows through to All Deliveries' },
     { icon: Shield, text: 'Instant client rating: as soon as a phone number lands in Contact 1, a badge shows GOOD / AVERAGE / BAD / NEW client with their order count, delivered % and total sales from past history' },

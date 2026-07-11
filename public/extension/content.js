@@ -106,6 +106,10 @@ style.textContent = `
 .akmez-st-pill.active{background:#10b981;border-color:#10b981;color:#04110b;}
 .akmez-label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600;}
 .akmez-label .req{color:#f97316;}
+.akmez-oldprod-picked{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 8px;margin-top:2px;}
+.akmez-oldprod-hint{font-size:11px;color:#94a3b8;margin-top:6px;}
+.akmez-oldprod-hint.nil{color:#34d399;}
+.akmez-oldprod-hint.pay{color:#fbbf24;font-weight:600;}
 .akmez-input-wrap{position:relative;}
 .akmez-input{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 50px 10px 12px;color:white;font-size:13px;outline:none;transition:all 0.15s;}
 .akmez-input:focus{border-color:#f97316;background:rgba(249,115,22,0.05);}
@@ -1078,6 +1082,13 @@ function renderOrdersForm() {
         <button type="button" class="akmez-st-pill" data-st="drop_off">Drop Off</button>
       </div>
     </div>
+    <div class="akmez-field akmez-autocomplete" id="ak-oldprod-field" style="display:none;">
+      <div class="akmez-label" id="ak-oldprod-label">Product client currently has <span class="req">*</span></div>
+      <input type="text" id="ak-oldprod-search" class="akmez-input akmez-input-plain" placeholder="Search the product being returned..." autocomplete="off">
+      <div class="akmez-suggest" id="ak-oldprod-suggest"></div>
+      <div id="ak-oldprod-picked" class="akmez-oldprod-picked" style="display:none;"></div>
+      <div id="ak-oldprod-hint" class="akmez-oldprod-hint"></div>
+    </div>
     <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
     <div class="akmez-row akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field">
@@ -1114,11 +1125,42 @@ function renderOrdersForm() {
     };
   });
 
+  // The product the client is returning (Exchange / Trade In). Held here so the
+  // submit handler and the difference calculator can both read it.
+  let oldProduct = null; // { id, name, price }
+
+  // Reflect the selected sales type in the "current product" sub-form:
+  //  - Exchange  : defective unit swapped for the same product, no charge
+  //  - Trade In  : swapped for an equivalent product, client pays any price gap
+  function updateSalesTypeUI() {
+    const active = body.querySelector('#ak-salestype .akmez-st-pill.active');
+    const st = active ? active.dataset.st : 'sale';
+    const field = document.getElementById('ak-oldprod-field');
+    const label = document.getElementById('ak-oldprod-label');
+    const search = document.getElementById('ak-oldprod-search');
+    if (!field) return;
+    if (st === 'exchange' || st === 'trade_in') {
+      field.style.display = '';
+      if (st === 'exchange') {
+        label.innerHTML = 'Defective product being returned <span class="req">*</span>';
+        search.placeholder = 'Search the defective product...';
+      } else {
+        label.innerHTML = 'Product client currently has (trading in) <span class="req">*</span>';
+        search.placeholder = 'Search the product being traded in...';
+      }
+    } else {
+      field.style.display = 'none';
+    }
+    updateOldProdHint();
+    updateCart();
+  }
+
   // Sales type pills: Sale / Exchange / Trade In / Refund / Drop Off
   body.querySelectorAll('.akmez-st-pill').forEach(p => {
     p.onclick = () => {
       body.querySelectorAll('.akmez-st-pill').forEach(x => x.classList.remove('active'));
       p.classList.add('active');
+      updateSalesTypeUI();
     };
   });
   
@@ -1307,6 +1349,128 @@ function renderOrdersForm() {
     prodInput.focus();
   }
 
+  // ===== "Current product" picker for Exchange / Trade In =====
+  const oldInput = document.getElementById('ak-oldprod-search');
+  const oldSuggest = document.getElementById('ak-oldprod-suggest');
+  const oldPicked = document.getElementById('ak-oldprod-picked');
+  let oldMatches = [];
+  let oldActive = -1;
+
+  // Current cart total (after B1G1 / bundle pricing) - the value of the new product(s)
+  function cartTotalAmount() {
+    let amt = 0;
+    Object.entries(cart).forEach(([id, q]) => {
+      if (q > 0) { const p = products.find(x => x.id === id); if (p) amt += akmezPriceFor(p, q); }
+    });
+    return amt;
+  }
+
+  // Show the charge outcome under the picker: nil for a defective exchange,
+  // else the price difference the client must pay on a trade in.
+  function updateOldProdHint() {
+    const hint = document.getElementById('ak-oldprod-hint');
+    if (!hint) return;
+    const active = document.querySelector('#ak-salestype .akmez-st-pill.active');
+    const st = active ? active.dataset.st : 'sale';
+    if (st !== 'exchange' && st !== 'trade_in') { hint.textContent = ''; return; }
+    if (st === 'exchange') {
+      hint.textContent = 'Defective swap - no charge (Rs 0).';
+      hint.className = 'akmez-oldprod-hint nil';
+      return;
+    }
+    // Trade In: difference = new product total - returned product price (min 0)
+    const oldPrice = oldProduct ? (parseFloat(oldProduct.price) || 0) : 0;
+    const diff = Math.max(0, cartTotalAmount() - oldPrice);
+    if (!oldProduct) {
+      hint.textContent = 'Select the product being traded in to compute the difference.';
+      hint.className = 'akmez-oldprod-hint';
+    } else if (diff <= 0) {
+      hint.textContent = 'Equivalent price - no difference to pay (Rs 0).';
+      hint.className = 'akmez-oldprod-hint nil';
+    } else {
+      hint.textContent = 'Difference to pay: Rs ' + diff.toFixed(0);
+      hint.className = 'akmez-oldprod-hint pay';
+    }
+  }
+
+  function renderOldPicked() {
+    if (!oldProduct) { oldPicked.style.display = 'none'; oldPicked.innerHTML = ''; oldInput.style.display = ''; return; }
+    oldInput.style.display = 'none';
+    oldPicked.style.display = 'flex';
+    oldPicked.innerHTML = `
+      ${akmezThumb(oldProduct, 'akmez-cart-thumb')}
+      <div class="akmez-cart-item-info">
+        <div class="akmez-cart-item-name">${oldProduct.name.replace(/</g, '&lt;')}</div>
+        <div class="akmez-cart-item-price">Rs ${(parseFloat(oldProduct.price) || 0).toFixed(0)}</div>
+      </div>
+      <button class="akmez-qty-btn akmez-qty-del" id="ak-oldprod-clear" title="Change">&times;</button>`;
+    const clr = document.getElementById('ak-oldprod-clear');
+    if (clr) clr.onclick = () => { oldProduct = null; window.__akmezOldProduct = null; renderOldPicked(); updateOldProdHint(); oldInput.focus(); };
+  }
+
+  function showOldSuggestions() {
+    const q = oldInput.value.toLowerCase().trim();
+    oldMatches = rankProducts(q);
+    if (!oldMatches.length) { oldSuggest.style.display = 'none'; return; }
+    oldActive = 0;
+    oldSuggest.innerHTML = oldMatches.map((p, i) => {
+      return `
+      <div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
+        ${akmezThumb(p, 'akmez-suggest-thumb')}
+        <span class="akmez-suggest-name">${p.name.replace(/</g, '&lt;')}</span>
+        <span class="akmez-suggest-price">Rs ${p.price}</span>
+      </div>`;
+    }).join('');
+    oldSuggest.style.display = 'block';
+    oldSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
+      it.onmousedown = e => {
+        if (e.target.classList.contains('akmez-suggest-thumb')) {
+          e.preventDefault();
+          const p = oldMatches[parseInt(it.dataset.i, 10)];
+          if (p) akmezShowImage(p.image_url, p.name);
+          return;
+        }
+        e.preventDefault();
+        pickOldProduct(parseInt(it.dataset.i, 10));
+      };
+    });
+  }
+
+  function pickOldProduct(i) {
+    if (i < 0 || i >= oldMatches.length) return;
+    const p = oldMatches[i];
+    oldProduct = { id: p.id, name: p.name, price: p.price, image_url: p.image_url };
+    window.__akmezOldProduct = oldProduct; // mirror so submitOrder can read it
+    oldInput.value = '';
+    oldSuggest.style.display = 'none';
+    renderOldPicked();
+    updateOldProdHint();
+  }
+
+  if (oldInput) {
+    oldInput.addEventListener('input', showOldSuggestions);
+    oldInput.addEventListener('focus', showOldSuggestions);
+    oldInput.addEventListener('blur', () => setTimeout(() => { oldSuggest.style.display = 'none'; }, 150));
+    oldInput.addEventListener('keydown', e => {
+      const open = oldSuggest.style.display === 'block' && oldMatches.length;
+      if (e.key === 'ArrowDown') {
+        if (!open) { showOldSuggestions(); return; }
+        e.preventDefault();
+        oldActive = (oldActive + 1) % oldMatches.length;
+        oldSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => el.classList.toggle('active', i === oldActive));
+      } else if (e.key === 'ArrowUp') {
+        if (!open) return;
+        e.preventDefault();
+        oldActive = (oldActive - 1 + oldMatches.length) % oldMatches.length;
+        oldSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => el.classList.toggle('active', i === oldActive));
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        if (open && oldActive >= 0) { if (e.key === 'Enter') e.preventDefault(); pickOldProduct(oldActive); }
+      } else if (e.key === 'Escape') {
+        oldSuggest.style.display = 'none';
+      }
+    });
+  }
+
   // Given a captured Ad ID, resolve its linked product (ad -> campaign -> product)
   // and auto-add it to the cart. Guards against resolving the same ad twice.
   function resolveProductFromAdId(adId) {
@@ -1354,6 +1518,11 @@ function renderOrdersForm() {
     }
   });
 
+  // Reset the returned-product selection for this fresh form, and let updateCart
+  // (module scope) refresh the trade-in difference hint whenever the cart changes.
+  window.__akmezOldProduct = null;
+  window.__akmezOnCartChange = updateOldProdHint;
+  updateSalesTypeUI();
   updateCart();
   document.getElementById('ak-submit').onclick = submitOrder;
 
@@ -1601,6 +1770,7 @@ function updateCart() {
   if (!entries.length) {
     c.style.display = 'none';
     list.innerHTML = '';
+    if (typeof window.__akmezOnCartChange === 'function') window.__akmezOnCartChange();
     return;
   }
 
@@ -1654,6 +1824,9 @@ function updateCart() {
   c.style.display = 'flex';
   c.querySelector('.items').textContent = qty + ' item' + (qty !== 1 ? 's' : '');
   c.querySelector('.total').textContent = 'Rs ' + amt.toFixed(0);
+
+  // Keep the Trade In price-difference hint in sync with the cart total
+  if (typeof window.__akmezOnCartChange === 'function') window.__akmezOnCartChange();
 }
 
 function submitOrder() {
@@ -1710,9 +1883,39 @@ function submitOrder() {
   const stActive = document.querySelector('#ak-salestype .akmez-st-pill.active');
   const salesType = stActive ? stActive.dataset.st : 'sale';
 
+  // Exchange / Trade In carry the returned product (in notes + return_product)
+  // and adjust the amount charged.
+  let notes = null;
+  let returnProduct = null;
+  if (salesType === 'exchange' || salesType === 'trade_in') {
+    const oldP = window.__akmezOldProduct;
+    if (!oldP || !oldP.name) {
+      err.textContent = salesType === 'exchange'
+        ? 'Select the defective product being returned'
+        : 'Select the product the client is trading in';
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Create Order';
+      return;
+    }
+    returnProduct = oldP.name;
+    if (salesType === 'exchange') {
+      // Defective unit swapped for the same product - no charge
+      amt = 0;
+      notes = 'Exchange (defective) - returned: ' + oldP.name;
+    } else {
+      // Trade In - client pays only the price difference (never negative)
+      const oldPrice = parseFloat(oldP.price) || 0;
+      const diff = Math.max(0, amt - oldPrice);
+      amt = diff;
+      notes = 'Trade In - returned: ' + oldP.name + ' (Rs ' + oldPrice.toFixed(0) + ')'
+        + (diff > 0 ? ' | difference paid: Rs ' + diff.toFixed(0) : ' | no difference');
+    }
+  }
+
   chrome.runtime.sendMessage({
     action: 'createOrder',
-    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId, pageCode, salesType }
+    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId, pageCode, salesType, notes, returnProduct }
   }, response => {
     if (!response || !response.success) {
       err.textContent = 'Connection failed';
