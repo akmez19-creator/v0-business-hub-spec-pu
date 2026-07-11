@@ -1865,7 +1865,10 @@ function submitOrder() {
   
   const prods = entries.map(([id, q]) => {
     const p = products.find(x => x.id === id);
-    return p ? p.name + ' x' + q : '';
+    if (!p) return '';
+    // Save just the product name. Only annotate quantity when more than one unit,
+    // since the total quantity is already stored separately in the qty column.
+    return q > 1 ? p.name + ' x' + q : p.name;
   }).filter(Boolean).join(', ');
   
   let qty = 0, amt = 0;

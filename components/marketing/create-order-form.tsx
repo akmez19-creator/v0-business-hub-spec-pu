@@ -133,7 +133,8 @@ export function CreateOrderForm({ userId, products, recentClients, regions }: Pr
     setSaving(true)
     
     try {
-      const products = cart.map(c => `${c.name} x${c.quantity}`).join(', ')
+      // Save just the product name; only annotate quantity when more than one unit
+      const products = cart.map(c => c.quantity > 1 ? `${c.name} x${c.quantity}` : c.name).join(', ')
       
       // Generate reply token for client link
       const replyToken = uuidv4()
