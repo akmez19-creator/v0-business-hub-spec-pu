@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.30.0'
+const EXTENSION_VERSION = '4.31.0'
 const LAST_UPDATED = '2026-07-11'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Shield, text: 'Exchange & Trade In now require a real past customer: enter the phone and the widget verifies a delivered order exists, auto-fills the most recent product bought, and blocks the order if the client has no delivery history' },
     { icon: Package, text: 'Orders now save clean product names (e.g. "3 IN 1 Dustpan") without the "x1" suffix; quantity is only shown when more than one unit is ordered' },
     { icon: Package, text: 'Exchange & Trade In now capture the returned item: pick the product the client currently has, and the widget records it in notes. Exchange (defective) charges nothing; Trade In charges only the price difference for an equivalent product (nil if the price matches)' },
     { icon: Shield, text: 'Bad clients now show a severity level (Low / Moderate / High risk / Critical) based on how many failed CMS orders they have, so you can spot repeat offenders at a glance' },

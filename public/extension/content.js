@@ -106,6 +106,10 @@ style.textContent = `
 .akmez-st-pill.active{background:#10b981;border-color:#10b981;color:#04110b;}
 .akmez-label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600;}
 .akmez-label .req{color:#f97316;}
+.akmez-oldprod-status{font-size:11px;margin-bottom:6px;line-height:1.4;}
+.akmez-oldprod-status.loading{color:#94a3b8;}
+.akmez-oldprod-status.ok{color:#34d399;font-weight:600;}
+.akmez-oldprod-status.blocked{color:#f87171;font-weight:600;}
 .akmez-oldprod-picked{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 8px;margin-top:2px;}
 .akmez-oldprod-hint{font-size:11px;color:#94a3b8;margin-top:6px;}
 .akmez-oldprod-hint.nil{color:#34d399;}
@@ -1084,6 +1088,7 @@ function renderOrdersForm() {
     </div>
     <div class="akmez-field akmez-autocomplete" id="ak-oldprod-field" style="display:none;">
       <div class="akmez-label" id="ak-oldprod-label">Product client currently has <span class="req">*</span></div>
+      <div id="ak-oldprod-status" class="akmez-oldprod-status"></div>
       <input type="text" id="ak-oldprod-search" class="akmez-input akmez-input-plain" placeholder="Search the product being returned..." autocomplete="off">
       <div class="akmez-suggest" id="ak-oldprod-suggest"></div>
       <div id="ak-oldprod-picked" class="akmez-oldprod-picked" style="display:none;"></div>
@@ -1128,6 +1133,12 @@ function renderOrdersForm() {
   // The product the client is returning (Exchange / Trade In). Held here so the
   // submit handler and the difference calculator can both read it.
   let oldProduct = null; // { id, name, price }
+  let oldProductAuto = false; // true when auto-filled from delivery history (agent hasn't overridden)
+
+  // Eligibility gate: Exchange / Trade In require a past DELIVERED order.
+  // state: idle | loading | ok | none
+  let deliveredElig = { phone: null, state: 'idle', count: 0, product: null };
+  let __deliveredTimer = null;
 
   // Reflect the selected sales type in the "current product" sub-form:
   //  - Exchange  : defective unit swapped for the same product, no charge
@@ -1148,9 +1159,12 @@ function renderOrdersForm() {
         label.innerHTML = 'Product client currently has (trading in) <span class="req">*</span>';
         search.placeholder = 'Search the product being traded in...';
       }
+      // Verify the client has a past delivered order and auto-fill from history
+      lookupLastDelivered();
     } else {
       field.style.display = 'none';
     }
+    updateEligUI();
     updateOldProdHint();
     updateCart();
   }
@@ -1224,7 +1238,7 @@ function renderOrdersForm() {
       });
     }, 350);
   }
-  fields.phone.input.addEventListener('input', refreshClientRating);
+  fields.phone.input.addEventListener('input', () => { refreshClientRating(); lookupLastDelivered(); });
 
   // Apply a freshly detected value, or clear the field once its selector stops matching.
   function applyField(f, val) {
@@ -1268,7 +1282,7 @@ function renderOrdersForm() {
         window.__akmezLastResolvedAd = null;
       }
     });
-    readCustomerPhone(num => { applyField(fields.phone, num); refreshClientRating(); });
+    readCustomerPhone(num => { applyField(fields.phone, num); refreshClientRating(); lookupLastDelivered(); });
     readCustomerAdId(id => {
       const prev = fields.adid.last;
       applyField(fields.adid, id);
@@ -1393,6 +1407,109 @@ function renderOrdersForm() {
     }
   }
 
+  // Best-effort match of a historical product name to the current catalog
+  // (to recover its price/image for the trade-in difference calculation).
+  function matchCatalog(name) {
+    if (!name) return null;
+    const low = name.toLowerCase().trim();
+    return products.find(x => x.name.toLowerCase() === low)
+      || products.find(x => { const n = x.name.toLowerCase(); return n.startsWith(low) || low.startsWith(n); })
+      || products.find(x => { const n = x.name.toLowerCase(); return n.includes(low) || low.includes(n); })
+      || null;
+  }
+
+  // Auto-fill the returned product from the client's most recent delivered order.
+  function autofillReturnedProduct(rawName) {
+    const p = matchCatalog(rawName);
+    if (p) {
+      oldProduct = { id: p.id, name: p.name, price: p.price, image_url: p.image_url };
+    } else if (rawName) {
+      // Product no longer in the catalog - keep the historical name, price unknown
+      oldProduct = { id: null, name: rawName, price: 0, image_url: null };
+    } else {
+      return;
+    }
+    oldProductAuto = true;
+    window.__akmezOldProduct = oldProduct;
+    renderOldPicked();
+    updateOldProdHint();
+  }
+
+  // Reflect the eligibility gate in the UI and enable/disable the picker.
+  function updateEligUI() {
+    window.__akmezDeliveredState = deliveredElig.state; // mirror for submit handler
+    const status = document.getElementById('ak-oldprod-status');
+    if (!status) return;
+    const active = document.querySelector('#ak-salestype .akmez-st-pill.active');
+    const st = active ? active.dataset.st : 'sale';
+    if (st !== 'exchange' && st !== 'trade_in') { status.textContent = ''; status.className = 'akmez-oldprod-status'; return; }
+    const kind = st === 'exchange' ? 'Exchange' : 'Trade In';
+    if (deliveredElig.state === 'idle') {
+      status.textContent = "Enter the client's phone to verify a past delivered order.";
+      status.className = 'akmez-oldprod-status loading';
+      if (oldInput) oldInput.disabled = true;
+    } else if (deliveredElig.state === 'loading') {
+      status.textContent = 'Checking delivery history...';
+      status.className = 'akmez-oldprod-status loading';
+      if (oldInput) oldInput.disabled = true;
+    } else if (deliveredElig.state === 'ok') {
+      status.innerHTML = '\u2713 Verified: ' + deliveredElig.count + ' delivered order'
+        + (deliveredElig.count !== 1 ? 's' : '')
+        + (deliveredElig.product ? ' \u00b7 last: ' + deliveredElig.product.replace(/</g, '&lt;') : '');
+      status.className = 'akmez-oldprod-status ok';
+      if (oldInput) oldInput.disabled = false;
+    } else { // none
+      status.textContent = '\u26A0 No delivered order found for this number - ' + kind + ' is only allowed for past customers.';
+      status.className = 'akmez-oldprod-status blocked';
+      if (oldInput) oldInput.disabled = true;
+    }
+  }
+
+  // Look up the client's most recent delivered product to gate Exchange / Trade In.
+  function lookupLastDelivered() {
+    const active = body.querySelector('#ak-salestype .akmez-st-pill.active');
+    const st = active ? active.dataset.st : 'sale';
+    if (st !== 'exchange' && st !== 'trade_in') return;
+    const digits = (fields.phone.input.value || '').replace(/\D/g, '');
+    if (digits.length < 7) {
+      deliveredElig = { phone: null, state: 'idle', count: 0, product: null };
+      window.__akmezDeliveredOk = false;
+      updateEligUI();
+      return;
+    }
+    // Reuse a resolved result for the same phone
+    if (deliveredElig.phone === digits && (deliveredElig.state === 'ok' || deliveredElig.state === 'none')) {
+      window.__akmezDeliveredOk = deliveredElig.state === 'ok';
+      updateEligUI();
+      return;
+    }
+    deliveredElig = { phone: digits, state: 'loading', count: 0, product: null };
+    window.__akmezDeliveredOk = false;
+    updateEligUI();
+    clearTimeout(__deliveredTimer);
+    __deliveredTimer = setTimeout(() => {
+      chrome.runtime.sendMessage({ action: 'getClientLastDelivered', phone: digits }, resp => {
+        // Ignore stale responses (phone changed meanwhile)
+        const now = (fields.phone.input.value || '').replace(/\D/g, '');
+        if (now !== digits) return;
+        if (resp && resp.success && resp.data && resp.data.found && resp.data.deliveredCount > 0) {
+          const d = resp.data;
+          deliveredElig = { phone: digits, state: 'ok', count: d.deliveredCount, product: d.lastProduct };
+          window.__akmezDeliveredOk = true;
+          // Auto-fill from history unless the agent already picked one manually
+          if (!oldProduct || oldProductAuto) autofillReturnedProduct(d.lastProduct);
+        } else {
+          deliveredElig = { phone: digits, state: 'none', count: 0, product: null };
+          window.__akmezDeliveredOk = false;
+          // Clear any auto-filled product since the client isn't eligible
+          if (oldProductAuto) { oldProduct = null; oldProductAuto = false; window.__akmezOldProduct = null; renderOldPicked(); }
+        }
+        updateEligUI();
+        updateOldProdHint();
+      });
+    }, 300);
+  }
+
   function renderOldPicked() {
     if (!oldProduct) { oldPicked.style.display = 'none'; oldPicked.innerHTML = ''; oldInput.style.display = ''; return; }
     oldInput.style.display = 'none';
@@ -1405,7 +1522,7 @@ function renderOrdersForm() {
       </div>
       <button class="akmez-qty-btn akmez-qty-del" id="ak-oldprod-clear" title="Change">&times;</button>`;
     const clr = document.getElementById('ak-oldprod-clear');
-    if (clr) clr.onclick = () => { oldProduct = null; window.__akmezOldProduct = null; renderOldPicked(); updateOldProdHint(); oldInput.focus(); };
+    if (clr) clr.onclick = () => { oldProduct = null; oldProductAuto = false; window.__akmezOldProduct = null; renderOldPicked(); updateOldProdHint(); oldInput.focus(); };
   }
 
   function showOldSuggestions() {
@@ -1440,6 +1557,7 @@ function renderOrdersForm() {
     if (i < 0 || i >= oldMatches.length) return;
     const p = oldMatches[i];
     oldProduct = { id: p.id, name: p.name, price: p.price, image_url: p.image_url };
+    oldProductAuto = false; // agent overrode the auto-filled product
     window.__akmezOldProduct = oldProduct; // mirror so submitOrder can read it
     oldInput.value = '';
     oldSuggest.style.display = 'none';
@@ -1521,6 +1639,8 @@ function renderOrdersForm() {
   // Reset the returned-product selection for this fresh form, and let updateCart
   // (module scope) refresh the trade-in difference hint whenever the cart changes.
   window.__akmezOldProduct = null;
+  window.__akmezDeliveredOk = false;
+  window.__akmezDeliveredState = 'idle';
   window.__akmezOnCartChange = updateOldProdHint;
   updateSalesTypeUI();
   updateCart();
@@ -1891,6 +2011,17 @@ function submitOrder() {
   let notes = null;
   let returnProduct = null;
   if (salesType === 'exchange' || salesType === 'trade_in') {
+    // Gate: only genuine past customers (with a delivered order) may exchange / trade in
+    if (window.__akmezDeliveredOk !== true) {
+      const kind = salesType === 'exchange' ? 'Exchange' : 'Trade In';
+      err.textContent = window.__akmezDeliveredState === 'loading'
+        ? 'Still verifying the delivery history, please wait a moment...'
+        : 'This client has no delivered order in our database - ' + kind + ' is only allowed for past customers.';
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Create Order';
+      return;
+    }
     const oldP = window.__akmezOldProduct;
     if (!oldP || !oldP.name) {
       err.textContent = salesType === 'exchange'

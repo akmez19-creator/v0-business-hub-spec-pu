@@ -108,6 +108,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'getClientLastDelivered') {
+      // Most recent delivered product for a phone (to gate Exchange / Trade In)
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/clients/last-delivered?phone=' + encodeURIComponent(request.phone), {
+          method: 'GET'
+        });
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'resolveAdProduct') {
       // Resolve the product linked to a captured Ad ID (ad -> campaign -> product)
       try {
