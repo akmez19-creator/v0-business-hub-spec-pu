@@ -205,6 +205,17 @@ style.textContent = `
 #akmez-hover-preview{position:fixed;z-index:2147483647;display:none;width:220px;height:220px;border-radius:12px;overflow:hidden;background:#0f172a;box-shadow:0 12px 40px rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15);pointer-events:none;}
 #akmez-hover-preview img{width:100%;height:100%;object-fit:contain;display:block;}
 .akmez-offer-badge{display:inline-block;background:rgba(249,115,22,0.2);color:#fb923c;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;letter-spacing:0.3px;}
+/* Product variety (colour/size) selection */
+.akmez-var-badge{display:inline-block;background:rgba(56,189,248,0.18);color:#7dd3fc;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;}
+.akmez-var-tag{display:inline-block;background:rgba(56,189,248,0.18);color:#7dd3fc;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:4px;vertical-align:middle;}
+.akmez-var-head{padding:8px 10px;font-size:11px;font-weight:700;color:#e2e8f0;border-bottom:1px solid rgba(255,255,255,0.08);}
+.akmez-var-group{padding:8px 10px;}
+.akmez-var-attr{font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;margin-bottom:6px;}
+.akmez-var-opts{display:flex;flex-wrap:wrap;gap:6px;}
+.akmez-var-chip{background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.4);color:#fb923c;font-size:11px;font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer;}
+.akmez-var-chip:hover{background:rgba(249,115,22,0.28);}
+.akmez-var-chip.sold{opacity:0.45;cursor:not-allowed;background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12);color:#94a3b8;}
+.akmez-var-cancel{width:calc(100% - 20px);margin:4px 10px 10px;padding:7px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#e2e8f0;font-size:11px;font-weight:600;cursor:pointer;}
 .akmez-cart-item-price s{color:#64748b;font-weight:400;margin-left:4px;}
 #akmez-img-overlay{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.82);display:none;align-items:center;justify-content:center;padding:24px;}
 .akmez-img-box{position:relative;max-width:90vw;max-height:88vh;display:flex;flex-direction:column;align-items:center;gap:10px;}
@@ -1853,10 +1864,12 @@ function renderOrdersForm() {
     prodActive = 0;
     prodSuggest.innerHTML = prodMatches.map((p, i) => {
       const offer = akmezOfferLabel(p);
+      const hasVar = p.has_variants && Array.isArray(p.variants) && p.variants.length;
+      const varBadge = hasVar ? ` <span class="akmez-var-badge">${p.variants.length} options</span>` : '';
       return `
       <div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
         ${akmezThumb(p, 'akmez-suggest-thumb')}
-        <span class="akmez-suggest-name">${p.name.replace(/</g, '&lt;')}${offer ? ` <span class="akmez-offer-badge">${offer}</span>` : ''}</span>
+        <span class="akmez-suggest-name">${p.name.replace(/</g, '&lt;')}${offer ? ` <span class="akmez-offer-badge">${offer}</span>` : ''}${varBadge}</span>
         <span class="akmez-suggest-price">Rs ${p.price}</span>
       </div>`;
     }).join('');
@@ -1879,12 +1892,55 @@ function renderOrdersForm() {
   function pickProduct(i) {
     if (i < 0 || i >= prodMatches.length) return;
     const p = prodMatches[i];
+    // If this product has varieties (e.g. colours), let the agent choose one
+    // before adding it to the cart instead of adding it straight away.
+    if (p.has_variants && Array.isArray(p.variants) && p.variants.length) {
+      showVariantPicker(p);
+      return;
+    }
     cart[p.id] = (cart[p.id] || 0) + 1;
     updateCart();
     // Clear the query so the agent can immediately search the next product
     prodInput.value = '';
     prodSuggest.style.display = 'none';
     prodInput.focus();
+  }
+
+  // Show a chooser for a product's varieties, grouped by attribute (Colour, Size...).
+  // Picking an option adds that specific variant as its own cart line.
+  function showVariantPicker(p) {
+    const groups = {};
+    (p.variants || []).forEach(v => {
+      const key = v.attribute_name || 'Option';
+      (groups[key] = groups[key] || []).push(v);
+    });
+    let html = `<div class="akmez-var-head">${p.name.replace(/</g, '&lt;')} &mdash; choose an option</div>`;
+    Object.keys(groups).forEach(attr => {
+      html += `<div class="akmez-var-group"><div class="akmez-var-attr">${String(attr).replace(/</g, '&lt;')}</div><div class="akmez-var-opts">`;
+      groups[attr].forEach(v => {
+        const soldOut = (v.quantity != null && Number(v.quantity) <= 0);
+        const hasOverride = v.price_override != null && v.price_override !== '';
+        const priceTag = hasOverride ? ` (Rs ${Math.round(parseFloat(v.price_override))})` : '';
+        html += `<button class="akmez-var-chip${soldOut ? ' sold' : ''}" data-vid="${v.id}"${soldOut ? ' disabled' : ''}>${String(v.attribute_value).replace(/</g, '&lt;')}${priceTag}${soldOut ? ' &middot; out of stock' : ''}</button>`;
+      });
+      html += `</div></div>`;
+    });
+    html += `<button class="akmez-var-cancel" data-cancel="1">Cancel</button>`;
+    prodSuggest.innerHTML = html;
+    prodSuggest.style.display = 'block';
+    prodSuggest.querySelectorAll('.akmez-var-chip:not(.sold)').forEach(chip => {
+      chip.onmousedown = e => {
+        e.preventDefault();
+        const key = p.id + '::' + chip.dataset.vid;
+        cart[key] = (cart[key] || 0) + 1;
+        updateCart();
+        prodInput.value = '';
+        prodSuggest.style.display = 'none';
+        prodInput.focus();
+      };
+    });
+    const cancel = prodSuggest.querySelector('[data-cancel]');
+    if (cancel) cancel.onmousedown = e => { e.preventDefault(); prodSuggest.style.display = 'none'; prodInput.focus(); };
   }
 
   // ===== "Current product" picker for Exchange / Trade In =====
@@ -1897,8 +1953,8 @@ function renderOrdersForm() {
   // Current cart total (after B1G1 / bundle pricing) - the value of the new product(s)
   function cartTotalAmount() {
     let amt = 0;
-    Object.entries(cart).forEach(([id, q]) => {
-      if (q > 0) { const p = products.find(x => x.id === id); if (p) amt += akmezPriceFor(p, q); }
+    Object.entries(cart).forEach(([key, q]) => {
+      if (q > 0) { const r = akmezCartResolve(key); if (r) amt += akmezPriceFor(r.priced, q); }
     });
     return amt;
   }
@@ -2428,6 +2484,29 @@ function akmezThumb(p, cls) {
   return '<span class="' + cls + ' placeholder"></span>';
 }
 
+// Resolve a cart key into its product + chosen variant. Cart keys are either a
+// plain product id, or "productId::variantId" when the agent picked a variety
+// (e.g. a colour). Returns a pricing-ready product object: when the variant has
+// its own price_override we use it as the unit price and drop bundle/B1G1 offers
+// (variant-specific pricing), otherwise the base product pricing applies.
+function akmezCartResolve(key) {
+  const str = String(key);
+  const sep = str.indexOf('::');
+  const pid = sep === -1 ? str : str.slice(0, sep);
+  const vid = sep === -1 ? '' : str.slice(sep + 2);
+  const p = products.find(x => x.id === pid);
+  if (!p) return null;
+  let variant = null;
+  if (vid && Array.isArray(p.variants)) variant = p.variants.find(v => v.id === vid) || null;
+  let priced = p;
+  const hasOverride = variant && variant.price_override != null && variant.price_override !== '';
+  if (hasOverride) {
+    priced = Object.assign({}, p, { price: variant.price_override, bundle_prices: null, is_b1g1: false });
+  }
+  const label = variant ? (p.name + ' - ' + variant.attribute_value) : p.name;
+  return { p, variant, priced, label };
+}
+
 function updateCart() {
   const c = document.getElementById('ak-cart');
   const list = document.getElementById('ak-cart-list');
@@ -2443,24 +2522,27 @@ function updateCart() {
   let qty = 0, amt = 0;
   // Render each selected product with quantity controls
   list.innerHTML = entries.map(([id, q]) => {
-    const p = products.find(x => x.id === id);
-    if (!p) return '';
+    const r = akmezCartResolve(id);
+    if (!r) return '';
+    const priced = r.priced;
     qty += q;
-    const unit = parseFloat(p.price) || 0;
-    const line = akmezPriceFor(p, q);       // price after B1G1 / bundle rules
+    const unit = parseFloat(priced.price) || 0;
+    const line = akmezPriceFor(priced, q);   // price after B1G1 / bundle rules
     const listTotal = unit * q;              // price with no offer
     amt += line;
-    const offer = akmezOfferLabel(p);
+    const offer = akmezOfferLabel(priced);
     const saved = listTotal - line;
     // Show the discounted line total, with the struck-through list price + offer
     const priceHtml = saved > 0.5
       ? `Rs ${line.toFixed(0)} <s>Rs ${listTotal.toFixed(0)}</s>${offer ? ` <span class="akmez-offer-badge">${offer}</span>` : ''}`
       : `Rs ${line.toFixed(0)}`;
+    // For variants show the attribute (e.g. colour) as a small chip under the name
+    const varTag = r.variant ? ` <span class="akmez-var-tag">${String(r.variant.attribute_value).replace(/</g, '&lt;')}</span>` : '';
     return `
       <div class="akmez-cart-item" data-id="${id}">
-        ${akmezThumb(p, 'akmez-cart-thumb')}
+        ${akmezThumb(r.p, 'akmez-cart-thumb')}
         <div class="akmez-cart-item-info">
-          <div class="akmez-cart-item-name">${p.name.replace(/</g, '&lt;')}</div>
+          <div class="akmez-cart-item-name">${r.p.name.replace(/</g, '&lt;')}${varTag}</div>
           <div class="akmez-cart-item-price">${priceHtml}</div>
         </div>
         <div class="akmez-qty">
@@ -2532,14 +2614,15 @@ function submitOrder() {
   // Build one line per product so the server can create a separate delivery
   // entry for each. Each carries its own name (with B1G1 flag), quantity and
   // line amount (after B1G1 / bundle pricing).
-  const productLines = entries.map(([id, q]) => {
-    const p = products.find(x => x.id === id);
-    if (!p) return null;
+  const productLines = entries.map(([key, q]) => {
+    const r = akmezCartResolve(key);
+    if (!r) return null;
+    // r.label already includes the chosen variety (e.g. "M8 Smartband - Red").
+    // Flag B1G1 so the picking list shows the offer.
     return {
-      // Save just the product name; flag B1G1 so the picking list shows the offer
-      name: p.is_b1g1 ? p.name + ' - B1G1' : p.name,
+      name: r.priced.is_b1g1 ? r.label + ' - B1G1' : r.label,
       qty: q,
-      amount: akmezPriceFor(p, q),
+      amount: akmezPriceFor(r.priced, q),
     };
   }).filter(Boolean);
 
