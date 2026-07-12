@@ -60,6 +60,7 @@ widget.innerHTML = `
   </div>
   <div class="akmez-tabs">
     <button class="akmez-tab active" data-tab="orders">&#128203; Orders</button>
+    <button class="akmez-tab" data-tab="stats">&#128202; My Stats</button>
     <button class="akmez-tab" data-tab="worktime">&#9201; Working Time</button>
   </div>
   <div class="akmez-body" id="akmez-body">
@@ -214,6 +215,28 @@ style.textContent = `
 .wt-history-item{display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;margin-bottom:6px;font-size:11px;}
 .wt-history-item .date{color:#888;}
 .wt-history-item .hours{color:#10b981;font-weight:600;}
+
+/* My Stats */
+.stats-metrics{display:flex;gap:8px;margin-bottom:10px;}
+.stats-card{flex:1;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 8px;text-align:center;}
+.stats-card-val{font-size:20px;font-weight:800;color:#fff;line-height:1.1;}
+.stats-card-lbl{font-size:10px;color:#94a3b8;margin-top:4px;text-transform:uppercase;letter-spacing:.04em;}
+.stats-window{font-size:11px;color:#94a3b8;text-align:center;margin-bottom:12px;line-height:1.4;}
+.stats-search-wrap{margin-bottom:10px;}
+.stats-search{width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 12px;color:#fff;font-size:13px;outline:none;}
+.stats-search:focus{border-color:#f97316;}
+.stats-search::placeholder{color:#64748b;}
+.stats-list{display:flex;flex-direction:column;gap:8px;}
+.stats-client{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px 12px;}
+.stats-client-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.stats-client-name{font-size:13px;font-weight:700;color:#fff;}
+.stats-client-prod{font-size:12px;color:#cbd5e1;margin-top:2px;line-height:1.4;}
+.stats-client-meta{font-size:11px;color:#94a3b8;margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;}
+.stats-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;background:rgba(148,163,184,0.15);color:#cbd5e1;}
+.stats-badge.pending{background:rgba(249,115,22,0.15);color:#fdba74;}
+.stats-badge.delivered{background:rgba(16,185,129,0.15);color:#6ee7b7;}
+.stats-badge.cancelled,.stats-badge.returned{background:rgba(239,68,68,0.15);color:#fca5a5;}
+.stats-empty{text-align:center;color:#94a3b8;padding:30px 12px;font-size:12px;}
 
 #akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;align-items:center;gap:4px;}
 .akmez-page-badge-logo{width:14px;height:14px;border-radius:50%;object-fit:cover;background:#fff;flex-shrink:0;}
@@ -422,8 +445,10 @@ function detectSourcePage() {
   }
 }
 let isDragging = false, dragOffset = {x:0,y:0};
-let worktimeData = { isClockedIn: false, clockInTime: null, todayHours: 0, history: [] };
-let timerInterval = null;
+  let worktimeData = { isClockedIn: false, clockInTime: null, todayHours: 0, history: [] };
+  let timerInterval = null;
+  let statsSearchTimer = null;
+  let statsSearchTerm = '';
 
 // Drag functionality
 document.getElementById('akmez-drag').addEventListener('mousedown', e => {
@@ -1093,6 +1118,7 @@ function renderLogin(error) {
 // Render current tab
 function renderCurrentTab() {
   if (currentTab === 'orders') renderOrdersForm();
+  else if (currentTab === 'stats') renderMyStats();
   else renderWorktime();
 }
 
@@ -2159,6 +2185,111 @@ function submitOrder() {
       cart = {};
       renderOrdersForm();
     };
+  });
+}
+
+// Escape untrusted text before injecting into innerHTML
+function statsEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Human-friendly "Xh Ym" from seconds
+function formatDuration(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return h + 'h ' + m + 'm';
+  return m + 'm';
+}
+
+// Short time e.g. "09:42"
+function shortTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+const STATS_STATUS_LABELS = {
+  pending: 'Pending', assigned: 'Assigned', dispatched: 'Dispatched',
+  delivered: 'Delivered', cancelled: 'Cancelled', returned: 'Returned',
+};
+
+// Render the "My Stats" tab: today's metrics + 30-day client search engine
+function renderMyStats() {
+  const body = document.getElementById('akmez-body');
+  body.innerHTML = '<div class="akmez-loading"><div class="akmez-spinner"></div></div>';
+
+  chrome.runtime.sendMessage({ action: 'getMyStats', q: statsSearchTerm }, resp => {
+    if (!resp || !resp.success || !resp.data) {
+      body.innerHTML = '<div class="stats-empty">Could not load stats. Please try again.</div>';
+      return;
+    }
+    if (resp.data.authenticated === false) {
+      body.innerHTML = '<div class="stats-empty">Please sign in to view your stats.</div>';
+      return;
+    }
+    const t = resp.data.today || {};
+    const clients = resp.data.clients || [];
+
+    const clientRows = clients.length === 0
+      ? `<div class="stats-empty">${statsSearchTerm ? 'No clients match your search.' : 'No clients in the last 30 days.'}</div>`
+      : clients.map(c => {
+          const statusKey = c.last_status || 'pending';
+          const statusLabel = STATS_STATUS_LABELS[statusKey] || statusKey;
+          const phone = c.contact_1 || c.contact_2 || '';
+          const meta = [
+            phone ? '&#128222; ' + statsEsc(phone) : '',
+            c.locality ? '&#128205; ' + statsEsc(c.locality) : '',
+            c.order_count > 1 ? statsEsc(c.order_count) + ' orders' : '',
+          ].filter(Boolean).map(b => '<span>' + b + '</span>').join('');
+          return `
+            <div class="stats-client">
+              <div class="stats-client-top">
+                <span class="stats-client-name">${statsEsc(c.customer_name)}</span>
+                <span class="stats-badge ${statsEsc(statusKey)}">${statsEsc(statusLabel)}</span>
+              </div>
+              ${c.last_products ? `<div class="stats-client-prod">${statsEsc(c.last_products)}</div>` : ''}
+              <div class="stats-client-meta">${meta}</div>
+            </div>`;
+        }).join('');
+
+    body.innerHTML = `
+      <div class="stats-metrics">
+        <div class="stats-card">
+          <div class="stats-card-val">${statsEsc(t.totalClients || 0)}</div>
+          <div class="stats-card-lbl">Clients Today</div>
+        </div>
+        <div class="stats-card">
+          <div class="stats-card-val">${statsEsc(formatDuration(t.workingSeconds || 0))}</div>
+          <div class="stats-card-lbl">Working Time</div>
+        </div>
+        <div class="stats-card">
+          <div class="stats-card-val">${statsEsc(t.avgClientsPerHour || 0)}</div>
+          <div class="stats-card-lbl">Clients / Hour</div>
+        </div>
+      </div>
+      <div class="stats-window">
+        ${t.firstEntry ? `First entry ${statsEsc(shortTime(t.firstEntry))} &middot; Last entry ${statsEsc(shortTime(t.lastEntry))} &middot; ${statsEsc(t.totalEntries || 0)} entries` : 'No entries made yet today'}
+      </div>
+      <div class="stats-search-wrap">
+        <input type="text" id="stats-search" class="stats-search" placeholder="Search clients (last 30 days) by name or phone..." value="${statsEsc(statsSearchTerm)}" autocomplete="off">
+      </div>
+      <div class="stats-list" id="stats-list">${clientRows}</div>
+    `;
+
+    const searchInput = document.getElementById('stats-search');
+    // Keep focus + caret at end after re-render when typing
+    if (statsSearchTerm) {
+      searchInput.focus();
+      searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+    }
+    searchInput.addEventListener('input', e => {
+      statsSearchTerm = e.target.value;
+      if (statsSearchTimer) clearTimeout(statsSearchTimer);
+      // Debounce so we don't hit the server on every keystroke
+      statsSearchTimer = setTimeout(() => renderMyStats(), 350);
+    });
   });
 }
 

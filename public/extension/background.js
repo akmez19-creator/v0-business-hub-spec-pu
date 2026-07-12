@@ -121,6 +121,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'getMyStats') {
+      // Agent stats: today's totals + 30-day client search (q optional)
+      try {
+        const qs = request.q ? '?q=' + encodeURIComponent(request.q) : '';
+        const data = await fetchWithAuth(API_BASE + '/api/extension/stats' + qs, { method: 'GET' });
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'resolveAdProduct') {
       // Resolve the product linked to a captured Ad ID (ad -> campaign -> product)
       try {
