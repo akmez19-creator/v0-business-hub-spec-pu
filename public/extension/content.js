@@ -202,9 +202,6 @@ style.textContent = `
 .wt-timer{font-size:42px;font-weight:700;font-family:'SF Mono',monospace;color:#fff;margin:20px 0;letter-spacing:2px;}
 .wt-info{font-size:11px;color:#888;margin-bottom:20px;}
 .wt-info span{color:#f97316;font-weight:600;}
-.wt-pin{display:flex;justify-content:center;gap:8px;margin-bottom:20px;}
-.wt-pin input{width:48px;height:56px;background:rgba(255,255,255,0.05);border:2px solid rgba(255,255,255,0.1);border-radius:10px;text-align:center;font-size:24px;font-weight:700;color:#fff;outline:none;}
-.wt-pin input:focus{border-color:#f97316;background:rgba(249,115,22,0.1);}
 .wt-btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all 0.15s;}
 .wt-btn.in{background:linear-gradient(135deg,#10b981,#059669);color:white;}
 .wt-btn.out{background:linear-gradient(135deg,#ef4444,#dc2626);color:white;}
@@ -2308,12 +2305,6 @@ function renderWorktime() {
       </div>
       <div class="wt-timer" id="wt-timer">${formatTime(isClockedIn && clockInTime ? (Date.now() - new Date(clockInTime).getTime()) / 1000 : todayHours * 3600)}</div>
       <div class="wt-info">Today: <span id="wt-today">${todayHours.toFixed(2)} hours</span></div>
-      <div class="wt-pin" id="wt-pin">
-        <input type="password" maxlength="1" data-index="0" />
-        <input type="password" maxlength="1" data-index="1" />
-        <input type="password" maxlength="1" data-index="2" />
-        <input type="password" maxlength="1" data-index="3" />
-      </div>
       <button class="wt-btn ${isClockedIn ? 'out' : 'in'}" id="wt-btn">${isClockedIn ? 'Clock Out' : 'Clock In'}</button>
       ${history && history.length ? `
         <div class="wt-history">
@@ -2329,36 +2320,14 @@ function renderWorktime() {
     </div>
   `;
   
-  // PIN input handling
-  const pinInputs = document.querySelectorAll('.wt-pin input');
-  pinInputs.forEach((input, index) => {
-    input.addEventListener('input', e => {
-      if (e.target.value && index < 3) {
-        pinInputs[index + 1].focus();
-      }
-    });
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Backspace' && !e.target.value && index > 0) {
-        pinInputs[index - 1].focus();
-      }
-    });
-  });
-  
-  // Clock button
+  // Clock button - no PIN needed, the agent is already signed in
   document.getElementById('wt-btn').onclick = () => {
-    const pin = Array.from(pinInputs).map(i => i.value).join('');
-    if (pin.length !== 4) {
-      toast('Enter 4-digit PIN');
-      return;
-    }
-    
     const btn = document.getElementById('wt-btn');
     btn.disabled = true;
     btn.textContent = 'Processing...';
     
     chrome.runtime.sendMessage({
-      action: isClockedIn ? 'clockOut' : 'clockIn',
-      pin
+      action: isClockedIn ? 'clockOut' : 'clockIn'
     }, response => {
       if (response && response.success) {
         worktimeData = response.data || worktimeData;

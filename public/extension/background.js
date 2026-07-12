@@ -220,7 +220,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           method: 'POST',
           body: JSON.stringify({
             action: request.action === 'clockIn' ? 'clock_in' : 'clock_out',
-            pin: request.pin
+            // The agent is already authenticated via email + password, so no
+            // PIN is required - clock in/out with a single tap.
+            auto: true
           })
         });
 

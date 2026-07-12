@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.35.0'
+const EXTENSION_VERSION = '4.36.0'
 const LAST_UPDATED = '2026-07-12'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Clock, text: 'Clock in and out with a single tap - the PIN has been removed since you are already signed in with your email and password' },
     { icon: Search, text: 'New "My Stats" tab: search the last 30 days of clients by name or phone, and see your live daily figures - total clients handled today, working time (first entry to last entry), and average clients per working hour' },
     { icon: Package, text: 'B1G1 pricing fixed: the free unit is bonus stock, not a price discount, so clients pay full unit price for every unit ordered (e.g. 3x Hanging Rope at Rs 475 = Rs 1,425). Bundle "N for Rs X" pricing still applies' },
     { icon: Package, text: 'Multi-product orders now create a separate delivery entry for each product, so a 2-product order becomes 2 rows (each with its own quantity, amount and reply link) for cleaner picking and tracking' },
