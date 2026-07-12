@@ -2232,8 +2232,10 @@ function renderMyStats() {
     const t = resp.data.today || {};
     const clients = resp.data.clients || [];
 
-    const clientRows = clients.length === 0
-      ? `<div class="stats-empty">${statsSearchTerm ? 'No clients match your search.' : 'No clients in the last 30 days.'}</div>`
+    const clientRows = !statsSearchTerm
+      ? `<div class="stats-empty">&#128269; Search by name or phone to find a client from the last 30 days.</div>`
+      : clients.length === 0
+      ? `<div class="stats-empty">No clients match your search.</div>`
       : clients.map(c => {
           const statusKey = c.last_status || 'pending';
           const statusLabel = STATS_STATUS_LABELS[statusKey] || statusKey;

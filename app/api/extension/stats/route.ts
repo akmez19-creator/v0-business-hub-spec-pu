@@ -81,23 +81,32 @@ export async function GET(request: NextRequest) {
     const avgClientsPerHour = workingHours > 0 ? totalClients / workingHours : totalClients
 
     // ---- Last-30-days client search (ALL clients) ----
-    const thirtyAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-    let searchQuery = supabase
-      .from('deliveries')
-      .select('customer_name, contact_1, contact_2, locality, products, amount, status, created_at')
-      .gte('created_at', thirtyAgo.toISOString())
-      .order('created_at', { ascending: false })
-      .limit(300)
+    // Only query when the agent has actually typed a search term; nothing is
+    // shown before a search, so there's no need to hit the DB otherwise.
+    let searchRows: Array<{
+      customer_name: string | null
+      contact_1: string | null
+      contact_2: string | null
+      locality: string | null
+      products: string | null
+      amount: number | null
+      status: string | null
+      created_at: string
+    }> = []
 
     if (q) {
+      const thirtyAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
       // Match on name or either contact number
       const safe = q.replace(/[%,]/g, ' ')
-      searchQuery = searchQuery.or(
-        `customer_name.ilike.%${safe}%,contact_1.ilike.%${safe}%,contact_2.ilike.%${safe}%`
-      )
+      const { data } = await supabase
+        .from('deliveries')
+        .select('customer_name, contact_1, contact_2, locality, products, amount, status, created_at')
+        .gte('created_at', thirtyAgo.toISOString())
+        .or(`customer_name.ilike.%${safe}%,contact_1.ilike.%${safe}%,contact_2.ilike.%${safe}%`)
+        .order('created_at', { ascending: false })
+        .limit(300)
+      searchRows = data || []
     }
-
-    const { data: searchRows } = await searchQuery
 
     // Group into one row per client (keyed by contact, else name); keep the
     // most recent order info and count how many orders they've had.
@@ -113,7 +122,7 @@ export async function GET(request: NextRequest) {
       order_count: number
     }>()
 
-    for (const r of searchRows || []) {
+    for (const r of searchRows) {
       const key = (r.contact_1 || r.customer_name || '').trim().toLowerCase()
       if (!key) continue
       const existing = clientMap.get(key)
