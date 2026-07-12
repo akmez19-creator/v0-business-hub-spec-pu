@@ -276,7 +276,7 @@ export async function POST(request: NextRequest) {
     }
     
     const body = await request.json()
-    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode, salesType, returnProduct } = body
+    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode, salesType, returnProduct, productLines } = body
 
     // Agents can log the order as Sale / Exchange / Trade In / Refund / Drop Off
     const ALLOWED_SALES_TYPES = ['sale', 'exchange', 'trade_in', 'refund', 'drop_off']
@@ -312,9 +312,10 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle()
     
-    // Insert delivery (mirrors the import sheet: INDEX and Payment Method
-    // stay blank, RTE comes from the locality's route)
-    const { data: delivery, error } = await supabase.from('deliveries').insert({
+    // Fields shared by every row created for this order (mirrors the import
+    // sheet: INDEX and Payment Method stay blank, RTE comes from the locality)
+    const nowIso = new Date().toISOString()
+    const baseRow = {
       customer_name: customerName.trim(),
       contact_1: contact1.trim(),
       contact_2: contact2?.trim() || null,
@@ -322,27 +323,51 @@ export async function POST(request: NextRequest) {
       rte: loc?.route_code || null,
       contractor_id: loc?.contractor_id || null,
       rider_id: loc?.default_rider_id || null,
-      assigned_at: loc?.contractor_id ? new Date().toISOString() : null,
+      assigned_at: loc?.contractor_id ? nowIso : null,
       sales_type: orderSalesType,
-      products: products,
-      qty: qty || 1,
-      amount: amount || 0,
       notes: notes?.trim() || null,
       // For Exchange / Trade In, the product the client is returning (what the
       // rider must collect) so stock reconciliation stays accurate.
       return_product: (typeof returnProduct === 'string' && returnProduct.trim()) ? returnProduct.trim() : null,
       ad_id: adId?.trim() || null,
       status: 'pending',
-      entry_date: new Date().toISOString().split('T')[0],
-      delivery_date: deliveryDate || new Date().toISOString().split('T')[0],
-      reply_token: replyToken,
-      reply_token_created_at: new Date().toISOString(),
+      entry_date: nowIso.split('T')[0],
+      delivery_date: deliveryDate || nowIso.split('T')[0],
       created_by: user.id,
       // MEDIUM carries the source page code (e.g. MBM / DBM) like the import
       // sheet; falls back to "Extension" when no page was detected
       medium: (typeof pageCode === 'string' && pageCode.trim()) ? pageCode.trim().slice(0, 20) : 'Extension',
-    }).select('id').single()
-    
+    }
+
+    // Normalise the per-product lines sent by the extension. Each valid line
+    // becomes its own delivery entry. Exchange / Trade In stay as a single
+    // combined row because their amount is calculated at the order level.
+    const validLines = Array.isArray(productLines)
+      ? productLines.filter((l: any) => l && typeof l.name === 'string' && l.name.trim())
+      : []
+    const splitPerProduct = validLines.length > 0 && orderSalesType !== 'exchange' && orderSalesType !== 'trade_in'
+
+    // Each row gets its own unique reply token (one product = one entry = one reply link)
+    const rows = splitPerProduct
+      ? validLines.map((l: any) => ({
+          ...baseRow,
+          products: l.name.trim(),
+          qty: Number(l.qty) > 0 ? Number(l.qty) : 1,
+          amount: Number(l.amount) >= 0 ? Number(l.amount) : 0,
+          reply_token: uuidv4(),
+          reply_token_created_at: nowIso,
+        }))
+      : [{
+          ...baseRow,
+          products: products,
+          qty: qty || 1,
+          amount: amount || 0,
+          reply_token: replyToken,
+          reply_token_created_at: nowIso,
+        }]
+
+    const { data: inserted, error } = await supabase.from('deliveries').insert(rows).select('id')
+
     if (error) {
       console.error('Insert error:', error)
       return NextResponse.json({ 
@@ -356,8 +381,12 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json({
       success: true,
-      message: 'Order created successfully!',
-      orderId: delivery?.id,
+      message: rows.length > 1
+        ? `Order created successfully! (${rows.length} entries)`
+        : 'Order created successfully!',
+      orderId: inserted?.[0]?.id,
+      orderIds: (inserted || []).map((d: { id: string }) => d.id),
+      entryCount: rows.length,
       createdBy: profile.name
     }, { headers: corsHeaders })
   } catch (error) {

@@ -2049,21 +2049,24 @@ function submitOrder() {
   btn.disabled = true;
   btn.textContent = 'Creating...';
   
-  const prods = entries.map(([id, q]) => {
+  // Build one line per product so the server can create a separate delivery
+  // entry for each. Each carries its own name (with B1G1 flag), quantity and
+  // line amount (after B1G1 / bundle pricing).
+  const productLines = entries.map(([id, q]) => {
     const p = products.find(x => x.id === id);
-    if (!p) return '';
-    // Save just the product name (no quantity - the total qty is stored in its
-    // own column). Flag B1G1 products so the picking list shows the offer,
-    // e.g. "Nose Patch - B1G1".
-    return p.is_b1g1 ? p.name + ' - B1G1' : p.name;
-  }).filter(Boolean).join(', ');
-  
+    if (!p) return null;
+    return {
+      // Save just the product name; flag B1G1 so the picking list shows the offer
+      name: p.is_b1g1 ? p.name + ' - B1G1' : p.name,
+      qty: q,
+      amount: akmezPriceFor(p, q),
+    };
+  }).filter(Boolean);
+
+  // Aggregate string / totals kept for Exchange & Trade In (order-level amount)
+  const prods = productLines.map(l => l.name).join(', ');
   let qty = 0, amt = 0;
-  entries.forEach(([id, q]) => {
-    qty += q;
-    const p = products.find(x => x.id === id);
-    if (p) amt += akmezPriceFor(p, q); // honour B1G1 / bundle pricing
-  });
+  productLines.forEach(l => { qty += l.qty; amt += l.amount; });
   
   // The detected page's code becomes the order's MEDIUM (e.g. MBM / DBM),
   // matching the import sheet. Falls back to "Extension" server-side if unknown.
@@ -2122,7 +2125,7 @@ function submitOrder() {
 
   chrome.runtime.sendMessage({
     action: 'createOrder',
-    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, adId, pageCode, salesType, notes, returnProduct }
+    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, productLines, adId, pageCode, salesType, notes, returnProduct }
   }, response => {
     if (!response || !response.success) {
       err.textContent = 'Connection failed';
@@ -2141,11 +2144,12 @@ function submitOrder() {
       return;
     }
     
+    const entryCount = data.entryCount || 1;
     document.getElementById('akmez-body').innerHTML = `
       <div class="akmez-success">
         <div class="check">&#10003;</div>
         <h3>Order Created!</h3>
-        <p>${name}</p>
+        <p>${name}${entryCount > 1 ? ` &middot; ${entryCount} separate entries` : ''}</p>
         <button id="ak-new">New Order</button>
       </div>
     `;
