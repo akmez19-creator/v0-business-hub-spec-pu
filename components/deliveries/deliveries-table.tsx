@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, markRiderPaid, updateDeliveryPrice } from '@/lib/delivery-actions'
+import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, markRiderPaid, updateDeliveryPrice, updateDeliveryFields } from '@/lib/delivery-actions'
 import type { Delivery, Profile, Rider, DeliveryStatus, SalesType } from '@/lib/types'
 import { STATUS_LABELS, SALES_TYPE_LABELS, SALES_TYPE_COLORS } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -42,6 +42,8 @@ import {
 } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { MoreHorizontal, Trash2, UserPlus, CheckCircle, Clock, Package, Banknote, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit } from 'lucide-react'
 
 interface Props {
@@ -64,6 +66,17 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
   const [jumpToPage, setJumpToPage] = useState('')
   const [editPriceDelivery, setEditPriceDelivery] = useState<Delivery | null>(null)
   const [editPriceValue, setEditPriceValue] = useState('')
+  const [editDelivery, setEditDelivery] = useState<Delivery | null>(null)
+  const [editForm, setEditForm] = useState({
+    delivery_date: '',
+    contact_1: '',
+    contact_2: '',
+    locality: '',
+    products: '',
+    qty: '1',
+    notes: '',
+  })
+  const [savingEdit, setSavingEdit] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -163,6 +176,47 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
   function openEditPrice(delivery: Delivery) {
     setEditPriceDelivery(delivery)
     setEditPriceValue(String(delivery.amount || 0))
+  }
+
+  function openEdit(delivery: Delivery) {
+    setEditDelivery(delivery)
+    setEditForm({
+      // date input wants yyyy-mm-dd
+      delivery_date: delivery.delivery_date ? String(delivery.delivery_date).slice(0, 10) : '',
+      contact_1: delivery.contact_1 || '',
+      contact_2: delivery.contact_2 || '',
+      locality: delivery.locality || '',
+      products: delivery.products || '',
+      qty: String(delivery.qty || 1),
+      notes: delivery.notes || '',
+    })
+  }
+
+  async function handleEditSave() {
+    if (!editDelivery) return
+    setSavingEdit(true)
+    try {
+      const result = await updateDeliveryFields(editDelivery.id, {
+        delivery_date: editForm.delivery_date || null,
+        contact_1: editForm.contact_1.trim() || null,
+        contact_2: editForm.contact_2.trim() || null,
+        locality: editForm.locality.trim() || null,
+        products: editForm.products.trim() || null,
+        qty: parseInt(editForm.qty, 10) || 1,
+        notes: editForm.notes.trim() || null,
+      })
+      if (result?.error) {
+        alert(result.error)
+      } else {
+        setEditDelivery(null)
+        router.refresh()
+      }
+    } catch (error) {
+      console.error('[v0] Edit delivery error:', error)
+      alert('Failed to update delivery. Please try again.')
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   async function handleEditPrice() {
@@ -511,8 +565,12 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                       <DropdownMenuContent align="end">
                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => openEditPrice(delivery)}>
+                        <DropdownMenuItem onClick={() => openEdit(delivery)}>
                           <Edit className="w-4 h-4 mr-2" />
+                          Edit Delivery
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openEditPrice(delivery)}>
+                          <Banknote className="w-4 h-4 mr-2" />
                           Edit Price
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -624,6 +682,98 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
             </Button>
             <Button onClick={handleEditPrice} disabled={loading === editPriceDelivery?.id}>
               {loading === editPriceDelivery?.id ? 'Saving...' : 'Save Price'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Delivery Dialog */}
+      <Dialog open={!!editDelivery} onOpenChange={(open) => !open && setEditDelivery(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Delivery</DialogTitle>
+            <DialogDescription>
+              Update the delivery date, contact, products and notes for {editDelivery?.customer_name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-date">Delivery Date</Label>
+                <Input
+                  id="edit-date"
+                  type="date"
+                  value={editForm.delivery_date}
+                  onChange={(e) => setEditForm({ ...editForm, delivery_date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-qty">Qty</Label>
+                <Input
+                  id="edit-qty"
+                  type="number"
+                  min={1}
+                  value={editForm.qty}
+                  onChange={(e) => setEditForm({ ...editForm, qty: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-c1">Contact 1</Label>
+                <Input
+                  id="edit-c1"
+                  value={editForm.contact_1}
+                  onChange={(e) => setEditForm({ ...editForm, contact_1: e.target.value })}
+                  placeholder="Primary phone"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-c2">Contact 2</Label>
+                <Input
+                  id="edit-c2"
+                  value={editForm.contact_2}
+                  onChange={(e) => setEditForm({ ...editForm, contact_2: e.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-region">Region</Label>
+              <Input
+                id="edit-region"
+                value={editForm.locality}
+                onChange={(e) => setEditForm({ ...editForm, locality: e.target.value })}
+                placeholder="Locality / region"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-products">Products</Label>
+              <Textarea
+                id="edit-products"
+                rows={2}
+                value={editForm.products}
+                onChange={(e) => setEditForm({ ...editForm, products: e.target.value })}
+                placeholder="e.g. Nose Patch, Tile Filler"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Textarea
+                id="edit-notes"
+                rows={2}
+                value={editForm.notes}
+                onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                placeholder="Delivery notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDelivery(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={savingEdit}>
+              {savingEdit ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>

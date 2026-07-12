@@ -166,7 +166,7 @@ export async function GET(request: NextRequest) {
     // Get shared, admin-configured extension settings (single row, id=1)
     const { data: settingsRow } = await supabase
       .from('extension_settings')
-      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings')
+      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme')
       .eq('id', 1)
       .single()
     const settings = {
@@ -175,6 +175,8 @@ export async function GET(request: NextRequest) {
       adidSelectors: settingsRow?.adid_selectors || [],
       cutoffTime: settingsRow?.cutoff_time || '20:00',
       pageMappings: settingsRow?.page_mappings || [],
+      // Per-weekday delivery-date scheme (order weekday -> target weekday)
+      deliveryDayScheme: settingsRow?.delivery_day_scheme || {},
     }
 
     const isClockedIn = todayShift?.status === 'in_progress' && todayShift?.actual_clock_in
@@ -426,6 +428,23 @@ export async function PUT(request: NextRequest) {
           .slice(0, 50)
       : [])
     
+    // Delivery-day scheme: { "0".."6": targetWeekday 0-6 }. Only keep valid
+    // weekday->weekday pairs; anything else is dropped so the day falls back
+    // to the cut-off "next working day" default.
+    const asScheme = (v: unknown): Record<string, number> => {
+      if (!v || typeof v !== 'object') return {}
+      const out: Record<string, number> = {}
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        const day = Number(k)
+        const target = Number(val)
+        if (Number.isInteger(day) && day >= 0 && day <= 6 &&
+            Number.isInteger(target) && target >= 0 && target <= 6) {
+          out[String(day)] = target
+        }
+      }
+      return out
+    }
+
     const { error } = await supabase.from('extension_settings').upsert({
       id: 1,
       name_selectors: asArray(body.nameSelectors),
@@ -433,6 +452,7 @@ export async function PUT(request: NextRequest) {
       adid_selectors: asArray(body.adidSelectors),
       page_mappings: asMappings(body.pageMappings),
       cutoff_time: typeof body.cutoffTime === 'string' && body.cutoffTime ? body.cutoffTime : '20:00',
+      delivery_day_scheme: asScheme(body.deliveryDayScheme),
       updated_at: new Date().toISOString(),
       updated_by: user.id,
     })

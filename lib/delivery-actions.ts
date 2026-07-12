@@ -638,6 +638,54 @@ export async function updateDeliveryNote(deliveryId: string, note: string) {
   return { success: true }
 }
 
+// Admin/manager edit of the delivery's editable fields (delivery date, notes,
+// contact numbers, products, quantity, region). Only touches the given columns
+// so it never wipes pricing / payment / assignment data.
+export async function updateDeliveryFields(
+  deliveryId: string,
+  fields: {
+    delivery_date?: string | null
+    notes?: string | null
+    contact_1?: string | null
+    contact_2?: string | null
+    products?: string | null
+    qty?: number
+    locality?: string | null
+  }
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  // Only admins / managers may edit deliveries
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+  if (!profile || !['admin', 'manager'].includes(profile.role)) {
+    return { error: 'Only admins can edit deliveries' }
+  }
+
+  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if ('delivery_date' in fields) updateData.delivery_date = fields.delivery_date || null
+  if ('notes' in fields) updateData.notes = fields.notes || null
+  if ('contact_1' in fields) updateData.contact_1 = fields.contact_1 || null
+  if ('contact_2' in fields) updateData.contact_2 = fields.contact_2 || null
+  if ('products' in fields) updateData.products = fields.products || null
+  if ('qty' in fields) updateData.qty = fields.qty && fields.qty > 0 ? fields.qty : 1
+  if ('locality' in fields) updateData.locality = await normalizeLocality(fields.locality ?? null)
+
+  const { error } = await supabase
+    .from('deliveries')
+    .update(updateData)
+    .eq('id', deliveryId)
+
+  if (error) return { error: error.message }
+  revalidateAllDeliveryPaths()
+  return { success: true }
+}
+
 // Update delivery price (admin only)
 export async function updateDeliveryPrice(deliveryId: string, amount: number) {
   console.log('[v0] updateDeliveryPrice called:', { deliveryId, amount })

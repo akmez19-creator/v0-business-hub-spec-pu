@@ -137,8 +137,14 @@ style.textContent = `
 .akmez-suggest{position:absolute;left:0;right:0;top:100%;margin-top:2px;z-index:10;background:#1a1a2e;border:1px solid rgba(249,115,22,0.4);border-radius:8px;max-height:160px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,0.4);display:none;}
 .akmez-suggest-item{padding:9px 12px;font-size:12px;color:#eee;cursor:pointer;}
 .akmez-suggest-item:hover,.akmez-suggest-item.active{background:rgba(249,115,22,0.35);color:#fff;}
-.akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
-.akmez-cutoff-input:focus{border-color:#f97316;}
+  .akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
+  .akmez-cutoff-input:focus{border-color:#f97316;}
+  .akmez-notes{resize:vertical;min-height:38px;font-family:inherit;line-height:1.4;}
+  .akmez-scheme-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;}
+  .akmez-scheme-label{font-size:12px;color:#cbd5e1;}
+  .akmez-scheme-select{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:5px 8px;color:#fff;font-size:12px;outline:none;min-width:150px;}
+  .akmez-scheme-select:focus{border-color:#f97316;}
+  .akmez-scheme-select:disabled{opacity:0.6;}
 .akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);font-weight:600;}
 .akmez-subsection{font-size:11px;color:#bbb;font-weight:600;margin:12px 0 6px;}
 .akmez-managed-tag{background:rgba(16,185,129,0.15);color:#10b981;font-size:8px;padding:2px 6px;border-radius:4px;margin-left:6px;letter-spacing:0.5px;vertical-align:middle;}
@@ -448,10 +454,23 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = EXT_VERSION || (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '');
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings', 'deliveryDayScheme'], stored => {
     const signedIn = !!stored.authToken;
     const isAdmin = stored.userRole === 'admin';
     const cutoff = stored.cutoffTime || '20:00';
+    const scheme = (stored.deliveryDayScheme && typeof stored.deliveryDayScheme === 'object') ? stored.deliveryDayScheme : {};
+    // Mon-first ordering for display; value is the JS getDay() index (0=Sun..6=Sat)
+    const WEEKDAYS = [['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],['5','Friday'],['6','Saturday'],['0','Sunday']];
+    const schemeRowsHtml = WEEKDAYS.map(([dow, label]) => {
+      const sel = scheme[dow];
+      const opts = ['<option value="">Next working day (default)</option>']
+        .concat(WEEKDAYS.map(([v, l]) => `<option value="${v}"${String(sel) === v ? ' selected' : ''}>${l}</option>`))
+        .join('');
+      return `<div class="akmez-scheme-row">
+          <span class="akmez-scheme-label">Order on ${label}</span>
+          <select class="akmez-scheme-select" data-dow="${dow}"${isAdmin ? '' : ' disabled'}>${opts}</select>
+        </div>`;
+    }).join('');
     const currentPageId = getCurrentPageId();
     const renderSelList = (arr, kind, emptyMsg) => (arr.length
       ? arr.map((s, i) => `
@@ -532,7 +551,13 @@ function renderSettings() {
           <input type="time" id="set-cutoff" class="akmez-cutoff-input" value="${cutoff}"${isAdmin ? '' : ' disabled'}>
         </div>
         ${isAdmin ? '<div class="akmez-hint-text">Orders before cut-off deliver the next working day. After cut-off the picking list is closed, so delivery skips to the working day after. Sundays and Mauritius public holidays are never selectable.</div>' : ''}
-        
+
+        <div class="akmez-subsection">Default Delivery Day</div>
+        <div class="akmez-scheme-list">${schemeRowsHtml}</div>
+        ${isAdmin
+          ? '<div class="akmez-hint-text">Choose which day an order delivers based on the day it&apos;s taken. E.g. orders taken on Saturday &amp; Sunday deliver on Monday. Days left on &ldquo;Next working day&rdquo; use the cut-off rule above. Holidays are always skipped forward.</div>'
+          : '<div class="akmez-hint-text">These delivery days are configured by your administrator.</div>'}
+
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
           <span class="akmez-set-label">Version</span>
@@ -561,6 +586,18 @@ function renderSettings() {
         const v = e.target.value || '20:00';
         chrome.storage.local.set({ cutoffTime: v }, () => pushSharedSettings('Cut-off saved for all users'));
       };
+      body.querySelectorAll('.akmez-scheme-select').forEach(sel => {
+        sel.onchange = () => {
+          chrome.storage.local.get(['deliveryDayScheme'], s => {
+            const next = (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? { ...s.deliveryDayScheme } : {};
+            const dow = sel.dataset.dow;
+            const val = sel.value;
+            if (val === '') delete next[dow];
+            else next[dow] = parseInt(val, 10);
+            chrome.storage.local.set({ deliveryDayScheme: next }, () => pushSharedSettings('Delivery day saved for all users'));
+          });
+        };
+      });
       body.querySelectorAll('.akmez-sel-del').forEach(b => {
         b.onclick = () => {
           const kind = b.dataset.kind;
@@ -720,7 +757,7 @@ function saveSelectors(kind, list, cb) {
 }
 // Admin-only: push the locally-edited settings to the server so all users inherit them
 function pushSharedSettings(successMsg) {
-  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings'], s => {
+  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings', 'deliveryDayScheme'], s => {
     chrome.runtime.sendMessage({
       action: 'saveSettings',
       data: {
@@ -729,6 +766,7 @@ function pushSharedSettings(successMsg) {
         adidSelectors: s.adidSelectors || [],
         cutoffTime: s.cutoffTime || '20:00',
         pageMappings: s.pageMappings || [],
+        deliveryDayScheme: (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {},
       }
     }, resp => {
       if (resp && resp.success) toast(successMsg || 'Settings saved for all users');
@@ -815,14 +853,36 @@ function addWorkingDays(from, n) {
   return d;
 }
 function getCutoff(cb) {
-  chrome.storage.local.get(['cutoffTime'], s => cb(s.cutoffTime || '20:00'));
+  // Reads both the cut-off time and the admin's per-weekday delivery scheme
+  chrome.storage.local.get(['cutoffTime', 'deliveryDayScheme'], s => {
+    const scheme = (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {};
+    cb(s.cutoffTime || '20:00', scheme);
+  });
 }
-// Default delivery date = next working day, or the one after if past the cut-off (picking list closed)
-function computeDefaultDeliveryDate(cutoff, cb) {
+// First date strictly after `from` whose weekday === target, skipping Sundays/holidays
+function nextDateForWeekday(from, target) {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  for (let i = 0; i < 21; i++) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() === target && !isNonWorking(d)) return d;
+  }
+  return addWorkingDays(from, 1); // safety fallback
+}
+// Default delivery date:
+//  - If the admin set a target weekday for today's weekday, deliver on the next
+//    occurrence of that weekday (skipping Sundays/holidays). Cut-off is ignored.
+//  - Otherwise: next working day, or the one after if past the cut-off.
+function computeDefaultDeliveryDate(cutoff, scheme, cb) {
   const now = new Date();
+  const orderDow = now.getDay();
+  const target = scheme ? scheme[String(orderDow)] : undefined;
+  if (target !== undefined && target !== null && target !== '') {
+    const t = parseInt(target, 10);
+    if (t >= 0 && t <= 6) { cb(nextDateForWeekday(now, t), false, true); return; }
+  }
   const [ch, cm] = (cutoff || '20:00').split(':').map(Number);
   const afterCutoff = now.getHours() > ch || (now.getHours() === ch && now.getMinutes() >= cm);
-  cb(addWorkingDays(now, afterCutoff ? 2 : 1), afterCutoff);
+  cb(addWorkingDays(now, afterCutoff ? 2 : 1), afterCutoff, false);
 }
 
 // Build a reasonably stable CSS selector for a clicked element
@@ -966,6 +1026,7 @@ async function loadData() {
         adidSelectors: Array.isArray(s.adidSelectors) ? s.adidSelectors : [],
         cutoffTime: s.cutoffTime || '20:00',
         pageMappings: Array.isArray(s.pageMappings) ? s.pageMappings : [],
+        deliveryDayScheme: (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {},
       }, () => { pageMappings = Array.isArray(s.pageMappings) ? s.pageMappings : []; renderCurrentTab(); });
     });
   });
@@ -1103,6 +1164,10 @@ function renderOrdersForm() {
           <button class="akmez-paste" data-t="ak-adid">PASTE</button>
         </div>
       </div>
+    </div>
+    <div class="akmez-field">
+      <div class="akmez-label">Notes</div>
+      <textarea id="ak-notes" class="akmez-input akmez-input-plain akmez-notes" placeholder="Optional note for the delivery team..." rows="2"></textarea>
     </div>
     <div class="akmez-section">Add Products</div>
     <div class="akmez-autocomplete">
@@ -1761,10 +1826,11 @@ function renderOrdersForm() {
   // Delivery date - default to next working day (or +1 after cut-off), block Sundays + holidays
   const dateInput = document.getElementById('ak-date');
   dateInput.min = ymd(new Date());
-  getCutoff(cutoff => {
-    computeDefaultDeliveryDate(cutoff, (d, afterCutoff) => {
+  getCutoff((cutoff, scheme) => {
+    computeDefaultDeliveryDate(cutoff, scheme, (d, afterCutoff, fromScheme) => {
       dateInput.value = ymd(d);
-      if (afterCutoff) toast('After ' + cutoff + ' cut-off - delivery set to ' + ymd(d));
+      if (fromScheme) toast('Delivery date set to ' + ymd(d));
+      else if (afterCutoff) toast('After ' + cutoff + ' cut-off - delivery set to ' + ymd(d));
     });
   });
   dateInput.addEventListener('change', () => {
@@ -1986,9 +2052,10 @@ function submitOrder() {
   const prods = entries.map(([id, q]) => {
     const p = products.find(x => x.id === id);
     if (!p) return '';
-    // Save just the product name. Only annotate quantity when more than one unit,
-    // since the total quantity is already stored separately in the qty column.
-    return q > 1 ? p.name + ' x' + q : p.name;
+    // Save just the product name (no quantity - the total qty is stored in its
+    // own column). Flag B1G1 products so the picking list shows the offer,
+    // e.g. "Nose Patch - B1G1".
+    return p.is_b1g1 ? p.name + ' - B1G1' : p.name;
   }).filter(Boolean).join(', ');
   
   let qty = 0, amt = 0;
@@ -2006,9 +2073,13 @@ function submitOrder() {
   const stActive = document.querySelector('#ak-salestype .akmez-st-pill.active');
   const salesType = stActive ? stActive.dataset.st : 'sale';
 
+  // Agent-typed note (shown for every sales type). Merged with any auto-generated
+  // exchange / trade-in note below.
+  const agentNote = (document.getElementById('ak-notes')?.value || '').trim();
+
   // Exchange / Trade In carry the returned product (in notes + return_product)
   // and adjust the amount charged.
-  let notes = null;
+  let notes = agentNote || null;
   let returnProduct = null;
   if (salesType === 'exchange' || salesType === 'trade_in') {
     // Gate: only genuine past customers (with a delivered order) may exchange / trade in
@@ -2045,6 +2116,8 @@ function submitOrder() {
       notes = 'Trade In - returned: ' + oldP.name + ' (Rs ' + oldPrice.toFixed(0) + ')'
         + (diff > 0 ? ' | difference paid: Rs ' + diff.toFixed(0) : ' | no difference');
     }
+    // Keep the agent's own note alongside the auto-generated return note
+    if (agentNote) notes = agentNote + ' | ' + notes;
   }
 
   chrome.runtime.sendMessage({
