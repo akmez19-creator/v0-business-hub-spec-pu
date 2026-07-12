@@ -233,6 +233,17 @@ style.textContent = `
 .akmez-success h3{color:#10b981;margin:10px 0 6px;font-size:16px;}
 .akmez-success p{color:#6ee7b7;font-size:12px;margin-bottom:16px;}
 .akmez-success button{background:rgba(16,185,129,0.2);border:1px solid #10b981;color:#10b981;padding:10px 20px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;}
+/* Proforma invoice link shown after an order is created */
+.akmez-proforma{text-align:left;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:10px;padding:12px;margin-bottom:16px;}
+.akmez-proforma-title{font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px;}
+.akmez-proforma-item{display:flex;flex-direction:column;gap:6px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);}
+.akmez-proforma-item:first-of-type{border-top:none;padding-top:0;}
+.akmez-proforma-prod{font-size:11px;color:#cbd5e1;font-weight:600;}
+.akmez-proforma-actions{display:flex;gap:8px;}
+.akmez-pf-copy,.akmez-pf-open{flex:1;text-align:center;padding:8px 10px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;}
+.akmez-pf-copy{background:rgba(56,189,248,0.15);border:1px solid rgba(56,189,248,0.4);color:#7dd3fc;}
+.akmez-pf-open{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#e2e8f0;}
+.akmez-proforma-hint{font-size:10px;color:#94a3b8;margin-top:8px;line-height:1.4;}
 .akmez-error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px;color:#fca5a5;font-size:11px;margin-bottom:10px;}
 
 /* Working Time Styles */
@@ -2420,14 +2431,53 @@ function submitOrder() {
     }
     
     const entryCount = data.entryCount || 1;
+    // Proforma invoice link(s) returned by the server - the same public page the
+    // rider shares: it shows a Proforma now and becomes an Invoice once delivered.
+    const links = Array.isArray(data.proformaLinks) ? data.proformaLinks : [];
+    const proformaHtml = links.length ? `
+      <div class="akmez-proforma">
+        <div class="akmez-proforma-title">&#128196; Proforma Invoice${links.length > 1 ? 's' : ''}</div>
+        ${links.map((l, i) => `
+          <div class="akmez-proforma-item">
+            ${links.length > 1 ? `<div class="akmez-proforma-prod">${statsEsc(l.products || ('Entry ' + (i + 1)))}</div>` : ''}
+            <div class="akmez-proforma-actions">
+              <button class="akmez-pf-copy" data-url="${statsEsc(l.url)}">Copy Link</button>
+              <a class="akmez-pf-open" href="${statsEsc(l.url)}" target="_blank" rel="noopener">Open</a>
+            </div>
+          </div>
+        `).join('')}
+        <div class="akmez-proforma-hint">Share with the customer as their proforma. It turns into an invoice automatically once the order is delivered.</div>
+      </div>
+    ` : '';
     document.getElementById('akmez-body').innerHTML = `
       <div class="akmez-success">
         <div class="check">&#10003;</div>
         <h3>Order Created!</h3>
-        <p>${name}${entryCount > 1 ? ` &middot; ${entryCount} separate entries` : ''}</p>
+        <p>${statsEsc(name)}${entryCount > 1 ? ` &middot; ${entryCount} separate entries` : ''}</p>
+        ${proformaHtml}
         <button id="ak-new">New Order</button>
       </div>
     `;
+    // Wire copy buttons (clipboard with a graceful fallback)
+    document.querySelectorAll('.akmez-pf-copy').forEach(b => {
+      b.onclick = () => {
+        const url = b.dataset.url;
+        const done = () => { b.textContent = 'Copied!'; setTimeout(() => { b.textContent = 'Copy Link'; }, 1500); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(done).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = url; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed'); }
+            document.body.removeChild(ta);
+          });
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = url; document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed'); }
+          document.body.removeChild(ta);
+        }
+      };
+    });
     document.getElementById('ak-new').onclick = () => {
       cart = {};
       renderOrdersForm();

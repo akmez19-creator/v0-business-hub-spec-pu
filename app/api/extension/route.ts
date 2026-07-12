@@ -390,7 +390,7 @@ export async function POST(request: NextRequest) {
           reply_token_created_at: nowIso,
         }]
 
-    const { data: inserted, error } = await supabase.from('deliveries').insert(rows).select('id')
+    const { data: inserted, error } = await supabase.from('deliveries').insert(rows).select('id, reply_token, products')
 
     if (error) {
       console.error('Insert error:', error)
@@ -402,7 +402,19 @@ export async function POST(request: NextRequest) {
         headers: corsHeaders 
       })
     }
-    
+
+    // Build the customer-facing proforma link for each created entry. This is
+    // the same public /reply/[token] page the rider shares: it shows a Proforma
+    // Invoice before delivery and turns into an Invoice/Receipt once delivered.
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+    const proformaLinks = (inserted || [])
+      .filter((d: { reply_token: string | null }) => !!d.reply_token)
+      .map((d: { id: string; reply_token: string; products: string | null }) => ({
+        id: d.id,
+        products: d.products || '',
+        url: `${baseUrl}/reply/${d.reply_token}`,
+      }))
+
     return NextResponse.json({
       success: true,
       message: rows.length > 1
@@ -411,7 +423,10 @@ export async function POST(request: NextRequest) {
       orderId: inserted?.[0]?.id,
       orderIds: (inserted || []).map((d: { id: string }) => d.id),
       entryCount: rows.length,
-      createdBy: profile.name
+      createdBy: profile.name,
+      // Proforma invoice link(s) the agent can copy/share with the customer
+      proformaLinks,
+      proformaLink: proformaLinks[0]?.url || null,
     }, { headers: corsHeaders })
   } catch (error) {
     console.error('Extension API error:', error)
