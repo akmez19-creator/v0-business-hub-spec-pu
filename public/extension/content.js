@@ -58,6 +58,10 @@ widget.innerHTML = `
       <button class="akmez-hbtn" id="akmez-close" title="Close">&times;</button>
     </div>
   </div>
+  <div class="akmez-cutoff-banner" id="akmez-cutoff-banner" style="display:none">
+    <span class="akmez-cutoff-pulse"></span>
+    <span class="akmez-cutoff-text">Cut-off in <strong id="akmez-cutoff-count">00:00</strong></span>
+  </div>
   <div class="akmez-tabs">
     <button class="akmez-tab active" data-tab="orders">&#128203; Orders</button>
     <button class="akmez-tab" data-tab="stats">&#128202; My Stats</button>
@@ -94,6 +98,22 @@ style.textContent = `
 .akmez-loading{text-align:center;padding:40px;color:#888;}
 .akmez-spinner{width:32px;height:32px;border:3px solid rgba(249,115,22,0.2);border-top-color:#f97316;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px;}
 @keyframes spin{to{transform:rotate(360deg);}}
+
+/* Delivery cut-off countdown banner */
+.akmez-cutoff-banner{display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 12px;background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;font-size:12px;font-weight:700;letter-spacing:0.3px;}
+.akmez-cutoff-text strong{font-variant-numeric:tabular-nums;font-size:13px;}
+.akmez-cutoff-pulse{width:9px;height:9px;border-radius:50%;background:#fff;animation:akmez-pulse 1s ease-in-out infinite;}
+@keyframes akmez-pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.4;transform:scale(0.7);}}
+
+/* When cut-off is near, recolor the ENTIRE interface to a red alert theme */
+#akmez-widget.cutoff-alert{border-color:#dc2626;}
+#akmez-widget.cutoff-alert .akmez-header{background:linear-gradient(135deg,#dc2626,#991b1b);}
+#akmez-widget.cutoff-alert .akmez-logo{background:rgba(255,255,255,0.25);}
+#akmez-widget.cutoff-alert .akmez-tab.active{color:#f87171;border-bottom-color:#dc2626;background:rgba(220,38,38,0.12);}
+#akmez-widget.cutoff-alert .akmez-tab:hover{color:#fecaca;}
+#akmez-widget.cutoff-alert .akmez-spinner{border-color:rgba(220,38,38,0.2);border-top-color:#dc2626;}
+#akmez-toggle.cutoff-alert{background:linear-gradient(135deg,#dc2626,#991b1b) !important;box-shadow:0 4px 20px rgba(220,38,38,0.6) !important;animation:akmez-toggle-pulse 1.2s ease-in-out infinite;}
+@keyframes akmez-toggle-pulse{0%,100%{box-shadow:0 4px 20px rgba(220,38,38,0.5);}50%{box-shadow:0 4px 28px rgba(220,38,38,0.9);}}
 
 /* Orders Form Styles */
 .akmez-user{background:rgba(139,92,246,0.1);border-radius:8px;padding:8px 12px;font-size:11px;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
@@ -471,6 +491,40 @@ document.getElementById('akmez-close').addEventListener('click', () => widget.st
 
 // Settings panel
 document.getElementById('akmez-settings').addEventListener('click', () => renderSettings());
+
+// Delivery cut-off countdown: starts 15 minutes before the cut-off time and
+// recolors the whole interface to a red alert theme so the agent can't miss it.
+const CUTOFF_WARN_SECONDS = 15 * 60;
+function tickCutoffCountdown() {
+  chrome.storage.local.get(['cutoffTime'], s => {
+    const cutoff = s.cutoffTime || '20:00';
+    const [ch, cm] = cutoff.split(':').map(Number);
+    if (isNaN(ch) || isNaN(cm)) return;
+    const now = new Date();
+    const target = new Date();
+    target.setHours(ch, cm, 0, 0);
+    const remaining = Math.floor((target.getTime() - now.getTime()) / 1000);
+
+    const banner = document.getElementById('akmez-cutoff-banner');
+    const active = remaining > 0 && remaining <= CUTOFF_WARN_SECONDS;
+
+    if (active) {
+      const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
+      const ss = String(remaining % 60).padStart(2, '0');
+      const countEl = document.getElementById('akmez-cutoff-count');
+      if (countEl) countEl.textContent = mm + ':' + ss;
+      if (banner) banner.style.display = 'flex';
+      widget.classList.add('cutoff-alert');
+      toggleBtn.classList.add('cutoff-alert');
+    } else {
+      if (banner) banner.style.display = 'none';
+      widget.classList.remove('cutoff-alert');
+      toggleBtn.classList.remove('cutoff-alert');
+    }
+  });
+}
+tickCutoffCountdown();
+setInterval(tickCutoffCountdown, 1000);
 
 function renderSettings() {
   const body = document.getElementById('akmez-body');
