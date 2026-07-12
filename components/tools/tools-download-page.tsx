@@ -25,12 +25,11 @@ import {
   Clock,
   Shield,
   LogIn,
-  Package,
-  Pencil
+  Package
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.35.0'
+const EXTENSION_VERSION = '4.34.0'
 const LAST_UPDATED = '2026-07-12'
 
 export function ToolsDownloadPage() {
@@ -83,7 +82,6 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
-    { icon: Pencil, text: 'New "My Orders" tab: agents can review the orders they created in the last 7 days and amend the delivery date, contact, region, products, quantity and notes themselves - but only while the order is still pending and not yet assigned to a rider. Every change is logged for managers' },
     { icon: Package, text: 'B1G1 pricing fixed: the free unit is bonus stock, not a price discount, so clients pay full unit price for every unit ordered (e.g. 3x Hanging Rope at Rs 475 = Rs 1,425). Bundle "N for Rs X" pricing still applies' },
     { icon: Package, text: 'Multi-product orders now create a separate delivery entry for each product, so a 2-product order becomes 2 rows (each with its own quantity, amount and reply link) for cleaner picking and tracking' },
     { icon: Shield, text: 'Exchange & Trade In now require a real past customer: enter the phone and the widget verifies a delivered order exists, auto-fills the most recent product bought, and blocks the order if the client has no delivery history' },

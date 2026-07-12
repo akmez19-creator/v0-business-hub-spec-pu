@@ -60,7 +60,6 @@ widget.innerHTML = `
   </div>
   <div class="akmez-tabs">
     <button class="akmez-tab active" data-tab="orders">&#128203; Orders</button>
-    <button class="akmez-tab" data-tab="myorders">&#128221; My Orders</button>
     <button class="akmez-tab" data-tab="worktime">&#9201; Working Time</button>
   </div>
   <div class="akmez-body" id="akmez-body">
@@ -146,29 +145,6 @@ style.textContent = `
   .akmez-scheme-select{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:5px 8px;color:#fff;font-size:12px;outline:none;min-width:150px;}
   .akmez-scheme-select:focus{border-color:#f97316;}
   .akmez-scheme-select:disabled{opacity:0.6;}
-  /* My Orders */
-  .akmez-mo-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
-  .akmez-mo-title{font-size:13px;font-weight:700;color:#fff;}
-  .akmez-mo-refresh{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#cbd5e1;font-size:11px;padding:5px 10px;cursor:pointer;}
-  .akmez-mo-refresh:hover{background:rgba(255,255,255,0.15);}
-  .akmez-mo-hint{font-size:11px;color:#94a3b8;margin-bottom:10px;line-height:1.4;}
-  .akmez-mo-card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
-  .akmez-mo-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
-  .akmez-mo-name{font-size:13px;font-weight:700;color:#fff;}
-  .akmez-mo-prod{font-size:12px;color:#cbd5e1;margin-top:2px;line-height:1.4;}
-  .akmez-mo-meta{font-size:11px;color:#94a3b8;margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;}
-  .akmez-mo-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
-  .akmez-mo-badge.pending{background:rgba(249,115,22,0.15);color:#fdba74;}
-  .akmez-mo-badge.locked{background:rgba(148,163,184,0.15);color:#cbd5e1;}
-  .akmez-mo-actions{margin-top:8px;display:flex;gap:8px;align-items:center;}
-  .akmez-mo-amend{background:#f97316;border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:700;padding:6px 12px;cursor:pointer;}
-  .akmez-mo-amend:hover{background:#ea580c;}
-  .akmez-mo-locknote{font-size:11px;color:#94a3b8;font-style:italic;}
-  .akmez-mo-empty{text-align:center;color:#94a3b8;padding:30px 12px;font-size:12px;}
-  .akmez-mo-formhint{font-size:11px;color:#94a3b8;margin-bottom:10px;}
-  .akmez-mo-btnrow{display:flex;gap:8px;margin-top:6px;}
-  .akmez-mo-save{flex:1;background:linear-gradient(135deg,#f97316,#ea580c);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:11px;cursor:pointer;}
-  .akmez-mo-cancel{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#cbd5e1;font-size:13px;font-weight:600;padding:11px 16px;cursor:pointer;}
 .akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);font-weight:600;}
 .akmez-subsection{font-size:11px;color:#bbb;font-weight:600;margin:12px 0 6px;}
 .akmez-managed-tag{background:rgba(16,185,129,0.15);color:#10b981;font-size:8px;padding:2px 6px;border-radius:4px;margin-left:6px;letter-spacing:0.5px;vertical-align:middle;}
@@ -298,7 +274,6 @@ document.head.appendChild(style);
 
 // State
 let products = [], regions = [], cart = {}, currentTab = 'orders';
-let myOrdersCache = {};
 // Map: region name -> { contractor, rider } (delivery assignment set by admin)
 let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
@@ -1118,172 +1093,7 @@ function renderLogin(error) {
 // Render current tab
 function renderCurrentTab() {
   if (currentTab === 'orders') renderOrdersForm();
-  else if (currentTab === 'myorders') renderMyOrders();
   else renderWorktime();
-}
-
-// Escape untrusted text before injecting into innerHTML
-function moEsc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-const MO_STATUS_LABELS = {
-  pending: 'Pending', assigned: 'Assigned', dispatched: 'Dispatched',
-  delivered: 'Delivered', cancelled: 'Cancelled', returned: 'Returned',
-};
-
-// "My Orders" tab: the agent's own recent entries, with self-service amend
-// for those that are still pending & unassigned.
-function renderMyOrders() {
-  const body = document.getElementById('akmez-body');
-  body.innerHTML = '<div class="akmez-loading"><div class="akmez-spinner"></div></div>';
-
-  chrome.runtime.sendMessage({ action: 'getMyOrders', days: 7 }, resp => {
-    if (!resp || !resp.success || !resp.data) {
-      body.innerHTML = '<div class="akmez-mo-empty">Could not load your orders. Please try again.</div>';
-      return;
-    }
-    if (resp.data.authenticated === false) {
-      body.innerHTML = '<div class="akmez-mo-empty">Please sign in to view your orders.</div>';
-      return;
-    }
-    const orders = resp.data.orders || [];
-    myOrdersCache = {};
-    orders.forEach(o => { myOrdersCache[o.id] = o; });
-
-    const cards = orders.length === 0
-      ? '<div class="akmez-mo-empty">No orders in the last 7 days.</div>'
-      : orders.map(o => {
-          const statusKey = (o.status || 'pending');
-          const statusLabel = MO_STATUS_LABELS[statusKey] || statusKey;
-          const dateStr = o.delivery_date ? String(o.delivery_date).slice(0, 10) : '-';
-          const amt = o.amount != null ? 'Rs ' + o.amount : '';
-          const metaBits = [
-            dateStr !== '-' ? '&#128197; ' + moEsc(dateStr) : '',
-            o.locality ? '&#128205; ' + moEsc(o.locality) : '',
-            'Qty ' + moEsc(o.qty || 1),
-            amt ? moEsc(amt) : '',
-          ].filter(Boolean).map(b => '<span>' + b + '</span>').join('');
-          const badge = o.editable
-            ? '<span class="akmez-mo-badge pending">' + moEsc(statusLabel) + '</span>'
-            : '<span class="akmez-mo-badge locked">' + moEsc(statusLabel) + '</span>';
-          const action = o.editable
-            ? '<button class="akmez-mo-amend" data-id="' + moEsc(o.id) + '">Amend</button>'
-            : '<span class="akmez-mo-locknote">Locked - ask a manager to change</span>';
-          return `
-            <div class="akmez-mo-card">
-              <div class="akmez-mo-card-top">
-                <div>
-                  <div class="akmez-mo-name">${moEsc(o.customer_name || 'Unnamed')}</div>
-                  <div class="akmez-mo-prod">${moEsc(o.products || '')}</div>
-                </div>
-                ${badge}
-              </div>
-              <div class="akmez-mo-meta">${metaBits}</div>
-              <div class="akmez-mo-actions">${action}</div>
-            </div>`;
-        }).join('');
-
-    body.innerHTML = `
-      <div class="akmez-mo-head">
-        <span class="akmez-mo-title">My Recent Orders</span>
-        <button class="akmez-mo-refresh" id="mo-refresh">&#8635; Refresh</button>
-      </div>
-      <div class="akmez-mo-hint">Only orders that are still pending and not yet assigned to a rider can be amended here.</div>
-      ${cards}
-    `;
-
-    document.getElementById('mo-refresh').onclick = () => renderMyOrders();
-    body.querySelectorAll('.akmez-mo-amend').forEach(btn => {
-      btn.onclick = () => renderAmendForm(btn.dataset.id);
-    });
-  });
-}
-
-// Inline amend form for one of the agent's own pending, unassigned entries
-function renderAmendForm(id) {
-  const o = myOrdersCache[id];
-  if (!o) { renderMyOrders(); return; }
-  const body = document.getElementById('akmez-body');
-  const dateStr = o.delivery_date ? String(o.delivery_date).slice(0, 10) : '';
-  const regionOpts = (regions || []).map(r => '<option value="' + moEsc(r) + '"></option>').join('');
-
-  body.innerHTML = `
-    <div class="akmez-mo-head">
-      <span class="akmez-mo-title">Amend Order</span>
-      <button class="akmez-mo-refresh" id="mo-back">&#8592; Back</button>
-    </div>
-    <div class="akmez-mo-formhint">Editing order for <strong>${moEsc(o.customer_name || 'Unnamed')}</strong></div>
-    <div class="akmez-row">
-      <div class="akmez-field">
-        <div class="akmez-label">Delivery Date</div>
-        <input type="date" id="mo-date" class="akmez-input akmez-input-plain" value="${moEsc(dateStr)}">
-      </div>
-    </div>
-    <div class="akmez-row">
-      <div class="akmez-field" style="flex:1;">
-        <div class="akmez-label">Contact 1</div>
-        <input type="text" id="mo-c1" class="akmez-input akmez-input-plain" value="${moEsc(o.contact_1 || '')}" placeholder="Primary phone">
-      </div>
-      <div class="akmez-field" style="flex:1;">
-        <div class="akmez-label">Contact 2</div>
-        <input type="text" id="mo-c2" class="akmez-input akmez-input-plain" value="${moEsc(o.contact_2 || '')}" placeholder="Optional">
-      </div>
-    </div>
-    <div class="akmez-row">
-      <div class="akmez-field" style="flex:2;">
-        <div class="akmez-label">Region</div>
-        <input type="text" id="mo-region" class="akmez-input akmez-input-plain" value="${moEsc(o.locality || '')}" list="mo-region-list" placeholder="Type region...">
-        <datalist id="mo-region-list">${regionOpts}</datalist>
-      </div>
-      <div class="akmez-field" style="flex:1;">
-        <div class="akmez-label">Qty</div>
-        <input type="number" id="mo-qty" class="akmez-input akmez-input-plain" min="1" value="${moEsc(o.qty || 1)}">
-      </div>
-    </div>
-    <div class="akmez-field">
-      <div class="akmez-label">Products</div>
-      <textarea id="mo-products" class="akmez-input akmez-input-plain akmez-notes" rows="2" placeholder="e.g. Nose Patch, Tile Filler">${moEsc(o.products || '')}</textarea>
-    </div>
-    <div class="akmez-field">
-      <div class="akmez-label">Notes</div>
-      <textarea id="mo-notes" class="akmez-input akmez-input-plain akmez-notes" rows="2" placeholder="Delivery notes">${moEsc(o.notes || '')}</textarea>
-    </div>
-    <div class="akmez-mo-btnrow">
-      <button class="akmez-mo-cancel" id="mo-cancel">Cancel</button>
-      <button class="akmez-mo-save" id="mo-save">Save Changes</button>
-    </div>
-  `;
-
-  document.getElementById('mo-back').onclick = () => renderMyOrders();
-  document.getElementById('mo-cancel').onclick = () => renderMyOrders();
-  document.getElementById('mo-save').onclick = () => {
-    const saveBtn = document.getElementById('mo-save');
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-    const fields = {
-      delivery_date: document.getElementById('mo-date').value || null,
-      contact_1: document.getElementById('mo-c1').value,
-      contact_2: document.getElementById('mo-c2').value,
-      region: document.getElementById('mo-region').value,
-      qty: document.getElementById('mo-qty').value,
-      products: document.getElementById('mo-products').value,
-      notes: document.getElementById('mo-notes').value,
-    };
-    chrome.runtime.sendMessage({ action: 'amendOrder', data: { deliveryId: id, fields } }, resp => {
-      if (resp && resp.success) {
-        toast(resp.data && resp.data.unchanged ? 'No changes made' : 'Order updated');
-        renderMyOrders();
-      } else {
-        const msg = (resp && (resp.error || (resp.data && resp.data.error))) || 'Failed to update order';
-        toast(msg);
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Changes';
-      }
-    });
-  };
 }
 
 // Render orders form

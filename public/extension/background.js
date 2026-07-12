@@ -121,32 +121,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
-    if (request.action === 'getMyOrders') {
-      // List the agent's own recent entries (for self-service amendments)
-      try {
-        const days = request.days ? '?days=' + encodeURIComponent(request.days) : '';
-        const data = await fetchWithAuth(API_BASE + '/api/extension/my-orders' + days, { method: 'GET' });
-        sendResponse({ success: true, data });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-      return;
-    }
-
-    if (request.action === 'amendOrder') {
-      // Amend one of the agent's own pending, unassigned entries
-      try {
-        const data = await fetchWithAuth(API_BASE + '/api/extension/my-orders', {
-          method: 'PUT',
-          body: JSON.stringify(request.data)
-        });
-        sendResponse({ success: !!data.success, data, error: data.error });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-      return;
-    }
-
     if (request.action === 'resolveAdProduct') {
       // Resolve the product linked to a captured Ad ID (ad -> campaign -> product)
       try {
