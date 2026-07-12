@@ -95,6 +95,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'aiReply') {
+      // Ask the server (Vercel AI Gateway / ChatGPT) to draft a reply from the
+      // conversation the content script scraped via the message selectors.
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/extension/ai-reply', {
+          method: 'POST',
+          body: JSON.stringify(request.data)
+        });
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'getClientRating') {
       // Instant client rating lookup by phone (indexed point read on the server)
       try {

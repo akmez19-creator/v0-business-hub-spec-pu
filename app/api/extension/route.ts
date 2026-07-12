@@ -166,7 +166,7 @@ export async function GET(request: NextRequest) {
     // Get shared, admin-configured extension settings (single row, id=1)
     const { data: settingsRow } = await supabase
       .from('extension_settings')
-      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme, holidays')
+      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme, holidays, message_selectors, sendbox_selectors, ai_reply_prompt')
       .eq('id', 1)
       .single()
     const settings = {
@@ -179,6 +179,11 @@ export async function GET(request: NextRequest) {
       deliveryDayScheme: settingsRow?.delivery_day_scheme || {},
       // Admin-managed non-delivery days (public holidays, moon-based, cyclone/rain closures)
       holidays: Array.isArray(settingsRow?.holidays) ? settingsRow.holidays : [],
+      // Selectors for reading the customer's messages + the reply/send box, and
+      // the business context prompt used for AI-drafted replies
+      messageSelectors: settingsRow?.message_selectors || [],
+      sendboxSelectors: settingsRow?.sendbox_selectors || [],
+      aiReplyPrompt: typeof settingsRow?.ai_reply_prompt === 'string' ? settingsRow.ai_reply_prompt : '',
     }
 
     const isClockedIn = todayShift?.status === 'in_progress' && todayShift?.actual_clock_in
@@ -543,6 +548,9 @@ export async function PUT(request: NextRequest) {
       cutoff_time: typeof body.cutoffTime === 'string' && body.cutoffTime ? body.cutoffTime : '20:00',
       delivery_day_scheme: asScheme(body.deliveryDayScheme),
       holidays: asHolidays(body.holidays),
+      message_selectors: asArray(body.messageSelectors),
+      sendbox_selectors: asArray(body.sendboxSelectors),
+      ai_reply_prompt: typeof body.aiReplyPrompt === 'string' ? body.aiReplyPrompt.slice(0, 2000) : '',
       updated_at: new Date().toISOString(),
       updated_by: user.id,
     })

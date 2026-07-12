@@ -325,6 +325,16 @@ style.textContent = `
 .akmez-pagemap-form{display:flex;gap:6px;margin:6px 0 2px;flex-wrap:wrap;}
 .akmez-pagemap-input{flex:1;min-width:120px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:6px 8px;font-size:12px;}
 .akmez-pagemap-input.code{flex:0 0 90px;min-width:70px;text-transform:uppercase;}
+.akmez-ai-prompt{width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.4;resize:vertical;font-family:inherit;margin-bottom:6px;}
+.akmez-ai-prompt:focus{outline:none;border-color:#f97316;}
+/* AI reply draft panel on the Orders tab */
+.akmez-ai-draft{margin-top:10px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px;}
+.akmez-ai-draft-title{font-size:11px;font-weight:700;color:#7dd3fc;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+.akmez-ai-draft-text{width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:8px;font-size:12px;line-height:1.45;resize:vertical;font-family:inherit;min-height:70px;}
+.akmez-ai-draft-actions{display:flex;gap:8px;margin-top:8px;}
+.akmez-ai-draft-actions button{flex:1;padding:7px 8px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;}
+.akmez-ai-insert{background:#f97316;color:#fff;}
+.akmez-ai-regen{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.15);color:#e2e8f0;}
 .akmez-pagemap-form .akmez-set-btn{flex:0 0 auto;width:auto;margin:0;padding:6px 10px;}
 /* Settings Styles */
 .akmez-settings-panel{padding:4px 2px;}
@@ -586,7 +596,7 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = EXT_VERSION || (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '');
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings', 'deliveryDayScheme', 'holidays'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings', 'deliveryDayScheme', 'holidays', 'messageSelectors', 'sendboxSelectors', 'aiReplyPrompt'], stored => {
     const signedIn = !!stored.authToken;
     const isAdmin = stored.userRole === 'admin';
     const cutoff = stored.cutoffTime || '20:00';
@@ -640,9 +650,14 @@ function renderSettings() {
     const nameSel = Array.isArray(stored.nameSelectors) ? stored.nameSelectors : [];
     const phoneSel = Array.isArray(stored.phoneSelectors) ? stored.phoneSelectors : [];
     const adidSel = Array.isArray(stored.adidSelectors) ? stored.adidSelectors : [];
+    const messageSel = Array.isArray(stored.messageSelectors) ? stored.messageSelectors : [];
+    const sendboxSel = Array.isArray(stored.sendboxSelectors) ? stored.sendboxSelectors : [];
+    const aiPrompt = typeof stored.aiReplyPrompt === 'string' ? stored.aiReplyPrompt : '';
     const nameHtml = renderSelList(nameSel, 'name', 'No selectors yet. Click "Pick name from page" then click the customer name in the conversation.');
     const phoneHtml = renderSelList(phoneSel, 'phone', 'No selectors yet. Click "Pick phone from page" then click the phone number (e.g. in the contact panel).');
     const adidHtml = renderSelList(adidSel, 'adid', 'No selectors yet. Click "Pick ad id from page" then click the ad_id label in the contact panel.');
+    const messageHtml = renderSelList(messageSel, 'message', 'No selectors yet. Click "Pick message from page" then click a customer message bubble in the conversation.');
+    const sendboxHtml = renderSelList(sendboxSel, 'sendbox', 'No selectors yet. Click "Pick send box from page" then click the reply text box you type in.');
     body.innerHTML = `
       <div class="akmez-settings-panel">
         <div class="akmez-section">Account</div>
@@ -679,6 +694,24 @@ function renderSettings() {
         <div class="akmez-subsection">Ad ID Auto-Fill</div>
         <div class="akmez-sel-list">${adidHtml}</div>
         ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-adid">&#9678; Pick ad id from page</button><div class="akmez-hint-text">Pick the ad_id label (e.g. ad_id.120248...) in the contact panel. The numeric id is extracted automatically.</div>' : ''}
+
+        <div class="akmez-section">AI Reply ${isAdmin ? '' : '<span class="akmez-managed-tag">Managed by admin</span>'}</div>
+        ${isAdmin ? '<div class="akmez-hint-text">Let agents draft a reply with ChatGPT from the customer\'s messages and drop it straight into the send box. Pick the message bubble and the reply box once per platform (Facebook Business Suite, WhatsApp, etc.).</div>' : '<div class="akmez-hint-text">Use the &#9728; Reply with AI button on the Orders tab to draft a response in the send box.</div>'}
+
+        <div class="akmez-subsection">Customer Messages</div>
+        <div class="akmez-sel-list">${messageHtml}</div>
+        ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-message">&#9678; Pick message from page</button><div class="akmez-hint-text">Click one customer message bubble. The plugin reads all messages that match to understand the conversation.</div>' : ''}
+
+        <div class="akmez-subsection">Reply / Send Box</div>
+        <div class="akmez-sel-list">${sendboxHtml}</div>
+        ${isAdmin ? '<button class="akmez-set-btn" id="set-pick-sendbox">&#9678; Pick send box from page</button><div class="akmez-hint-text">Click the text box you type replies into. The AI draft is inserted there for you to review and send.</div>' : ''}
+
+        <div class="akmez-subsection">Business Context &amp; Tone</div>
+        ${isAdmin
+          ? `<textarea id="set-ai-prompt" class="akmez-ai-prompt" rows="5" placeholder="Describe your business, tone, delivery info, and how replies should sound. E.g. 'We are Made By Moris, a Mauritian online shop. Be warm and helpful, reply in the customer's language, mention free delivery over Rs 1000, ask for the delivery address if not given.'">${aiPrompt.replace(/</g, '&lt;')}</textarea>
+          <button class="akmez-set-btn" id="set-save-ai-prompt">Save AI Instructions</button>
+          <div class="akmez-hint-text">This steers every AI reply. Keep it short and specific. Do not put prices you don&apos;t want the AI to quote.</div>`
+          : `<div class="akmez-sel-empty">${aiPrompt ? 'Configured by your admin.' : 'Not configured by your admin yet.'}</div>`}
         
         <div class="akmez-subsection">Page Identification</div>
         ${isAdmin && currentPageId ? `<div class="akmez-hint-text">You are currently viewing page ID <b>${currentPageId}</b>. Use the &#128279; button on a page below to link it to this ID for instant, reliable detection.</div>` : ''}
@@ -765,6 +798,15 @@ function renderSettings() {
       document.getElementById('set-pick-name').onclick = () => startPicker('name');
       document.getElementById('set-pick-phone').onclick = () => startPicker('phone');
       document.getElementById('set-pick-adid').onclick = () => startPicker('adid');
+      const pickMsg = document.getElementById('set-pick-message');
+      if (pickMsg) pickMsg.onclick = () => startPicker('message');
+      const pickSend = document.getElementById('set-pick-sendbox');
+      if (pickSend) pickSend.onclick = () => startPicker('sendbox');
+      const saveAiPrompt = document.getElementById('set-save-ai-prompt');
+      if (saveAiPrompt) saveAiPrompt.onclick = () => {
+        const val = (document.getElementById('set-ai-prompt').value || '').slice(0, 2000);
+        chrome.storage.local.set({ aiReplyPrompt: val }, () => pushSharedSettings('AI instructions saved for all users'));
+      };
       document.getElementById('set-cutoff').onchange = e => {
         const v = e.target.value || '20:00';
         chrome.storage.local.set({ cutoffTime: v }, () => pushSharedSettings('Cut-off saved for all users'));
@@ -974,7 +1016,7 @@ function renderSettings() {
 }
 
 // ===== Auto-fill selectors: name + phone, multiple per field (Facebook, WhatsApp, etc.) =====
-const SEL_KEYS = { name: 'nameSelectors', phone: 'phoneSelectors', adid: 'adidSelectors' };
+const SEL_KEYS = { name: 'nameSelectors', phone: 'phoneSelectors', adid: 'adidSelectors', message: 'messageSelectors', sendbox: 'sendboxSelectors' };
 
 function getSelectors(kind, cb) {
   const key = SEL_KEYS[kind];
@@ -985,7 +1027,7 @@ function saveSelectors(kind, list, cb) {
 }
 // Admin-only: push the locally-edited settings to the server so all users inherit them
 function pushSharedSettings(successMsg) {
-  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings', 'deliveryDayScheme', 'holidays'], s => {
+  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings', 'deliveryDayScheme', 'holidays', 'messageSelectors', 'sendboxSelectors', 'aiReplyPrompt'], s => {
     chrome.runtime.sendMessage({
       action: 'saveSettings',
       data: {
@@ -996,6 +1038,9 @@ function pushSharedSettings(successMsg) {
         pageMappings: s.pageMappings || [],
         deliveryDayScheme: (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {},
         holidays: Array.isArray(s.holidays) ? s.holidays : [],
+        messageSelectors: s.messageSelectors || [],
+        sendboxSelectors: s.sendboxSelectors || [],
+        aiReplyPrompt: typeof s.aiReplyPrompt === 'string' ? s.aiReplyPrompt : '',
       }
     }, resp => {
       if (resp && resp.success) toast(successMsg || 'Settings saved for all users');
@@ -1037,6 +1082,82 @@ function readCustomerAdId(cb) {
     if (!raw) { cb(''); return; }
     const m = raw.match(/(\d{6,})/);
     cb(m ? m[1] : raw.trim());
+  });
+}
+
+// Read the whole visible conversation as [{ from: 'customer'|'business', text }].
+// The message selector should match the message bubbles (querySelectorAll picks
+// them all). Sender is inferred from horizontal alignment: in chat UIs the
+// business's own replies sit on the right, the customer's on the left.
+function readConversation(cb) {
+  getSelectors('message', selectors => {
+    const seen = new Set();
+    const bubbles = [];
+    for (const sel of selectors) {
+      let els = [];
+      try { els = Array.from(document.querySelectorAll(sel)); } catch (e) { continue; }
+      for (const el of els) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (!text || text.length > 1200) continue;
+        const key = text.slice(0, 80);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        bubbles.push({ text, top: r.top, center: r.left + r.width / 2 });
+      }
+    }
+    if (!bubbles.length) { cb([]); return; }
+    // Alignment midpoint across all bubbles -> anything past it is our reply
+    const lefts = bubbles.map(b => b.center);
+    const mid = (Math.min(...lefts) + Math.max(...lefts)) / 2;
+    const spread = Math.max(...lefts) - Math.min(...lefts);
+    bubbles.sort((a, b) => a.top - b.top); // top-to-bottom = oldest-to-newest
+    const turns = bubbles.map(b => ({
+      // Only classify by side when bubbles actually differ in alignment
+      from: (spread > 40 && b.center > mid) ? 'business' : 'customer',
+      text: b.text,
+    }));
+    cb(turns);
+  });
+}
+
+// Type AI-drafted text into the platform's reply/send box. Works for plain
+// inputs/textareas and for contenteditable rich editors (Messenger, Business
+// Suite) by using execCommand so the framework's own input handlers fire.
+function insertIntoSendBox(text, cb) {
+  getSelectors('sendbox', selectors => {
+    let box = null;
+    for (const sel of selectors) {
+      try { const el = document.querySelector(sel); if (el) { box = el; break; } } catch (e) { /* skip */ }
+    }
+    if (!box) { cb(false, 'No send box selector set. Add one in Settings.'); return; }
+    try {
+      box.focus();
+      const tag = box.tagName.toLowerCase();
+      if (tag === 'textarea' || tag === 'input') {
+        const setter = Object.getOwnPropertyDescriptor(box.__proto__, 'value');
+        if (setter && setter.set) setter.set.call(box, text); else box.value = text;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        // contenteditable rich editor: replace any existing content
+        const range = document.createRange();
+        range.selectNodeContents(box);
+        const selApi = window.getSelection();
+        selApi.removeAllRanges();
+        selApi.addRange(range);
+        let ok = false;
+        try { ok = document.execCommand('insertText', false, text); } catch (e) { ok = false; }
+        if (!ok) {
+          box.textContent = text;
+          box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+        }
+      }
+      cb(true);
+    } catch (e) {
+      cb(false, 'Could not write into the send box.');
+    }
   });
 }
 
@@ -1187,7 +1308,11 @@ function buildSelector(el) {
 }
 // Highlight click-to-pick: user clicks the name or phone on the page
 function startPicker(kind) {
-  const label = kind === 'phone' ? 'phone number' : 'customer name';
+  const label = kind === 'phone' ? 'phone number'
+    : kind === 'adid' ? 'ad id label'
+    : kind === 'message' ? 'a customer message bubble'
+    : kind === 'sendbox' ? 'the reply / send box'
+    : 'customer name';
   toast('Click the ' + label + ' on the page (ESC to cancel)');
   widget.style.display = 'none';
 
@@ -1304,6 +1429,9 @@ async function loadData() {
         pageMappings: Array.isArray(s.pageMappings) ? s.pageMappings : [],
         deliveryDayScheme: (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {},
         holidays: muHolidays,
+        messageSelectors: Array.isArray(s.messageSelectors) ? s.messageSelectors : [],
+        sendboxSelectors: Array.isArray(s.sendboxSelectors) ? s.sendboxSelectors : [],
+        aiReplyPrompt: typeof s.aiReplyPrompt === 'string' ? s.aiReplyPrompt : '',
       }, () => { pageMappings = Array.isArray(s.pageMappings) ? s.pageMappings : []; loadWeather(); renderCurrentTab(); });
     });
   });
@@ -1378,6 +1506,15 @@ function renderCurrentTab() {
 function renderOrdersForm() {
   const body = document.getElementById('akmez-body');
   body.innerHTML = `
+    <button type="button" class="akmez-set-btn" id="ak-ai-reply">&#9728; Reply with AI</button>
+    <div class="akmez-ai-draft" id="ak-ai-draft" style="display:none;">
+      <div class="akmez-ai-draft-title">&#9728; Suggested reply</div>
+      <textarea class="akmez-ai-draft-text" id="ak-ai-draft-text"></textarea>
+      <div class="akmez-ai-draft-actions">
+        <button type="button" class="akmez-ai-insert" id="ak-ai-insert">Insert into Send Box</button>
+        <button type="button" class="akmez-ai-regen" id="ak-ai-regen">Regenerate</button>
+      </div>
+    </div>
     <div class="akmez-row">
       <div class="akmez-field">
         <div class="akmez-label">Name <span class="req">*</span></div>
@@ -1464,15 +1601,58 @@ function renderOrdersForm() {
   
   // Paste buttons
   body.querySelectorAll('.akmez-paste').forEach(b => {
-    b.onclick = async () => {
-      try {
-        const el = document.getElementById(b.dataset.t);
-        el.value = await navigator.clipboard.readText();
-        // Fire input so listeners react (e.g. instant client rating on C1)
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      } catch(e) {}
-    };
+  b.onclick = async () => {
+  try {
+  const el = document.getElementById(b.dataset.t);
+  el.value = await navigator.clipboard.readText();
+  // Fire input so listeners react (e.g. instant client rating on C1)
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  } catch(e) {}
+  };
   });
+
+  // ----- Reply with AI: scrape the conversation, draft a reply via ChatGPT,
+  // then let the agent insert it into the platform's send box -----
+  const aiBtn = document.getElementById('ak-ai-reply');
+  const aiDraft = document.getElementById('ak-ai-draft');
+  const aiText = document.getElementById('ak-ai-draft-text');
+  const generateReply = () => {
+    readConversation(turns => {
+      if (!turns.length) {
+        toast('No messages found. Ask your admin to set the message selector in Settings.');
+        return;
+      }
+      aiBtn.disabled = true;
+      aiBtn.innerHTML = '&#9728; Thinking...';
+      const customerName = (document.getElementById('ak-name').value || '').trim();
+      const dp = window.__akmezDetectedPage;
+      const pageName = (dp && (dp.match || dp.code)) ? (dp.match || dp.code) : '';
+      chrome.runtime.sendMessage({ action: 'aiReply', data: { messages: turns, customerName, pageName } }, resp => {
+        aiBtn.disabled = false;
+        aiBtn.innerHTML = '&#9728; Reply with AI';
+        const data = resp && resp.data;
+        if (resp && resp.success && data && data.success && data.reply) {
+          aiText.value = data.reply;
+          aiDraft.style.display = 'block';
+          aiText.focus();
+        } else {
+          toast((data && data.error) || (resp && resp.error) || 'Could not generate a reply');
+        }
+      });
+    });
+  };
+  if (aiBtn) aiBtn.onclick = generateReply;
+  const aiRegen = document.getElementById('ak-ai-regen');
+  if (aiRegen) aiRegen.onclick = generateReply;
+  const aiInsert = document.getElementById('ak-ai-insert');
+  if (aiInsert) aiInsert.onclick = () => {
+    const txt = (aiText.value || '').trim();
+    if (!txt) { toast('Nothing to insert'); return; }
+    insertIntoSendBox(txt, (ok, err) => {
+      if (ok) toast('Inserted into the send box');
+      else toast(err || 'Could not insert');
+    });
+  };
 
   // The product the client is returning (Exchange / Trade In). Held here so the
   // submit handler and the difference calculator can both read it.
