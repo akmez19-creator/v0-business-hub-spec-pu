@@ -1847,14 +1847,16 @@ function renderOrdersForm() {
 
 // Compute the total price for `q` units of product `p`, honouring inventory
 // pricing rules so the extension always matches the admin inventory:
-//   - B1G1 (buy one get one free): pay for ceil(q/2) units
+//   - B1G1 (buy one get one free): the free unit is bonus stock, NOT a price
+//     discount, so the client pays full unit price for every unit ordered.
 //   - Bundle prices e.g. { "2": 775 }: "2 for 775". Uses DP to find the
 //     cheapest combination of bundles + singles for the chosen quantity.
 function akmezPriceFor(p, q) {
   q = Math.max(0, parseInt(q, 10) || 0);
   if (q === 0 || !p) return 0;
   const unit = parseFloat(p.price) || 0;
-  if (p.is_b1g1) return unit * Math.ceil(q / 2);
+  // Note: B1G1 does NOT discount the price - the free unit is bonus stock
+  // shipped, so the client still pays full unit price for every unit ordered.
   const bp = p.bundle_prices && typeof p.bundle_prices === 'object' ? p.bundle_prices : null;
   if (bp) {
     const tiers = Object.keys(bp)

@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.33.0'
+const EXTENSION_VERSION = '4.34.0'
 const LAST_UPDATED = '2026-07-12'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Package, text: 'B1G1 pricing fixed: the free unit is bonus stock, not a price discount, so clients pay full unit price for every unit ordered (e.g. 3x Hanging Rope at Rs 475 = Rs 1,425). Bundle "N for Rs X" pricing still applies' },
     { icon: Package, text: 'Multi-product orders now create a separate delivery entry for each product, so a 2-product order becomes 2 rows (each with its own quantity, amount and reply link) for cleaner picking and tracking' },
     { icon: Shield, text: 'Exchange & Trade In now require a real past customer: enter the phone and the widget verifies a delivered order exists, auto-fills the most recent product bought, and blocks the order if the client has no delivery history' },
     { icon: Package, text: 'Orders now save clean product names (e.g. "3 IN 1 Dustpan") without the "x1" suffix; quantity is only shown when more than one unit is ordered' },
