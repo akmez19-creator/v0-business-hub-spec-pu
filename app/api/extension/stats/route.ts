@@ -83,16 +83,28 @@ export async function GET(request: NextRequest) {
     // ---- Last-30-days client search (ALL clients) ----
     // Only query when the agent has actually typed a search term; nothing is
     // shown before a search, so there's no need to hit the DB otherwise.
-    let searchRows: Array<{
+    interface DeliveryRow {
+      id: string
       customer_name: string | null
       contact_1: string | null
       contact_2: string | null
       locality: string | null
+      rte: string | null
       products: string | null
+      qty: number | null
       amount: number | null
       status: string | null
+      sales_type: string | null
+      medium: string | null
+      ad_id: string | null
+      notes: string | null
+      return_product: string | null
+      entry_date: string | null
+      delivery_date: string | null
+      reply_token: string | null
       created_at: string
-    }> = []
+    }
+    let searchRows: DeliveryRow[] = []
 
     if (q) {
       const thirtyAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
@@ -100,45 +112,98 @@ export async function GET(request: NextRequest) {
       const safe = q.replace(/[%,]/g, ' ')
       const { data } = await supabase
         .from('deliveries')
-        .select('customer_name, contact_1, contact_2, locality, products, amount, status, created_at')
+        .select('id, customer_name, contact_1, contact_2, locality, rte, products, qty, amount, status, sales_type, medium, ad_id, notes, return_product, entry_date, delivery_date, reply_token, created_at')
         .gte('created_at', thirtyAgo.toISOString())
         .or(`customer_name.ilike.%${safe}%,contact_1.ilike.%${safe}%,contact_2.ilike.%${safe}%`)
         .order('created_at', { ascending: false })
         .limit(300)
-      searchRows = data || []
+      searchRows = (data as DeliveryRow[]) || []
     }
 
-    // Group into one row per client (keyed by contact, else name); keep the
-    // most recent order info and count how many orders they've had.
-    const clientMap = new Map<string, {
+    // Public base URL for the customer-facing /reply/[token] proforma/invoice page
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+
+    // Group into one row per client (keyed by contact, else name). Rows arrive
+    // newest-first, so the first row seen per client is their latest order: we
+    // keep its full detail (+ proforma/invoice link) and list the rest as
+    // order history, plus running totals.
+    interface OrderLine {
+      products: string | null
+      qty: number | null
+      amount: number | null
+      status: string | null
+      sales_type: string | null
+      delivery_date: string | null
+      created_at: string
+      link: string | null
+    }
+    interface ClientRecord {
       customer_name: string
       contact_1: string | null
       contact_2: string | null
       locality: string | null
+      rte: string | null
+      medium: string | null
+      ad_id: string | null
       last_products: string | null
+      last_qty: number | null
       last_amount: number | null
       last_status: string | null
+      last_sales_type: string | null
+      last_notes: string | null
+      last_return_product: string | null
+      last_delivery_date: string | null
       last_order_at: string
+      proforma_url: string | null
       order_count: number
-    }>()
+      total_amount: number
+      orders: OrderLine[]
+    }
+    const clientMap = new Map<string, ClientRecord>()
 
     for (const r of searchRows) {
       const key = (r.contact_1 || r.customer_name || '').trim().toLowerCase()
       if (!key) continue
+      const link = r.reply_token ? `${baseUrl}/reply/${r.reply_token}` : null
+      const line: OrderLine = {
+        products: r.products,
+        qty: r.qty,
+        amount: r.amount,
+        status: r.status,
+        sales_type: r.sales_type,
+        delivery_date: r.delivery_date,
+        created_at: r.created_at,
+        link,
+      }
       const existing = clientMap.get(key)
       if (existing) {
         existing.order_count += 1
+        existing.total_amount += Number(r.amount) || 0
+        if (existing.orders.length < 10) existing.orders.push(line)
       } else {
         clientMap.set(key, {
           customer_name: r.customer_name || 'Unnamed',
           contact_1: r.contact_1,
           contact_2: r.contact_2,
           locality: r.locality,
+          rte: r.rte,
+          medium: r.medium,
+          ad_id: r.ad_id,
           last_products: r.products,
+          last_qty: r.qty,
           last_amount: r.amount,
           last_status: r.status,
+          last_sales_type: r.sales_type,
+          last_notes: r.notes,
+          last_return_product: r.return_product,
+          last_delivery_date: r.delivery_date,
           last_order_at: r.created_at,
+          // The latest order's link doubles as proforma (before delivery) or
+          // invoice/receipt (once delivered) on the public /reply page.
+          proforma_url: link,
           order_count: 1,
+          total_amount: Number(r.amount) || 0,
+          orders: [line],
         })
       }
     }

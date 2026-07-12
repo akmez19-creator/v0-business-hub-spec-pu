@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.39.0'
+const EXTENSION_VERSION = '4.40.0'
 const LAST_UPDATED = '2026-07-12'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Search, text: 'My Stats client search now shows the full customer record: phone(s), region, route, delivery date, quantity, last amount, total spent, order count, sales type, source and Ad ID - plus a proforma/invoice link (Copy Link / Open) that shows as a Proforma before delivery and an Invoice/Receipt once delivered' },
     { icon: Clipboard, text: 'Proforma invoice link on order confirmation: after creating an order the agent gets the customer-facing proforma link (one per product entry) with Copy Link and Open buttons - the same page the rider shares, which automatically becomes an invoice/receipt once the order is delivered' },
     { icon: Clock, text: 'Non-delivery days are now admin-managed and visible to everyone: admins add public holidays, moon-based holidays (as a 2-day range so a shifted Eid/Divali is covered) and instant cyclone/rain closures ("Close today/tomorrow"), and every agent sees the upcoming closed days in Settings. Orders always skip forward to the next working day, enforced on the server too' },
     { icon: Clock, text: 'Live Mauritius weather on the order form: the chosen delivery day shows a climate emoji with temperature and rain chance (via Open-Meteo), and days in cyclone season (Nov-Apr) are flagged automatically so agents can pre-warn customers' },

@@ -290,6 +290,20 @@ style.textContent = `
 .stats-badge.delivered{background:rgba(16,185,129,0.15);color:#6ee7b7;}
 .stats-badge.cancelled,.stats-badge.returned{background:rgba(239,68,68,0.15);color:#fca5a5;}
 .stats-empty{text-align:center;color:#94a3b8;padding:30px 12px;font-size:12px;}
+/* Proforma / invoice link on each client card */
+.stats-doc{margin-top:8px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:8px 10px;}
+.stats-doc-title{font-size:11px;font-weight:700;color:#e2e8f0;display:block;margin-bottom:6px;}
+.stats-doc-actions{display:flex;gap:8px;}
+.stats-doc-copy,.stats-doc-open{flex:1;text-align:center;padding:7px 10px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;border:1px solid transparent;}
+.stats-doc-copy{background:rgba(56,189,248,0.15);border-color:rgba(56,189,248,0.4);color:#7dd3fc;}
+.stats-doc-open{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.15);color:#e2e8f0;}
+/* Full customer detail grid */
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:10px;}
+.stats-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.stats-cell-lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;}
+.stats-cell-val{font-size:12px;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.stats-note{margin-top:8px;font-size:11px;color:#cbd5e1;line-height:1.4;background:rgba(255,255,255,0.03);border-radius:6px;padding:6px 8px;}
+.stats-note strong{color:#94a3b8;}
 
 #akmez-page-badge{margin-left:6px;background:#0ea5e9;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;letter-spacing:0.5px;align-items:center;gap:4px;}
 .akmez-page-badge-logo{width:14px;height:14px;border-radius:50%;object-fit:cover;background:#fff;flex-shrink:0;}
@@ -2529,6 +2543,15 @@ function renderMyStats() {
     const t = resp.data.today || {};
     const clients = resp.data.clients || [];
 
+    const fmtMoney = v => (v == null || isNaN(v)) ? '-' : 'Rs ' + Number(v).toFixed(0);
+    const fmtDay = iso => {
+      if (!iso) return '-';
+      const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
+      return isNaN(d) ? '-' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    };
+    // A detail cell shown only when it has a value
+    const cell = (label, value) => value ? `<div class="stats-cell"><span class="stats-cell-lbl">${label}</span><span class="stats-cell-val">${statsEsc(value)}</span></div>` : '';
+
     const clientRows = !statsSearchTerm
       ? `<div class="stats-empty">&#128269; Search by name or phone to find a client from the last 30 days.</div>`
       : clients.length === 0
@@ -2536,12 +2559,32 @@ function renderMyStats() {
       : clients.map(c => {
           const statusKey = c.last_status || 'pending';
           const statusLabel = STATS_STATUS_LABELS[statusKey] || statusKey;
-          const phone = c.contact_1 || c.contact_2 || '';
-          const meta = [
-            phone ? '&#128222; ' + statsEsc(phone) : '',
-            c.locality ? '&#128205; ' + statsEsc(c.locality) : '',
-            c.order_count > 1 ? statsEsc(c.order_count) + ' orders' : '',
-          ].filter(Boolean).map(b => '<span>' + b + '</span>').join('');
+          const delivered = statusKey === 'delivered';
+          // Same public link: proforma before delivery, invoice/receipt after
+          const docLabel = delivered ? '\uD83E\uDDFE Invoice / Receipt' : '\uD83D\uDCC4 Proforma Invoice';
+          const docHtml = c.proforma_url ? `
+            <div class="stats-doc">
+              <span class="stats-doc-title">${docLabel}</span>
+              <div class="stats-doc-actions">
+                <button class="stats-doc-copy akmez-pf-copy" data-url="${statsEsc(c.proforma_url)}">Copy Link</button>
+                <a class="stats-doc-open" href="${statsEsc(c.proforma_url)}" target="_blank" rel="noopener">Open</a>
+              </div>
+            </div>` : '';
+          const phones = [c.contact_1, c.contact_2].filter(Boolean).map(p => statsEsc(p)).join(' / ');
+          // Build the detail grid explicitly (cell() hides empty ones)
+          const grid = [
+            cell('Phone', phones || ''),
+            cell('Region', c.locality || ''),
+            cell('Route', c.rte || ''),
+            cell('Delivery', c.last_delivery_date ? fmtDay(c.last_delivery_date) : ''),
+            cell('Qty', c.last_qty != null ? String(c.last_qty) : ''),
+            cell('Last amount', c.last_amount != null ? fmtMoney(c.last_amount) : ''),
+            cell('Total spent', c.total_amount ? fmtMoney(c.total_amount) : ''),
+            cell('Orders', c.order_count > 1 ? String(c.order_count) : ''),
+            cell('Type', c.last_sales_type && c.last_sales_type !== 'sale' ? c.last_sales_type.replace('_', ' ') : ''),
+            cell('Source', c.medium || ''),
+            cell('Ad ID', c.ad_id || ''),
+          ].join('');
           return `
             <div class="stats-client">
               <div class="stats-client-top">
@@ -2549,7 +2592,10 @@ function renderMyStats() {
                 <span class="stats-badge ${statsEsc(statusKey)}">${statsEsc(statusLabel)}</span>
               </div>
               ${c.last_products ? `<div class="stats-client-prod">${statsEsc(c.last_products)}</div>` : ''}
-              <div class="stats-client-meta">${meta}</div>
+              ${docHtml}
+              <div class="stats-grid">${grid}</div>
+              ${c.last_return_product ? `<div class="stats-note"><strong>Returned:</strong> ${statsEsc(c.last_return_product)}</div>` : ''}
+              ${c.last_notes ? `<div class="stats-note"><strong>Notes:</strong> ${statsEsc(c.last_notes)}</div>` : ''}
             </div>`;
         }).join('');
 
@@ -2588,6 +2634,23 @@ function renderMyStats() {
       if (statsSearchTimer) clearTimeout(statsSearchTimer);
       // Debounce so we don't hit the server on every keystroke
       statsSearchTimer = setTimeout(() => renderMyStats(), 350);
+    });
+
+    // Copy proforma/invoice link buttons on each client card
+    body.querySelectorAll('.akmez-pf-copy').forEach(b => {
+      b.onclick = () => {
+        const url = b.dataset.url;
+        const done = () => { b.textContent = 'Copied!'; setTimeout(() => { b.textContent = 'Copy Link'; }, 1500); };
+        const fallback = () => {
+          const ta = document.createElement('textarea');
+          ta.value = url; document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed'); }
+          document.body.removeChild(ta);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(done).catch(fallback);
+        } else { fallback(); }
+      };
     });
   });
 }
