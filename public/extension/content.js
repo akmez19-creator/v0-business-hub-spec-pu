@@ -166,6 +166,31 @@ style.textContent = `
   .akmez-scheme-select{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:5px 8px;color:#fff;font-size:12px;outline:none;min-width:150px;}
   .akmez-scheme-select:focus{border-color:#f97316;}
   .akmez-scheme-select:disabled{opacity:0.6;}
+  /* Non-delivery days (holidays / cyclone closures) */
+  .akmez-hol-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;max-height:220px;overflow-y:auto;}
+  .akmez-hol-row{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:7px 9px;}
+  .akmez-hol-type{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#94a3b8;}
+  .akmez-hol-type.fixed{background:#38bdf8;}
+  .akmez-hol-type.variable{background:#fbbf24;}
+  .akmez-hol-type.adhoc{background:#ef4444;}
+  .akmez-hol-main{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;}
+  .akmez-hol-date{font-size:12px;color:#f1f5f9;font-weight:600;}
+  .akmez-hol-label{font-size:10px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .akmez-hol-tag{font-size:8px;color:#cbd5e1;background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;letter-spacing:0.4px;flex-shrink:0;}
+  .akmez-hol-del{background:none;border:none;color:#ef4444;font-size:18px;line-height:1;cursor:pointer;padding:0 2px;flex-shrink:0;}
+  .akmez-hol-del:hover{color:#f87171;}
+  .akmez-hol-quick{display:flex;gap:8px;margin-bottom:8px;}
+  .akmez-hol-quick .akmez-set-btn{flex:1;margin:0;}
+  .akmez-hol-form{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
+  .akmez-hol-form-row{display:flex;gap:8px;align-items:center;}
+  .akmez-hol-form-row .akmez-scheme-select{flex:1;min-width:0;}
+  .akmez-hol-form-row .akmez-set-btn{margin:0;white-space:nowrap;}
+  .akmez-hol-flabel{flex:1;display:flex;flex-direction:column;gap:3px;font-size:10px;color:#94a3b8;}
+  /* Delivery-day climate info strip on the order form */
+  .akmez-delivery-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:7px 10px;margin:-4px 0 10px;font-size:11px;}
+  .akmez-delivery-info.cyclone{background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.3);}
+  .akmez-di-weather{color:#e2e8f0;font-weight:600;}
+  .akmez-di-cyclone{color:#f87171;font-weight:600;}
 .akmez-section{font-size:10px;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(249,115,22,0.2);font-weight:600;}
 .akmez-subsection{font-size:11px;color:#bbb;font-weight:600;margin:12px 0 6px;}
 .akmez-managed-tag{background:rgba(16,185,129,0.15);color:#10b981;font-size:8px;padding:2px 6px;border-radius:4px;margin-left:6px;letter-spacing:0.5px;vertical-align:middle;}
@@ -318,8 +343,14 @@ let products = [], regions = [], cart = {}, currentTab = 'orders';
 let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
 let pageMappings = [];
-chrome.storage.local.get(['pageMappings'], s => {
+// Admin-managed non-delivery days: [{ id, start, end, label, type }]
+// type: 'fixed' | 'variable' (moon-based) | 'adhoc' (cyclone/rain closure)
+let muHolidays = [];
+// Mauritius daily weather forecast keyed by date: { 'YYYY-MM-DD': { code, tMax, tMin, rain } }
+let weatherByDate = {};
+chrome.storage.local.get(['pageMappings', 'holidays'], s => {
   if (Array.isArray(s.pageMappings)) pageMappings = s.pageMappings;
+  if (Array.isArray(s.holidays)) muHolidays = s.holidays;
 });
 
 // Detect which Facebook page the current conversation belongs to by matching
@@ -530,11 +561,37 @@ function renderSettings() {
   const body = document.getElementById('akmez-body');
   const version = EXT_VERSION || (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '');
   
-  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings', 'deliveryDayScheme'], stored => {
+  chrome.storage.local.get(['authToken', 'userName', 'userEmail', 'nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'userRole', 'pageMappings', 'deliveryDayScheme', 'holidays'], stored => {
     const signedIn = !!stored.authToken;
     const isAdmin = stored.userRole === 'admin';
     const cutoff = stored.cutoffTime || '20:00';
     const scheme = (stored.deliveryDayScheme && typeof stored.deliveryDayScheme === 'object') ? stored.deliveryDayScheme : {};
+    // Non-delivery days list, sorted, upcoming/current first (past hidden)
+    const todayStr = ymd(new Date());
+    const holidayTypeLabels = { fixed: 'Public holiday', variable: 'Moon-based', adhoc: 'Cyclone / closure' };
+    const allHolidays = Array.isArray(stored.holidays) ? stored.holidays.slice() : [];
+    const upcomingHolidays = allHolidays
+      .filter(h => h && h.start && (h.end || h.start) >= todayStr)
+      .sort((a, b) => a.start < b.start ? -1 : a.start > b.start ? 1 : 0);
+    const fmtRange = (h) => {
+      const opts = { month: 'short', day: 'numeric' };
+      const s = new Date(h.start + 'T00:00:00').toLocaleDateString('en-GB', opts);
+      if (!h.end || h.end === h.start) return s;
+      const e = new Date(h.end + 'T00:00:00').toLocaleDateString('en-GB', opts);
+      return s + ' - ' + e;
+    };
+    const holidayRowsHtml = upcomingHolidays.length
+      ? upcomingHolidays.map(h => `
+        <div class="akmez-hol-row">
+          <span class="akmez-hol-type ${statsEsc(h.type || 'fixed')}"></span>
+          <span class="akmez-hol-main">
+            <span class="akmez-hol-date">${statsEsc(fmtRange(h))}</span>
+            <span class="akmez-hol-label">${statsEsc(h.label || holidayTypeLabels[h.type] || 'Closed')}</span>
+          </span>
+          <span class="akmez-hol-tag">${statsEsc(holidayTypeLabels[h.type] || 'Holiday')}</span>
+          ${isAdmin ? `<button class="akmez-hol-del" data-id="${statsEsc(h.id)}" title="Remove">&times;</button>` : ''}
+        </div>`).join('')
+      : `<div class="akmez-sel-empty">No upcoming non-delivery days.</div>`;
     // Mon-first ordering for display; value is the JS getDay() index (0=Sun..6=Sat)
     const WEEKDAYS = [['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],['5','Friday'],['6','Saturday'],['0','Sunday']];
     const schemeRowsHtml = WEEKDAYS.map(([dow, label]) => {
@@ -634,6 +691,31 @@ function renderSettings() {
           ? '<div class="akmez-hint-text">Choose which day an order delivers based on the day it&apos;s taken. E.g. orders taken on Saturday &amp; Sunday deliver on Monday. Days left on &ldquo;Next working day&rdquo; use the cut-off rule above. Holidays are always skipped forward.</div>'
           : '<div class="akmez-hint-text">These delivery days are configured by your administrator.</div>'}
 
+        <div class="akmez-subsection">Non-Delivery Days ${isAdmin ? '' : '<span class="akmez-managed-tag">Managed by admin</span>'}</div>
+        <div class="akmez-hol-list">${holidayRowsHtml}</div>
+        ${isAdmin ? `
+        <div class="akmez-hol-quick">
+          <button class="akmez-set-btn danger" id="hol-close-today">&#9888; Close today</button>
+          <button class="akmez-set-btn danger" id="hol-close-tomorrow">&#9888; Close tomorrow</button>
+        </div>
+        <div class="akmez-hol-form">
+          <div class="akmez-hol-form-row">
+            <label class="akmez-hol-flabel">From<input type="date" id="hol-start" class="akmez-cutoff-input"></label>
+            <label class="akmez-hol-flabel">To<input type="date" id="hol-end" class="akmez-cutoff-input"></label>
+          </div>
+          <input type="text" id="hol-label" class="akmez-pagemap-input" placeholder="Reason (e.g. Eid, Cyclone warning)" maxlength="80">
+          <div class="akmez-hol-form-row">
+            <select id="hol-type" class="akmez-scheme-select">
+              <option value="fixed">Public holiday</option>
+              <option value="variable">Moon-based (Eid / Divali)</option>
+              <option value="adhoc">Cyclone / rain closure</option>
+            </select>
+            <button class="akmez-set-btn" id="hol-add">+ Add</button>
+          </div>
+        </div>
+        <div class="akmez-hint-text">Add public holidays, moon-based holidays (enter a 2-day range so a shifted Eid/Divali is covered), or instant cyclone/rain closures. Deliveries never fall on these days &mdash; orders skip forward to the next working day for everyone. Cyclone season (Nov&ndash;Apr) is flagged automatically on the order form.</div>`
+          : '<div class="akmez-hint-text">These are the days deliveries are closed. Your administrator manages this list; orders automatically skip forward to the next working day.</div>'}
+
         <div class="akmez-section">About</div>
         <div class="akmez-set-row">
           <span class="akmez-set-label">Version</span>
@@ -674,6 +756,51 @@ function renderSettings() {
           });
         };
       });
+
+      // ----- Non-delivery days (holidays / cyclone closures) -----
+      const saveHolidays = (list, msg) => {
+        muHolidays = list;
+        chrome.storage.local.set({ holidays: list }, () => { pushSharedSettings(msg); renderSettings(); });
+      };
+      const addHolidayRange = (start, end, label, type, msg) => {
+        chrome.storage.local.get(['holidays'], s => {
+          const list = Array.isArray(s.holidays) ? s.holidays.slice() : [];
+          const id = 'h-' + start + '-' + Math.random().toString(36).slice(2, 7);
+          list.push({ id, start, end: end || start, label: (label || '').trim(), type: type || 'fixed' });
+          saveHolidays(list, msg);
+        });
+      };
+      const addBtn = document.getElementById('hol-add');
+      if (addBtn) addBtn.onclick = () => {
+        const start = document.getElementById('hol-start').value;
+        let end = document.getElementById('hol-end').value;
+        const label = document.getElementById('hol-label').value;
+        const type = document.getElementById('hol-type').value;
+        if (!start) { toast('Pick a start date'); return; }
+        if (end && end < start) end = start;
+        addHolidayRange(start, end, label, type, 'Non-delivery day saved for all users');
+      };
+      const closeToday = document.getElementById('hol-close-today');
+      if (closeToday) closeToday.onclick = () => {
+        const t = ymd(new Date());
+        addHolidayRange(t, t, 'Emergency closure', 'adhoc', 'Deliveries closed today for all users');
+      };
+      const closeTomorrow = document.getElementById('hol-close-tomorrow');
+      if (closeTomorrow) closeTomorrow.onclick = () => {
+        const d = new Date(); d.setDate(d.getDate() + 1);
+        const t = ymd(d);
+        addHolidayRange(t, t, 'Emergency closure', 'adhoc', 'Deliveries closed tomorrow for all users');
+      };
+      body.querySelectorAll('.akmez-hol-del').forEach(b => {
+        b.onclick = () => {
+          const id = b.dataset.id;
+          chrome.storage.local.get(['holidays'], s => {
+            const list = (Array.isArray(s.holidays) ? s.holidays : []).filter(h => h.id !== id);
+            saveHolidays(list, 'Non-delivery day removed for all users');
+          });
+        };
+      });
+
       body.querySelectorAll('.akmez-sel-del').forEach(b => {
         b.onclick = () => {
           const kind = b.dataset.kind;
@@ -833,7 +960,7 @@ function saveSelectors(kind, list, cb) {
 }
 // Admin-only: push the locally-edited settings to the server so all users inherit them
 function pushSharedSettings(successMsg) {
-  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings', 'deliveryDayScheme'], s => {
+  chrome.storage.local.get(['nameSelectors', 'phoneSelectors', 'adidSelectors', 'cutoffTime', 'pageMappings', 'deliveryDayScheme', 'holidays'], s => {
     chrome.runtime.sendMessage({
       action: 'saveSettings',
       data: {
@@ -843,6 +970,7 @@ function pushSharedSettings(successMsg) {
         cutoffTime: s.cutoffTime || '20:00',
         pageMappings: s.pageMappings || [],
         deliveryDayScheme: (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {},
+        holidays: Array.isArray(s.holidays) ? s.holidays : [],
       }
     }, resp => {
       if (resp && resp.success) toast(successMsg || 'Settings saved for all users');
@@ -887,30 +1015,76 @@ function readCustomerAdId(cb) {
   });
 }
 
-// ===== Delivery date rules: no deliveries on Sundays or Mauritius public holidays =====
-// Official Mauritius public holidays 2026 (General Notice No. 1195 of 2025)
-const MU_HOLIDAYS = [
-  '2026-01-01', // New Year
-  '2026-01-02', // New Year
-  '2026-02-01', // Abolition of Slavery / Thaipoosam Cavadee
-  '2026-02-15', // Maha Shivaratree
-  '2026-02-17', // Chinese Spring Festival
-  '2026-03-12', // Independence and Republic Day
-  '2026-03-19', // Ugaadi
-  '2026-03-21', // Eid-Ul-Fitr (subject to moon)
-  '2026-05-01', // Labour Day
-  '2026-08-15', // Assumption
-  '2026-09-16', // Ganesh Chaturthi
-  '2026-11-02', // Arrival of Indentured Labourers
-  '2026-11-08', // Divali
-  '2026-12-25', // Christmas
-];
+// ===== Delivery date rules: no deliveries on Sundays or non-delivery days =====
+// Non-delivery days are admin-managed (synced from the server into `muHolidays`)
+// and support multi-day ranges so a 2-day Eid/Divali or a multi-day cyclone
+// closure fits a single entry. Falls back to just Sundays if none are loaded.
 function ymd(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
-// Sunday (getDay()===0) or a listed public holiday
+// Return the holiday entry covering date `d`, or null. Ranges are inclusive.
+function holidayForDate(d) {
+  const s = ymd(d);
+  for (const h of (muHolidays || [])) {
+    if (h && h.start && s >= h.start && s <= (h.end || h.start)) return h;
+  }
+  return null;
+}
+// Sunday (getDay()===0) or a day inside an admin-configured non-delivery range
 function isNonWorking(d) {
-  return d.getDay() === 0 || MU_HOLIDAYS.includes(ymd(d));
+  return d.getDay() === 0 || !!holidayForDate(d);
+}
+// Mauritius cyclone season runs roughly Nov -> Apr (Southern-hemisphere summer)
+function isCycloneSeason(d) {
+  const m = d.getMonth(); // 0=Jan
+  return m >= 10 || m <= 3; // Nov,Dec,Jan,Feb,Mar,Apr
+}
+// Map an Open-Meteo WMO weather code to a climate emoji
+function weatherEmoji(code) {
+  if (code == null) return '';
+  if (code === 0) return '\u2600\uFE0F';               // clear sky
+  if (code <= 2) return '\uD83C\uDF24\uFE0F';          // mainly clear / partly cloudy
+  if (code === 3) return '\u2601\uFE0F';               // overcast
+  if (code >= 45 && code <= 48) return '\uD83C\uDF2B\uFE0F'; // fog
+  if (code >= 51 && code <= 67) return '\uD83C\uDF26\uFE0F'; // drizzle / rain
+  if (code >= 71 && code <= 77) return '\u2744\uFE0F'; // snow (never in MU, safety)
+  if (code >= 80 && code <= 82) return '\uD83C\uDF27\uFE0F'; // rain showers
+  if (code >= 95) return '\u26C8\uFE0F';               // thunderstorm / cyclonic
+  return '\uD83C\uDF24\uFE0F';
+}
+// Weather info for a date: { emoji, label } or null if we have no forecast
+function weatherForDate(d) {
+  const w = weatherByDate[ymd(d)];
+  if (!w) return null;
+  const emoji = weatherEmoji(w.code);
+  const parts = [];
+  if (w.tMax != null) parts.push(Math.round(w.tMax) + '\u00B0C');
+  if (w.rain != null && w.rain >= 30) parts.push(w.rain + '% rain');
+  return { emoji, label: parts.join(' \u00B7 ') };
+}
+// Fetch the Mauritius 16-day forecast (Open-Meteo, no API key) via the
+// background worker, cache it for 3h, and refresh the current view.
+let __weatherLoading = false;
+function loadWeather() {
+  if (__weatherLoading) return;
+  chrome.storage.local.get(['weatherCache'], c => {
+    const cache = c.weatherCache;
+    const fresh = cache && cache.fetchedAt && (Date.now() - cache.fetchedAt < 3 * 60 * 60 * 1000);
+    if (fresh && cache.byDate) {
+      weatherByDate = cache.byDate;
+      if (currentTab === 'orders') renderCurrentTab();
+      return;
+    }
+    __weatherLoading = true;
+    chrome.runtime.sendMessage({ action: 'getWeather' }, resp => {
+      __weatherLoading = false;
+      if (resp && resp.success && resp.data && resp.data.byDate) {
+        weatherByDate = resp.data.byDate;
+        chrome.storage.local.set({ weatherCache: { fetchedAt: Date.now(), byDate: weatherByDate } });
+        if (currentTab === 'orders') renderCurrentTab();
+      }
+    });
+  });
 }
 // First working day on or after the given date
 function nextWorkingOnOrAfter(date) {
@@ -1095,6 +1269,7 @@ async function loadData() {
       // Mirror the shared, admin-configured settings into local storage so the
       // auto-fill readers (which read these keys) inherit them for every user.
       const s = data.settings || {};
+      muHolidays = Array.isArray(s.holidays) ? s.holidays : [];
       chrome.storage.local.set({
         userRole: data.role || null,
         nameSelectors: Array.isArray(s.nameSelectors) ? s.nameSelectors : [],
@@ -1103,7 +1278,8 @@ async function loadData() {
         cutoffTime: s.cutoffTime || '20:00',
         pageMappings: Array.isArray(s.pageMappings) ? s.pageMappings : [],
         deliveryDayScheme: (s.deliveryDayScheme && typeof s.deliveryDayScheme === 'object') ? s.deliveryDayScheme : {},
-      }, () => { pageMappings = Array.isArray(s.pageMappings) ? s.pageMappings : []; renderCurrentTab(); });
+        holidays: muHolidays,
+      }, () => { pageMappings = Array.isArray(s.pageMappings) ? s.pageMappings : []; loadWeather(); renderCurrentTab(); });
     });
   });
 }
@@ -1213,6 +1389,7 @@ function renderOrdersForm() {
         <input type="date" id="ak-date" class="akmez-input akmez-input-plain">
       </div>
     </div>
+    <div class="akmez-delivery-info" id="ak-delivery-info" style="display:none;"></div>
     <div class="akmez-region-delivery" id="ak-region-delivery" style="display:none;"></div>
     <div class="akmez-field">
       <div class="akmez-label">Sales Type</div>
@@ -1903,11 +2080,27 @@ function renderOrdersForm() {
   // Delivery date - default to next working day (or +1 after cut-off), block Sundays + holidays
   const dateInput = document.getElementById('ak-date');
   dateInput.min = ymd(new Date());
+  // Show the climate emoji + any cyclone-season note for the chosen delivery day
+  function updateDeliveryInfo() {
+    const box = document.getElementById('ak-delivery-info');
+    if (!box || !dateInput.value) { if (box) box.style.display = 'none'; return; }
+    const d = new Date(dateInput.value + 'T00:00:00');
+    const w = weatherForDate(d);
+    const cyclone = isCycloneSeason(d);
+    const bits = [];
+    if (w) bits.push(`<span class="akmez-di-weather">${w.emoji} ${statsEsc(w.label || 'Forecast')}</span>`);
+    if (cyclone) bits.push('<span class="akmez-di-cyclone" title="Mauritius cyclone season (Nov-Apr): deliveries may be disrupted by weather">\uD83C\uDF00 Cyclone season</span>');
+    if (!bits.length) { box.style.display = 'none'; return; }
+    box.innerHTML = bits.join('');
+    box.style.display = 'flex';
+    box.classList.toggle('cyclone', cyclone);
+  }
   getCutoff((cutoff, scheme) => {
     computeDefaultDeliveryDate(cutoff, scheme, (d, afterCutoff, fromScheme) => {
       dateInput.value = ymd(d);
       if (fromScheme) toast('Delivery date set to ' + ymd(d));
       else if (afterCutoff) toast('After ' + cutoff + ' cut-off - delivery set to ' + ymd(d));
+      updateDeliveryInfo();
     });
   });
   dateInput.addEventListener('change', () => {
@@ -1916,10 +2109,13 @@ function renderOrdersForm() {
     if (isNonWorking(picked)) {
       const fixed = nextWorkingOnOrAfter(picked);
       dateInput.value = ymd(fixed);
-      const why = picked.getDay() === 0 ? 'Sundays' : 'public holidays';
+      const h = holidayForDate(picked);
+      const why = picked.getDay() === 0 ? 'Sundays' : (h && h.label ? h.label : 'non-delivery days');
       toast('No deliveries on ' + why + ' - moved to ' + ymd(fixed));
     }
+    updateDeliveryInfo();
   });
+  updateDeliveryInfo();
 }
 
 // Compute the total price for `q` units of product `p`, honouring inventory

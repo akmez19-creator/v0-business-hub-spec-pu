@@ -166,7 +166,7 @@ export async function GET(request: NextRequest) {
     // Get shared, admin-configured extension settings (single row, id=1)
     const { data: settingsRow } = await supabase
       .from('extension_settings')
-      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme')
+      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme, holidays')
       .eq('id', 1)
       .single()
     const settings = {
@@ -177,6 +177,8 @@ export async function GET(request: NextRequest) {
       pageMappings: settingsRow?.page_mappings || [],
       // Per-weekday delivery-date scheme (order weekday -> target weekday)
       deliveryDayScheme: settingsRow?.delivery_day_scheme || {},
+      // Admin-managed non-delivery days (public holidays, moon-based, cyclone/rain closures)
+      holidays: Array.isArray(settingsRow?.holidays) ? settingsRow.holidays : [],
     }
 
     const isClockedIn = todayShift?.status === 'in_progress' && todayShift?.actual_clock_in
@@ -312,6 +314,28 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle()
     
+    // Enforce delivery rules server-side so a stale extension can never slip an
+    // order onto a Sunday or an admin-configured non-delivery day (public
+    // holiday, moon-based holiday, or cyclone/rain closure). Push forward to the
+    // first working day on/after the requested date.
+    const { data: hSettings } = await supabase
+      .from('extension_settings')
+      .select('holidays')
+      .eq('id', 1)
+      .single()
+    const holidayList: Array<{ start: string; end: string }> = Array.isArray(hSettings?.holidays) ? hSettings.holidays : []
+    const ymdUTC = (d: Date) => d.toISOString().split('T')[0]
+    const isNonWorkingDay = (d: Date) => {
+      if (d.getUTCDay() === 0) return true // Sunday
+      const s = ymdUTC(d)
+      return holidayList.some(h => h.start && s >= h.start && s <= (h.end || h.start))
+    }
+    const requested = deliveryDate || new Date().toISOString().split('T')[0]
+    const safeDate = new Date(requested + 'T00:00:00Z')
+    let guard = 0
+    while (isNonWorkingDay(safeDate) && guard < 60) { safeDate.setUTCDate(safeDate.getUTCDate() + 1); guard++ }
+    const resolvedDeliveryDate = ymdUTC(safeDate)
+
     // Fields shared by every row created for this order (mirrors the import
     // sheet: INDEX and Payment Method stay blank, RTE comes from the locality)
     const nowIso = new Date().toISOString()
@@ -332,7 +356,7 @@ export async function POST(request: NextRequest) {
       ad_id: adId?.trim() || null,
       status: 'pending',
       entry_date: nowIso.split('T')[0],
-      delivery_date: deliveryDate || nowIso.split('T')[0],
+      delivery_date: resolvedDeliveryDate,
       created_by: user.id,
       // MEDIUM carries the source page code (e.g. MBM / DBM) like the import
       // sheet; falls back to "Extension" when no page was detected
@@ -474,6 +498,27 @@ export async function PUT(request: NextRequest) {
       return out
     }
 
+    // Holidays: [{ id, start, end, label, type }]. Keep only well-formed entries
+    // with valid ISO dates where end >= start; cap the label and total count.
+    const asHolidays = (v: unknown): Array<{ id: string; start: string; end: string; label: string; type: string }> => {
+      if (!Array.isArray(v)) return []
+      const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+      const types = new Set(['fixed', 'variable', 'adhoc'])
+      return v
+        .filter((h): h is Record<string, unknown> => !!h && typeof h === 'object')
+        .map(h => {
+          const start = isDate(h.start) ? h.start : ''
+          let end = isDate(h.end) ? h.end : start
+          if (start && end < start) end = start
+          const type = typeof h.type === 'string' && types.has(h.type) ? h.type : 'fixed'
+          const id = typeof h.id === 'string' && h.id ? h.id.slice(0, 40) : `h-${start}-${Math.random().toString(36).slice(2, 7)}`
+          const label = typeof h.label === 'string' ? h.label.trim().slice(0, 80) : ''
+          return { id, start, end, label, type }
+        })
+        .filter(h => h.start !== '')
+        .slice(0, 200)
+    }
+
     const { error } = await supabase.from('extension_settings').upsert({
       id: 1,
       name_selectors: asArray(body.nameSelectors),
@@ -482,6 +527,7 @@ export async function PUT(request: NextRequest) {
       page_mappings: asMappings(body.pageMappings),
       cutoff_time: typeof body.cutoffTime === 'string' && body.cutoffTime ? body.cutoffTime : '20:00',
       delivery_day_scheme: asScheme(body.deliveryDayScheme),
+      holidays: asHolidays(body.holidays),
       updated_at: new Date().toISOString(),
       updated_by: user.id,
     })

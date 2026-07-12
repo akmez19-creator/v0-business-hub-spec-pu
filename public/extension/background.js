@@ -133,6 +133,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'getWeather') {
+      // Live Mauritius forecast from Open-Meteo (free, no API key). Port Louis
+      // coordinates; 16-day daily weather code, max/min temp, rain probability.
+      try {
+        const url = 'https://api.open-meteo.com/v1/forecast'
+          + '?latitude=-20.16&longitude=57.50'
+          + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+          + '&timezone=Indian%2FMauritius&forecast_days=16';
+        const res = await fetch(url);
+        const json = await res.json();
+        const byDate = {};
+        const d = json && json.daily;
+        if (d && Array.isArray(d.time)) {
+          d.time.forEach((date, i) => {
+            byDate[date] = {
+              code: d.weather_code ? d.weather_code[i] : null,
+              tMax: d.temperature_2m_max ? d.temperature_2m_max[i] : null,
+              tMin: d.temperature_2m_min ? d.temperature_2m_min[i] : null,
+              rain: d.precipitation_probability_max ? d.precipitation_probability_max[i] : null,
+            };
+          });
+        }
+        sendResponse({ success: true, data: { byDate } });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'resolveAdProduct') {
       // Resolve the product linked to a captured Ad ID (ad -> campaign -> product)
       try {

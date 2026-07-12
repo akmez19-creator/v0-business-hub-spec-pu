@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.37.0'
+const EXTENSION_VERSION = '4.38.0'
 const LAST_UPDATED = '2026-07-12'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,8 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Clock, text: 'Non-delivery days are now admin-managed and visible to everyone: admins add public holidays, moon-based holidays (as a 2-day range so a shifted Eid/Divali is covered) and instant cyclone/rain closures ("Close today/tomorrow"), and every agent sees the upcoming closed days in Settings. Orders always skip forward to the next working day, enforced on the server too' },
+    { icon: Clock, text: 'Live Mauritius weather on the order form: the chosen delivery day shows a climate emoji with temperature and rain chance (via Open-Meteo), and days in cyclone season (Nov-Apr) are flagged automatically so agents can pre-warn customers' },
     { icon: Clock, text: 'Delivery cut-off countdown: 15 minutes before the cut-off time a live countdown appears and the whole widget turns red as an alert, so agents know orders taken after cut-off will skip a delivery day' },
     { icon: Clock, text: 'Clock in and out with a single tap - the PIN has been removed since you are already signed in with your email and password' },
     { icon: Search, text: 'New "My Stats" tab: search the last 30 days of clients by name or phone, and see your live daily figures - total clients handled today, working time (first entry to last entry), and average clients per working hour' },
