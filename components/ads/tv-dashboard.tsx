@@ -110,15 +110,13 @@ export function TvDashboard({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
-  // Rank order for zones so red (needs attention) surfaces first, no-data last.
-  const zoneRank: Record<Zone, number> = { red: 0, yellow: 1, green: 2, none: 3 }
-  const sorted = [...groups].sort((a, b) => {
-    const za = zoneFor(a.cac)
-    const zb = zoneFor(b.cac)
-    if (zoneRank[za] !== zoneRank[zb]) return zoneRank[za] - zoneRank[zb]
-    // Within a zone, highest cost-per-client first (nulls fall back to spend)
-    if (a.cac !== null && b.cac !== null) return b.cac - a.cac
-    return b.totalSpend - a.totalSpend
+  // League standings: rank by cost-per-client, best (lowest) first at the top —
+  // like a sports league table. Products with no client data drop to the bottom.
+  const ranked = [...groups].sort((a, b) => {
+    if (a.cac === null && b.cac === null) return b.totalSpend - a.totalSpend
+    if (a.cac === null) return 1
+    if (b.cac === null) return -1
+    return a.cac - b.cac
   })
 
   // Zone tallies for the legend/summary bar
@@ -173,7 +171,7 @@ export function TvDashboard({
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [autoScroll, sorted.length])
+  }, [autoScroll, ranked.length])
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background p-8 text-foreground">
@@ -284,62 +282,77 @@ export function TvDashboard({
         </div>
       </div>
 
-      {/* Product grid, color-coded by cost-per-client zone */}
+      {/* League standings table, ranked by cost-per-client and color-coded by zone */}
       <div ref={scrollRef} className="mt-6 flex-1 overflow-y-auto pr-2" style={{ scrollbarWidth: 'thin' }}>
-        {sorted.length === 0 ? (
+        {ranked.length === 0 ? (
           <div className="flex h-full items-center justify-center text-2xl text-muted-foreground">
             No products to display
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-5">
-            {sorted.map((g) => {
+          <div className="overflow-hidden rounded-2xl border border-border">
+            {/* Column headers */}
+            <div className="grid grid-cols-[4rem_1fr_9rem_9rem_9rem_11rem] items-center gap-4 border-b border-border bg-card px-6 py-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              <span className="text-center">#</span>
+              <span>Product</span>
+              <span className="text-right">Spend</span>
+              <span className="text-right">Clients</span>
+              <span className="text-right">Campaigns</span>
+              <span className="text-right">Cost / Client</span>
+            </div>
+
+            {ranked.map((g, i) => {
               const zone = zoneFor(g.cac)
               const zs = ZONE_STYLES[zone]
+              const pos = i + 1
               return (
-                <div key={g.key} className={`rounded-2xl border-2 ${zs.border} ${zs.bg} p-5`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className={`h-3.5 w-3.5 shrink-0 rounded-full ${zs.dot}`} />
-                      <h3 className="truncate text-xl font-semibold" title={g.productName}>
+                <div
+                  key={g.key}
+                  className={`grid grid-cols-[4rem_1fr_9rem_9rem_9rem_11rem] items-center gap-4 border-b border-border/60 px-6 py-4 ${
+                    i % 2 === 1 ? 'bg-card/40' : ''
+                  }`}
+                >
+                  {/* Rank with zone-colored accent bar */}
+                  <div className="flex items-center gap-3">
+                    <span className={`h-9 w-1.5 rounded-full ${zs.dot}`} />
+                    <span className="w-8 text-center text-2xl font-bold tabular-nums text-muted-foreground">{pos}</span>
+                  </div>
+
+                  {/* Product name + zone label */}
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-2xl font-semibold" title={g.productName}>
                         {g.productName}
-                      </h3>
-                    </div>
-                    {typeof g.productPrice === 'number' && (
-                      <span className="shrink-0 text-base text-muted-foreground">Rs {g.productPrice}</span>
-                    )}
-                  </div>
-
-                  {/* Headline: cost per client, colored by zone */}
-                  <div className="mt-3 flex items-end justify-between gap-3">
-                    <div>
-                      <p className={`text-5xl font-bold tabular-nums ${zs.text}`}>
-                        {g.cac !== null ? formatRs(g.cac) : '—'}
                       </p>
-                      <p className="text-sm text-muted-foreground">per client · {zs.label}</p>
-                    </div>
-                    <div className={`rounded-lg px-3 py-1 text-sm font-semibold ${zs.bg} ${zs.text}`}>
-                      {zone === 'none' ? 'No clients yet' : zs.label}
+                      <div className="mt-0.5 flex items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full ${zs.bg} px-2.5 py-0.5 text-sm font-semibold ${zs.text}`}>
+                          <span className={`h-2 w-2 rounded-full ${zs.dot}`} />
+                          {zone === 'none' ? 'No clients yet' : zs.label}
+                        </span>
+                        {typeof g.productPrice === 'number' && (
+                          <span className="text-sm text-muted-foreground">Rs {g.productPrice}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Spend / clients / campaigns */}
-                  <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border/60 pt-4 text-center">
-                    <div>
-                      <p className="text-2xl font-bold tabular-nums text-amber-500">{formatSpend(g.totalSpend.toString())}</p>
-                      <p className="text-xs text-muted-foreground">Spend</p>
-                    </div>
-                    <div>
-                      <p className="flex items-center justify-center gap-1 text-2xl font-bold tabular-nums">
-                        <Users className="h-5 w-5 text-muted-foreground" />
-                        {g.clients.toLocaleString()}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Clients</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold tabular-nums">{g.campaigns.length}</p>
-                      <p className="text-xs text-muted-foreground">Campaigns</p>
-                    </div>
-                  </div>
+                  {/* Spend */}
+                  <span className="text-right text-2xl font-bold tabular-nums text-amber-500">
+                    {formatSpend(g.totalSpend.toString())}
+                  </span>
+
+                  {/* Clients */}
+                  <span className="flex items-center justify-end gap-1.5 text-right text-2xl font-bold tabular-nums">
+                    <Users className="h-5 w-5 text-muted-foreground" />
+                    {g.clients.toLocaleString()}
+                  </span>
+
+                  {/* Campaigns */}
+                  <span className="text-right text-2xl font-bold tabular-nums">{g.campaigns.length}</span>
+
+                  {/* Cost per client - the league metric, colored by zone */}
+                  <span className={`text-right text-4xl font-bold tabular-nums ${zs.text}`}>
+                    {g.cac !== null ? formatRs(g.cac) : '—'}
+                  </span>
                 </div>
               )
             })}
