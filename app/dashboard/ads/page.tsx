@@ -84,6 +84,12 @@ interface Campaign {
   ads?: { id: string; postId: string | null }[]
   accountId?: string
   accountName?: string
+  // Facebook budget + schedule (budget fields are in USD minor units / cents)
+  lifetime_budget?: string | null
+  daily_budget?: string | null
+  budget_remaining?: string | null
+  start_time?: string | null
+  stop_time?: string | null
 }
 
 interface Product {
@@ -517,6 +523,52 @@ export default function AdsManagerPage() {
   const formatUsd = (amount: string) => {
     const value = parseFloat(amount)
     return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  // Per-campaign budget summary from Facebook: total amount spent toward the
+  // budget, remaining budget, and the campaign end date. Budget fields come
+  // back in USD minor units (cents), so divide by 100 before formatting.
+  const renderCampaignBudget = (campaign: Campaign) => {
+    const lifetimeBudget = parseFloat(campaign.lifetime_budget || '0') / 100
+    const dailyBudget = parseFloat(campaign.daily_budget || '0') / 100
+    const remaining = parseFloat(campaign.budget_remaining || '0') / 100
+    const hasLifetime = lifetimeBudget > 0
+    const endDate = campaign.stop_time ? new Date(campaign.stop_time) : null
+    const validEnd = endDate && !isNaN(endDate.getTime())
+
+    // Nothing useful to show (e.g. ad-set level budgets, no schedule)
+    if (!hasLifetime && dailyBudget <= 0 && !validEnd) return null
+
+    // Spent toward the budget = budget - remaining (Facebook's own accounting)
+    const spent = hasLifetime ? Math.max(0, lifetimeBudget - remaining) : 0
+
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+        {hasLifetime && (
+          <>
+            <span title="Total amount spent toward this campaign's budget">
+              Spent{' '}
+              <span className="font-medium text-amber-600">{formatSpend(spent.toString())}</span>
+              <span className="text-muted-foreground/60"> / {formatSpend(lifetimeBudget.toString())}</span>
+            </span>
+            <span title="Remaining budget">
+              Left <span className="font-medium text-foreground">{formatSpend(remaining.toString())}</span>
+            </span>
+          </>
+        )}
+        {!hasLifetime && dailyBudget > 0 && (
+          <span title="Daily budget">
+            Daily <span className="font-medium text-foreground">{formatSpend(dailyBudget.toString())}</span>
+          </span>
+        )}
+        {validEnd && (
+          <span className="inline-flex items-center gap-1" title="Campaign end date">
+            <CalendarIcon className="w-3 h-3" />
+            Ends {format(endDate as Date, 'd MMM yyyy')}
+          </span>
+        )}
+      </div>
+    )
   }
 
   // When showTodayOnly is on, the API already returns today's data - filter for spend > 0
@@ -1023,6 +1075,7 @@ export default function AdsManagerPage() {
                                   <p className="text-xs text-muted-foreground">
                                     {campaign.objective?.replace(/_/g, ' ')}
                                   </p>
+                                  {renderCampaignBudget(campaign)}
                                   {renderAdIds(campaign)}
                                 </div>
                                 {isUnlinked ? (
@@ -1088,6 +1141,7 @@ export default function AdsManagerPage() {
                         <p className="text-xs text-muted-foreground">
                           {campaign.objective?.replace(/_/g, ' ')}
                         </p>
+                        {renderCampaignBudget(campaign)}
                         {renderAdIds(campaign)}
                       </div>
                     </TableCell>

@@ -73,9 +73,10 @@ async function getCampaignsWithSpend(
     timeRange = `&date_preset=${datePreset}`
   }
   
-  // Get ALL campaigns with pagination
-  let allCampaigns: Array<{ id: string; name: string; status: string; objective: string; created_time: string }> = []
-  let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=500`
+  // Get ALL campaigns with pagination. Budget + schedule fields (lifetime_budget,
+  // budget_remaining, stop_time) power the per-campaign spent/remaining/end-date UI.
+  let allCampaigns: Array<{ id: string; name: string; status: string; objective: string; created_time: string; lifetime_budget?: string; daily_budget?: string; budget_remaining?: string; start_time?: string; stop_time?: string }> = []
+  let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time,lifetime_budget,daily_budget,budget_remaining,start_time,stop_time&access_token=${accessToken}&limit=500`
   
   while (nextUrl) {
     const campaignsResponse = await fetch(nextUrl)

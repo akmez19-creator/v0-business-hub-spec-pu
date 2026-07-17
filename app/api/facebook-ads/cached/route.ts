@@ -96,7 +96,7 @@ export async function GET(request: Request) {
         // Also fetch all ads for the account so we can show each campaign's ad IDs.
         const [spendResponse, campaignsResponse, adsResponse] = await Promise.all([
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/insights?fields=spend&date_preset=today&access_token=${accessToken}`),
-          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,insights.date_preset(today){spend}&access_token=${accessToken}&limit=500`),
+          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,lifetime_budget,daily_budget,budget_remaining,start_time,stop_time,insights.date_preset(today){spend}&access_token=${accessToken}&limit=500`),
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/ads?fields=id,campaign_id,creative{effective_object_story_id}&access_token=${accessToken}&limit=500`)
         ])
         
@@ -138,6 +138,11 @@ export async function GET(request: Request) {
             status: campaign.status,
             objective: campaign.objective,
             created_time: campaign.created_time,
+            lifetime_budget: campaign.lifetime_budget || null,
+            daily_budget: campaign.daily_budget || null,
+            budget_remaining: campaign.budget_remaining || null,
+            start_time: campaign.start_time || null,
+            stop_time: campaign.stop_time || null,
             spend,
             ads: adsByCampaign[campaign.id] || [],
             accountId: account.id,
@@ -158,6 +163,11 @@ export async function GET(request: Request) {
               status: campaign.status,
               objective: campaign.objective,
               created_time: campaign.created_time,
+              lifetime_budget: campaign.lifetime_budget || null,
+              daily_budget: campaign.daily_budget || null,
+              budget_remaining: campaign.budget_remaining || null,
+              start_time: campaign.start_time || null,
+              stop_time: campaign.stop_time || null,
               spend,
               ads: adsByCampaign[campaign.id] || [],
               accountId: account.id,
