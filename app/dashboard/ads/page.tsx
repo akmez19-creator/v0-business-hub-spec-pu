@@ -17,6 +17,8 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
+import { TvDashboard } from '@/components/ads/tv-dashboard'
+import { Tv } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -150,6 +152,9 @@ export default function AdsManagerPage() {
   const [countdown, setCountdown] = useState(15 * 60) // 15 minutes in seconds
   const AUTO_REFRESH_INTERVAL = 15 * 60 // 15 minutes in seconds
   
+  // Full-screen TV dashboard mode (separate glanceable wall-display view)
+  const [tvMode, setTvMode] = useState(false)
+
   // Product grouping view (a product can have multiple campaigns)
   const [groupByProduct, setGroupByProduct] = useState(true)
   const [collapsedProducts, setCollapsedProducts] = useState<Set<string>>(new Set())
@@ -723,6 +728,28 @@ export default function AdsManagerPage() {
     )
   }
 
+  if (tvMode) {
+    return (
+      <TvDashboard
+        campaigns={filteredCampaigns}
+        totalSpend={totalSpend}
+        activeCampaigns={activeCampaigns}
+        campaignsWithSpendCount={campaignsWithSpendCount}
+        totalBalanceOwed={totalBalanceOwed}
+        showTodayOnly={showTodayOnly}
+        countdown={countdown}
+        lastRefresh={lastRefresh}
+        formatSpend={formatSpend}
+        formatUsd={formatUsd}
+        formatCountdown={formatCountdown}
+        formatLastRefresh={formatLastRefresh}
+        onRefresh={handleManualRefresh}
+        refreshing={loadingCampaigns}
+        onExit={() => setTvMode(false)}
+      />
+    )
+  }
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -777,6 +804,17 @@ export default function AdsManagerPage() {
                 {campaignsWithSpendCount}
               </Badge>
             )}
+          </Button>
+
+          {/* TV Mode - full-screen glanceable wall display */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTvMode(true)}
+            className="bg-card"
+          >
+            <Tv className="w-4 h-4 mr-2" />
+            TV Mode
           </Button>
           
           {/* Group by Product Toggle */}
