@@ -89,19 +89,16 @@ export function TvDashboard({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
-  // League standings: rank by cost-per-client, best (lowest) first at the top —
-  // like a sports league table. Products with no client data drop to the bottom.
-  const ranked = [...groups].sort((a, b) => {
+  // Within each zone, rank by cost-per-client (best/lowest first) like a league.
+  const byCac = (a: TvGroup, b: TvGroup) => {
     if (a.cac === null && b.cac === null) return b.totalSpend - a.totalSpend
     if (a.cac === null) return 1
     if (b.cac === null) return -1
     return a.cac - b.cac
-  })
-
-  // Split the standings into two side-by-side columns so twice as many products
-  // are visible before scrolling (ranks flow down the left column, then right).
-  const half = Math.ceil(ranked.length / 2)
-  const columns = [ranked.slice(0, half), ranked.slice(half)]
+  }
+  const green = groups.filter((g) => zoneFor(g.cac) === 'green').sort(byCac)
+  const yellow = groups.filter((g) => zoneFor(g.cac) === 'yellow').sort(byCac)
+  const red = groups.filter((g) => zoneFor(g.cac) === 'red').sort(byCac)
 
   // Zone tallies for the legend/summary bar
   const counts = groups.reduce(
@@ -155,20 +152,9 @@ export function TvDashboard({
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [autoScroll, ranked.length])
+  }, [autoScroll, groups.length])
 
-  const columnHeader = (
-    <div className={`${ROW_GRID} border-b border-border bg-card px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground`}>
-      <span className="text-center">#</span>
-      <span>Product</span>
-      <span className="text-right">Spend</span>
-      <span className="text-right">Clients</span>
-      <span className="text-right">Camp</span>
-      <span className="text-right">Cost/Cl</span>
-    </div>
-  )
-
-  const renderRow = (g: TvGroup, globalIndex: number, striped: boolean) => {
+  const renderRow = (g: TvGroup, rank: number, striped: boolean) => {
     const zone = zoneFor(g.cac)
     const zs = ZONE_STYLES[zone]
     return (
@@ -179,16 +165,13 @@ export function TvDashboard({
         {/* Rank + zone-colored accent bar */}
         <div className="flex items-center gap-2">
           <span className={`h-6 w-1 rounded-full ${zs.dot}`} />
-          <span className="text-lg font-bold tabular-nums text-muted-foreground">{globalIndex + 1}</span>
+          <span className="text-lg font-bold tabular-nums text-muted-foreground">{rank}</span>
         </div>
 
-        {/* Product name (zone dot inline to save vertical space) */}
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${zs.dot}`} title={zone === 'none' ? 'No clients yet' : zs.label} />
-          <span className="truncate text-lg font-semibold" title={g.productName}>
-            {g.productName}
-          </span>
-        </div>
+        {/* Product name */}
+        <span className="truncate text-lg font-semibold" title={g.productName}>
+          {g.productName}
+        </span>
 
         {/* Spend */}
         <span className="text-right text-lg font-bold tabular-nums text-amber-500">
@@ -205,6 +188,44 @@ export function TvDashboard({
         <span className={`text-right text-xl font-bold tabular-nums ${zs.text}`}>
           {g.cac !== null ? formatRs(g.cac) : '—'}
         </span>
+      </div>
+    )
+  }
+
+  // One self-contained standings table per zone (green / yellow / red).
+  const zoneTable = (
+    zone: Exclude<Zone, 'none'>,
+    title: string,
+    rows: TvGroup[],
+  ) => {
+    const zs = ZONE_STYLES[zone]
+    return (
+      <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+        {/* Zone title bar */}
+        <div className={`flex shrink-0 items-center justify-between gap-2 px-3 py-2 ${zs.bg}`}>
+          <div className="flex items-center gap-2">
+            <span className={`h-3 w-3 rounded-full ${zs.dot}`} />
+            <span className={`text-base font-bold ${zs.text}`}>{title}</span>
+          </div>
+          <span className={`rounded-full px-2 py-0.5 text-sm font-bold tabular-nums ${zs.text}`}>{rows.length}</span>
+        </div>
+        {/* Column labels */}
+        <div className={`${ROW_GRID} shrink-0 border-y border-border bg-card px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground`}>
+          <span className="text-center">#</span>
+          <span>Product</span>
+          <span className="text-right">Spend</span>
+          <span className="text-right">Cl</span>
+          <span className="text-right">Cmp</span>
+          <span className="text-right">Cost/Cl</span>
+        </div>
+        {/* Rows */}
+        <div>
+          {rows.length === 0 ? (
+            <div className="px-3 py-4 text-center text-sm text-muted-foreground">None</div>
+          ) : (
+            rows.map((g, i) => renderRow(g, i + 1, i % 2 === 1))
+          )}
+        </div>
       </div>
     )
   }
@@ -302,20 +323,17 @@ export function TvDashboard({
         </div>
       </div>
 
-      {/* Two-column dense league standings, ranked by cost-per-client and color-coded */}
+      {/* Three separate zone standings tables: green / yellow / red */}
       <div ref={scrollRef} className="mt-3 flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-        {ranked.length === 0 ? (
+        {groups.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xl text-muted-foreground">
             No products to display
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-x-4 xl:grid-cols-2">
-            {columns.map((col, ci) => (
-              <div key={ci} className="overflow-hidden rounded-xl border border-border">
-                {columnHeader}
-                {col.map((g, i) => renderRow(g, ci * half + i, i % 2 === 1))}
-              </div>
-            ))}
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+            {zoneTable('green', 'Rs 0–50', green)}
+            {zoneTable('yellow', 'Rs 51–75', yellow)}
+            {zoneTable('red', 'Above Rs 75', red)}
           </div>
         )}
       </div>
