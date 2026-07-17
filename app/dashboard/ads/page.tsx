@@ -634,6 +634,19 @@ export default function AdsManagerPage() {
     return b.totalSpend - a.totalSpend
   })
 
+  // TV dashboard: product groups enriched with client count + cost-per-client (Rs)
+  // so the TV view can color-code each product into a CAC efficiency zone.
+  const tvGroups = productGroups.map((g) => ({
+    key: g.key,
+    productName: g.productName,
+    productPrice: g.productPrice,
+    totalSpend: g.totalSpend,
+    isUnlinked: g.key === UNLINKED_KEY,
+    clients: productClientStats[g.productName]?.clientCount ?? 0,
+    cac: groupCac(g),
+    campaigns: g.campaigns,
+  }))
+
   // Number of columns shown in the campaigns table (drives colSpan for group headers)
   const tableCols = selectedAccount === 'all' ? 4 : 3
 
@@ -731,7 +744,8 @@ export default function AdsManagerPage() {
   if (tvMode) {
     return (
       <TvDashboard
-        campaigns={filteredCampaigns}
+        groups={tvGroups}
+        campaignCount={filteredCampaigns.length}
         totalSpend={totalSpend}
         activeCampaigns={activeCampaigns}
         campaignsWithSpendCount={campaignsWithSpendCount}

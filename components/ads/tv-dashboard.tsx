@@ -1,25 +1,32 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, CalendarIcon, Pause, Play, AlertCircle } from 'lucide-react'
-import { format } from 'date-fns'
+import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, Pause, Play, AlertCircle, Users } from 'lucide-react'
 
-// Minimal structural shape of a campaign needed for the TV view. Compatible with
-// the Campaign interface used on the Ads Manager page.
+// Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
   id: string
   name: string
   status: string
-  objective: string
   spend: string
   accountName?: string
-  lifetime_budget?: string | null
-  budget_remaining?: string | null
-  stop_time?: string | null
+}
+
+// A product group enriched with client count + cost-per-client (in Rs).
+export interface TvGroup {
+  key: string
+  productName: string
+  productPrice?: number
+  totalSpend: number // USD
+  isUnlinked: boolean
+  clients: number
+  cac: number | null // Rs per client (null when not computable)
+  campaigns: TvCampaign[]
 }
 
 interface TvDashboardProps {
-  campaigns: TvCampaign[]
+  groups: TvGroup[]
+  campaignCount: number
   totalSpend: number
   activeCampaigns: number
   campaignsWithSpendCount: number
@@ -36,8 +43,55 @@ interface TvDashboardProps {
   onExit: () => void
 }
 
+// Cost-per-client efficiency zones (Rs). Green 0-50, Yellow 51-75, Red above 75.
+type Zone = 'green' | 'yellow' | 'red' | 'none'
+const GREEN_MAX = 50
+const YELLOW_MAX = 75
+
+function zoneFor(cac: number | null): Zone {
+  if (cac === null) return 'none'
+  if (cac <= GREEN_MAX) return 'green'
+  if (cac <= YELLOW_MAX) return 'yellow'
+  return 'red'
+}
+
+// Tailwind class bundles per zone (border, tint, text, dot, progress).
+const ZONE_STYLES: Record<Zone, { border: string; bg: string; text: string; dot: string; label: string }> = {
+  green: {
+    border: 'border-emerald-500/60',
+    bg: 'bg-emerald-500/10',
+    text: 'text-emerald-500',
+    dot: 'bg-emerald-500',
+    label: 'Good',
+  },
+  yellow: {
+    border: 'border-amber-500/60',
+    bg: 'bg-amber-500/10',
+    text: 'text-amber-500',
+    dot: 'bg-amber-500',
+    label: 'Watch',
+  },
+  red: {
+    border: 'border-red-500/60',
+    bg: 'bg-red-500/10',
+    text: 'text-red-500',
+    dot: 'bg-red-500',
+    label: 'High',
+  },
+  none: {
+    border: 'border-border',
+    bg: 'bg-card',
+    text: 'text-muted-foreground',
+    dot: 'bg-gray-500',
+    label: 'No data',
+  },
+}
+
+const formatRs = (rs: number) => `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+
 export function TvDashboard({
-  campaigns,
+  groups,
+  campaignCount,
   totalSpend,
   activeCampaigns,
   campaignsWithSpendCount,
@@ -56,9 +110,24 @@ export function TvDashboard({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
-  // Sort campaigns by spend (highest first) so the most important spend is on top
-  const sorted = [...campaigns].sort(
-    (a, b) => parseFloat(b.spend || '0') - parseFloat(a.spend || '0'),
+  // Rank order for zones so red (needs attention) surfaces first, no-data last.
+  const zoneRank: Record<Zone, number> = { red: 0, yellow: 1, green: 2, none: 3 }
+  const sorted = [...groups].sort((a, b) => {
+    const za = zoneFor(a.cac)
+    const zb = zoneFor(b.cac)
+    if (zoneRank[za] !== zoneRank[zb]) return zoneRank[za] - zoneRank[zb]
+    // Within a zone, highest cost-per-client first (nulls fall back to spend)
+    if (a.cac !== null && b.cac !== null) return b.cac - a.cac
+    return b.totalSpend - a.totalSpend
+  })
+
+  // Zone tallies for the legend/summary bar
+  const counts = groups.reduce(
+    (acc, g) => {
+      acc[zoneFor(g.cac)]++
+      return acc
+    },
+    { green: 0, yellow: 0, red: 0, none: 0 } as Record<Zone, number>,
   )
 
   // Exit on Escape for convenience
@@ -71,7 +140,6 @@ export function TvDashboard({
   }, [onExit])
 
   // Gentle auto-scroll loop: pause at top, scroll to bottom, pause, jump back.
-  // Only scrolls when the content actually overflows the viewport.
   useEffect(() => {
     const el = scrollRef.current
     if (!el || !autoScroll) return
@@ -86,12 +154,19 @@ export function TvDashboard({
       const overflow = el.scrollHeight - el.clientHeight
       if (overflow > 4) {
         if (phase === 'top') {
-          if (now - phaseStart > 2500) { phase = 'scroll' }
+          if (now - phaseStart > 2500) phase = 'scroll'
         } else if (phase === 'scroll') {
           el.scrollTop += (SPEED * dt) / 1000
-          if (el.scrollTop >= overflow - 1) { phase = 'bottom'; phaseStart = now }
+          if (el.scrollTop >= overflow - 1) {
+            phase = 'bottom'
+            phaseStart = now
+          }
         } else if (phase === 'bottom') {
-          if (now - phaseStart > 4000) { el.scrollTop = 0; phase = 'top'; phaseStart = now }
+          if (now - phaseStart > 4000) {
+            el.scrollTop = 0
+            phase = 'top'
+            phaseStart = now
+          }
         }
       }
       raf = requestAnimationFrame(loop)
@@ -100,33 +175,15 @@ export function TvDashboard({
     return () => cancelAnimationFrame(raf)
   }, [autoScroll, sorted.length])
 
-  const statusDot = (status: string) => {
-    if (status === 'ACTIVE') return 'bg-emerald-500'
-    if (status === 'PAUSED') return 'bg-amber-500'
-    return 'bg-gray-500'
-  }
-
-  // Per-campaign budget summary (Facebook budget fields are in USD cents)
-  const budgetInfo = (c: TvCampaign) => {
-    const lifetime = parseFloat(c.lifetime_budget || '0') / 100
-    const remaining = parseFloat(c.budget_remaining || '0') / 100
-    const end = c.stop_time ? new Date(c.stop_time) : null
-    const validEnd = end && !isNaN(end.getTime())
-    if (lifetime <= 0 && !validEnd) return null
-    const spent = lifetime > 0 ? Math.max(0, lifetime - remaining) : 0
-    const pct = lifetime > 0 ? Math.min(100, (spent / lifetime) * 100) : 0
-    return { lifetime, remaining, spent, pct, end: validEnd ? (end as Date) : null }
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background p-8 text-foreground">
-      {/* Header + KPIs */}
+      {/* Header */}
       <div className="shrink-0">
         <div className="flex items-center justify-between gap-6">
           <div className="flex items-baseline gap-4">
             <h1 className="text-4xl font-bold tracking-tight">Ads Manager</h1>
             <span className="text-lg text-muted-foreground">
-              {showTodayOnly ? "Today's spend" : 'All campaigns'} · {campaigns.length} campaigns
+              {showTodayOnly ? "Today's spend" : 'All campaigns'} · {groups.length} products · {campaignCount} campaigns
             </span>
           </div>
           <div className="flex items-center gap-6">
@@ -205,66 +262,84 @@ export function TvDashboard({
             <p className="mt-4 text-5xl font-bold tabular-nums text-red-500">{formatSpend(totalBalanceOwed.toString())}</p>
           </div>
         </div>
+
+        {/* Cost-per-client zone legend */}
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <span className="text-base font-medium text-muted-foreground">Cost / client</span>
+          <div className="flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-1.5 text-emerald-500">
+            <span className="h-3 w-3 rounded-full bg-emerald-500" />
+            <span className="text-base font-semibold">Rs 0–50</span>
+            <span className="text-base font-bold tabular-nums">· {counts.green}</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-4 py-1.5 text-amber-500">
+            <span className="h-3 w-3 rounded-full bg-amber-500" />
+            <span className="text-base font-semibold">Rs 51–75</span>
+            <span className="text-base font-bold tabular-nums">· {counts.yellow}</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-1.5 text-red-500">
+            <span className="h-3 w-3 rounded-full bg-red-500" />
+            <span className="text-base font-semibold">Above Rs 75</span>
+            <span className="text-base font-bold tabular-nums">· {counts.red}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Campaign grid */}
-      <div
-        ref={scrollRef}
-        className="mt-6 flex-1 overflow-y-auto pr-2"
-        style={{ scrollbarWidth: 'thin' }}
-      >
+      {/* Product grid, color-coded by cost-per-client zone */}
+      <div ref={scrollRef} className="mt-6 flex-1 overflow-y-auto pr-2" style={{ scrollbarWidth: 'thin' }}>
         {sorted.length === 0 ? (
           <div className="flex h-full items-center justify-center text-2xl text-muted-foreground">
-            No campaigns to display
+            No products to display
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-5">
-            {sorted.map((c) => {
-              const b = budgetInfo(c)
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-5">
+            {sorted.map((g) => {
+              const zone = zoneFor(g.cac)
+              const zs = ZONE_STYLES[zone]
               return (
-                <div key={c.id} className="rounded-2xl border border-border bg-card p-5">
+                <div key={g.key} className={`rounded-2xl border-2 ${zs.border} ${zs.bg} p-5`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className={`h-3 w-3 shrink-0 rounded-full ${statusDot(c.status)}`} />
-                      <h3 className="truncate text-xl font-semibold" title={c.name}>{c.name}</h3>
+                      <span className={`h-3.5 w-3.5 shrink-0 rounded-full ${zs.dot}`} />
+                      <h3 className="truncate text-xl font-semibold" title={g.productName}>
+                        {g.productName}
+                      </h3>
+                    </div>
+                    {typeof g.productPrice === 'number' && (
+                      <span className="shrink-0 text-base text-muted-foreground">Rs {g.productPrice}</span>
+                    )}
+                  </div>
+
+                  {/* Headline: cost per client, colored by zone */}
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className={`text-5xl font-bold tabular-nums ${zs.text}`}>
+                        {g.cac !== null ? formatRs(g.cac) : '—'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">per client · {zs.label}</p>
+                    </div>
+                    <div className={`rounded-lg px-3 py-1 text-sm font-semibold ${zs.bg} ${zs.text}`}>
+                      {zone === 'none' ? 'No clients yet' : zs.label}
                     </div>
                   </div>
-                  {c.accountName && (
-                    <p className="mt-1 truncate text-base text-muted-foreground">{c.accountName}</p>
-                  )}
-                  <p className="mt-3 text-4xl font-bold tabular-nums text-amber-500">
-                    {formatSpend(c.spend || '0')}
-                  </p>
-                  <p className="text-sm text-muted-foreground/70">{formatUsd(c.spend || '0')} USD</p>
 
-                  {b && (
-                    <div className="mt-4 space-y-2">
-                      {b.lifetime > 0 && (
-                        <>
-                          <div className="flex items-center justify-between text-base">
-                            <span className="text-muted-foreground">Spent</span>
-                            <span className="font-medium tabular-nums">
-                              {formatSpend(b.spent.toString())}
-                              <span className="text-muted-foreground/60"> / {formatSpend(b.lifetime.toString())}</span>
-                            </span>
-                          </div>
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                            <div className="h-full rounded-full bg-amber-500" style={{ width: `${b.pct}%` }} />
-                          </div>
-                          <div className="flex items-center justify-between text-base">
-                            <span className="text-muted-foreground">Remaining</span>
-                            <span className="font-medium tabular-nums">{formatSpend(b.remaining.toString())}</span>
-                          </div>
-                        </>
-                      )}
-                      {b.end && (
-                        <div className="flex items-center gap-2 text-base text-muted-foreground">
-                          <CalendarIcon className="h-4 w-4" />
-                          Ends {format(b.end, 'd MMM yyyy')}
-                        </div>
-                      )}
+                  {/* Spend / clients / campaigns */}
+                  <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border/60 pt-4 text-center">
+                    <div>
+                      <p className="text-2xl font-bold tabular-nums text-amber-500">{formatSpend(g.totalSpend.toString())}</p>
+                      <p className="text-xs text-muted-foreground">Spend</p>
                     </div>
-                  )}
+                    <div>
+                      <p className="flex items-center justify-center gap-1 text-2xl font-bold tabular-nums">
+                        <Users className="h-5 w-5 text-muted-foreground" />
+                        {g.clients.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Clients</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold tabular-nums">{g.campaigns.length}</p>
+                      <p className="text-xs text-muted-foreground">Campaigns</p>
+                    </div>
+                  </div>
                 </div>
               )
             })}
