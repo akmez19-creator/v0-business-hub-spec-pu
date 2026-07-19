@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -139,6 +139,11 @@ export default function AdsManagerPage() {
   const [linkingProduct, setLinkingProduct] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingCampaigns, setLoadingCampaigns] = useState(false)
+  // Cache for historical date results (past dates never change), keyed by
+  // account + preset + range. Lets us instantly re-show a previously viewed
+  // date without refetching or blanking the whole dashboard. "Today" is never
+  // cached here since it keeps changing.
+  const historyCacheRef = useRef<Record<string, { campaigns: Campaign[]; accountSpends: Record<string, number> }>>({})
   const [error, setError] = useState<string | null>(null)
   
   // Date range state
@@ -329,9 +334,7 @@ export default function AdsManagerPage() {
     }
   }
 
-  async function fetchCampaignsData() {
-    setLoadingCampaigns(true)
-    
+  async function fetchCampaignsData(forceRefresh = false) {
     const buildParams = () => {
       let params = `datePreset=${datePreset}`
       if (datePreset === 'custom' && dateRange?.from && dateRange?.to) {
@@ -341,6 +344,20 @@ export default function AdsManagerPage() {
     }
     
     const params = buildParams()
+
+    // Historical dates are immutable, so serve a cached result instantly (unless
+    // the user explicitly hits Refresh). This avoids the full reload/spinner when
+    // flipping between past dates. "Today" is excluded — it always fetches fresh.
+    const cacheKey = `${selectedAccount}|${params}`
+    const canCache = datePreset !== 'today'
+    if (!forceRefresh && canCache && historyCacheRef.current[cacheKey]) {
+      const cached = historyCacheRef.current[cacheKey]
+      setCampaigns(cached.campaigns)
+      setAccountSpends(cached.accountSpends)
+      return
+    }
+
+    setLoadingCampaigns(true)
     
     if (selectedAccount === 'all') {
       // Fetch from all accounts
@@ -374,6 +391,7 @@ export default function AdsManagerPage() {
       setCampaigns(allCampaigns)
       setAccountSpends(newAccountSpends)
       setLastRefresh(new Date())
+      if (canCache) historyCacheRef.current[cacheKey] = { campaigns: allCampaigns, accountSpends: newAccountSpends }
     } else {
       // Fetch from single account
       try {
@@ -381,16 +399,19 @@ export default function AdsManagerPage() {
         const data = await res.json()
         
         const account = accounts.find(a => a.id === selectedAccount)
-        setCampaigns((data.data || []).map((c: Campaign) => ({
+        const mapped = (data.data || []).map((c: Campaign) => ({
           ...c,
           accountId: selectedAccount,
           accountName: account?.name || selectedAccount
-        })))
-        
+        }))
+        setCampaigns(mapped)
+
         // Store account-level spend
-        if (data.accountTotalSpend) {
-          setAccountSpends({ [selectedAccount]: parseFloat(data.accountTotalSpend) })
-        }
+        const spends = data.accountTotalSpend
+          ? { [selectedAccount]: parseFloat(data.accountTotalSpend) }
+          : {}
+        if (data.accountTotalSpend) setAccountSpends(spends)
+        if (canCache) historyCacheRef.current[cacheKey] = { campaigns: mapped, accountSpends: spends }
       } catch {
         console.error('Failed to fetch campaigns')
         setCampaigns([])
@@ -722,7 +743,7 @@ export default function AdsManagerPage() {
     if (showTodayOnly) {
       fetchCachedData(true) // Force refresh from Facebook
     } else {
-      fetchCampaignsData()
+      fetchCampaignsData(true) // Bypass the historical cache for a fresh pull
       setLastRefresh(new Date())
       setCountdown(AUTO_REFRESH_INTERVAL)
     }
@@ -1036,7 +1057,7 @@ export default function AdsManagerPage() {
       {/* Campaigns Table */}
       <Card>
         <CardContent className="p-0">
-          {loadingCampaigns ? (
+          {loadingCampaigns && filteredCampaigns.length === 0 ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
