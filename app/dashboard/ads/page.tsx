@@ -488,7 +488,13 @@ export default function AdsManagerPage() {
 
   const handleDatePresetChange = (preset: DatePreset) => {
     setDatePreset(preset)
-    
+
+    // "Today's Spend" mode reads from the cached (today-only) endpoint. Any other
+    // date requires the live historical fetch, so exit today-only mode; selecting
+    // "Today" re-enters it. Without this, picking Yesterday/other dates left the
+    // view stuck on today's cached data.
+    setShowTodayOnly(preset === 'today')
+
     if (preset === 'custom') {
       setShowCalendar(true)
     } else {
@@ -808,7 +814,12 @@ export default function AdsManagerPage() {
           <Button
             variant={showTodayOnly ? "default" : "outline"}
             size="sm"
-            onClick={() => setShowTodayOnly(!showTodayOnly)}
+            onClick={() => {
+              const next = !showTodayOnly
+              setShowTodayOnly(next)
+              // Keep the date label in sync: today-only mode always means "Today"
+              if (next) setDatePreset('today')
+            }}
             className={showTodayOnly ? "bg-primary" : "bg-card"}
           >
             <DollarSign className="w-4 h-4 mr-2" />
