@@ -269,11 +269,15 @@ export default function AdsManagerPage() {
     return () => clearInterval(countdownTimer)
   }, [])
 
-  // When filters change (not today's spend mode), fetch fresh data
+  // When filters change (not today's spend mode), fetch fresh data.
+  // For a custom range, wait until BOTH ends are picked — otherwise the fetch
+  // fires on every calendar click (open, "from", "to") and the dashboard keeps
+  // reloading while the user is still selecting the range.
   useEffect(() => {
-    if (!showTodayOnly && accounts.length > 0) {
-      fetchCampaignsData()
-    }
+    if (showTodayOnly || accounts.length === 0) return
+    if (datePreset === 'custom' && !(dateRange?.from && dateRange?.to)) return
+    fetchCampaignsData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAccount, datePreset, dateRange])
   
   // When switching to today's spend mode, use cached data
