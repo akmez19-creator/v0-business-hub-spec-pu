@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.45.0'
+const EXTENSION_VERSION = '4.46.0'
 const LAST_UPDATED = '2026-07-23'
 
 export function ToolsDownloadPage() {
@@ -82,6 +82,7 @@ export function ToolsDownloadPage() {
   ]
 
   const newFeatures = [
+    { icon: Zap, text: 'Refreshed design: a polished orange header, glowing focus rings on inputs, softer rounded cards, a styled scrollbar, and a full-width gradient Create Order button that always spans the panel - the whole widget looks cleaner and is easier to scan' },
     { icon: CheckCircle2, text: 'Create Order button is now always reachable: it sticks to the bottom of the panel (with the running total just above it) so you can submit even when a customer orders many items - no more scrolling past a long product list to find it' },
     { icon: Zap, text: 'Panel size fixed: the widget is compact by default (the intended ~400px look) and now scales proportionally with your screen resolution - a bit wider on large/4K monitors, never oversized - while always staying within the screen height so the footer is reachable' },
     { icon: CheckCircle2, text: 'Order creation fixed: orders that failed with "new row violates row-level security policy for table deliveries" now save reliably. Authorized agents create orders through a secure server path, so the error no longer blocks logging a sale' },
