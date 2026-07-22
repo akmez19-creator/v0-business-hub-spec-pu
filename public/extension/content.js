@@ -85,14 +85,10 @@ style.textContent = `
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
 #akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
 #akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
-/* Fluid width so the panel scales with the viewport instead of a fixed 440px */
-#akmez-widget{position:fixed;top:40px;right:20px;width:clamp(360px,29vw,560px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:min(960px,calc(100vh - 80px));background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
-/* Proportionally scale the whole panel up on high-res / TV displays so the small
-   text stays legible from a distance, and keep it compact on laptops. */
-@media (min-width:1600px){#akmez-widget{zoom:1.12;}}
-@media (min-width:1920px){#akmez-widget{zoom:1.25;}}
-@media (min-width:2560px){#akmez-widget{zoom:1.5;}}
-@media (min-width:3200px){#akmez-widget{zoom:1.85;}}
+/* Fluid but compact width so the panel scales gently with the viewport instead
+   of a fixed 440px. Height is bounded to the viewport so the sticky footer /
+   Create Order button is always on-screen (no zoom, which would overflow it). */
+#akmez-widget{position:fixed;top:40px;right:20px;width:clamp(340px,24vw,440px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:calc(100vh - 80px);background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
 /* Accessibility: clear keyboard-focus ring on every interactive control */
 #akmez-widget button:focus-visible,#akmez-widget input:focus-visible,#akmez-widget select:focus-visible,#akmez-widget [tabindex]:focus-visible,#akmez-toggle:focus-visible{outline:3px solid #38bdf8;outline-offset:2px;border-radius:6px;}
 /* Respect users who prefer reduced motion */
@@ -248,10 +244,13 @@ style.textContent = `
 .akmez-qty-val{min-width:20px;text-align:center;font-size:12px;font-weight:700;color:#fff;}
 .akmez-qty-del{border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.12);color:#ef4444;margin-left:2px;}
 .akmez-qty-del:hover{background:rgba(239,68,68,0.3);}
-.akmez-cart{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px 12px;margin-top:10px;display:flex;justify-content:space-between;font-size:12px;}
+    .akmez-cart{position:sticky;bottom:52px;z-index:5;background:rgba(20,40,34,0.96);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px 12px;margin-top:10px;display:flex;justify-content:space-between;font-size:13px;font-weight:600;}
 .akmez-cart .items{color:#6ee7b7;}
 .akmez-cart .total{color:#10b981;font-weight:700;}
-.akmez-submit{width:100%;padding:14px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:10px;color:white;font-size:13px;font-weight:700;cursor:pointer;margin-top:12px;text-transform:uppercase;letter-spacing:1px;transition:all 0.15s;}
+    /* Sticky so the Create Order button is always reachable, even with a long
+       product list. Pinned to the bottom of the scrolling body with a backdrop
+       + negative side margins so it spans the full panel width. */
+    .akmez-submit{position:sticky;bottom:0;z-index:5;width:auto;display:block;padding:14px;margin:12px -12px -12px -12px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:0;color:white;font-size:14px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all 0.15s;box-shadow:0 -8px 16px -6px rgba(0,0,0,0.6);}
 .akmez-submit:hover{transform:scale(1.02);box-shadow:0 4px 20px rgba(16,185,129,0.3);}
 .akmez-submit:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
 .akmez-success{text-align:center;padding:20px;}
