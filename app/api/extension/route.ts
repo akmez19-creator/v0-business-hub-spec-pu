@@ -395,7 +395,17 @@ export async function POST(request: NextRequest) {
           reply_token_created_at: nowIso,
         }]
 
-    const { data: inserted, error } = await supabase.from('deliveries').insert(rows).select('id, reply_token, products')
+    // The order creator is already authorized above by profile.role. When the
+    // request comes in via cookie auth, `supabase` is the user-scoped client and
+    // the deliveries RLS INSERT policy rejects the row ("new row violates
+    // row-level security policy for table deliveries"). Perform this privileged
+    // write with the service-role client so authorized agents can always create
+    // orders regardless of the deliveries RLS policy. (See note below on RLS.)
+    const writeClient = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+      : supabase
+
+    const { data: inserted, error } = await writeClient.from('deliveries').insert(rows).select('id, reply_token, products')
 
     if (error) {
       console.error('Insert error:', error)

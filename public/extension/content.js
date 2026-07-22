@@ -45,6 +45,8 @@ const EXT_VERSION = (() => {
 // Create floating widget with tabs
 const widget = document.createElement('div');
 widget.id = 'akmez-widget';
+widget.setAttribute('role', 'dialog');
+widget.setAttribute('aria-label', 'Akmez Quick Order');
 widget.innerHTML = `
   <div class="akmez-header" id="akmez-drag">
     <div class="akmez-logo">A</div>
@@ -54,8 +56,8 @@ widget.innerHTML = `
       <div style="font-size:10px;opacity:0.7">Create orders from anywhere</div>
     </div>
     <div class="akmez-header-btns">
-      <button class="akmez-hbtn" id="akmez-settings" title="Settings">&#9881;</button>
-      <button class="akmez-hbtn" id="akmez-close" title="Close">&times;</button>
+      <button class="akmez-hbtn" id="akmez-settings" title="Settings" aria-label="Open settings">&#9881;</button>
+      <button class="akmez-hbtn" id="akmez-close" title="Close" aria-label="Close panel">&times;</button>
     </div>
   </div>
   <div class="akmez-cutoff-banner" id="akmez-cutoff-banner" style="display:none">
@@ -83,15 +85,28 @@ style.textContent = `
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
 #akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
 #akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
-#akmez-widget{position:fixed;top:40px;right:20px;width:440px;max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:900px;background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
+/* Fluid width so the panel scales with the viewport instead of a fixed 440px */
+#akmez-widget{position:fixed;top:40px;right:20px;width:clamp(360px,29vw,560px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:min(960px,calc(100vh - 80px));background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
+/* Proportionally scale the whole panel up on high-res / TV displays so the small
+   text stays legible from a distance, and keep it compact on laptops. */
+@media (min-width:1600px){#akmez-widget{zoom:1.12;}}
+@media (min-width:1920px){#akmez-widget{zoom:1.25;}}
+@media (min-width:2560px){#akmez-widget{zoom:1.5;}}
+@media (min-width:3200px){#akmez-widget{zoom:1.85;}}
+/* Accessibility: clear keyboard-focus ring on every interactive control */
+#akmez-widget button:focus-visible,#akmez-widget input:focus-visible,#akmez-widget select:focus-visible,#akmez-widget [tabindex]:focus-visible,#akmez-toggle:focus-visible{outline:3px solid #38bdf8;outline-offset:2px;border-radius:6px;}
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion:reduce){#akmez-widget *,#akmez-toggle{animation-duration:0.001ms!important;animation-iteration-count:1!important;transition-duration:0.001ms!important;}}
 .akmez-header{background:linear-gradient(135deg,#f97316,#ea580c);padding:12px 14px;display:flex;align-items:center;gap:10px;cursor:move;user-select:none;}
 .akmez-logo{width:32px;height:32px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;}
 .akmez-header span{font-weight:700;font-size:14px;}
 .akmez-header-btns{display:flex;gap:6px;}
-.akmez-hbtn{width:26px;height:26px;border:none;border-radius:6px;background:rgba(255,255,255,0.2);color:white;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.akmez-hbtn{width:32px;height:32px;border:none;border-radius:6px;background:rgba(255,255,255,0.2);color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s;}
+.akmez-hbtn:hover{background:rgba(255,255,255,0.35);}
 .akmez-hbtn:hover{background:rgba(255,255,255,0.3);}
 .akmez-tabs{display:flex;background:rgba(0,0,0,0.3);border-bottom:1px solid rgba(255,255,255,0.1);}
-.akmez-tab{flex:1;padding:10px 12px;background:none;border:none;color:#888;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;border-bottom:2px solid transparent;transition:all 0.15s;}
+.akmez-tab{flex:1;padding:12px 12px;background:none;border:none;color:#888;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;border-bottom:2px solid transparent;transition:all 0.15s;min-height:44px;}
+.akmez-tab:hover{color:#cbd5e1;}
 .akmez-tab:hover{color:#fff;background:rgba(255,255,255,0.05);}
 .akmez-tab.active{color:#f97316;border-bottom-color:#f97316;background:rgba(249,115,22,0.1);}
 .akmez-body{padding:12px;overflow-y:auto;overflow-x:hidden;flex:1;min-height:0;}
