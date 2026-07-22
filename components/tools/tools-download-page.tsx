@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 
 // Current extension version - update this when making changes
-const EXTENSION_VERSION = '4.44.0'
+const EXTENSION_VERSION = '4.45.0'
 const LAST_UPDATED = '2026-07-23'
 
 export function ToolsDownloadPage() {
@@ -83,7 +83,7 @@ export function ToolsDownloadPage() {
 
   const newFeatures = [
     { icon: CheckCircle2, text: 'Create Order button is now always reachable: it sticks to the bottom of the panel (with the running total just above it) so you can submit even when a customer orders many items - no more scrolling past a long product list to find it' },
-    { icon: Zap, text: 'Panel size fixed: the widget is compact again and stays within the screen height instead of overflowing on large monitors, while still scaling gently with your display' },
+    { icon: Zap, text: 'Panel size fixed: the widget is compact by default (the intended ~400px look) and now scales proportionally with your screen resolution - a bit wider on large/4K monitors, never oversized - while always staying within the screen height so the footer is reachable' },
     { icon: CheckCircle2, text: 'Order creation fixed: orders that failed with "new row violates row-level security policy for table deliveries" now save reliably. Authorized agents create orders through a secure server path, so the error no longer blocks logging a sale' },
     { icon: Package, text: 'Product varieties: when a product has options (e.g. colours or sizes) the search result shows an "options" badge and prompts you to pick the variety before adding it. Each variety is its own cart line and order entry (with its own price if set), so "M8 Smartband - Red" is recorded distinctly from "M8 Smartband - Blue", and out-of-stock options are greyed out' },
     { icon: Sparkles, text: 'Reply with AI: a new button on the Orders tab reads the customer\'s messages from the conversation and drafts a reply with ChatGPT, then drops it straight into the Facebook Business Suite send box for you to review and send. Admins pick the message bubble and the send box once per platform (like the name/phone selectors) and can set a business context/tone prompt in Settings' },

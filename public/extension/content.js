@@ -85,10 +85,13 @@ style.textContent = `
 #akmez-toggle span{color:white;font-size:24px;font-weight:800;}
 #akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
 #akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
-/* Fluid but compact width so the panel scales gently with the viewport instead
-   of a fixed 440px. Height is bounded to the viewport so the sticky footer /
-   Create Order button is always on-screen (no zoom, which would overflow it). */
-#akmez-widget{position:fixed;top:40px;right:20px;width:clamp(340px,24vw,440px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:calc(100vh - 80px);background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
+/* Compact by default (~400px on a 1080p screen, matching the intended look) and
+   scales proportionally with screen resolution via a viewport-relative width:
+   21vw = ~403px at 1920px wide, ~538px at 2560px, capped at 560px on 4K, and
+   never below 360px on small screens. Height stays bounded to the viewport so
+   the sticky footer / Create Order button is always on-screen (no zoom, which
+   would scale the height and push the footer off-screen). */
+#akmez-widget{position:fixed;top:40px;right:20px;width:clamp(360px,21vw,560px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:calc(100vh - 80px);background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
 /* Accessibility: clear keyboard-focus ring on every interactive control */
 #akmez-widget button:focus-visible,#akmez-widget input:focus-visible,#akmez-widget select:focus-visible,#akmez-widget [tabindex]:focus-visible,#akmez-toggle:focus-visible{outline:3px solid #38bdf8;outline-offset:2px;border-radius:6px;}
 /* Respect users who prefer reduced motion */
