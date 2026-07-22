@@ -85,6 +85,7 @@ export async function GET(request: NextRequest) {
     // shown before a search, so there's no need to hit the DB otherwise.
     interface DeliveryRow {
       id: string
+      created_by: string | null
       customer_name: string | null
       contact_1: string | null
       contact_2: string | null
@@ -112,7 +113,7 @@ export async function GET(request: NextRequest) {
       const safe = q.replace(/[%,]/g, ' ')
       const { data } = await supabase
         .from('deliveries')
-        .select('id, customer_name, contact_1, contact_2, locality, rte, products, qty, amount, status, sales_type, medium, ad_id, notes, return_product, entry_date, delivery_date, reply_token, created_at')
+        .select('id, created_by, customer_name, contact_1, contact_2, locality, rte, products, qty, amount, status, sales_type, medium, ad_id, notes, return_product, entry_date, delivery_date, reply_token, created_at')
         .gte('created_at', thirtyAgo.toISOString())
         .or(`customer_name.ilike.%${safe}%,contact_1.ilike.%${safe}%,contact_2.ilike.%${safe}%`)
         .order('created_at', { ascending: false })
@@ -139,6 +140,10 @@ export async function GET(request: NextRequest) {
     }
     interface ClientRecord {
       customer_name: string
+      // Latest order's id + whether the signed-in agent may edit it (they
+      // created it and it hasn't been dispatched/delivered yet)
+      last_id: string | null
+      last_editable: boolean
       contact_1: string | null
       contact_2: string | null
       locality: string | null
@@ -183,6 +188,8 @@ export async function GET(request: NextRequest) {
       } else {
         clientMap.set(key, {
           customer_name: r.customer_name || 'Unnamed',
+          last_id: r.id,
+          last_editable: r.created_by === user.id && ['pending', 'assigned'].includes(r.status || 'pending'),
           contact_1: r.contact_1,
           contact_2: r.contact_2,
           locality: r.locality,

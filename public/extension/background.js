@@ -95,6 +95,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
+    if (request.action === 'updateOrder') {
+      // Agent edits an entry they created (server enforces ownership + status)
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/extension', {
+          method: 'PATCH',
+          body: JSON.stringify(request.data)
+        });
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
     if (request.action === 'aiReply') {
       // Ask the server (Vercel AI Gateway / ChatGPT) to draft a reply from the
       // conversation the content script scraped via the message selectors.

@@ -314,6 +314,19 @@ style.textContent = `
 .stats-list{display:flex;flex-direction:column;gap:8px;}
 .stats-client{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px 12px;}
 .stats-client-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.stats-client-top-right{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.stats-edit-btn{border:1px solid rgba(249,115,22,0.4);background:rgba(249,115,22,0.12);color:#fb923c;border-radius:7px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;transition:background 0.15s;white-space:nowrap;}
+.stats-edit-btn:hover{background:rgba(249,115,22,0.3);color:#fff;}
+.stats-edit-form{display:flex;flex-direction:column;gap:6px;}
+.stats-edit-title{font-size:12px;font-weight:700;color:#fb923c;margin-bottom:2px;}
+.stats-edit-row{display:flex;gap:8px;}
+.stats-edit-err{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-left:3px solid #ef4444;border-radius:8px;padding:8px 10px;color:#fca5a5;font-size:11px;line-height:1.4;}
+.stats-edit-actions{display:flex;gap:8px;margin-top:4px;}
+.stats-edit-cancel{flex:1;padding:10px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;transition:background 0.15s;}
+.stats-edit-cancel:hover{background:rgba(255,255,255,0.12);}
+.stats-edit-save{flex:2;padding:10px;border:none;background:linear-gradient(135deg,#34d399,#10b981 55%,#059669);color:#04110b;border-radius:9px;font-size:12px;font-weight:800;cursor:pointer;text-transform:uppercase;letter-spacing:0.6px;transition:filter 0.15s;}
+.stats-edit-save:hover{filter:brightness(1.08);}
+.stats-edit-save:disabled{opacity:0.5;cursor:not-allowed;}
 .stats-client-name{font-size:13px;font-weight:700;color:#fff;}
 .stats-client-prod{font-size:12px;color:#cbd5e1;margin-top:2px;line-height:1.4;}
 .stats-client-meta{font-size:11px;color:#94a3b8;margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;}
@@ -2826,6 +2839,10 @@ function renderMyStats() {
     }
     const t = resp.data.today || {};
     const clients = resp.data.clients || [];
+    // Orders the signed-in agent may edit (they created them and the order is
+    // still pending/assigned), keyed by order id for the Edit buttons below.
+    const editMap = {};
+    clients.forEach(c => { if (c.last_editable && c.last_id) editMap[c.last_id] = c; });
 
     const fmtMoney = v => (v == null || isNaN(v)) ? '-' : 'Rs ' + Number(v).toFixed(0);
     const fmtDay = iso => {
@@ -2870,10 +2887,13 @@ function renderMyStats() {
             cell('Ad ID', c.ad_id || ''),
           ].join('');
           return `
-            <div class="stats-client">
+            <div class="stats-client" ${c.last_editable && c.last_id ? `data-cid="${statsEsc(c.last_id)}"` : ''}>
               <div class="stats-client-top">
                 <span class="stats-client-name">${statsEsc(c.customer_name)}</span>
-                <span class="stats-badge ${statsEsc(statusKey)}">${statsEsc(statusLabel)}</span>
+                <span class="stats-client-top-right">
+                  ${c.last_editable && c.last_id ? `<button class="stats-edit-btn" data-eid="${statsEsc(c.last_id)}" title="Edit this entry" aria-label="Edit this entry">&#9998; Edit</button>` : ''}
+                  <span class="stats-badge ${statsEsc(statusKey)}">${statsEsc(statusLabel)}</span>
+                </span>
               </div>
               ${c.last_products ? `<div class="stats-client-prod">${statsEsc(c.last_products)}</div>` : ''}
               ${docHtml}
@@ -2936,7 +2956,117 @@ function renderMyStats() {
         } else { fallback(); }
       };
     });
+
+    // Edit buttons: swap the client card for an inline edit form (only shown
+    // on entries this agent created that are still pending/assigned)
+    body.querySelectorAll('.stats-edit-btn').forEach(btn => {
+      btn.onclick = () => {
+        const c = editMap[btn.dataset.eid];
+        const card = btn.closest('.stats-client');
+        if (c && card) statsRenderEditForm(card, c);
+      };
+    });
   });
+}
+
+// Inline edit form for an agent's own entry. Saves via the updateOrder action
+// (server re-checks ownership + status), then reloads the stats list.
+function statsRenderEditForm(card, c) {
+  const val = v => statsEsc(v == null ? '' : v);
+  const dateVal = c.last_delivery_date ? String(c.last_delivery_date).slice(0, 10) : '';
+  card.innerHTML = `
+    <div class="stats-edit-form">
+      <div class="stats-edit-title">&#9998; Edit entry &middot; ${statsEsc(c.customer_name)}</div>
+      <div class="akmez-label">Name *</div>
+      <input class="akmez-input se-name" type="text" value="${val(c.customer_name)}" style="padding-right:12px;">
+      <div class="stats-edit-row">
+        <div style="flex:1;min-width:0;">
+          <div class="akmez-label">Contact 1 *</div>
+          <input class="akmez-input se-c1" type="text" value="${val(c.contact_1)}" style="padding-right:12px;">
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div class="akmez-label">Contact 2</div>
+          <input class="akmez-input se-c2" type="text" value="${val(c.contact_2)}" style="padding-right:12px;">
+        </div>
+      </div>
+      <div class="stats-edit-row">
+        <div style="flex:1;min-width:0;">
+          <div class="akmez-label">Region *</div>
+          <input class="akmez-input se-region" type="text" value="${val(c.locality)}" style="padding-right:12px;">
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div class="akmez-label">Delivery date *</div>
+          <input class="akmez-input se-date" type="date" value="${val(dateVal)}" style="padding-right:12px;">
+        </div>
+      </div>
+      <div class="akmez-label">Products *</div>
+      <input class="akmez-input se-products" type="text" value="${val(c.last_products)}" style="padding-right:12px;">
+      <div class="stats-edit-row">
+        <div style="flex:1;min-width:0;">
+          <div class="akmez-label">Qty *</div>
+          <input class="akmez-input se-qty" type="number" min="1" step="1" value="${val(c.last_qty != null ? c.last_qty : 1)}" style="padding-right:12px;">
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div class="akmez-label">Amount (Rs) *</div>
+          <input class="akmez-input se-amount" type="number" min="0" step="0.01" value="${val(c.last_amount != null ? c.last_amount : '')}" style="padding-right:12px;">
+        </div>
+      </div>
+      <div class="akmez-label">Notes</div>
+      <textarea class="akmez-input se-notes" rows="2" style="padding-right:12px;resize:vertical;">${val(c.last_notes)}</textarea>
+      <div class="stats-edit-err" style="display:none;"></div>
+      <div class="stats-edit-actions">
+        <button class="stats-edit-cancel">Cancel</button>
+        <button class="stats-edit-save">Save Changes</button>
+      </div>
+    </div>
+  `;
+  const q = sel => card.querySelector(sel);
+  q('.stats-edit-cancel').onclick = () => renderMyStats();
+  q('.stats-edit-save').onclick = () => {
+    const err = q('.stats-edit-err');
+    err.style.display = 'none';
+    const name = q('.se-name').value.trim();
+    const c1 = q('.se-c1').value.trim();
+    const region = q('.se-region').value.trim();
+    const date = q('.se-date').value;
+    const products = q('.se-products').value.trim();
+    const qty = parseInt(q('.se-qty').value, 10);
+    const amount = parseFloat(q('.se-amount').value);
+    if (!name || !c1 || !region || !date || !products || !(qty > 0) || !(amount >= 0)) {
+      err.textContent = 'Please fill all required fields correctly';
+      err.style.display = 'block';
+      return;
+    }
+    const saveBtn = q('.stats-edit-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    chrome.runtime.sendMessage({
+      action: 'updateOrder',
+      data: {
+        id: c.last_id,
+        customerName: name,
+        contact1: c1,
+        contact2: q('.se-c2').value.trim(),
+        region,
+        deliveryDate: date,
+        products,
+        qty,
+        amount,
+        notes: q('.se-notes').value.trim(),
+      }
+    }, resp => {
+      const data = resp && resp.data;
+      if (!resp || !resp.success || !data || data.success !== true) {
+        err.textContent = (data && data.error) || (resp && resp.error) || 'Failed to save changes';
+        err.style.display = 'block';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+        return;
+      }
+      toast('Entry updated!');
+      renderMyStats();
+    });
+  };
 }
 
 // Render working time panel

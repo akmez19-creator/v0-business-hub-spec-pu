@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 // CORS headers for Chrome extension
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
@@ -456,6 +456,94 @@ export async function POST(request: NextRequest) {
 }
 
 // PUT - Save shared extension settings (admin only)
+// PATCH - Agents edit an order entry THEY created via the extension.
+// Only the creator may edit, and only while the order hasn't been handled yet
+// (pending / assigned). Riders' status flow is never touched from here.
+export async function PATCH(request: NextRequest) {
+  try {
+    const tokenAuth = await getUserFromToken(request)
+    let user = tokenAuth?.user ?? null
+
+    if (!user) {
+      const cookieSupabase = await createClient()
+      const { data: { user: cookieUser } } = await cookieSupabase.auth.getUser()
+      user = cookieUser
+    }
+
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401, headers: corsHeaders })
+    }
+
+    const body = await request.json()
+    const id = typeof body.id === 'string' ? body.id : ''
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Missing order id' }, { status: 400, headers: corsHeaders })
+    }
+
+    // Service-role client for the ownership check + write (deliveries RLS
+    // doesn't grant agents UPDATE; authorization is enforced here instead:
+    // strictly created_by = the signed-in user).
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    const { data: existing } = await admin
+      .from('deliveries')
+      .select('id, created_by, status')
+      .eq('id', id)
+      .single()
+
+    if (!existing) {
+      return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404, headers: corsHeaders })
+    }
+    if (existing.created_by !== user.id) {
+      return NextResponse.json({ success: false, error: 'You can only edit entries you created' }, { status: 403, headers: corsHeaders })
+    }
+    const editableStatuses = new Set(['pending', 'assigned'])
+    if (!editableStatuses.has(existing.status || 'pending')) {
+      return NextResponse.json({ success: false, error: 'This order is already ' + (existing.status || 'processed') + ' and can no longer be edited' }, { status: 409, headers: corsHeaders })
+    }
+
+    // Whitelisted editable fields only - never status/created_by/reply_token
+    const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined)
+    const num = (v: unknown) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : undefined)
+    const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+
+    const updates: Record<string, unknown> = {}
+    const customerName = str(body.customerName, 120)
+    if (customerName) updates.customer_name = customerName
+    const contact1 = str(body.contact1, 30)
+    if (contact1) updates.contact_1 = contact1
+    if (typeof body.contact2 === 'string') updates.contact_2 = body.contact2.trim().slice(0, 30) || null
+    const region = str(body.region, 80)
+    if (region) updates.locality = region
+    if (isDate(body.deliveryDate)) updates.delivery_date = body.deliveryDate
+    const products = str(body.products, 500)
+    if (products) updates.products = products
+    const qty = num(body.qty)
+    if (qty !== undefined) updates.qty = qty
+    const amount = num(body.amount)
+    if (amount !== undefined) updates.amount = amount
+    if (typeof body.notes === 'string') updates.notes = body.notes.trim().slice(0, 1000) || null
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ success: false, error: 'Nothing to update' }, { status: 400, headers: corsHeaders })
+    }
+
+    const { error } = await admin.from('deliveries').update(updates).eq('id', id)
+    if (error) {
+      console.error('Order edit error:', error)
+      return NextResponse.json({ success: false, error: 'Failed to update order' }, { status: 500, headers: corsHeaders })
+    }
+
+    return NextResponse.json({ success: true }, { headers: corsHeaders })
+  } catch (error) {
+    console.error('Extension PATCH error:', error)
+    return NextResponse.json({ success: false, error: 'Failed to update order' }, { status: 500, headers: corsHeaders })
+  }
+}
+
 export async function PUT(request: NextRequest) {
   try {
     const tokenAuth = await getUserFromToken(request)
