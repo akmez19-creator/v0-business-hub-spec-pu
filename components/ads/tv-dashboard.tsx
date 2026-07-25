@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook } from 'lucide-react'
+import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook, Cat } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
+import { TvRulesCat } from '@/components/ads/tv-rules-cat'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -160,6 +161,10 @@ export function TvDashboard({
 
   // Which product row is expanded to show its campaigns + today's edits
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
+
+  // 2030 Vision rulebook: the animated cat anchor explaining every rule and
+  // indicator on the wall (shown on first TV entry, dismissible)
+  const [showRulesCat, setShowRulesCat] = useState(false)
   // Stable signature of today's edited products so the sync effect only
   // refires when the edited set (or their live numbers) actually changes
   const editedSignature = groups
@@ -853,6 +858,18 @@ export function TvDashboard({
             Refresh
           </button>
           <button
+            onClick={() => setShowRulesCat((v) => !v)}
+            className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors ${
+              showRulesCat
+                ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-400'
+                : 'border-border bg-card hover:bg-muted'
+            }`}
+            aria-label="Toggle 2030 Vision rules"
+          >
+            <Cat className="h-4 w-4" />
+            Rules
+          </button>
+          <button
             onClick={onExit}
             className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             aria-label="Exit TV mode"
@@ -862,6 +879,9 @@ export function TvDashboard({
           </button>
         </div>
       </div>
+
+      {/* The 2030 Vision cat anchor presenting the rulebook */}
+      {showRulesCat && <TvRulesCat onClose={() => setShowRulesCat(false)} />}
 
       {/* Cost-per-client zone legend with per-zone product + client tallies */}
       <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
