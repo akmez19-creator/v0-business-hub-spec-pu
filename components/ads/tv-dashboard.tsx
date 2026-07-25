@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, Pause, Play, AlertCircle, Users } from 'lucide-react'
+import { useEffect } from 'react'
+import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike } from 'lucide-react'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -24,6 +24,13 @@ export interface TvGroup {
   campaigns: TvCampaign[]
 }
 
+// A rider with the regions already allocated to them.
+export interface TvRider {
+  id: string
+  name: string
+  regions: string[]
+}
+
 interface TvDashboardProps {
   groups: TvGroup[]
   campaignCount: number
@@ -31,6 +38,7 @@ interface TvDashboardProps {
   activeCampaigns: number
   campaignsWithSpendCount: number
   totalBalanceOwed: number
+  riders: TvRider[]
   showTodayOnly: boolean
   countdown: number
   lastRefresh: Date
@@ -66,7 +74,15 @@ const ZONE_STYLES: Record<Zone, { bg: string; text: string; dot: string; label: 
 const formatRs = (rs: number) => `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
 // Shared dense grid template used by both the header and every row.
-const ROW_GRID = 'grid grid-cols-[2rem_1fr_5.5rem_3.5rem_3rem_5rem] items-center gap-2'
+const ROW_GRID = 'grid grid-cols-[1.6rem_1fr_4.5rem_2.6rem_4.5rem] items-center gap-1.5'
+
+// Row density presets. The tallest zone column decides the density so the whole
+// league fits on the TV screen with NO scrolling.
+const DENSITY = {
+  normal: { row: 'px-2 py-1.5', name: 'text-base', num: 'text-base', cac: 'text-lg', bar: 'h-5' },
+  compact: { row: 'px-2 py-1', name: 'text-sm', num: 'text-sm', cac: 'text-base', bar: 'h-4' },
+  tight: { row: 'px-2 py-0.5', name: 'text-xs', num: 'text-xs', cac: 'text-sm', bar: 'h-3.5' },
+} as const
 
 export function TvDashboard({
   groups,
@@ -75,6 +91,7 @@ export function TvDashboard({
   activeCampaigns,
   campaignsWithSpendCount,
   totalBalanceOwed,
+  riders,
   showTodayOnly,
   countdown,
   lastRefresh,
@@ -86,9 +103,6 @@ export function TvDashboard({
   refreshing,
   onExit,
 }: TvDashboardProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
-
   // Within each zone, rank by cost-per-client (best/lowest first) like a league.
   const byCac = (a: TvGroup, b: TvGroup) => {
     if (a.cac === null && b.cac === null) return b.totalSpend - a.totalSpend
@@ -109,6 +123,14 @@ export function TvDashboard({
     { green: 0, yellow: 0, red: 0, none: 0 } as Record<Zone, number>,
   )
 
+  // Total clients across every product - the headline the team watches.
+  const totalClients = groups.reduce((sum, g) => sum + g.clients, 0)
+
+  // Pick a density so the tallest column fits on screen without scrolling.
+  const maxRows = Math.max(green.length, yellow.length, red.length, 1)
+  const density = maxRows <= 14 ? DENSITY.normal : maxRows <= 24 ? DENSITY.compact : DENSITY.tight
+  const isTight = density === DENSITY.tight
+
   // Exit on Escape for convenience
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -118,74 +140,35 @@ export function TvDashboard({
     return () => window.removeEventListener('keydown', onKey)
   }, [onExit])
 
-  // Gentle auto-scroll loop: pause at top, scroll to bottom, pause, jump back.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el || !autoScroll) return
-    let raf = 0
-    let phase: 'top' | 'scroll' | 'bottom' = 'top'
-    let phaseStart = performance.now()
-    let last = performance.now()
-    const SPEED = 40 // px per second
-    const loop = (now: number) => {
-      const dt = now - last
-      last = now
-      const overflow = el.scrollHeight - el.clientHeight
-      if (overflow > 4) {
-        if (phase === 'top') {
-          if (now - phaseStart > 2500) phase = 'scroll'
-        } else if (phase === 'scroll') {
-          el.scrollTop += (SPEED * dt) / 1000
-          if (el.scrollTop >= overflow - 1) {
-            phase = 'bottom'
-            phaseStart = now
-          }
-        } else if (phase === 'bottom') {
-          if (now - phaseStart > 4000) {
-            el.scrollTop = 0
-            phase = 'top'
-            phaseStart = now
-          }
-        }
-      }
-      raf = requestAnimationFrame(loop)
-    }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
-  }, [autoScroll, groups.length])
-
   const renderRow = (g: TvGroup, rank: number, striped: boolean) => {
     const zone = zoneFor(g.cac)
     const zs = ZONE_STYLES[zone]
     return (
       <div
         key={g.key}
-        className={`${ROW_GRID} border-b border-border/50 px-3 py-1.5 ${striped ? 'bg-card/40' : ''}`}
+        className={`${ROW_GRID} border-b border-border/50 ${density.row} ${striped ? 'bg-card/40' : ''}`}
       >
         {/* Rank + zone-colored accent bar */}
-        <div className="flex items-center gap-2">
-          <span className={`h-6 w-1 rounded-full ${zs.dot}`} />
-          <span className="text-lg font-bold tabular-nums text-muted-foreground">{rank}</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`${density.bar} w-1 rounded-full ${zs.dot}`} />
+          <span className={`${density.num} font-bold tabular-nums text-muted-foreground`}>{rank}</span>
         </div>
 
         {/* Product name */}
-        <span className="truncate text-lg font-semibold" title={g.productName}>
+        <span className={`truncate ${density.name} font-semibold`} title={g.productName}>
           {g.productName}
         </span>
 
         {/* Spend */}
-        <span className="text-right text-lg font-bold tabular-nums text-amber-500">
+        <span className={`text-right ${density.num} font-bold tabular-nums text-amber-500`}>
           {formatSpend(g.totalSpend.toString())}
         </span>
 
         {/* Clients */}
-        <span className="text-right text-lg font-bold tabular-nums">{g.clients.toLocaleString()}</span>
-
-        {/* Campaigns */}
-        <span className="text-right text-lg font-bold tabular-nums text-muted-foreground">{g.campaigns.length}</span>
+        <span className={`text-right ${density.num} font-bold tabular-nums`}>{g.clients.toLocaleString()}</span>
 
         {/* Cost per client - the league metric, colored by zone */}
-        <span className={`text-right text-xl font-bold tabular-nums ${zs.text}`}>
+        <span className={`text-right ${density.cac} font-bold tabular-nums ${zs.text}`}>
           {g.cac !== null ? formatRs(g.cac) : '—'}
         </span>
       </div>
@@ -193,35 +176,35 @@ export function TvDashboard({
   }
 
   // One self-contained standings table per zone (green / yellow / red).
-  const zoneTable = (
-    zone: Exclude<Zone, 'none'>,
-    title: string,
-    rows: TvGroup[],
-  ) => {
+  const zoneTable = (zone: Exclude<Zone, 'none'>, title: string, rows: TvGroup[]) => {
     const zs = ZONE_STYLES[zone]
+    const zoneClients = rows.reduce((s, g) => s + g.clients, 0)
     return (
-      <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border">
-        {/* Zone title bar */}
-        <div className={`flex shrink-0 items-center justify-between gap-2 px-3 py-2 ${zs.bg}`}>
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+        {/* Zone title bar with zone client total */}
+        <div className={`flex shrink-0 items-center justify-between gap-2 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${zs.bg}`}>
           <div className="flex items-center gap-2">
-            <span className={`h-3 w-3 rounded-full ${zs.dot}`} />
-            <span className={`text-base font-bold ${zs.text}`}>{title}</span>
+            <span className={`h-2.5 w-2.5 rounded-full ${zs.dot}`} />
+            <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold ${zs.text}`}>{title}</span>
+            <span className={`${isTight ? 'text-xs' : 'text-sm'} font-semibold tabular-nums text-muted-foreground`}>{rows.length}</span>
           </div>
-          <span className={`rounded-full px-2 py-0.5 text-sm font-bold tabular-nums ${zs.text}`}>{rows.length}</span>
+          <span className={`flex items-center gap-1 ${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums ${zs.text}`}>
+            <Users className="h-3.5 w-3.5" />
+            {zoneClients.toLocaleString()}
+          </span>
         </div>
         {/* Column labels */}
-        <div className={`${ROW_GRID} shrink-0 border-y border-border bg-card px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground`}>
+        <div className={`${ROW_GRID} shrink-0 border-y border-border bg-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground`}>
           <span className="text-center">#</span>
           <span>Product</span>
           <span className="text-right">Spend</span>
           <span className="text-right">Cl</span>
-          <span className="text-right">Cmp</span>
           <span className="text-right">Cost/Cl</span>
         </div>
-        {/* Rows */}
-        <div>
+        {/* Rows - density is chosen so these never need to scroll */}
+        <div className="min-h-0 overflow-hidden">
           {rows.length === 0 ? (
-            <div className="px-3 py-4 text-center text-sm text-muted-foreground">None</div>
+            <div className="px-3 py-3 text-center text-sm text-muted-foreground">None</div>
           ) : (
             rows.map((g, i) => renderRow(g, i + 1, i % 2 === 1))
           )}
@@ -230,8 +213,44 @@ export function TvDashboard({
     )
   }
 
+  // Riders panel: every rider with the regions already allocated to them.
+  const ridersPanel = (
+    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+      <div className={`flex shrink-0 items-center justify-between gap-2 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
+        <div className="flex items-center gap-2">
+          <Bike className="h-4 w-4 text-blue-400" />
+          <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold text-blue-400`}>Riders &amp; Regions</span>
+        </div>
+        <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{riders.length}</span>
+      </div>
+      <div className="grid shrink-0 grid-cols-[7rem_1fr] items-center gap-1.5 border-y border-border bg-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span>Rider</span>
+        <span>Allocated regions</span>
+      </div>
+      <div className="min-h-0 overflow-hidden">
+        {riders.length === 0 ? (
+          <div className="px-3 py-3 text-center text-sm text-muted-foreground">No riders</div>
+        ) : (
+          riders.map((r, i) => (
+            <div
+              key={r.id}
+              className={`grid grid-cols-[7rem_1fr] items-start gap-1.5 border-b border-border/50 px-2 ${density.row} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
+            >
+              <span className={`truncate ${density.name} font-semibold`} title={r.name}>
+                {r.name}
+              </span>
+              <span className={`${isTight ? 'text-xs' : 'text-sm'} leading-snug text-muted-foreground`}>
+                {r.regions.length > 0 ? r.regions.join(', ') : <span className="italic text-muted-foreground/60">None yet</span>}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background px-6 py-4 text-foreground">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background px-6 py-4 text-foreground">
       {/* Header: title + compact inline KPIs + controls, all on one band */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="flex items-baseline gap-3">
@@ -248,6 +267,13 @@ export function TvDashboard({
             <div className="leading-tight">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total Spend</p>
               <p className="text-lg font-bold tabular-nums">{formatSpend(totalSpend.toString())}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-1.5">
+            <Users className="h-4 w-4 text-violet-400" />
+            <div className="leading-tight">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total Clients</p>
+              <p className="text-lg font-bold tabular-nums text-violet-400">{totalClients.toLocaleString()}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
@@ -280,14 +306,6 @@ export function TvDashboard({
             <div className="text-[10px] text-muted-foreground">Last: {formatLastRefresh(lastRefresh)}</div>
           </div>
           <button
-            onClick={() => setAutoScroll((v) => !v)}
-            className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium transition-colors hover:bg-muted"
-            aria-label={autoScroll ? 'Pause auto-scroll' : 'Resume auto-scroll'}
-          >
-            {autoScroll ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            {autoScroll ? 'Pause' : 'Scroll'}
-          </button>
-          <button
             onClick={onRefresh}
             className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium transition-colors hover:bg-muted"
             aria-label="Refresh"
@@ -307,7 +325,7 @@ export function TvDashboard({
       </div>
 
       {/* Cost-per-client zone legend */}
-      <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
+      <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-muted-foreground">Cost / client</span>
         <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-emerald-500">
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -323,17 +341,19 @@ export function TvDashboard({
         </div>
       </div>
 
-      {/* Three separate zone standings tables: green / yellow / red */}
-      <div ref={scrollRef} className="mt-3 flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+      {/* Zone standings (green / yellow / red) + riders panel. Row density is
+          adaptive so the full league fits on screen with no scrolling. */}
+      <div className="mt-2 min-h-0 flex-1 overflow-hidden">
         {groups.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xl text-muted-foreground">
             No products to display
           </div>
         ) : (
-          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+          <div className="grid h-full grid-cols-1 items-start gap-3 lg:grid-cols-[1fr_1fr_1fr_0.9fr]">
             {zoneTable('green', 'Rs 0–50', green)}
             {zoneTable('yellow', 'Rs 51–75', yellow)}
             {zoneTable('red', 'Above Rs 75', red)}
+            {ridersPanel}
           </div>
         )}
       </div>

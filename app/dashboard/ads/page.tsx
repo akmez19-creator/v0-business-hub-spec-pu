@@ -159,6 +159,19 @@ export default function AdsManagerPage() {
   
   // Full-screen TV dashboard mode (separate glanceable wall-display view)
   const [tvMode, setTvMode] = useState(false)
+  // Riders + their allocated regions, shown on the TV mode display
+  const [tvRiders, setTvRiders] = useState<{ id: string; name: string; regions: string[] }[]>([])
+
+  // Load riders/regions when TV mode opens (refreshed on each entry)
+  useEffect(() => {
+    if (!tvMode) return
+    fetch('/api/ads/riders-regions')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.success) setTvRiders(data.riders || [])
+      })
+      .catch(() => {})
+  }, [tvMode])
 
   // Product grouping view (a product can have multiple campaigns)
   const [groupByProduct, setGroupByProduct] = useState(true)
@@ -781,6 +794,7 @@ export default function AdsManagerPage() {
         activeCampaigns={activeCampaigns}
         campaignsWithSpendCount={campaignsWithSpendCount}
         totalBalanceOwed={totalBalanceOwed}
+        riders={tvRiders}
         showTodayOnly={showTodayOnly}
         countdown={countdown}
         lastRefresh={lastRefresh}
