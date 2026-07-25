@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
+import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -309,33 +310,55 @@ export function TvDashboard({
         {riders.length === 0 ? (
           <div className="px-3 py-3 text-center text-sm text-muted-foreground">No regions allocated yet</div>
         ) : (
-          riders.map((r, i) => (
-            <div
-              key={r.id}
-              className={`border-b border-border/50 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className={`truncate ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
-                  {r.name}
-                  {r.isContractor && (
-                    <span className="ml-1.5 rounded bg-blue-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-400">
-                      Contractor
+          riders.map((r, i) => {
+            // Collapse the rider's flat locality list into delivery zones so
+            // it's obvious which zones they cover (a rider usually opts for
+            // one or a few zones).
+            const { zones, unmatched } = groupLocalitiesByZone(r.regions)
+            return (
+              <div
+                key={r.id}
+                className={`border-b border-border/50 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`truncate ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
+                    {r.name}
+                    {r.isContractor && (
+                      <span className="ml-1.5 rounded bg-blue-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-400">
+                        Contractor
+                      </span>
+                    )}
+                  </span>
+                  <span className={`shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400`}>
+                    {r.regions.length}
+                  </span>
+                </div>
+                {/* Zone chips: each shows the zone name + how many of the
+                    rider's localities fall in it. Full locality list on hover. */}
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {zones.map((z) => (
+                    <span
+                      key={z.zone}
+                      title={`${z.zone}: ${z.localities.join(', ')}`}
+                      className={`inline-flex items-center gap-1 rounded border border-blue-500/30 bg-blue-500/10 px-1.5 ${isTight ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-semibold text-blue-300`}
+                    >
+                      {z.zone}
+                      <span className="tabular-nums text-blue-400/70">{z.localities.length}</span>
+                    </span>
+                  ))}
+                  {unmatched.length > 0 && (
+                    <span
+                      title={unmatched.join(', ')}
+                      className={`inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 ${isTight ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-semibold text-muted-foreground`}
+                    >
+                      Other
+                      <span className="tabular-nums">{unmatched.length}</span>
                     </span>
                   )}
-                </span>
-                <span className={`shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400`}>
-                  {r.regions.length}
-                </span>
+                </div>
               </div>
-              <p
-                className={`mt-0.5 ${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
-                style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-                title={r.regions.join(', ')}
-              >
-                {r.regions.join(' · ')}
-              </p>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>
