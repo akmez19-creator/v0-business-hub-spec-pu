@@ -327,9 +327,14 @@ export function TvDashboard({
   const assignedClients = riders.reduce((sum, r) => sum + (r.todayClients || 0), 0)
   const unassignedClients = Math.max(0, ridersTodayTotal - assignedClients)
   const ridersPanel = (
-    // shrink-0: the riders list always shows in FULL; only the edits panel
-    // below flexes and scrolls within the remaining space
-    <div className="flex min-w-0 shrink-0 flex-col overflow-hidden rounded-xl border border-border">
+    // Compact mode (regions hidden): shrink-0, the full rider list always
+    // shows and only the edits panel scrolls. Regions expanded: the list gets
+    // much taller, so the panel flexes and scrolls internally instead.
+    <div
+      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-border ${
+        showRiderRegions ? 'min-h-0 flex-1' : 'shrink-0'
+      }`}
+    >
       <div className={`flex shrink-0 items-center justify-between gap-2 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
         <div className="flex min-w-0 items-center gap-2">
           <Bike className="h-4 w-4 shrink-0 text-blue-400" />
@@ -355,7 +360,7 @@ export function TvDashboard({
           <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{ridersTodayTotal}</span>
         </div>
       </div>
-      <div>
+      <div className={showRiderRegions ? 'min-h-0 overflow-y-auto' : ''}>
         {riders.length === 0 ? (
           <div className="px-3 py-3 text-center text-sm text-muted-foreground">No regions allocated yet</div>
         ) : (

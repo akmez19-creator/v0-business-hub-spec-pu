@@ -95,12 +95,14 @@ function parseActivity(raw: RawActivity): AdActivity | null {
     const extra = JSON.parse(raw.extra_data)
 
     if (label === 'Status') {
-      // On/off flip: OFF counts as a decrease-type action (spend cut to
-      // zero), ON counts as an increase-type action
+      // Only turning OFF is a deliberate spend action (cuts spend to zero,
+      // counts as a decrease). Turn-ONs are routine re-activations - not a
+      // performance action - so they stay neutral: visible in the feed but
+      // never counted as an actioned edit or shown with a green arrow.
       const oldS = runStatus(extra.old_value)
       const newS = runStatus(extra.new_value)
       if (newS === null || newS === oldS) return null
-      direction = newS === 'off' ? 'decrease' : 'increase'
+      direction = newS === 'off' ? 'decrease' : 'other'
       changeSummary = newS === 'off' ? 'Ad turned OFF' : 'Ad turned ON'
     } else {
       // Budget: only real INCREASED / DECREASED values survive
