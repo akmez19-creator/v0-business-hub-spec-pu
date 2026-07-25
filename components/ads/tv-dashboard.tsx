@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike } from 'lucide-react'
+import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge } from 'lucide-react'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -133,6 +133,25 @@ export function TvDashboard({
 
   // Total clients across every product - the headline the team watches.
   const totalClients = groups.reduce((sum, g) => sum + g.clients, 0)
+
+  // Average cost per client (Rs) across ALL products with clients: each cac is
+  // Rs/client, so cac * clients recovers each product's Rs spend and the sum
+  // over total clients is the true weighted average.
+  const rsSpendWithClients = groups.reduce(
+    (sum, g) => (g.cac !== null ? sum + g.cac * g.clients : sum),
+    0,
+  )
+  const avgCac = totalClients > 0 ? rsSpendWithClients / totalClients : null
+  // Health thresholds for the average: green below Rs 75, yellow Rs 76-99,
+  // red at Rs 100 and above.
+  const avgStyle =
+    avgCac === null
+      ? { border: 'border-border', bg: 'bg-muted', text: 'text-muted-foreground' }
+      : avgCac <= 75
+        ? { border: 'border-emerald-500/20', bg: 'bg-emerald-500/10', text: 'text-emerald-500' }
+        : avgCac < 100
+          ? { border: 'border-amber-500/20', bg: 'bg-amber-500/10', text: 'text-amber-500' }
+          : { border: 'border-red-500/20', bg: 'bg-red-500/10', text: 'text-red-500' }
 
   // Split the single ranked list into 3 balanced columns (top-to-bottom, then
   // next column) so every column is full and nothing scrolls or leaves gaps.
@@ -280,6 +299,16 @@ export function TvDashboard({
             <div className="leading-tight">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total Clients</p>
               <p className="text-lg font-bold tabular-nums text-violet-400">{totalClients.toLocaleString()}</p>
+            </div>
+          </div>
+          {/* Average cost per client - green below Rs 75, yellow 76-99, red 100+ */}
+          <div className={`flex items-center gap-2 rounded-lg border ${avgStyle.border} ${avgStyle.bg} px-3 py-1.5`}>
+            <Gauge className={`h-4 w-4 ${avgStyle.text}`} />
+            <div className="leading-tight">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Avg Cost/Client</p>
+              <p className={`text-lg font-bold tabular-nums ${avgStyle.text}`}>
+                {avgCac !== null ? formatRs(avgCac) : '—'}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
