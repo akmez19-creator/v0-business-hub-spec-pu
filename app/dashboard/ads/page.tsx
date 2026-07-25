@@ -723,6 +723,24 @@ export default function AdsManagerPage() {
     return b.totalSpend - a.totalSpend
   })
 
+  // Find a campaign's most recent budget edit. Matches by object id first;
+  // falls back to the edited object's NAME because ad-set-level budget edits
+  // carry the ad set's id (not the campaign id), while FB names ad sets after
+  // their campaign - so "DBM - Pet Comb - 4" still maps back to the campaign.
+  const editForCampaign = (c: Campaign): AdActivity | null => {
+    const byId = lastEditByObject[c.id]
+    if (byId && (byId.direction === 'increase' || byId.direction === 'decrease')) return byId
+    const name = c.name?.trim().toLowerCase()
+    if (!name) return null
+    return (
+      activities.find(
+        (a) =>
+          (a.direction === 'increase' || a.direction === 'decrease') &&
+          a.objectName.trim().toLowerCase() === name,
+      ) ?? null
+    )
+  }
+
   // Budget recommendation for a product group: uses group CAC + the EARLIEST
   // campaign created_time (an established product shouldn't show HOLD just
   // because one new campaign was added).
@@ -736,8 +754,8 @@ export default function AdsManagerPage() {
     // activity feed): if one exists within the watch window, the group shows
     // EDITED (already taken care of) instead of re-recommending.
     const lastEdit = g.campaigns.reduce<AdActivity | null>((latest, c) => {
-      const e = lastEditByObject[c.id]
-      if (!e || (e.direction !== 'increase' && e.direction !== 'decrease')) return latest
+      const e = editForCampaign(c)
+      if (!e) return latest
       return latest === null || e.eventTime > latest.eventTime ? e : latest
     }, null)
     return getRecommendation({
@@ -755,8 +773,8 @@ export default function AdsManagerPage() {
     if (g.key === UNLINKED_KEY) return null
     const todayStr = new Date().toDateString()
     return g.campaigns.reduce<AdActivity | null>((latest, c) => {
-      const e = lastEditByObject[c.id]
-      if (!e || (e.direction !== 'increase' && e.direction !== 'decrease')) return latest
+      const e = editForCampaign(c)
+      if (!e) return latest
       if (new Date(e.eventTime).toDateString() !== todayStr) return latest
       return latest === null || e.eventTime > latest.eventTime ? e : latest
     }, null)
@@ -834,8 +852,8 @@ export default function AdsManagerPage() {
   }
 
   // "Edited 2h ago" indicator for a campaign that appears in the activity feed
-  const renderLastEdit = (campaignId: string) => {
-    const edit = lastEditByObject[campaignId]
+  const renderLastEdit = (campaign: Campaign) => {
+    const edit = editForCampaign(campaign)
     if (!edit) return null
     const color =
       edit.direction === 'increase' ? 'text-emerald-500' : edit.direction === 'decrease' ? 'text-red-500' : 'text-blue-400'
@@ -1502,8 +1520,8 @@ export default function AdsManagerPage() {
                                           createdTime: campaign.created_time,
                                           cac: groupCac(group),
                                           hasSpend: parseFloat(campaign.spend || '0') > 0,
-                                          lastEditTime: lastEditByObject[campaign.id]?.eventTime ?? null,
-                                          lastEditDirection: lastEditByObject[campaign.id]?.direction ?? null,
+                                          lastEditTime: editForCampaign(campaign)?.eventTime ?? null,
+                                          lastEditDirection: editForCampaign(campaign)?.direction ?? null,
                                         }),
                                         true,
                                       )}
@@ -1512,7 +1530,7 @@ export default function AdsManagerPage() {
                                     {campaign.objective?.replace(/_/g, ' ')}
                                   </p>
                                   {renderCampaignBudget(campaign)}
-                                  {renderLastEdit(campaign.id)}
+                                  {renderLastEdit(campaign)}
                                   {renderAdIds(campaign)}
                                 </div>
                                 {isUnlinked ? (
@@ -1579,7 +1597,7 @@ export default function AdsManagerPage() {
                           {campaign.objective?.replace(/_/g, ' ')}
                         </p>
                         {renderCampaignBudget(campaign)}
-                        {renderLastEdit(campaign.id)}
+                        {renderLastEdit(campaign)}
                         {renderAdIds(campaign)}
                       </div>
                     </TableCell>

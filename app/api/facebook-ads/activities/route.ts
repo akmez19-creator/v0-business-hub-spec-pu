@@ -30,19 +30,13 @@ export interface AdActivity {
   direction: 'increase' | 'decrease' | 'status' | 'other'
 }
 
-// Only the edits the team actually acts on: budget changes and on/off flips.
-// Everything else (schedule, bidding, creation, review churn) is noise.
+// ONLY budget changes. The whole purpose of this feed is answering "did the
+// budget get increased or decreased?" - status flips (Active/Inactive), review
+// churn, schedule/bidding changes are all noise and are dropped entirely.
 const RELEVANT_EVENTS: Record<string, string> = {
   update_campaign_budget: 'Budget',
   update_ad_set_budget: 'Budget',
-  update_campaign_run_status: 'Status',
-  update_ad_set_run_status: 'Status',
-  update_ad_run_status: 'Status',
 }
-
-// Facebook's automatic review/delivery states - transitions involving these
-// are system churn (ad review cycling), not human edits. Filtered out.
-const SYSTEM_STATUSES = /pending|in review|processing|scheduled|with issues/i
 
 function formatRs(cents: number): string {
   // FB budget values in extra_data are in account currency minor units (cents)
@@ -55,36 +49,20 @@ function parseActivity(raw: RawActivity): AdActivity | null {
   const label = RELEVANT_EVENTS[eventType]
   if (!label) return null
 
-  // Strict output: only three kinds of entries survive -
-  //   budget INCREASED (with values), budget DECREASED (with values),
-  //   or a real ON/OFF flip. Anything unparseable or system-driven is dropped.
+  // Strict output: only budget INCREASED / DECREASED with real values survive.
   let changeSummary = ''
   let direction: AdActivity['direction'] = 'other'
 
   if (!raw.extra_data) return null
   try {
     const extra = JSON.parse(raw.extra_data)
-    const oldVal = extra.old_value
-    const newVal = extra.new_value
-
-    if (eventType.includes('budget')) {
-      const oldNum = Number(oldVal)
-      const newNum = Number(newVal)
-      // No values or no actual change = noise, drop it
-      if (!isFinite(oldNum) || !isFinite(newNum) || oldNum <= 0 || newNum === oldNum) return null
-      const pct = Math.round(((newNum - oldNum) / oldNum) * 100)
-      direction = newNum > oldNum ? 'increase' : 'decrease'
-      changeSummary = `Budget ${direction === 'increase' ? 'increased' : 'decreased'}: ${formatRs(oldNum)} \u2192 ${formatRs(newNum)} (${pct > 0 ? '+' : ''}${pct}%)`
-    } else {
-      // Status flip: keep only genuine on/off changes by a person. Any
-      // transition touching a system review state (Pending process etc.)
-      // is Facebook churn, not an edit.
-      const from = String(oldVal ?? '')
-      const to = String(newVal ?? '')
-      if (!to || SYSTEM_STATUSES.test(from) || SYSTEM_STATUSES.test(to)) return null
-      direction = 'status'
-      changeSummary = /^active$/i.test(to) ? `Turned ON (${from} \u2192 ${to})` : `Turned OFF (${from} \u2192 ${to})`
-    }
+    const oldNum = Number(extra.old_value)
+    const newNum = Number(extra.new_value)
+    // No values or no actual change = noise, drop it
+    if (!isFinite(oldNum) || !isFinite(newNum) || oldNum <= 0 || newNum === oldNum) return null
+    const pct = Math.round(((newNum - oldNum) / oldNum) * 100)
+    direction = newNum > oldNum ? 'increase' : 'decrease'
+    changeSummary = `Budget ${direction === 'increase' ? 'increased' : 'decreased'}: ${formatRs(oldNum)} \u2192 ${formatRs(newNum)} (${pct > 0 ? '+' : ''}${pct}%)`
   } catch {
     return null
   }
