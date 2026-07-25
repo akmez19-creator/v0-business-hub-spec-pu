@@ -218,13 +218,19 @@ export function TvDashboard({
     return () => window.removeEventListener('keydown', onKey)
   }, [onExit])
 
+  // All of the product's campaigns are switched off (paused/archived): the
+  // ad is no longer spending, which itself is the strongest decrease action
+  const isGroupOff = (g: TvGroup) =>
+    g.campaigns.length > 0 && g.campaigns.every((c) => c.status !== 'ACTIVE')
+
   const renderRow = (g: TvGroup, rank: number, striped: boolean) => {
     const zone = zoneFor(g.cac)
     const zs = ZONE_STYLES[zone]
+    const off = isGroupOff(g)
     return (
       <div
         key={g.key}
-        className={`${ROW_GRID} border-b border-border/50 ${density.row} ${striped ? 'bg-card/40' : ''}`}
+        className={`${ROW_GRID} border-b border-border/50 ${density.row} ${striped ? 'bg-card/40' : ''} ${off ? 'opacity-60' : ''}`}
       >
         {/* Global rank + zone-colored accent bar */}
         <div className="flex items-center gap-1.5">
@@ -232,9 +238,14 @@ export function TvDashboard({
           <span className={`${density.num} font-bold tabular-nums text-muted-foreground`}>{rank}</span>
         </div>
 
-        {/* Product name */}
-        <span className={`truncate ${density.name} font-semibold`} title={g.productName}>
-          {g.productName}
+        {/* Product name + OFF badge when all its campaigns are switched off */}
+        <span className={`flex min-w-0 items-center gap-1 ${density.name} font-semibold`} title={g.productName}>
+          <span className="truncate">{g.productName}</span>
+          {off && (
+            <span className="shrink-0 rounded bg-red-500/20 px-1 py-0 text-[9px] font-bold uppercase tracking-wide text-red-400">
+              Off
+            </span>
+          )}
         </span>
 
         {/* Spend */}
@@ -502,6 +513,8 @@ export function TvDashboard({
   const pendingActions = ranked.filter(
     (g) =>
       !g.todayEdit &&
+      // Turned-off ads are already actioned (spend is zero) - drop them
+      !isGroupOff(g) &&
       (g.recommendation?.action === 'INCREASE' || g.recommendation?.action === 'DECREASE'),
   )
   // Zero-client products that have burned at least Rs 100: the top priority.

@@ -30,12 +30,26 @@ export interface AdActivity {
   direction: 'increase' | 'decrease' | 'status' | 'other'
 }
 
-// ONLY budget changes. The whole purpose of this feed is answering "did the
-// budget get increased or decreased?" - status flips (Active/Inactive), review
-// churn, schedule/bidding changes are all noise and are dropped entirely.
+// Budget changes AND on/off flips. Turning an ad OFF is a real action (it
+// cuts spend to zero, stronger than any budget decrease) so it must show in
+// the feed and count as a taken action; turning ON counts like an increase.
+// Review churn, schedule/bidding changes remain noise and are dropped.
 const RELEVANT_EVENTS: Record<string, string> = {
   update_campaign_budget: 'Budget',
   update_ad_set_budget: 'Budget',
+  update_campaign_run_status: 'Status',
+  update_ad_set_run_status: 'Status',
+  update_ad_run_status: 'Status',
+}
+
+// Normalize FB run-status values (strings like "ACTIVE"/"PAUSED" or numeric
+// codes: 1 = active, 2 = paused/off) into 'on' | 'off' | null
+function runStatus(value: unknown): 'on' | 'off' | null {
+  if (value == null) return null
+  const v = String(typeof value === 'object' ? (value as Record<string, unknown>).new_value ?? (value as Record<string, unknown>).old_value ?? '' : value).toUpperCase()
+  if (v === 'ACTIVE' || v === '1') return 'on'
+  if (v === 'PAUSED' || v === 'INACTIVE' || v === '2' || v === 'OFF') return 'off'
+  return null
 }
 
 // Budget values in extra_data are USD cents; the team thinks in Rs
@@ -73,20 +87,31 @@ function parseActivity(raw: RawActivity): AdActivity | null {
   const label = RELEVANT_EVENTS[eventType]
   if (!label) return null
 
-  // Strict output: only budget INCREASED / DECREASED with real values survive.
   let changeSummary = ''
   let direction: AdActivity['direction'] = 'other'
 
   if (!raw.extra_data) return null
   try {
     const extra = JSON.parse(raw.extra_data)
-    const oldNum = extractAmount(extra.old_value, 'old_value')
-    const newNum = extractAmount(extra.new_value, 'new_value')
-    // No values or no actual change = noise, drop it
-    if (oldNum === null || newNum === null || oldNum <= 0 || newNum === oldNum) return null
-    const pct = Math.round(((newNum - oldNum) / oldNum) * 100)
-    direction = newNum > oldNum ? 'increase' : 'decrease'
-    changeSummary = `Budget ${direction === 'increase' ? 'increased' : 'decreased'}: ${formatRs(oldNum)} \u2192 ${formatRs(newNum)} (${pct > 0 ? '+' : ''}${pct}%)`
+
+    if (label === 'Status') {
+      // On/off flip: OFF counts as a decrease-type action (spend cut to
+      // zero), ON counts as an increase-type action
+      const oldS = runStatus(extra.old_value)
+      const newS = runStatus(extra.new_value)
+      if (newS === null || newS === oldS) return null
+      direction = newS === 'off' ? 'decrease' : 'increase'
+      changeSummary = newS === 'off' ? 'Ad turned OFF' : 'Ad turned ON'
+    } else {
+      // Budget: only real INCREASED / DECREASED values survive
+      const oldNum = extractAmount(extra.old_value, 'old_value')
+      const newNum = extractAmount(extra.new_value, 'new_value')
+      // No values or no actual change = noise, drop it
+      if (oldNum === null || newNum === null || oldNum <= 0 || newNum === oldNum) return null
+      const pct = Math.round(((newNum - oldNum) / oldNum) * 100)
+      direction = newNum > oldNum ? 'increase' : 'decrease'
+      changeSummary = `Budget ${direction === 'increase' ? 'increased' : 'decreased'}: ${formatRs(oldNum)} \u2192 ${formatRs(newNum)} (${pct > 0 ? '+' : ''}${pct}%)`
+    }
   } catch {
     return null
   }
