@@ -24,10 +24,11 @@ export interface TvGroup {
   campaigns: TvCampaign[]
 }
 
-// A rider with the regions already allocated to them.
+// A rider (or contractor fallback) with the regions allocated to them.
 export interface TvRider {
   id: string
   name: string
+  isContractor?: boolean
   regions: string[]
 }
 
@@ -64,20 +65,20 @@ function zoneFor(cac: number | null): Zone {
 }
 
 // Tailwind class bundles per zone (tint, text, dot).
-const ZONE_STYLES: Record<Zone, { bg: string; text: string; dot: string; label: string }> = {
-  green: { bg: 'bg-emerald-500/10', text: 'text-emerald-500', dot: 'bg-emerald-500', label: 'Good' },
-  yellow: { bg: 'bg-amber-500/10', text: 'text-amber-500', dot: 'bg-amber-500', label: 'Watch' },
-  red: { bg: 'bg-red-500/10', text: 'text-red-500', dot: 'bg-red-500', label: 'High' },
-  none: { bg: 'bg-muted', text: 'text-muted-foreground', dot: 'bg-gray-500', label: 'No data' },
+const ZONE_STYLES: Record<Zone, { bg: string; text: string; dot: string }> = {
+  green: { bg: 'bg-emerald-500/10', text: 'text-emerald-500', dot: 'bg-emerald-500' },
+  yellow: { bg: 'bg-amber-500/10', text: 'text-amber-500', dot: 'bg-amber-500' },
+  red: { bg: 'bg-red-500/10', text: 'text-red-500', dot: 'bg-red-500' },
+  none: { bg: 'bg-muted', text: 'text-muted-foreground', dot: 'bg-gray-500' },
 }
 
 const formatRs = (rs: number) => `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
 // Shared dense grid template used by both the header and every row.
-const ROW_GRID = 'grid grid-cols-[1.6rem_1fr_4.5rem_2.6rem_4.5rem] items-center gap-1.5'
+const ROW_GRID = 'grid grid-cols-[1.9rem_1fr_4.5rem_2.6rem_4.5rem] items-center gap-1.5'
 
-// Row density presets. The tallest zone column decides the density so the whole
-// league fits on the TV screen with NO scrolling.
+// Row density presets. The number of rows per column decides the density so
+// the whole league fits on the TV screen with NO scrolling.
 const DENSITY = {
   normal: { row: 'px-2 py-1.5', name: 'text-base', num: 'text-base', cac: 'text-lg', bar: 'h-5' },
   compact: { row: 'px-2 py-1', name: 'text-sm', num: 'text-sm', cac: 'text-base', bar: 'h-4' },
@@ -103,32 +104,46 @@ export function TvDashboard({
   refreshing,
   onExit,
 }: TvDashboardProps) {
-  // Within each zone, rank by cost-per-client (best/lowest first) like a league.
+  // ONE continuous league ranked by cost-per-client (best first), flowing
+  // across balanced columns with no per-zone gaps. Zone colors stay on each
+  // row so green/yellow/red reads at a glance.
   const byCac = (a: TvGroup, b: TvGroup) => {
     if (a.cac === null && b.cac === null) return b.totalSpend - a.totalSpend
     if (a.cac === null) return 1
     if (b.cac === null) return -1
     return a.cac - b.cac
   }
-  const green = groups.filter((g) => zoneFor(g.cac) === 'green').sort(byCac)
-  const yellow = groups.filter((g) => zoneFor(g.cac) === 'yellow').sort(byCac)
-  const red = groups.filter((g) => zoneFor(g.cac) === 'red').sort(byCac)
+  const ranked = [...groups].sort(byCac)
 
-  // Zone tallies for the legend/summary bar
-  const counts = groups.reduce(
+  // Zone tallies + per-zone client totals for the legend chips
+  const zoneStats = groups.reduce(
     (acc, g) => {
-      acc[zoneFor(g.cac)]++
+      const z = zoneFor(g.cac)
+      acc[z].count++
+      acc[z].clients += g.clients
       return acc
     },
-    { green: 0, yellow: 0, red: 0, none: 0 } as Record<Zone, number>,
+    {
+      green: { count: 0, clients: 0 },
+      yellow: { count: 0, clients: 0 },
+      red: { count: 0, clients: 0 },
+      none: { count: 0, clients: 0 },
+    } as Record<Zone, { count: number; clients: number }>,
   )
 
   // Total clients across every product - the headline the team watches.
   const totalClients = groups.reduce((sum, g) => sum + g.clients, 0)
 
-  // Pick a density so the tallest column fits on screen without scrolling.
-  const maxRows = Math.max(green.length, yellow.length, red.length, 1)
-  const density = maxRows <= 14 ? DENSITY.normal : maxRows <= 24 ? DENSITY.compact : DENSITY.tight
+  // Split the single ranked list into 3 balanced columns (top-to-bottom, then
+  // next column) so every column is full and nothing scrolls or leaves gaps.
+  const COLS = 3
+  const perCol = Math.ceil(ranked.length / COLS) || 1
+  const columns: TvGroup[][] = Array.from({ length: COLS }, (_, i) =>
+    ranked.slice(i * perCol, (i + 1) * perCol),
+  )
+
+  // Density adapts to rows per column, not the biggest zone.
+  const density = perCol <= 14 ? DENSITY.normal : perCol <= 24 ? DENSITY.compact : DENSITY.tight
   const isTight = density === DENSITY.tight
 
   // Exit on Escape for convenience
@@ -148,7 +163,7 @@ export function TvDashboard({
         key={g.key}
         className={`${ROW_GRID} border-b border-border/50 ${density.row} ${striped ? 'bg-card/40' : ''}`}
       >
-        {/* Rank + zone-colored accent bar */}
+        {/* Global rank + zone-colored accent bar */}
         <div className="flex items-center gap-1.5">
           <span className={`${density.bar} w-1 rounded-full ${zs.dot}`} />
           <span className={`${density.num} font-bold tabular-nums text-muted-foreground`}>{rank}</span>
@@ -175,45 +190,26 @@ export function TvDashboard({
     )
   }
 
-  // One self-contained standings table per zone (green / yellow / red).
-  const zoneTable = (zone: Exclude<Zone, 'none'>, title: string, rows: TvGroup[]) => {
-    const zs = ZONE_STYLES[zone]
-    const zoneClients = rows.reduce((s, g) => s + g.clients, 0)
-    return (
-      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
-        {/* Zone title bar with zone client total */}
-        <div className={`flex shrink-0 items-center justify-between gap-2 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${zs.bg}`}>
-          <div className="flex items-center gap-2">
-            <span className={`h-2.5 w-2.5 rounded-full ${zs.dot}`} />
-            <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold ${zs.text}`}>{title}</span>
-            <span className={`${isTight ? 'text-xs' : 'text-sm'} font-semibold tabular-nums text-muted-foreground`}>{rows.length}</span>
-          </div>
-          <span className={`flex items-center gap-1 ${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums ${zs.text}`}>
-            <Users className="h-3.5 w-3.5" />
-            {zoneClients.toLocaleString()}
-          </span>
-        </div>
-        {/* Column labels */}
-        <div className={`${ROW_GRID} shrink-0 border-y border-border bg-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground`}>
-          <span className="text-center">#</span>
-          <span>Product</span>
-          <span className="text-right">Spend</span>
-          <span className="text-right">Cl</span>
-          <span className="text-right">Cost/Cl</span>
-        </div>
-        {/* Rows - density is chosen so these never need to scroll */}
-        <div className="min-h-0 overflow-hidden">
-          {rows.length === 0 ? (
-            <div className="px-3 py-3 text-center text-sm text-muted-foreground">None</div>
-          ) : (
-            rows.map((g, i) => renderRow(g, i + 1, i % 2 === 1))
-          )}
-        </div>
+  // A league column: rank continues across columns (1-15, 16-30, ...).
+  const leagueColumn = (rows: TvGroup[], colIndex: number) => (
+    <div key={colIndex} className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+      {/* Column labels */}
+      <div className={`${ROW_GRID} shrink-0 border-b border-border bg-card px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground`}>
+        <span className="text-center">#</span>
+        <span>Product</span>
+        <span className="text-right">Spend</span>
+        <span className="text-right">Cl</span>
+        <span className="text-right">Cost/Cl</span>
       </div>
-    )
-  }
+      <div className="min-h-0 overflow-hidden">
+        {rows.map((g, i) => renderRow(g, colIndex * perCol + i + 1, i % 2 === 1))}
+      </div>
+    </div>
+  )
 
-  // Riders panel: every rider with the regions already allocated to them.
+  // Riders panel: regions allocated per rider (from the localities table).
+  // Compact rows - count badge + region list clamped to a few lines so many
+  // riders fit; unallocated riders are not shown here.
   const ridersPanel = (
     <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
       <div className={`flex shrink-0 items-center justify-between gap-2 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
@@ -223,25 +219,35 @@ export function TvDashboard({
         </div>
         <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{riders.length}</span>
       </div>
-      <div className="grid shrink-0 grid-cols-[7rem_1fr] items-center gap-1.5 border-y border-border bg-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        <span>Rider</span>
-        <span>Allocated regions</span>
-      </div>
       <div className="min-h-0 overflow-hidden">
         {riders.length === 0 ? (
-          <div className="px-3 py-3 text-center text-sm text-muted-foreground">No riders</div>
+          <div className="px-3 py-3 text-center text-sm text-muted-foreground">No regions allocated yet</div>
         ) : (
           riders.map((r, i) => (
             <div
               key={r.id}
-              className={`grid grid-cols-[7rem_1fr] items-start gap-1.5 border-b border-border/50 px-2 ${density.row} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
+              className={`border-b border-border/50 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
             >
-              <span className={`truncate ${density.name} font-semibold`} title={r.name}>
-                {r.name}
-              </span>
-              <span className={`${isTight ? 'text-xs' : 'text-sm'} leading-snug text-muted-foreground`}>
-                {r.regions.length > 0 ? r.regions.join(', ') : <span className="italic text-muted-foreground/60">None yet</span>}
-              </span>
+              <div className="flex items-center justify-between gap-2">
+                <span className={`truncate ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
+                  {r.name}
+                  {r.isContractor && (
+                    <span className="ml-1.5 rounded bg-blue-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-400">
+                      Contractor
+                    </span>
+                  )}
+                </span>
+                <span className={`shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400`}>
+                  {r.regions.length}
+                </span>
+              </div>
+              <p
+                className={`mt-0.5 ${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
+                style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                title={r.regions.join(', ')}
+              >
+                {r.regions.join(' · ')}
+              </p>
             </div>
           ))
         )}
@@ -324,25 +330,37 @@ export function TvDashboard({
         </div>
       </div>
 
-      {/* Cost-per-client zone legend */}
+      {/* Cost-per-client zone legend with per-zone product + client tallies */}
       <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-muted-foreground">Cost / client</span>
         <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-emerald-500">
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-          <span className="text-sm font-semibold">Rs 0–50 · {counts.green}</span>
+          <span className="text-sm font-semibold">Rs 0–50 · {zoneStats.green.count}</span>
+          <span className="flex items-center gap-1 text-sm font-bold tabular-nums">
+            <Users className="h-3 w-3" />
+            {zoneStats.green.clients.toLocaleString()}
+          </span>
         </div>
         <div className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-amber-500">
           <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-          <span className="text-sm font-semibold">Rs 51–75 · {counts.yellow}</span>
+          <span className="text-sm font-semibold">Rs 51–75 · {zoneStats.yellow.count}</span>
+          <span className="flex items-center gap-1 text-sm font-bold tabular-nums">
+            <Users className="h-3 w-3" />
+            {zoneStats.yellow.clients.toLocaleString()}
+          </span>
         </div>
         <div className="flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1 text-red-500">
           <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-          <span className="text-sm font-semibold">Above Rs 75 · {counts.red}</span>
+          <span className="text-sm font-semibold">Above Rs 75 · {zoneStats.red.count}</span>
+          <span className="flex items-center gap-1 text-sm font-bold tabular-nums">
+            <Users className="h-3 w-3" />
+            {zoneStats.red.clients.toLocaleString()}
+          </span>
         </div>
       </div>
 
-      {/* Zone standings (green / yellow / red) + riders panel. Row density is
-          adaptive so the full league fits on screen with no scrolling. */}
+      {/* One continuous ranked league flowing across 3 balanced columns (no
+          per-zone gaps, nothing cut off) + the riders/regions allocation table. */}
       <div className="mt-2 min-h-0 flex-1 overflow-hidden">
         {groups.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xl text-muted-foreground">
@@ -350,9 +368,7 @@ export function TvDashboard({
           </div>
         ) : (
           <div className="grid h-full grid-cols-1 items-start gap-3 lg:grid-cols-[1fr_1fr_1fr_0.9fr]">
-            {zoneTable('green', 'Rs 0–50', green)}
-            {zoneTable('yellow', 'Rs 51–75', yellow)}
-            {zoneTable('red', 'Above Rs 75', red)}
+            {columns.map((rows, i) => leagueColumn(rows, i))}
             {ridersPanel}
           </div>
         )}
