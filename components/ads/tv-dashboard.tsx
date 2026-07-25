@@ -20,6 +20,8 @@ export interface TvGroup {
   key: string
   productName: string
   productPrice?: number
+  // Product photo from the products table (null = no image uploaded)
+  productImage?: string | null
   totalSpend: number // USD
   isUnlinked: boolean
   clients: number
@@ -111,6 +113,9 @@ const ZONE_STYLES: Record<Zone, { bg: string; text: string; dot: string }> = {
 }
 
 const formatRs = (rs: number) => `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+
+// USD -> Rs conversion used across the wall (spend cells, ticker thresholds)
+const USD_TO_RS = 57.5
 
 // Shared dense grid template used by both the header and every row.
 // Last column: budget action badge (increase / decrease / hold).
@@ -337,9 +342,24 @@ export function TvDashboard({
           <span className={`${density.num} font-bold tabular-nums text-muted-foreground`}>{rank}</span>
         </div>
 
-        {/* Product name + OFF badge when all its campaigns are switched off.
-            Click the row to expand its campaigns + today's edit history. */}
-        <span className={`flex min-w-0 items-center gap-1 ${density.name} font-semibold`} title={`${g.productName} \u00b7 ${g.campaigns.length} campaign${g.campaigns.length !== 1 ? 's' : ''} \u00b7 click for details`}>
+        {/* Product photo + name + OFF badge when all its campaigns are
+            switched off. Click the row to expand campaigns + edit history. */}
+        <span className={`flex min-w-0 items-center gap-1.5 ${density.name} font-semibold`} title={`${g.productName} \u00b7 ${g.campaigns.length} campaign${g.campaigns.length !== 1 ? 's' : ''} \u00b7 click for details`}>
+          {g.productImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={g.productImage || '/placeholder.svg'}
+              alt=""
+              loading="lazy"
+              className="h-5 w-5 shrink-0 rounded-md border border-border/60 bg-muted object-cover"
+            />
+          ) : (
+            !g.isUnlinked && (
+              <span aria-hidden className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[9px] font-bold text-muted-foreground">
+                {g.productName.charAt(0)}
+              </span>
+            )
+          )}
           <span className="truncate">{g.productName}</span>
           {g.campaigns.length > 1 && (
             <span className="shrink-0 rounded bg-muted px-1 py-0 text-[9px] font-bold tabular-nums text-muted-foreground">
@@ -353,9 +373,12 @@ export function TvDashboard({
           )}
         </span>
 
-        {/* Spend */}
-        <span className={`text-right ${density.num} font-bold tabular-nums text-amber-500`}>
-          {formatSpend(g.totalSpend.toString())}
+        {/* Spend - digits only (Rs is in the column header) */}
+        <span
+          className={`text-right ${density.num} font-bold tabular-nums text-amber-500`}
+          title={formatSpend(g.totalSpend.toString())}
+        >
+          {(g.totalSpend * USD_TO_RS).toLocaleString('en-US', { maximumFractionDigits: 0 })}
         </span>
 
         {/* Clients */}
@@ -390,7 +413,10 @@ export function TvDashboard({
               </span>
             )
           })()}
-          <span>{g.cac !== null ? formatRs(g.cac) : '—'}</span>
+          {/* Digits only - Rs is in the column header */}
+          <span title={g.cac !== null ? formatRs(g.cac) : undefined}>
+            {g.cac !== null ? g.cac.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}
+          </span>
         </span>
 
         {/* Budget action: ↑ increase (scale), ↓ decrease (burning), ● hold (<4 days),
@@ -491,9 +517,15 @@ export function TvDashboard({
       <div className={`${ROW_GRID} shrink-0 border-b border-border bg-card px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground`}>
         <span className="text-center">#</span>
         <span>Product</span>
-        <span className="text-right">Spend</span>
+        {/* Rs lives HERE once, so cells can be pure digits (no repeated
+            currency prefix distorting the column) */}
+        <span className="text-right">
+          Spend <span className="text-amber-500">Rs</span>
+        </span>
         <span className="text-right">Cl</span>
-        <span className="text-right">Cost/Cl</span>
+        <span className="text-right">
+          Cost <span className="text-foreground/70">Rs</span>
+        </span>
         <span className="text-center" title="Budget action: increase / decrease / hold">Act</span>
       </div>
       <div className="min-h-0 overflow-hidden">
@@ -778,7 +810,6 @@ export function TvDashboard({
   // News ticker: products that STILL need action - recommendation says
   // increase or decrease AND no budget edit has been made today. Once someone
   // edits the budget, the product drops off the ticker automatically.
-  const USD_TO_RS = 57.5
   const NO_CLIENT_MIN_SPEND_RS = 100 // spent this much with zero clients = act now
   const spendRs = (g: TvGroup) => g.totalSpend * USD_TO_RS
 

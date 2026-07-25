@@ -114,6 +114,7 @@ interface Product {
   name: string
   price: number
   quantity: number
+  image_url?: string | null
 }
 
 interface CampaignProductLink {
@@ -739,6 +740,7 @@ export default function AdsManagerPage() {
         productId: product?.id || null,
         productName: product?.name || 'Unlinked Campaigns',
         productPrice: product?.price,
+        productImage: product?.image_url || null,
         campaigns: [],
         totalSpend: 0,
       }
@@ -746,7 +748,7 @@ export default function AdsManagerPage() {
     acc[key].campaigns.push(campaign)
     acc[key].totalSpend += parseFloat(campaign.spend || '0')
     return acc
-  }, {} as Record<string, { key: string; productId: string | null; productName: string; productPrice?: number; campaigns: Campaign[]; totalSpend: number }>)
+  }, {} as Record<string, { key: string; productId: string | null; productName: string; productPrice?: number; productImage?: string | null; campaigns: Campaign[]; totalSpend: number }>)
 
   // Cost per client (CAC) in Rs for a group, or null when it can't be computed
   const groupCac = (g: { productName: string; totalSpend: number }) => {
@@ -939,6 +941,7 @@ export default function AdsManagerPage() {
     key: g.key,
     productName: g.productName,
     productPrice: g.productPrice,
+    productImage: g.productImage ?? null,
     totalSpend: g.totalSpend,
     isUnlinked: g.key === UNLINKED_KEY,
     clients: productClientStats[g.productName]?.clientCount ?? 0,

@@ -13,7 +13,8 @@ export async function GET() {
         id,
         name,
         price,
-        quantity
+        quantity,
+        image_url
       )
     `)
   
