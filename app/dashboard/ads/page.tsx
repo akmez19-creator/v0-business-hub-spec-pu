@@ -141,6 +141,10 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 export default function AdsManagerPage() {
   const [accounts, setAccounts] = useState<AdAccount[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string>('all')
+  // Multi-select account filter (empty = all accounts). Persisted so the
+  // team's usual pair (MBM + Destockage By Moris) is the default view.
+  const [accountFilter, setAccountFilter] = useState<string[]>([])
+  const accountFilterInitRef = useRef(false)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [accountSpends, setAccountSpends] = useState<Record<string, number>>({}) // Account-level spend from FB
   
@@ -318,7 +322,7 @@ export default function AdsManagerPage() {
     if (datePreset === 'custom' && !(dateRange?.from && dateRange?.to)) return
     fetchCampaignsData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccount, datePreset, dateRange])
+  }, [selectedAccount, accountFilter, datePreset, dateRange])
   
   // When switching to today's spend mode, use cached data
   useEffect(() => {
@@ -326,6 +330,42 @@ export default function AdsManagerPage() {
       fetchCachedData()
     }
   }, [showTodayOnly])
+
+  // Initialize the account filter once accounts arrive: restore the saved
+  // selection, or default to the two working accounts (MBM + Destockage By
+  // Moris, excluding read-only duplicates) on first ever load.
+  useEffect(() => {
+    if (accounts.length === 0 || accountFilterInitRef.current) return
+    accountFilterInitRef.current = true
+    try {
+      const saved = localStorage.getItem('ads-account-filter')
+      if (saved) {
+        const ids = (JSON.parse(saved) as string[]).filter((id) => accounts.some((a) => a.id === id))
+        setAccountFilter(ids)
+        return
+      }
+    } catch {
+      // fall through to defaults
+    }
+    const defaults = accounts
+      .filter((a) => {
+        const n = (a.name || '').toLowerCase()
+        if (n.includes('read-only')) return false
+        return n === 'mbm' || n.includes('destockage')
+      })
+      .map((a) => a.id)
+    if (defaults.length > 0) setAccountFilter(defaults)
+  }, [accounts])
+
+  // Toggle one account in the filter (persisted). Empty selection = all.
+  const updateAccountFilter = (ids: string[]) => {
+    setAccountFilter(ids)
+    try {
+      localStorage.setItem('ads-account-filter', JSON.stringify(ids))
+    } catch {
+      // storage unavailable - selection just won't persist
+    }
+  }
 
   // Refresh per-product client counts whenever the set of linked products changes
   useEffect(() => {
@@ -383,7 +423,7 @@ export default function AdsManagerPage() {
     // Historical dates are immutable, so serve a cached result instantly (unless
     // the user explicitly hits Refresh). This avoids the full reload/spinner when
     // flipping between past dates. "Today" is excluded — it always fetches fresh.
-    const cacheKey = `${selectedAccount}|${params}`
+    const cacheKey = `${selectedAccount}|${accountFilter.join(',')}|${params}`
     const canCache = datePreset !== 'today'
     if (!forceRefresh && canCache && historyCacheRef.current[cacheKey]) {
       const cached = historyCacheRef.current[cacheKey]
@@ -399,7 +439,11 @@ export default function AdsManagerPage() {
       const allCampaigns: Campaign[] = []
       const newAccountSpends: Record<string, number> = {}
       
-      for (const account of accounts) {
+      // Only fetch accounts in the filter - no point pulling history for
+      // the 8 accounts the team never uses.
+      const accountsToFetch =
+        accountFilter.length > 0 ? accounts.filter((a) => accountFilter.includes(a.id)) : accounts
+      for (const account of accountsToFetch) {
         try {
           const res = await fetch(`/api/facebook-ads?action=campaigns&accountId=${account.id}&${params}`)
           const data = await res.json()
@@ -665,10 +709,14 @@ export default function AdsManagerPage() {
     )
   }
 
-  // When showTodayOnly is on, the API already returns today's data - filter for spend > 0
-  const filteredCampaigns = showTodayOnly 
-    ? campaigns.filter(c => parseFloat(c.spend || '0') > 0)
-    : campaigns
+  // Account filter first (empty = all), then when showTodayOnly is on,
+  // keep only campaigns that actually have spend today.
+  const inAccountFilter = (c: Campaign) =>
+    accountFilter.length === 0 || accountFilter.includes(c.accountId || '')
+  const accountFiltered = campaigns.filter(inAccountFilter)
+  const filteredCampaigns = showTodayOnly
+    ? accountFiltered.filter(c => parseFloat(c.spend || '0') > 0)
+    : accountFiltered
 
   // Group campaigns by their linked product (a product may have multiple campaigns)
   const UNLINKED_KEY = '__unlinked__'
@@ -904,7 +952,7 @@ export default function AdsManagerPage() {
   
   const activeCampaigns = filteredCampaigns.filter(c => c.status === 'ACTIVE').length
   // Count campaigns that have spend > 0
-  const campaignsWithSpendCount = campaigns.filter(c => parseFloat(c.spend || '0') > 0).length
+  const campaignsWithSpendCount = accountFiltered.filter(c => parseFloat(c.spend || '0') > 0).length
 
   // Calculate spend per account - use account-level spend from FB when available
   const accountSpendMap = filteredCampaigns.reduce((acc, campaign) => {
@@ -1036,22 +1084,58 @@ export default function AdsManagerPage() {
         
         {/* Filters Row */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Account Selector */}
-          <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-            <SelectTrigger className="w-[220px] bg-card">
-              <SelectValue placeholder="Select Account" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">
+          {/* Account Selector: multi-select so the team's usual pair
+              (MBM + DBM) can be the default without hiding the others */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="w-[220px] justify-between bg-card font-normal">
+                <span className="truncate">
+                  {accountFilter.length === 0
+                    ? `All Accounts (${accounts.length})`
+                    : accountFilter.length === 1
+                      ? accounts.find((a) => a.id === accountFilter[0])?.name || accountFilter[0]
+                      : accounts
+                          .filter((a) => accountFilter.includes(a.id))
+                          .map((a) => a.name || a.id)
+                          .join(' + ')}
+                </span>
+                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-[260px] p-1">
+              <button
+                type="button"
+                onClick={() => updateAccountFilter([])}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+              >
+                <span className={`flex h-4 w-4 items-center justify-center rounded border ${accountFilter.length === 0 ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>
+                  {accountFilter.length === 0 && <Check className="h-3 w-3" />}
+                </span>
                 All Accounts ({accounts.length})
-              </SelectItem>
-              {accounts.map((account) => (
-                <SelectItem key={account.id} value={account.id}>
-                  {account.name || account.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              </button>
+              <div className="my-1 h-px bg-border" />
+              {accounts.map((account) => {
+                const checked = accountFilter.includes(account.id)
+                return (
+                  <button
+                    key={account.id}
+                    type="button"
+                    onClick={() =>
+                      updateAccountFilter(
+                        checked ? accountFilter.filter((id) => id !== account.id) : [...accountFilter, account.id],
+                      )
+                    }
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                  >
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>
+                      {checked && <Check className="h-3 w-3" />}
+                    </span>
+                    <span className="truncate">{account.name || account.id}</span>
+                  </button>
+                )
+              })}
+            </PopoverContent>
+          </Popover>
           
           {/* Today's Spend Toggle */}
           <Button
