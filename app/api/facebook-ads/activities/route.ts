@@ -130,21 +130,29 @@ function parseActivity(raw: RawActivity): AdActivity | null {
 }
 
 async function fetchAccountActivities(accessToken: string, accountId: string): Promise<AdActivity[]> {
-  // Last 7 days of activity, most recent first
+  // Last 7 days of activity, most recent first. The raw feed is mostly noise
+  // (review churn, schedule changes) so a single 100-row page can cover just
+  // a couple of hours on a busy day and silently hide the morning's edits -
+  // follow paging.next for up to 5 pages (500 raw events) per account.
   const since = Math.floor(Date.now() / 1000) - 7 * 86400
-  const url =
+  let url: string | null =
     `${FACEBOOK_GRAPH_URL}/${accountId}/activities` +
     `?fields=event_type,event_time,actor_name,object_name,object_id,extra_data` +
     `&since=${since}&limit=100&access_token=${accessToken}`
 
-  const response = await fetch(url)
-  if (!response.ok) {
-    // Non-fatal per account: return empty so one bad account doesn't kill the feed
-    return []
+  const parsed: AdActivity[] = []
+  for (let page = 0; page < 5 && url; page++) {
+    const response = await fetch(url)
+    if (!response.ok) break // Non-fatal: keep whatever pages we already have
+    const data: { data?: RawActivity[]; paging?: { next?: string } } = await response.json()
+    const rows: RawActivity[] = data.data || []
+    for (const row of rows) {
+      const a = parseActivity(row)
+      if (a) parsed.push(a)
+    }
+    url = data.paging?.next || null
   }
-  const data = await response.json()
-  const rows: RawActivity[] = data.data || []
-  return rows.map(parseActivity).filter((a): a is AdActivity => a !== null)
+  return parsed
 }
 
 export async function GET(request: Request) {
@@ -165,18 +173,21 @@ export async function GET(request: Request) {
 
   try {
     const perAccount = await Promise.all(accountIds.map((id) => fetchAccountActivities(accessToken, id)))
-    // Drop duplicate entries (same object + same change) keeping the newest
+    // Drop only TRUE duplicates (same object, same change, same moment - the
+    // API can return an event on multiple pages/accounts). The same edit
+    // repeated at a different time is a real separate action and must stay,
+    // e.g. an ad turned OFF in the morning and again in the evening.
     const seen = new Set<string>()
     const activities = perAccount
       .flat()
       .sort((a, b) => new Date(b.eventTime).getTime() - new Date(a.eventTime).getTime())
       .filter((a) => {
-        const key = `${a.objectId}|${a.changeSummary}`
+        const key = `${a.objectId}|${a.changeSummary}|${a.eventTime}`
         if (seen.has(key)) return false
         seen.add(key)
         return true
       })
-      .slice(0, 50)
+      .slice(0, 200)
 
     // Last edit per object id so each campaign row can show its own indicator
     const lastEditByObject: Record<string, AdActivity> = {}

@@ -710,7 +710,16 @@ export function TvDashboard({
           <History className="h-4 w-4 text-violet-400" />
           <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold text-violet-400`}>Recent Edits</span>
         </div>
-        <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-violet-400`}>{activities.length}</span>
+        {/* Today's edit count front and center; total kept as context */}
+        {(() => {
+          const todayCount = activities.filter((a) => isTodayMu(a.eventTime)).length
+          return (
+            <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-violet-400`}>
+              {todayCount} today
+              <span className="ml-1 font-semibold text-muted-foreground">/ {activities.length}</span>
+            </span>
+          )
+        })()}
       </div>
       <div className="min-h-0 overflow-y-auto">
         {activities.length === 0 ? (
