@@ -148,6 +148,42 @@ export function TvDashboard({
   // Riders panel: show/hide each rider's region coverage (default hidden so
   // every rider fits as a one-line row with today's client count)
   const [showRiderRegions, setShowRiderRegions] = useState(false)
+
+  // Cost/client baselines for products edited today: the FIRST cost seen at
+  // edit time is stored server-side, so the row can show whether the edit is
+  // actually IMPROVING the cost as the day progresses (baseline vs live CAC).
+  const [editBaselines, setEditBaselines] = useState<
+    Record<string, { cac: number | null; spendRs: number; clients: number }>
+  >({})
+  // Stable signature of today's edited products so the sync effect only
+  // refires when the edited set (or their live numbers) actually changes
+  const editedSignature = groups
+    .filter((g) => g.todayEdit && !g.isUnlinked)
+    .map((g) => `${g.key}:${g.cac ?? 'x'}:${g.clients}`)
+    .join('|')
+  useEffect(() => {
+    const edited = groups.filter((g) => g.todayEdit && !g.isUnlinked)
+    if (edited.length === 0) return
+    const entries = edited.map((g) => ({
+      productKey: g.key,
+      cac: g.cac,
+      spendRs: g.totalSpend,
+      clients: g.clients,
+    }))
+    // POST first (server keeps only the first-of-day baseline), then GET
+    fetch('/api/facebook-ads/edit-baselines', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    })
+      .then(() => fetch('/api/facebook-ads/edit-baselines'))
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success) setEditBaselines(data.baselines || {})
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editedSignature])
   // ONE continuous league ranked by cost-per-client (best first), flowing
   // across balanced columns with no per-zone gaps. Zone colors stay on each
   // row so green/yellow/red reads at a glance.
@@ -256,9 +292,36 @@ export function TvDashboard({
         {/* Clients */}
         <span className={`text-right ${density.num} font-bold tabular-nums`}>{g.clients.toLocaleString()}</span>
 
-        {/* Cost per client - the league metric, colored by zone */}
-        <span className={`text-right ${density.cac} font-bold tabular-nums ${zs.text}`}>
-          {g.cac !== null ? formatRs(g.cac) : '—'}
+        {/* Cost per client - the league metric, colored by zone. Rows edited
+            today also show whether the edit is IMPROVING the cost: live CAC
+            vs the cost captured at edit time (green down = cheaper since the
+            edit, red up = more expensive, gray = no change yet). */}
+        <span className={`flex items-center justify-end gap-1 text-right ${density.cac} font-bold tabular-nums ${zs.text}`}>
+          {(() => {
+            if (!g.todayEdit) return null
+            const base = editBaselines[g.key]
+            if (!base || base.cac === null || g.cac === null) return null
+            const pct = base.cac > 0 ? Math.round(((g.cac - base.cac) / base.cac) * 100) : 0
+            const title = `Since today\u2019s edit: ${formatRs(base.cac)} \u2192 ${formatRs(g.cac)} per client`
+            if (pct === 0)
+              return (
+                <span title={title} className="rounded bg-muted px-1 py-0 text-[9px] font-bold leading-tight text-muted-foreground">
+                  =
+                </span>
+              )
+            const improving = pct < 0
+            return (
+              <span
+                title={title}
+                className={`rounded px-1 py-0 text-[9px] font-bold leading-tight ${
+                  improving ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                }`}
+              >
+                {improving ? '\u25bc' : '\u25b2'}{Math.abs(pct)}%
+              </span>
+            )
+          })()}
+          <span>{g.cac !== null ? formatRs(g.cac) : '—'}</span>
         </span>
 
         {/* Budget action: ↑ increase (scale), ↓ decrease (burning), ● hold (<4 days),
