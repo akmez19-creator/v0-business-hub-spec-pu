@@ -842,9 +842,23 @@ export function TvDashboard({
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="flex items-baseline gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Ads Manager</h1>
+          {/* The wall's identity: always-visible glowing VISION 2030 wordmark */}
+          <span className="tv-2030-mark font-mono text-sm font-black uppercase tracking-[0.3em] text-cyan-400">
+            Vision 2030
+          </span>
           <span className="text-sm text-muted-foreground">
             {groups.length} products · {campaignCount} campaigns
           </span>
+          <style>{`
+            .tv-2030-mark {
+              text-shadow: 0 0 10px rgb(34 211 238 / 0.7), 0 0 24px rgb(34 211 238 / 0.35);
+              animation: tv-2030-glow 3.2s ease-in-out infinite;
+            }
+            @keyframes tv-2030-glow {
+              0%, 100% { opacity: 0.8; }
+              50% { opacity: 1; }
+            }
+          `}</style>
         </div>
 
         {/* Inline KPI strip */}
