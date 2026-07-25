@@ -104,12 +104,19 @@ export async function GET() {
     const clientsByAssignee = new Map<string, Set<string>>()
     const allClients = new Set<string>()
     const unassignedByLocality = new Map<string, Set<string>>()
+    // Display name + role for assignees seen ONLY on deliveries (a rider with
+    // clients but no locality allocated, e.g. "Rider x") - they must still
+    // appear as their own row, not vanish into "Unassigned"
+    const deliveryOnlyNames = new Map<string, { name: string; isContractor: boolean }>()
     for (const d of (batchDeliveries || []) as any[]) {
       const locality = String(d.locality || '').trim()
-      const key =
-        assigneeKey(d.rider?.name || null, d.contractor?.name || null) ||
-        localityToKey.get(locality.toLowerCase()) ||
-        null
+      const dRider: string | null = d.rider?.name || null
+      const dContractor: string | null = d.contractor?.name || null
+      const explicitKey = assigneeKey(dRider, dContractor)
+      const key = explicitKey || localityToKey.get(locality.toLowerCase()) || null
+      if (explicitKey && !byAssignee.has(explicitKey) && !deliveryOnlyNames.has(explicitKey)) {
+        deliveryOnlyNames.set(explicitKey, { name: dRider || dContractor!, isContractor: !dRider })
+      }
       const clientKey = (d.contact_1 || d.customer_name || '').trim().toLowerCase()
       if (!clientKey) continue
       allClients.add(clientKey)
@@ -123,6 +130,14 @@ export async function GET() {
       const set = clientsByAssignee.get(key) || new Set<string>()
       set.add(clientKey)
       clientsByAssignee.set(key, set)
+    }
+
+    // Add delivery-only assignees to the panel with NO regions - their rows
+    // show the client count plus a "no regions allocated" flag in the UI
+    for (const [key, info] of deliveryOnlyNames) {
+      if (!byAssignee.has(key)) {
+        byAssignee.set(key, { name: info.name, isContractor: info.isContractor, regions: [] })
+      }
     }
 
     // Unassigned breakdown: locality + client count, biggest first

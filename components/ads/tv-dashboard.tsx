@@ -541,6 +541,13 @@ export function TvDashboard({
                           Contractor
                         </span>
                       )}
+                      {/* Has clients on the batch but zero localities allocated:
+                          flag it so dispatch allocates regions to this rider */}
+                      {r.regions.length === 0 && (
+                        <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500">
+                          No regions
+                        </span>
+                      )}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
                       {/* Today's clients: the number that adds up to the total */}
