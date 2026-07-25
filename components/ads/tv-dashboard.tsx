@@ -548,15 +548,22 @@ export function TvDashboard({
     // shows and only the edits panel scrolls. Regions expanded: the list gets
     // much taller, so the panel flexes and scrolls internally instead.
     <div
-      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-border ${
+      className={`relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-blue-400/25 shadow-[inset_0_0_24px_rgba(59,130,246,0.06)] ${
         showRiderRegions ? 'min-h-0 flex-1' : 'shrink-0'
       }`}
     >
-      <div className={`flex shrink-0 items-center justify-between gap-2 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
+      {/* HUD corner brackets */}
+      <span aria-hidden className="pointer-events-none absolute left-0 top-0 h-3 w-3 rounded-tl-xl border-l-2 border-t-2 border-blue-400/70" />
+      <span aria-hidden className="pointer-events-none absolute right-0 top-0 h-3 w-3 rounded-tr-xl border-r-2 border-t-2 border-blue-400/70" />
+      <span aria-hidden className="pointer-events-none absolute bottom-0 left-0 h-3 w-3 rounded-bl-xl border-b-2 border-l-2 border-blue-400/70" />
+      <span aria-hidden className="pointer-events-none absolute bottom-0 right-0 h-3 w-3 rounded-br-xl border-b-2 border-r-2 border-blue-400/70" />
+      <div className={`flex shrink-0 items-center justify-between gap-2 border-b border-blue-400/20 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
         <div className="flex min-w-0 items-center gap-2">
-          <Bike className="h-4 w-4 shrink-0 text-blue-400" />
-          <span className={`truncate ${isTight ? 'text-sm' : 'text-base'} font-bold text-blue-400`}>Riders</span>
-          <span className={`${isTight ? 'text-[10px]' : 'text-xs'} text-blue-400/70`}>
+          <Bike className="h-4 w-4 shrink-0 text-blue-400 [filter:drop-shadow(0_0_5px_rgba(96,165,250,0.8))]" />
+          <span className={`truncate ${isTight ? 'text-sm' : 'text-base'} font-black uppercase tracking-[0.15em] text-blue-400`}>
+            Riders
+          </span>
+          <span className={`font-mono ${isTight ? 'text-[10px]' : 'text-xs'} uppercase text-blue-400/60`}>
             {ridersBatchDate
               ? `clients \u00b7 ${new Date(ridersBatchDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}`
               : 'clients'}
@@ -574,7 +581,11 @@ export function TvDashboard({
           >
             Regions
           </button>
-          <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{ridersTodayTotal}</span>
+          <span
+            className={`font-mono ${isTight ? 'text-xs' : 'text-sm'} font-black tabular-nums text-blue-300 [text-shadow:0_0_10px_rgba(96,165,250,0.7)]`}
+          >
+            {ridersTodayTotal}
+          </span>
         </div>
       </div>
       <div className={showRiderRegions ? 'min-h-0 overflow-y-auto' : ''}>
@@ -590,32 +601,34 @@ export function TvDashboard({
                   className={`border-b border-border/50 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`truncate ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
-                      {r.name}
-                      {r.isContractor && (
-                        <span className="ml-1.5 rounded bg-blue-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-400">
-                          Contractor
+                    <span className={`flex min-w-0 items-center gap-2 ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
+                      {/* HUD rank index - a slim glowing tick, not a badge */}
+                      <span className="flex shrink-0 items-center gap-1">
+                        <span className="h-3.5 w-0.5 rounded-full bg-blue-400/80 shadow-[0_0_6px_rgba(96,165,250,0.9)]" />
+                        <span className="font-mono text-[9px] font-bold tabular-nums text-blue-400/60">
+                          {String(i + 1).padStart(2, '0')}
                         </span>
-                      )}
+                      </span>
+                      <span className="truncate uppercase tracking-wide">{r.name}</span>
                       {/* Has clients on the batch but zero localities allocated:
                           flag it so dispatch allocates regions to this rider */}
                       {r.regions.length === 0 && (
-                        <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500">
+                        <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500">
                           No regions
                         </span>
                       )}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      {/* Today's clients vs the rider's daily target as a
-                          progress meter: bar fill + % + count. Green when the
-                          target is met, amber when close (80%+), blue while
-                          building - readable across the room on a TV. */}
+                      {/* Today's clients vs the rider's daily target rendered
+                          as a segmented power-cell meter (10 glowing cells):
+                          green = target hit, amber = close (80%+), blue =
+                          charging. Reads instantly across the room. */}
                       {(() => {
                         const target = targetOverrides[r.id] ?? r.target ?? null
                         const clients = r.todayClients || 0
                         if (target === null || target <= 0) {
                           return (
-                            <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400">
+                            <span className="rounded-full bg-blue-500/15 px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums text-blue-400">
                               {clients} cl
                             </span>
                           )
@@ -624,34 +637,49 @@ export function TvDashboard({
                         const pctLabel = Math.round(pct * 100)
                         const toneText =
                           pct >= 1 ? 'text-emerald-400' : pct >= 0.8 ? 'text-amber-500' : 'text-blue-400'
-                        const toneBar =
-                          pct >= 1 ? 'bg-emerald-500' : pct >= 0.8 ? 'bg-amber-500' : 'bg-blue-500'
+                        const cellOn =
+                          pct >= 1
+                            ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.9)]'
+                            : pct >= 0.8
+                              ? 'bg-amber-400 shadow-[0_0_5px_rgba(251,191,36,0.9)]'
+                              : 'bg-blue-400 shadow-[0_0_5px_rgba(96,165,250,0.9)]'
+                        const CELLS = 10
+                        const litCells = Math.min(CELLS, Math.round(pct * CELLS))
+                        // The frontier cell pulses while charging toward target
                         return (
                           <span
                             className="flex items-center gap-1.5"
                             title={`${clients} of ${target} target clients (${pctLabel}%)`}
                           >
-                            {/* % - the instant read */}
-                            <span className={`text-[11px] font-black tabular-nums ${toneText}`}>
-                              {pctLabel}%
+                            {/* % readout - monospace HUD style */}
+                            <span className={`font-mono text-[11px] font-black tabular-nums ${toneText}`}>
+                              {pctLabel}
+                              <span className="opacity-60">%</span>
                             </span>
-                            {/* progress track */}
+                            {/* segmented power cells */}
                             <span
-                              className="relative h-2 w-14 overflow-hidden rounded-full bg-muted"
+                              className="flex items-center gap-[2px]"
                               role="progressbar"
                               aria-valuenow={clients}
                               aria-valuemin={0}
                               aria-valuemax={target}
                               aria-label={`${r.name}: ${clients} of ${target} clients`}
                             >
-                              <span
-                                className={`absolute inset-y-0 left-0 rounded-full ${toneBar} ${pct >= 1 ? 'animate-pulse' : ''}`}
-                                style={{ width: `${Math.min(100, pct * 100)}%` }}
-                              />
+                              {Array.from({ length: CELLS }, (_, c) => (
+                                <span
+                                  key={c}
+                                  className={`h-2.5 w-1 skew-x-[-12deg] rounded-[1px] ${
+                                    c < litCells
+                                      ? `${cellOn} ${c === litCells - 1 && pct < 1 ? 'animate-pulse' : ''}`
+                                      : 'bg-muted'
+                                  }`}
+                                />
+                              ))}
                             </span>
                             {/* raw count */}
-                            <span className={`text-[11px] font-bold tabular-nums ${toneText}`}>
-                              {clients}/{target}
+                            <span className={`font-mono text-[11px] font-bold tabular-nums ${toneText}`}>
+                              {clients}
+                              <span className="opacity-50">/{target}</span>
                             </span>
                           </span>
                         )
