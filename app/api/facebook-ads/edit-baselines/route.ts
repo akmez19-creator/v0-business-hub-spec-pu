@@ -33,17 +33,19 @@ export async function GET() {
 
     const { data, error } = await admin()
       .from('ad_edit_baselines')
-      .select('product_key, baseline_cac, baseline_spend_rs, baseline_clients')
+      .select('product_key, baseline_cac, baseline_spend_rs, baseline_clients, created_at')
       .eq('baseline_date', todayMauritius())
     if (error) throw error
 
-    // product_key -> baseline
-    const baselines: Record<string, { cac: number | null; spendRs: number; clients: number }> = {}
+    // product_key -> baseline (createdAt = when the edit was first detected,
+    // used for "no improvement after 2-3 hours" escalation)
+    const baselines: Record<string, { cac: number | null; spendRs: number; clients: number; createdAt: string }> = {}
     for (const row of data || []) {
       baselines[row.product_key] = {
         cac: row.baseline_cac === null ? null : Number(row.baseline_cac),
         spendRs: Number(row.baseline_spend_rs) || 0,
         clients: row.baseline_clients || 0,
+        createdAt: row.created_at,
       }
     }
     return NextResponse.json({ success: true, baselines })

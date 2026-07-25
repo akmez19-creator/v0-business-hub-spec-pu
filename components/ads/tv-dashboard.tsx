@@ -152,9 +152,14 @@ export function TvDashboard({
   // Cost/client baselines for products edited today: the FIRST cost seen at
   // edit time is stored server-side, so the row can show whether the edit is
   // actually IMPROVING the cost as the day progresses (baseline vs live CAC).
+  // createdAt = when the edit was first detected, used to escalate ads that
+  // show no improvement after 2-3 hours.
   const [editBaselines, setEditBaselines] = useState<
-    Record<string, { cac: number | null; spendRs: number; clients: number }>
+    Record<string, { cac: number | null; spendRs: number; clients: number; createdAt?: string }>
   >({})
+
+  // Which product row is expanded to show its campaigns + today's edits
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
   // Stable signature of today's edited products so the sync effect only
   // refires when the edited set (or their live numbers) actually changes
   const editedSignature = groups
@@ -259,14 +264,51 @@ export function TvDashboard({
   const isGroupOff = (g: TvGroup) =>
     g.campaigns.length > 0 && g.campaigns.every((c) => c.status !== 'ACTIVE')
 
+  // Today's edits (from the FB activity feed) belonging to a product's
+  // campaigns: matched by campaign id first, then by object name containing a
+  // campaign name (ad set edits carry different ids but related names).
+  const todayMu = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const isTodayMu = (t: string) =>
+    new Date(new Date(t).getTime() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10) === todayMu
+  const editsForGroup = (g: TvGroup): TvActivity[] => {
+    const ids = new Set(g.campaigns.map((c) => c.id))
+    const names = g.campaigns.map((c) => c.name.toLowerCase()).filter(Boolean)
+    return activities.filter((a) => {
+      if (!isTodayMu(a.eventTime)) return false
+      if (ids.has(a.objectId)) return true
+      const obj = (a.objectName || '').toLowerCase()
+      return obj.length > 0 && names.some((n) => obj === n || obj.includes(n) || n.includes(obj))
+    })
+  }
+
+  // STALLED EDITS: edited 2+ hours ago but the cost is NOT improving (live
+  // cost/client is the same or worse than at edit time) and still in the red
+  // zone. These escalate to breaking news: decrease again, or turn OFF when
+  // the cost has blown past Rs 150/client.
+  const STALL_HOURS = 2
+  const TURN_OFF_CAC = 150
+  const stalledInfo = (g: TvGroup): { hoursAgo: number; turnOff: boolean } | null => {
+    if (!g.todayEdit || isGroupOff(g)) return null
+    const base = editBaselines[g.key]
+    if (!base?.createdAt || base.cac === null || g.cac === null) return null
+    const hoursAgo = (Date.now() - new Date(base.createdAt).getTime()) / 3_600_000
+    if (hoursAgo < STALL_HOURS) return null
+    const improving = g.cac < base.cac
+    if (improving || g.cac <= YELLOW_MAX) return null
+    return { hoursAgo, turnOff: g.cac > TURN_OFF_CAC }
+  }
+
   const renderRow = (g: TvGroup, rank: number, striped: boolean) => {
     const zone = zoneFor(g.cac)
     const zs = ZONE_STYLES[zone]
     const off = isGroupOff(g)
+    const expanded = expandedProduct === g.key
+    const groupEdits = expanded ? editsForGroup(g) : []
     return (
+      <div key={g.key}>
       <div
-        key={g.key}
-        className={`${ROW_GRID} border-b border-border/50 ${density.row} ${striped ? 'bg-card/40' : ''} ${off ? 'opacity-60' : ''}`}
+        onClick={() => setExpandedProduct(expanded ? null : g.key)}
+        className={`${ROW_GRID} cursor-pointer border-b border-border/50 ${density.row} ${striped ? 'bg-card/40' : ''} ${off ? 'opacity-60' : ''} ${expanded ? 'bg-blue-500/10' : 'hover:bg-muted/40'}`}
       >
         {/* Global rank + zone-colored accent bar */}
         <div className="flex items-center gap-1.5">
@@ -274,9 +316,15 @@ export function TvDashboard({
           <span className={`${density.num} font-bold tabular-nums text-muted-foreground`}>{rank}</span>
         </div>
 
-        {/* Product name + OFF badge when all its campaigns are switched off */}
-        <span className={`flex min-w-0 items-center gap-1 ${density.name} font-semibold`} title={g.productName}>
+        {/* Product name + OFF badge when all its campaigns are switched off.
+            Click the row to expand its campaigns + today's edit history. */}
+        <span className={`flex min-w-0 items-center gap-1 ${density.name} font-semibold`} title={`${g.productName} \u00b7 ${g.campaigns.length} campaign${g.campaigns.length !== 1 ? 's' : ''} \u00b7 click for details`}>
           <span className="truncate">{g.productName}</span>
+          {g.campaigns.length > 1 && (
+            <span className="shrink-0 rounded bg-muted px-1 py-0 text-[9px] font-bold tabular-nums text-muted-foreground">
+              {'\u00d7'}{g.campaigns.length}
+            </span>
+          )}
           {off && (
             <span className="shrink-0 rounded bg-red-500/20 px-1 py-0 text-[9px] font-bold uppercase tracking-wide text-red-400">
               Off
@@ -361,6 +409,56 @@ export function TvDashboard({
             })()
           )}
         </span>
+      </div>
+
+      {/* Expanded details: the ad campaigns this product concerns + every
+          edit they received today, so the wall answers "which campaign is
+          this and what was done to it" without leaving TV mode */}
+      {expanded && (
+        <div className="border-b border-blue-500/30 bg-blue-500/5 px-2 py-1.5">
+          <div className="space-y-0.5">
+            {g.campaigns.map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  <span className={`truncate ${isTight ? 'text-[10px]' : 'text-[11px]'} font-medium`} title={c.name}>
+                    {c.name}
+                  </span>
+                </span>
+                <span className={`shrink-0 ${isTight ? 'text-[10px]' : 'text-[11px]'} font-bold tabular-nums text-amber-500`}>
+                  {formatSpend(c.spend)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {/* Today's edits on those campaigns, newest first */}
+          <div className="mt-1 border-t border-border/40 pt-1">
+            {groupEdits.length === 0 ? (
+              <p className={`${isTight ? 'text-[10px]' : 'text-[11px]'} text-muted-foreground`}>No edits today</p>
+            ) : (
+              <>
+                <p className={`${isTight ? 'text-[10px]' : 'text-[11px]'} font-semibold text-blue-400`}>
+                  Edited {groupEdits.length}{'\u00d7'} today
+                </p>
+                {groupEdits.slice(0, 5).map((a, i) => (
+                  <p
+                    key={`${a.objectId}-${a.eventTime}-${i}`}
+                    className={`truncate ${isTight ? 'text-[10px]' : 'text-[11px]'} ${
+                      a.direction === 'increase' ? 'text-emerald-400' : a.direction === 'decrease' ? 'text-red-400' : 'text-muted-foreground'
+                    }`}
+                    title={`${a.objectName}: ${a.changeSummary}`}
+                  >
+                    <span className="tabular-nums text-muted-foreground">
+                      {new Date(a.eventTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    </span>{' '}
+                    {a.changeSummary}
+                  </p>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
       </div>
     )
   }
@@ -599,6 +697,33 @@ export function TvDashboard({
     .sort((a, b) => (a.cac ?? 0) - (b.cac ?? 0))
   const tickerItems = [...noClient, ...decrease, ...increase]
 
+  // Edited 2+ hours ago but the cost still isn't improving: back in the
+  // news as top priority - either cut deeper or switch it OFF (over Rs 150).
+  const stalledItems = ranked
+    .map((g) => ({ g, info: stalledInfo(g) }))
+    .filter((x): x is { g: TvGroup; info: { hoursAgo: number; turnOff: boolean } } => x.info !== null)
+    .sort((a, b) => (b.g.cac ?? 0) - (a.g.cac ?? 0))
+
+  const stalledTickerItem = ({ g, info }: { g: TvGroup; info: { hoursAgo: number; turnOff: boolean } }, idx: number) => {
+    const base = editBaselines[g.key]
+    return (
+      <span key={`stalled-${g.key}-${idx}`} className="inline-flex items-center gap-2 whitespace-nowrap">
+        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-sm font-bold uppercase ${
+          info.turnOff ? 'bg-red-600 text-white animate-pulse' : 'bg-orange-500/25 text-orange-400'
+        }`}>
+          {info.turnOff ? '\u23fb Turn off' : '\u2193 Decrease more'}
+        </span>
+        <span className="text-base font-bold">{g.productName}</span>
+        <span className="text-base font-bold tabular-nums text-red-500">{formatRs(g.cac as number)}/cl</span>
+        <span className="text-sm tabular-nums text-muted-foreground">
+          no improvement {Math.floor(info.hoursAgo)}h after edit
+          {base?.cac != null ? ` (was ${formatRs(base.cac)})` : ''}
+        </span>
+        <span className="mx-4 text-muted-foreground/40">{'\u25c6'}</span>
+      </span>
+    )
+  }
+
   const tickerItem = (g: TvGroup, idx: number) => {
     const isNoClient = g.cac === null
     const isDecrease = g.recommendation?.action === 'DECREASE'
@@ -818,21 +943,25 @@ export function TvDashboard({
           Content is duplicated for a seamless infinite scroll; speed scales
           with item count so it stays readable. Disappears when nothing is
           pending (everything actioned). */}
-      {tickerItems.length > 0 && (
+      {(tickerItems.length > 0 || stalledItems.length > 0) && (
         <div className="mt-2 flex shrink-0 items-stretch overflow-hidden rounded-lg border border-red-500/30 bg-card">
           <div className="flex shrink-0 items-center gap-1.5 bg-red-600 px-3 text-white">
             <AlertCircle className="h-4 w-4" />
             <span className="text-sm font-bold uppercase tracking-wider">
-              Action needed {'\u00b7'} {tickerItems.length}
+              Action needed {'\u00b7'} {tickerItems.length + stalledItems.length}
             </span>
           </div>
           <div className="relative flex-1 overflow-hidden">
             <div
               className="flex w-max items-center py-1.5"
-              style={{ animation: `tv-ticker ${Math.max(20, tickerItems.length * 5)}s linear infinite` }}
+              style={{ animation: `tv-ticker ${Math.max(20, (tickerItems.length + stalledItems.length) * 5)}s linear infinite` }}
             >
+              {/* Stalled edits lead the news: they were already actioned once
+                  and are STILL burning, so they outrank fresh recommendations */}
+              {stalledItems.map((x, i) => stalledTickerItem(x, i))}
               {tickerItems.map((g, i) => tickerItem(g, i))}
               {/* duplicate for seamless loop */}
+              {stalledItems.map((x, i) => stalledTickerItem(x, i + stalledItems.length))}
               {tickerItems.map((g, i) => tickerItem(g, i + tickerItems.length))}
             </div>
           </div>
