@@ -38,10 +38,34 @@ const RELEVANT_EVENTS: Record<string, string> = {
   update_ad_set_budget: 'Budget',
 }
 
-function formatRs(cents: number): string {
-  // FB budget values in extra_data are in account currency minor units (cents)
-  const rs = cents / 100
-  return `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+// Budget values in extra_data are USD cents; the team thinks in Rs
+const USD_TO_RS = 57.5
+
+function formatRs(usdCents: number): string {
+  const rs = (usdCents / 100) * USD_TO_RS
+  return `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+}
+
+// extra_data for budget events is composite:
+//   { old_value: { type:"payment_amount", old_value: 12000, ... },
+//     new_value: { type:"payment_amount", new_value: 10000, ... } }
+// The amount lives INSIDE the nested object, keyed old_value/new_value again.
+function extractAmount(node: unknown, key: 'old_value' | 'new_value'): number | null {
+  if (node == null) return null
+  if (typeof node === 'number') return node
+  if (typeof node === 'string') {
+    const n = Number(node)
+    return isFinite(n) ? n : null
+  }
+  if (typeof node === 'object') {
+    const inner = (node as Record<string, unknown>)[key]
+    if (typeof inner === 'number') return inner
+    if (typeof inner === 'string') {
+      const n = Number(inner)
+      return isFinite(n) ? n : null
+    }
+  }
+  return null
 }
 
 function parseActivity(raw: RawActivity): AdActivity | null {
@@ -56,10 +80,10 @@ function parseActivity(raw: RawActivity): AdActivity | null {
   if (!raw.extra_data) return null
   try {
     const extra = JSON.parse(raw.extra_data)
-    const oldNum = Number(extra.old_value)
-    const newNum = Number(extra.new_value)
+    const oldNum = extractAmount(extra.old_value, 'old_value')
+    const newNum = extractAmount(extra.new_value, 'new_value')
     // No values or no actual change = noise, drop it
-    if (!isFinite(oldNum) || !isFinite(newNum) || oldNum <= 0 || newNum === oldNum) return null
+    if (oldNum === null || newNum === null || oldNum <= 0 || newNum === oldNum) return null
     const pct = Math.round(((newNum - oldNum) / oldNum) * 100)
     direction = newNum > oldNum ? 'increase' : 'decrease'
     changeSummary = `Budget ${direction === 'increase' ? 'increased' : 'decreased'}: ${formatRs(oldNum)} \u2192 ${formatRs(newNum)} (${pct > 0 ? '+' : ''}${pct}%)`
