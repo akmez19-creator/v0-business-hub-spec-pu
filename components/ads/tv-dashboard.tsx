@@ -25,6 +25,8 @@ export interface TvGroup {
   campaigns: TvCampaign[]
   // Budget action recommendation (HOLD/INCREASE/WATCH/DECREASE), null = n/a
   recommendation?: Recommendation | null
+  // Budget edit that happened TODAY (the action-taken signal), null = none
+  todayEdit?: { direction: 'increase' | 'decrease'; summary: string } | null
 }
 
 // Page-level attribution: clients from each page + est. avg cost/client
@@ -237,20 +239,37 @@ export function TvDashboard({
             improving: green better, amber no change, red still expensive).
             WATCH stays blank so only actionable rows draw the eye. */}
         <span className="flex items-center justify-center">
-          {g.recommendation && g.recommendation.action !== 'WATCH' && (() => {
-            const rec = g.recommendation
-            const s = RECOMMENDATION_STYLES[rec.action]
-            const tint =
-              rec.action === 'EDITED' && rec.verdict ? VERDICT_STYLES[rec.verdict].text : s.text
-            return (
-              <span
-                title={rec.reason}
-                className={`inline-flex h-4 w-4 items-center justify-center rounded ${s.bg} ${tint} text-[11px] font-bold leading-none`}
-              >
-                {s.arrow}
-              </span>
-            )
-          })()}
+          {g.todayEdit ? (
+            // Edited TODAY: the priority signal - pulsing arrow in the edit's
+            // direction so the wall shows at a glance which ads got actioned.
+            <span
+              title={g.todayEdit.summary}
+              className={`inline-flex h-4 w-4 animate-pulse items-center justify-center rounded text-[12px] font-bold leading-none ${
+                g.todayEdit.direction === 'increase'
+                  ? 'bg-emerald-500/25 text-emerald-400'
+                  : 'bg-red-500/25 text-red-400'
+              }`}
+            >
+              {g.todayEdit.direction === 'increase' ? '\u2191' : '\u2193'}
+            </span>
+          ) : (
+            g.recommendation &&
+            g.recommendation.action !== 'WATCH' &&
+            (() => {
+              const rec = g.recommendation
+              const s = RECOMMENDATION_STYLES[rec.action]
+              const tint =
+                rec.action === 'EDITED' && rec.verdict ? VERDICT_STYLES[rec.verdict].text : s.text
+              return (
+                <span
+                  title={rec.reason}
+                  className={`inline-flex h-4 w-4 items-center justify-center rounded ${s.bg} ${tint} text-[11px] font-bold leading-none`}
+                >
+                  {s.arrow}
+                </span>
+              )
+            })()
+          )}
         </span>
       </div>
     )
@@ -413,6 +432,25 @@ export function TvDashboard({
               </p>
             </div>
           </div>
+          {/* How many products got a budget edit TODAY (up / down counts) */}
+          {(() => {
+            const up = groups.filter((g) => g.todayEdit?.direction === 'increase').length
+            const down = groups.filter((g) => g.todayEdit?.direction === 'decrease').length
+            if (up + down === 0) return null
+            return (
+              <div className="flex items-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-1.5">
+                <History className="h-4 w-4 text-blue-400" />
+                <div className="leading-tight">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Edited Today</p>
+                  <p className="text-lg font-bold tabular-nums">
+                    {up > 0 && <span className="text-emerald-500">{'\u2191'}{up}</span>}
+                    {up > 0 && down > 0 && <span className="text-muted-foreground/60"> {'\u00b7'} </span>}
+                    {down > 0 && <span className="text-red-500">{'\u2193'}{down}</span>}
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
           <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
             <TrendingUp className="h-4 w-4 text-emerald-500" />
             <div className="leading-tight">

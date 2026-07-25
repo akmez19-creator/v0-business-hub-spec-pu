@@ -749,6 +749,39 @@ export default function AdsManagerPage() {
     })
   }
 
+  // THE key question per product: did any of its campaigns get a budget
+  // increase or decrease TODAY? Returns the latest such edit, or null.
+  const todaysEdit = (g: { campaigns: Campaign[]; key: string }): AdActivity | null => {
+    if (g.key === UNLINKED_KEY) return null
+    const todayStr = new Date().toDateString()
+    return g.campaigns.reduce<AdActivity | null>((latest, c) => {
+      const e = lastEditByObject[c.id]
+      if (!e || (e.direction !== 'increase' && e.direction !== 'decrease')) return latest
+      if (new Date(e.eventTime).toDateString() !== todayStr) return latest
+      return latest === null || e.eventTime > latest.eventTime ? e : latest
+    }, null)
+  }
+
+  // Prominent chip: "↑ EDITED TODAY" green / "↓ EDITED TODAY" red, with the
+  // Rs change + who did it in the tooltip. This is the action-taken signal.
+  const renderTodayEditChip = (g: { campaigns: Campaign[]; key: string }) => {
+    const e = todaysEdit(g)
+    if (!e) return null
+    const up = e.direction === 'increase'
+    return (
+      <span
+        title={`${e.changeSummary} \u00b7 by ${e.actorName}`}
+        className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide ${
+          up
+            ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-500'
+            : 'border-red-500/40 bg-red-500/15 text-red-500'
+        }`}
+      >
+        {up ? '\u2191' : '\u2193'} Edited today
+      </span>
+    )
+  }
+
   // Page-level stats across ALL products: total clients per page and the
   // estimated avg cost/client per page. Page spend is estimated by splitting
   // each product's spend across its pages proportionally to clients, so the
@@ -836,6 +869,10 @@ export default function AdsManagerPage() {
     cac: groupCac(g),
     campaigns: g.campaigns,
     recommendation: groupRecommendation(g),
+    todayEdit: (() => {
+      const e = todaysEdit(g)
+      return e ? { direction: e.direction as 'increase' | 'decrease', summary: `${e.changeSummary} \u00b7 by ${e.actorName}` } : null
+    })(),
   }))
 
   // Number of columns shown in the campaigns table (drives colSpan for group headers)
@@ -1397,6 +1434,7 @@ export default function AdsManagerPage() {
                                   </Badge>
                                 )
                               })()}
+                              {renderTodayEditChip(group)}
                               {renderRecBadge(groupRecommendation(group))}
                               {/* Which pages this product's clients came from */}
                               {!isUnlinked && (() => {
