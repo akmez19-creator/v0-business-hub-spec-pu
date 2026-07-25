@@ -313,7 +313,9 @@ export function TvDashboard({
   const assignedClients = riders.reduce((sum, r) => sum + (r.todayClients || 0), 0)
   const unassignedClients = Math.max(0, ridersTodayTotal - assignedClients)
   const ridersPanel = (
-    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+    // shrink-0: the riders list always shows in FULL; only the edits panel
+    // below flexes and scrolls within the remaining space
+    <div className="flex min-w-0 shrink-0 flex-col overflow-hidden rounded-xl border border-border">
       <div className={`flex shrink-0 items-center justify-between gap-2 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
         <div className="flex min-w-0 items-center gap-2">
           <Bike className="h-4 w-4 shrink-0 text-blue-400" />
@@ -339,7 +341,7 @@ export function TvDashboard({
           <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{ridersTodayTotal}</span>
         </div>
       </div>
-      <div className="min-h-0 overflow-y-auto">
+      <div>
         {riders.length === 0 ? (
           <div className="px-3 py-3 text-center text-sm text-muted-foreground">No regions allocated yet</div>
         ) : (
@@ -433,7 +435,9 @@ export function TvDashboard({
   // Recent Edits: what got changed on Facebook (budget up/down, status),
   // colored by direction so the wall shows edits at a glance.
   const editsPanel = (
-    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+    // flex-1: takes whatever height remains under the full riders list and
+    // scrolls its content internally
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
       <div className={`flex shrink-0 items-center justify-between gap-2 bg-violet-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
         <div className="flex items-center gap-2">
           <History className="h-4 w-4 text-violet-400" />
