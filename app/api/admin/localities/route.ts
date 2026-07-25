@@ -62,7 +62,18 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: true, updated: data?.length || 0 })
     }
 
-    return NextResponse.json({ error: 'localityId or routeCode required' }, { status: 400 })
+    // Bulk: assign a whole GROUP (delivery zone) of localities in one call
+    if (Array.isArray(body.localityIds) && body.localityIds.length > 0) {
+      const { data, error } = await adminDb
+        .from('localities')
+        .update(update)
+        .in('id', body.localityIds)
+        .select('id')
+      if (error) throw error
+      return NextResponse.json({ success: true, updated: data?.length || 0 })
+    }
+
+    return NextResponse.json({ error: 'localityId, routeCode, or localityIds required' }, { status: 400 })
   } catch (err) {
     console.error('[localities PATCH] error:', err)
     return NextResponse.json({ error: 'Failed to update assignment' }, { status: 500 })
