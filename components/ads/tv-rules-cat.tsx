@@ -1,166 +1,441 @@
 'use client'
 
 import Image from 'next/image'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { X, ChevronLeft, ChevronRight } from 'lucide-react'
 
-// The VISION 2030 cat: the wall's animated mascot and identity. Idle it
-// bobs, tilts, blinks its visor and carries a holographic VISION 2030 tag.
-// CLICK IT and it reacts: backflip pose, ring flare, energy burst and a
-// bigger 2030 hologram - every click cycles a different reaction.
-const REACTIONS = ['tv-cat-react-spin', 'tv-cat-react-jump', 'tv-cat-react-wiggle'] as const
+// ============================================================================
+// VISION 2030 cat: free-standing mascot (no circle), always playing.
+// It cycles through 10 idle animations - batting a ball, juggling, chasing
+// its tail, pouncing, snoozing... Click it to open the full-screen VISION
+// 2030 guide where the cat explains every rule of the wall, navigable with
+// arrows, dots, keyboard (left/right/Esc).
+// ============================================================================
+
+// The idle playlist: each entry = cat animation class + which props to show
+type IdleMode = {
+  cat: string
+  balls?: ('cyan' | 'orange' | 'violet')[]
+  zzz?: boolean
+}
+const IDLE_MODES: IdleMode[] = [
+  { cat: 'cat-anim-bob' }, // 1. gentle float
+  { cat: 'cat-anim-bat', balls: ['cyan'] }, // 2. batting a rolling ball
+  { cat: 'cat-anim-tilt' }, // 3. curious head tilt
+  { cat: 'cat-anim-bounce', balls: ['orange'] }, // 4. hopping with a bouncing ball
+  { cat: 'cat-anim-tailchase' }, // 5. chasing its tail
+  { cat: 'cat-anim-juggle', balls: ['cyan', 'orange', 'violet'] }, // 6. juggling three balls
+  { cat: 'cat-anim-stretch' }, // 7. big cat stretch
+  { cat: 'cat-anim-pounce', balls: ['violet'] }, // 8. pouncing on a ball
+  { cat: 'cat-anim-wiggle' }, // 9. happy wiggle
+  { cat: 'cat-anim-snooze', zzz: true }, // 10. quick snooze
+]
+
+const BALL_COLORS: Record<string, string> = {
+  cyan: 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.9)]',
+  orange: 'bg-orange-400 shadow-[0_0_10px_rgba(251,146,60,0.9)]',
+  violet: 'bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)]',
+}
+
+// The guide slides: the cat explains every rule and indicator on the wall
+const GUIDE_SLIDES: { title: string; icon: string; lines: string[] }[] = [
+  {
+    title: 'Cost / Client Zones',
+    icon: '\u25cf',
+    lines: [
+      'GREEN Rs 0-50: winning ads. Feed them more budget.',
+      'YELLOW Rs 51-75: healthy. Watch them, no panic.',
+      'RED above Rs 75: burning money. Act today.',
+      'Every product row carries its zone color bar on the left.',
+    ],
+  },
+  {
+    title: 'Action Arrows',
+    icon: '\u2191\u2193',
+    lines: [
+      'Green \u2191 = recommendation to INCREASE budget.',
+      'Red \u2193 = recommendation to DECREASE budget.',
+      'Pulsing arrow = already actioned today - the edit was detected.',
+      'A dot \u00b7 means watch: no action needed yet.',
+    ],
+  },
+  {
+    title: 'Edit Improvement Chip',
+    icon: '\u25bc%',
+    lines: [
+      'Products edited today show a chip next to their cost.',
+      'Green \u25bc = cost per client DROPPED since the edit. It is working.',
+      'Red \u25b2 = cost got WORSE since the edit.',
+      'Gray = means no change yet. Hover for the full Rs journey.',
+    ],
+  },
+  {
+    title: 'Breaking News Ticker',
+    icon: '\u25a0',
+    lines: [
+      'The red band at the bottom is the action queue.',
+      'Priority order: stalled edits first, then NO CLIENTS spenders,',
+      'then DECREASE candidates, then INCREASE winners.',
+      'When a product is actioned it leaves the ticker automatically.',
+    ],
+  },
+  {
+    title: 'The 2-Hour Rule',
+    icon: '\u23f1',
+    lines: [
+      'An edit gets 2 hours to prove itself.',
+      'Still not improving after 2h and in the red zone?',
+      'It re-enters breaking news: \u2193 DECREASE MORE.',
+      'Above Rs 150/client: pulsing \u23fb TURN OFF. No mercy.',
+    ],
+  },
+  {
+    title: 'ON / OFF Logic',
+    icon: '\u23fb',
+    lines: [
+      'Turning an ad OFF counts as a real action - spend cut to zero.',
+      'OFF products show a red OFF badge and dim out.',
+      'Turning ON is neutral: visible in Recent Edits, gray, never',
+      'counted as an action and never flashes green.',
+    ],
+  },
+  {
+    title: 'Product Drill-Down',
+    icon: '\u25b8',
+    lines: [
+      'Click any product row to expand it.',
+      'You see every ad campaign it concerns: status, name, spend.',
+      'Below: every edit those campaigns received today, timed.',
+      '\u00d7N chip = the product runs N campaigns.',
+    ],
+  },
+  {
+    title: 'Riders & Targets',
+    icon: '\u2691',
+    lines: [
+      'Each rider shows clients/target: blue on track, amber at 80%,',
+      'green when the target is met.',
+      'Toggle REGIONS for locality coverage and \u2212/+ target controls.',
+      'Targets sync live with the Regions admin module.',
+    ],
+  },
+]
 
 export function TvRulesCat() {
-  const [reaction, setReaction] = useState<string | null>(null)
-  const [burst, setBurst] = useState(0)
-  const clickCount = useRef(0)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [modeIdx, setModeIdx] = useState(0)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [slide, setSlide] = useState(0)
 
-  const onCatClick = useCallback(() => {
-    const next = REACTIONS[clickCount.current % REACTIONS.length]
-    clickCount.current += 1
-    setBurst((b) => b + 1)
-    setReaction(null)
-    // restart the animation even when the same class repeats
-    requestAnimationFrame(() => setReaction(next))
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setReaction(null), 1400)
-  }, [])
+  // Rotate the idle playlist every 4.5s (paused while the guide is open)
+  useEffect(() => {
+    if (guideOpen) return
+    const t = setInterval(() => setModeIdx((i) => (i + 1) % IDLE_MODES.length), 4500)
+    return () => clearInterval(t)
+  }, [guideOpen])
+
+  // Keyboard navigation for the guide: left/right arrows + Escape
+  const onKey = useCallback(
+    (e: KeyboardEvent) => {
+      if (!guideOpen) return
+      if (e.key === 'ArrowRight') setSlide((s) => (s + 1) % GUIDE_SLIDES.length)
+      if (e.key === 'ArrowLeft') setSlide((s) => (s - 1 + GUIDE_SLIDES.length) % GUIDE_SLIDES.length)
+      if (e.key === 'Escape') setGuideOpen(false)
+    },
+    [guideOpen],
+  )
+  useEffect(() => {
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onKey])
+
+  const mode = IDLE_MODES[modeIdx]
+  const current = GUIDE_SLIDES[slide]
 
   return (
-    <div className="fixed bottom-14 right-5 z-[60] select-none">
-      <button
-        type="button"
-        onClick={onCatClick}
-        aria-label="VISION 2030 cat - click me"
-        className="tv-cat-float relative block h-28 w-28 cursor-pointer bg-transparent outline-none"
-      >
-        {/* Pulsing aura (flares on click) */}
-        <div className={`tv-cat-aura absolute inset-1 rounded-full bg-cyan-400/20 blur-xl ${reaction ? 'tv-cat-aura-flare' : ''}`} />
-        {/* Orbiting scan rings (speed up on click) */}
-        <div className={`tv-cat-ring absolute inset-0 rounded-full border border-cyan-400/40 ${reaction ? 'tv-cat-ring-fast' : ''}`} />
-        <div className={`tv-cat-ring-2 absolute -inset-1.5 rounded-full border border-cyan-400/15 ${reaction ? 'tv-cat-ring-fast' : ''}`} />
-        {/* Energy burst particles on click */}
-        {reaction && (
-          <div key={burst} className="pointer-events-none absolute inset-0">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <span
-                key={i}
-                className="tv-cat-spark absolute left-1/2 top-1/2 h-1.5 w-1.5 rounded-full bg-cyan-300"
-                style={{ ['--angle' as string]: `${i * 45}deg` }}
-              />
-            ))}
+    <>
+      {/* ================= The free-standing playing cat ================= */}
+      <div className="fixed bottom-14 right-5 z-[60] select-none">
+        <button
+          type="button"
+          onClick={() => {
+            setSlide(0)
+            setGuideOpen(true)
+          }}
+          aria-label="Open the VISION 2030 guide"
+          className="relative block h-32 w-32 cursor-pointer bg-transparent outline-none"
+          title="Click me - I will explain the wall"
+        >
+          {/* The cat itself: free, no circle, glow via drop-shadow */}
+          <div key={modeIdx} className={`relative h-full w-full ${mode.cat}`}>
+            <Image
+              src="/images/tv-cat-2030.png"
+              alt=""
+              fill
+              sizes="128px"
+              className="object-contain [filter:drop-shadow(0_0_14px_rgba(34,211,238,0.45))]"
+            />
+            {/* Visor light sweep */}
+            <div className="pointer-events-none absolute inset-x-3 top-1/3 h-2 overflow-hidden">
+              <div className="cat-blink-bar absolute -left-full h-full w-full bg-cyan-300/40 blur-sm" />
+            </div>
           </div>
-        )}
-        {/* The cat: idle bob + head tilt, click reaction overrides */}
-        <div className={`relative h-full w-full ${reaction ?? 'tv-cat-tilt'}`}>
-          <Image
-            src="/images/tv-cat-2030.png"
-            alt=""
-            fill
-            sizes="112px"
-            className="rounded-full object-cover"
-          />
-          {/* Visor blink: a sweep of light across the eyes */}
-          <div className="tv-cat-blink absolute inset-0 overflow-hidden rounded-full">
-            <div className="tv-cat-blink-bar absolute -left-full top-1/3 h-2 w-full bg-cyan-300/30 blur-sm" />
-          </div>
+
+          {/* Play balls, per mode */}
+          {mode.balls?.map((color, i) => (
+            <span
+              key={`${modeIdx}-${color}`}
+              className={`cat-ball absolute h-3.5 w-3.5 rounded-full ${BALL_COLORS[color]} ${
+                mode.cat === 'cat-anim-bat'
+                  ? 'cat-ball-roll bottom-0 left-0'
+                  : mode.cat === 'cat-anim-bounce'
+                    ? 'cat-ball-bounce bottom-0 right-1'
+                    : mode.cat === 'cat-anim-pounce'
+                      ? 'cat-ball-flee bottom-0 left-2'
+                      : 'cat-ball-juggle bottom-8 left-1/2'
+              }`}
+              style={{ ['--i' as string]: i, animationDelay: mode.cat === 'cat-anim-juggle' ? `${i * 0.33}s` : undefined }}
+            />
+          ))}
+
+          {/* Snooze Zzz */}
+          {mode.zzz && (
+            <span className="pointer-events-none absolute -top-2 right-2 font-mono text-base font-bold text-cyan-300/90">
+              <span className="cat-zzz inline-block">z</span>
+              <span className="cat-zzz inline-block text-lg" style={{ animationDelay: '0.4s' }}>z</span>
+              <span className="cat-zzz inline-block text-xl" style={{ animationDelay: '0.8s' }}>Z</span>
+            </span>
+          )}
+        </button>
+
+        {/* Breathing ground shadow */}
+        <div className="cat-shadow mx-auto -mt-2 h-2 w-20 rounded-full bg-cyan-950/70 blur-sm" />
+        {/* Identity tag */}
+        <div className="cat-tag mt-1 text-center font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-400/90">
+          Vision 2030
         </div>
-        {/* Click hologram: a big 2030 flash rising from the cat */}
-        {reaction && (
-          <span key={`holo-${burst}`} className="tv-cat-holo pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 font-mono text-xl font-black tracking-[0.3em] text-cyan-300">
-            2030
-          </span>
-        )}
-      </button>
-      {/* Ground shadow that breathes with the bob */}
-      <div className="tv-cat-shadow mx-auto -mt-1 h-2 w-16 rounded-full bg-cyan-950/70 blur-sm" />
-      {/* Permanent holographic identity tag */}
-      <div className="tv-cat-tag mt-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-400/90">
-        Vision 2030
       </div>
 
+      {/* ================= Full-screen VISION 2030 guide ================= */}
+      {guideOpen && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 backdrop-blur-md"
+          onClick={() => setGuideOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="VISION 2030 guide"
+        >
+          {/* Grid backdrop for the 2030 feel */}
+          <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(34,211,238,0.6)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.6)_1px,transparent_1px)] [background-size:48px_48px]" />
+
+          <div
+            className="guide-enter relative mx-4 flex w-full max-w-5xl items-stretch gap-0 overflow-hidden rounded-2xl border border-cyan-400/30 bg-[#070b16] shadow-[0_0_80px_rgba(34,211,238,0.15)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Left: the cat presenting */}
+            <div className="relative hidden w-72 shrink-0 flex-col items-center justify-end overflow-hidden border-r border-cyan-400/15 pb-6 sm:flex">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_70%,rgba(34,211,238,0.14),transparent_65%)]" />
+              <div className="guide-cat relative h-52 w-52">
+                <Image
+                  src="/images/tv-cat-2030.png"
+                  alt="VISION 2030 cat presenter"
+                  fill
+                  sizes="208px"
+                  className="object-contain [filter:drop-shadow(0_0_20px_rgba(34,211,238,0.5))]"
+                />
+              </div>
+              <div className="cat-shadow mx-auto h-2.5 w-28 rounded-full bg-cyan-950 blur-sm" />
+              <p className="cat-tag mt-3 font-mono text-xs font-black uppercase tracking-[0.4em] text-cyan-400">
+                Vision 2030
+              </p>
+              <p className="mt-1 text-[11px] text-cyan-100/50">The wall, explained</p>
+            </div>
+
+            {/* Right: the slide */}
+            <div className="flex min-h-[380px] flex-1 flex-col p-6 sm:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-400/70">
+                    Rule {slide + 1} / {GUIDE_SLIDES.length}
+                  </p>
+                  <h2 key={`t-${slide}`} className="guide-line mt-1 text-balance text-2xl font-black text-cyan-50 sm:text-3xl">
+                    <span className="mr-2 text-cyan-400">{current.icon}</span>
+                    {current.title}
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setGuideOpen(false)}
+                  aria-label="Close guide"
+                  className="rounded-lg border border-cyan-400/20 p-2 text-cyan-200/70 transition-colors hover:bg-cyan-400/10 hover:text-cyan-100"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* The cat's speech: lines animate in one after the other */}
+              <div key={`s-${slide}`} className="mt-6 flex-1 space-y-3">
+                {current.lines.map((line, i) => (
+                  <p
+                    key={i}
+                    className="guide-line flex items-start gap-2.5 text-base leading-relaxed text-cyan-100/90 sm:text-lg"
+                    style={{ animationDelay: `${0.12 + i * 0.14}s` }}
+                  >
+                    <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
+                    {line}
+                  </p>
+                ))}
+              </div>
+
+              {/* Navigation: prev / dots / next - plus arrow keys and Esc */}
+              <div className="mt-6 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setSlide((s) => (s - 1 + GUIDE_SLIDES.length) % GUIDE_SLIDES.length)}
+                  aria-label="Previous rule"
+                  className="flex h-10 items-center gap-1 rounded-lg border border-cyan-400/25 px-3 text-sm font-semibold text-cyan-200 transition-colors hover:bg-cyan-400/10"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Prev
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {GUIDE_SLIDES.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSlide(i)}
+                      aria-label={`Go to rule ${i + 1}`}
+                      className={`h-2 rounded-full transition-all ${
+                        i === slide ? 'w-6 bg-cyan-400' : 'w-2 bg-cyan-400/25 hover:bg-cyan-400/50'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={() => setSlide((s) => (s + 1) % GUIDE_SLIDES.length)}
+                  aria-label="Next rule"
+                  className="flex h-10 items-center gap-1 rounded-lg bg-cyan-400 px-3 text-sm font-bold text-cyan-950 transition-opacity hover:opacity-90"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="mt-3 text-center text-[10px] uppercase tracking-widest text-cyan-100/30">
+                {'\u2190'} {'\u2192'} arrow keys {'\u00b7'} Esc to close
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
-        .tv-cat-float { animation: tv-cat-bob 3.2s ease-in-out infinite; }
-        @keyframes tv-cat-bob {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-9px); }
+        /* ---------- idle playlist (10 animations) ---------- */
+        .cat-anim-bob { animation: catBob 3.2s ease-in-out infinite; }
+        @keyframes catBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+
+        .cat-anim-tilt { animation: catTilt 4.4s ease-in-out infinite; transform-origin: 50% 85%; }
+        @keyframes catTilt {
+          0%, 55%, 100% { transform: rotate(0); }
+          65% { transform: rotate(-8deg); } 78% { transform: rotate(6deg); } 88% { transform: rotate(-3deg); }
         }
-        .tv-cat-tilt { animation: tv-cat-head 7s ease-in-out infinite; transform-origin: 50% 80%; }
-        @keyframes tv-cat-head {
-          0%, 78%, 100% { transform: rotate(0deg); }
-          82% { transform: rotate(-6deg); }
-          88% { transform: rotate(5deg); }
-          93% { transform: rotate(-2deg); }
+
+        .cat-anim-bat { animation: catBat 1.5s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catBat {
+          0%, 100% { transform: rotate(0); }
+          25% { transform: rotate(-7deg) translateX(-4px); }
+          75% { transform: rotate(7deg) translateX(4px); }
         }
-        .tv-cat-aura { animation: tv-cat-pulse 3.2s ease-in-out infinite; }
-        .tv-cat-aura-flare { animation: tv-cat-flare 1.4s ease-out; }
-        @keyframes tv-cat-pulse {
-          0%, 100% { opacity: 0.5; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.12); }
+        .cat-ball-roll { animation: ballRoll 1.5s ease-in-out infinite; }
+        @keyframes ballRoll {
+          0%, 100% { transform: translateX(0) rotate(0); }
+          50% { transform: translateX(104px) rotate(360deg); }
         }
-        @keyframes tv-cat-flare {
-          0% { opacity: 1; transform: scale(1); }
-          30% { opacity: 1; transform: scale(1.7); }
-          100% { opacity: 0.5; transform: scale(1); }
+
+        .cat-anim-bounce { animation: catHop 0.8s cubic-bezier(0.34,1.2,0.64,1) infinite; transform-origin: 50% 100%; }
+        @keyframes catHop {
+          0%, 100% { transform: translateY(0) scale(1); }
+          40% { transform: translateY(-8px) scale(1.03,0.97); }
+          70% { transform: translateY(0) scale(0.97,1.03); }
         }
-        .tv-cat-ring { animation: tv-cat-spin 6s linear infinite; border-style: dashed; }
-        .tv-cat-ring-2 { animation: tv-cat-spin 10s linear infinite reverse; }
-        .tv-cat-ring-fast { animation-duration: 0.7s !important; border-color: rgb(103 232 249 / 0.8) !important; }
-        @keyframes tv-cat-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
+        .cat-ball-bounce { animation: ballBounce 0.8s cubic-bezier(0.5,0,0.7,0.3) infinite alternate; }
+        @keyframes ballBounce {
+          0% { transform: translateY(-56px) scale(1); }
+          90% { transform: translateY(0) scale(1); }
+          100% { transform: translateY(0) scale(1.3,0.7); }
         }
-        .tv-cat-blink-bar { animation: tv-cat-sweep 5s ease-in-out infinite; }
-        @keyframes tv-cat-sweep {
-          0%, 86%, 100% { left: -100%; }
-          92% { left: 100%; }
-        }
-        .tv-cat-shadow { animation: tv-cat-shadow-breathe 3.2s ease-in-out infinite; }
-        @keyframes tv-cat-shadow-breathe {
-          0%, 100% { transform: scaleX(1); opacity: 0.7; }
-          50% { transform: scaleX(0.72); opacity: 0.4; }
-        }
-        .tv-cat-tag { animation: tv-cat-tag-glow 3.2s ease-in-out infinite; text-shadow: 0 0 8px rgb(34 211 238 / 0.6); }
-        @keyframes tv-cat-tag-glow {
-          0%, 100% { opacity: 0.75; }
-          50% { opacity: 1; }
-        }
-        /* Click reactions */
-        .tv-cat-react-spin { animation: tv-cat-spin-once 1.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
-        @keyframes tv-cat-spin-once {
+
+        .cat-anim-tailchase { animation: catTailChase 1.6s cubic-bezier(0.45,0,0.55,1) infinite; }
+        @keyframes catTailChase {
           0% { transform: rotate(0) scale(1); }
-          55% { transform: rotate(360deg) scale(1.18); }
+          50% { transform: rotate(180deg) scale(0.92); }
           100% { transform: rotate(360deg) scale(1); }
         }
-        .tv-cat-react-jump { animation: tv-cat-jump 1.2s cubic-bezier(0.34, 1.56, 0.64, 1); transform-origin: 50% 100%; }
-        @keyframes tv-cat-jump {
-          0% { transform: translateY(0) scale(1); }
-          30% { transform: translateY(-26px) scale(1.12, 0.94); }
-          55% { transform: translateY(0) scale(0.94, 1.08); }
-          72% { transform: translateY(-10px) scale(1.04); }
-          100% { transform: translateY(0) scale(1); }
+
+        .cat-anim-juggle { animation: catJuggleSway 1s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catJuggleSway {
+          0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); }
         }
-        .tv-cat-react-wiggle { animation: tv-cat-wiggle 1.2s ease-in-out; transform-origin: 50% 80%; }
-        @keyframes tv-cat-wiggle {
+        .cat-ball-juggle { animation: ballJuggle 1s ease-in-out infinite; }
+        @keyframes ballJuggle {
+          0%, 100% { transform: translate(-28px, 0); }
+          25% { transform: translate(0, -46px) scale(1.1); }
+          50% { transform: translate(24px, 0); }
+          75% { transform: translate(0, -46px) scale(1.1); }
+        }
+
+        .cat-anim-stretch { animation: catStretch 4.4s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catStretch {
+          0%, 20%, 80%, 100% { transform: scale(1,1); }
+          35% { transform: scale(1.08, 0.82); }
+          55% { transform: scale(0.92, 1.14) translateY(-6px); }
+        }
+
+        .cat-anim-pounce { animation: catPounce 2.2s cubic-bezier(0.34,1.4,0.64,1) infinite; transform-origin: 50% 100%; }
+        @keyframes catPounce {
+          0%, 100% { transform: translate(14px, 0) scale(1); }
+          30% { transform: translate(14px, 0) scale(1.04, 0.88); }
+          50% { transform: translate(-18px, -18px) scale(0.96, 1.1) rotate(-6deg); }
+          65% { transform: translate(-24px, 0) scale(1.06, 0.94); }
+          85% { transform: translate(-6px, 0) scale(1); }
+        }
+        .cat-ball-flee { animation: ballFlee 2.2s ease-in-out infinite; }
+        @keyframes ballFlee {
+          0%, 40% { transform: translateX(0); opacity: 1; }
+          60% { transform: translateX(-34px); opacity: 1; }
+          75%, 100% { transform: translateX(-60px); opacity: 0; }
+        }
+
+        .cat-anim-wiggle { animation: catWiggle 1.1s ease-in-out infinite; transform-origin: 50% 85%; }
+        @keyframes catWiggle {
           0%, 100% { transform: rotate(0); }
-          15% { transform: rotate(-14deg) scale(1.1); }
-          35% { transform: rotate(12deg) scale(1.14); }
-          55% { transform: rotate(-9deg) scale(1.1); }
-          75% { transform: rotate(6deg) scale(1.05); }
+          20% { transform: rotate(-10deg) scale(1.05); }
+          45% { transform: rotate(9deg) scale(1.08); }
+          70% { transform: rotate(-6deg) scale(1.04); }
         }
-        .tv-cat-spark { animation: tv-cat-spark-fly 0.9s ease-out forwards; }
-        @keyframes tv-cat-spark-fly {
-          0% { transform: rotate(var(--angle)) translateX(0); opacity: 1; }
-          100% { transform: rotate(var(--angle)) translateX(64px); opacity: 0; }
+
+        .cat-anim-snooze { animation: catSnooze 3.6s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catSnooze {
+          0%, 100% { transform: scale(1, 1) rotate(2deg); }
+          50% { transform: scale(1.03, 0.96) rotate(2deg); }
         }
-        .tv-cat-holo { animation: tv-cat-holo-rise 1.3s ease-out forwards; }
-        @keyframes tv-cat-holo-rise {
-          0% { opacity: 0; transform: translate(-50%, 14px) scale(0.6); }
-          25% { opacity: 1; transform: translate(-50%, 0) scale(1.15); }
-          60% { opacity: 1; transform: translate(-50%, -6px) scale(1); }
-          100% { opacity: 0; transform: translate(-50%, -22px) scale(1.1); }
+        .cat-zzz { animation: zzzFloat 1.8s ease-out infinite; }
+        @keyframes zzzFloat {
+          0% { opacity: 0; transform: translate(0, 4px) scale(0.7); }
+          30% { opacity: 1; }
+          100% { opacity: 0; transform: translate(10px, -16px) scale(1.15); }
         }
+
+        /* ---------- shared bits ---------- */
+        .cat-blink-bar { animation: catBlinkSweep 5s ease-in-out infinite; }
+        @keyframes catBlinkSweep { 0%, 86%, 100% { left: -100%; } 92% { left: 100%; } }
+        .cat-shadow { animation: catShadow 3.2s ease-in-out infinite; }
+        @keyframes catShadow { 0%,100% { transform: scaleX(1); opacity: 0.7; } 50% { transform: scaleX(0.72); opacity: 0.4; } }
+        .cat-tag { animation: catTagGlow 3.2s ease-in-out infinite; text-shadow: 0 0 8px rgb(34 211 238 / 0.6); }
+        @keyframes catTagGlow { 0%,100% { opacity: 0.75; } 50% { opacity: 1; } }
+
+        /* ---------- guide ---------- */
+        .guide-enter { animation: guideIn 0.35s cubic-bezier(0.16,1,0.3,1); }
+        @keyframes guideIn { from { opacity: 0; transform: translateY(24px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .guide-cat { animation: catBob 3.2s ease-in-out infinite; }
+        .guide-line { animation: lineIn 0.5s cubic-bezier(0.16,1,0.3,1) both; }
+        @keyframes lineIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
       `}</style>
-    </div>
+    </>
   )
 }
