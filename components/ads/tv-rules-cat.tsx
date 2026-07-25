@@ -161,7 +161,7 @@ export function TvRulesCat() {
             setSlide(0)
             setGuideOpen(true)
           }}
-          aria-label="Open the VISION 2030 guide"
+          aria-label="Open the Vision guide"
           className="relative block h-32 w-32 cursor-pointer bg-transparent outline-none"
           title="Click me - I will explain the wall"
         >
@@ -211,7 +211,7 @@ export function TvRulesCat() {
         <div className="cat-shadow mx-auto -mt-2 h-2 w-20 rounded-full bg-cyan-950/70 blur-sm" />
         {/* Identity tag */}
         <div className="cat-tag mt-1 text-center font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-400/90">
-          Vision 2030
+          Vision
         </div>
       </div>
 
@@ -222,7 +222,7 @@ export function TvRulesCat() {
           onClick={() => setGuideOpen(false)}
           role="dialog"
           aria-modal="true"
-          aria-label="VISION 2030 guide"
+          aria-label="Vision guide"
         >
           {/* Grid backdrop for the 2030 feel */}
           <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(34,211,238,0.6)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.6)_1px,transparent_1px)] [background-size:48px_48px]" />
@@ -237,7 +237,7 @@ export function TvRulesCat() {
               <div className="guide-cat relative h-52 w-52">
                 <Image
                   src="/images/tv-cat-2030.png"
-                  alt="VISION 2030 cat presenter"
+                  alt="The Vision cat presenter"
                   fill
                   sizes="208px"
                   className="object-contain [filter:drop-shadow(0_0_20px_rgba(34,211,238,0.5))]"
@@ -245,7 +245,7 @@ export function TvRulesCat() {
               </div>
               <div className="cat-shadow mx-auto h-2.5 w-28 rounded-full bg-cyan-950 blur-sm" />
               <p className="cat-tag mt-3 font-mono text-xs font-black uppercase tracking-[0.4em] text-cyan-400">
-                Vision 2030
+                Vision
               </p>
               <p className="mt-1 text-[11px] text-cyan-100/50">The wall, explained</p>
             </div>
