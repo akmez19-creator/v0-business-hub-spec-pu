@@ -395,6 +395,43 @@ export function TvDashboard({
     </div>
   )
 
+  // News ticker: products that STILL need action - recommendation says
+  // increase or decrease AND no budget edit has been made today. Once someone
+  // edits the budget, the product drops off the ticker automatically.
+  const pendingActions = ranked.filter(
+    (g) =>
+      !g.todayEdit &&
+      (g.recommendation?.action === 'INCREASE' || g.recommendation?.action === 'DECREASE'),
+  )
+  // Worst offenders first: decreases (money burning) before increases
+  const tickerItems = [
+    ...pendingActions.filter((g) => g.recommendation?.action === 'DECREASE').sort((a, b) => (b.cac ?? 0) - (a.cac ?? 0)),
+    ...pendingActions.filter((g) => g.recommendation?.action === 'INCREASE').sort((a, b) => (a.cac ?? 0) - (b.cac ?? 0)),
+  ]
+
+  const tickerItem = (g: TvGroup, idx: number) => {
+    const isDecrease = g.recommendation?.action === 'DECREASE'
+    return (
+      <span key={`${g.key}-${idx}`} className="inline-flex items-center gap-2 whitespace-nowrap">
+        <span
+          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-sm font-bold uppercase ${
+            isDecrease ? 'bg-red-500/20 text-red-500' : 'bg-emerald-500/20 text-emerald-500'
+          }`}
+        >
+          {isDecrease ? '\u2193 Decrease' : '\u2191 Increase'}
+        </span>
+        <span className="text-base font-bold">{g.productName}</span>
+        <span className={`text-base font-bold tabular-nums ${isDecrease ? 'text-red-500' : 'text-emerald-500'}`}>
+          {g.cac !== null ? `${formatRs(g.cac)}/cl` : 'no clients'}
+        </span>
+        <span className="text-sm tabular-nums text-muted-foreground">
+          {formatSpend(g.totalSpend.toString())} spent {'\u00b7'} {g.clients} cl
+        </span>
+        <span className="mx-4 text-muted-foreground/40">{'\u25c6'}</span>
+      </span>
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background px-6 py-4 text-foreground">
       {/* Header: title + compact inline KPIs + controls, all on one band */}
@@ -581,6 +618,32 @@ export function TvDashboard({
           </div>
         )}
       </div>
+
+      {/* Breaking-news ticker: ads NOT yet edited that need a budget action.
+          Content is duplicated for a seamless infinite scroll; speed scales
+          with item count so it stays readable. Disappears when nothing is
+          pending (everything actioned). */}
+      {tickerItems.length > 0 && (
+        <div className="mt-2 flex shrink-0 items-stretch overflow-hidden rounded-lg border border-red-500/30 bg-card">
+          <div className="flex shrink-0 items-center gap-1.5 bg-red-600 px-3 text-white">
+            <AlertCircle className="h-4 w-4" />
+            <span className="text-sm font-bold uppercase tracking-wider">
+              Action needed {'\u00b7'} {tickerItems.length}
+            </span>
+          </div>
+          <div className="relative flex-1 overflow-hidden">
+            <div
+              className="flex w-max items-center py-1.5"
+              style={{ animation: `tv-ticker ${Math.max(20, tickerItems.length * 5)}s linear infinite` }}
+            >
+              {tickerItems.map((g, i) => tickerItem(g, i))}
+              {/* duplicate for seamless loop */}
+              {tickerItems.map((g, i) => tickerItem(g, i + tickerItems.length))}
+            </div>
+          </div>
+          <style>{`@keyframes tv-ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }`}</style>
+        </div>
+      )}
     </div>
   )
 }
