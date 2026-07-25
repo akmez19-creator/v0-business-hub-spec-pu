@@ -398,34 +398,51 @@ export function TvDashboard({
   // News ticker: products that STILL need action - recommendation says
   // increase or decrease AND no budget edit has been made today. Once someone
   // edits the budget, the product drops off the ticker automatically.
+  const USD_TO_RS = 57.5
+  const NO_CLIENT_MIN_SPEND_RS = 100 // spent this much with zero clients = act now
+  const spendRs = (g: TvGroup) => g.totalSpend * USD_TO_RS
+
   const pendingActions = ranked.filter(
     (g) =>
       !g.todayEdit &&
       (g.recommendation?.action === 'INCREASE' || g.recommendation?.action === 'DECREASE'),
   )
-  // Worst offenders first: decreases (money burning) before increases
-  const tickerItems = [
-    ...pendingActions.filter((g) => g.recommendation?.action === 'DECREASE').sort((a, b) => (b.cac ?? 0) - (a.cac ?? 0)),
-    ...pendingActions.filter((g) => g.recommendation?.action === 'INCREASE').sort((a, b) => (a.cac ?? 0) - (b.cac ?? 0)),
-  ]
+  // Zero-client products that have burned at least Rs 100: the top priority.
+  const noClient = pendingActions
+    .filter((g) => g.cac === null && spendRs(g) >= NO_CLIENT_MIN_SPEND_RS)
+    .sort((a, b) => spendRs(b) - spendRs(a))
+  const noClientKeys = new Set(noClient.map((g) => g.key))
+  // Remaining actions: decreases (money burning) first, then increases.
+  const decrease = pendingActions
+    .filter((g) => g.recommendation?.action === 'DECREASE' && g.cac !== null)
+    .sort((a, b) => (b.cac ?? 0) - (a.cac ?? 0))
+  const increase = pendingActions
+    .filter((g) => g.recommendation?.action === 'INCREASE' && !noClientKeys.has(g.key))
+    .sort((a, b) => (a.cac ?? 0) - (b.cac ?? 0))
+  const tickerItems = [...noClient, ...decrease, ...increase]
 
   const tickerItem = (g: TvGroup, idx: number) => {
+    const isNoClient = g.cac === null
     const isDecrease = g.recommendation?.action === 'DECREASE'
+    // Zero-client gets its own alarming label; then decrease/increase
+    const tag = isNoClient ? '\u26a0 No clients' : isDecrease ? '\u2193 Decrease' : '\u2191 Increase'
+    const tagClass = isNoClient
+      ? 'bg-red-600 text-white animate-pulse'
+      : isDecrease
+        ? 'bg-red-500/20 text-red-500'
+        : 'bg-emerald-500/20 text-emerald-500'
+    const valueClass = isNoClient || isDecrease ? 'text-red-500' : 'text-emerald-500'
     return (
       <span key={`${g.key}-${idx}`} className="inline-flex items-center gap-2 whitespace-nowrap">
-        <span
-          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-sm font-bold uppercase ${
-            isDecrease ? 'bg-red-500/20 text-red-500' : 'bg-emerald-500/20 text-emerald-500'
-          }`}
-        >
-          {isDecrease ? '\u2193 Decrease' : '\u2191 Increase'}
+        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-sm font-bold uppercase ${tagClass}`}>
+          {tag}
         </span>
         <span className="text-base font-bold">{g.productName}</span>
-        <span className={`text-base font-bold tabular-nums ${isDecrease ? 'text-red-500' : 'text-emerald-500'}`}>
-          {g.cac !== null ? `${formatRs(g.cac)}/cl` : 'no clients'}
+        <span className={`text-base font-bold tabular-nums ${valueClass}`}>
+          {isNoClient ? `${formatSpend(g.totalSpend.toString())} wasted` : `${formatRs(g.cac as number)}/cl`}
         </span>
         <span className="text-sm tabular-nums text-muted-foreground">
-          {formatSpend(g.totalSpend.toString())} spent {'\u00b7'} {g.clients} cl
+          {isNoClient ? '0 clients' : `${formatSpend(g.totalSpend.toString())} spent \u00b7 ${g.clients} cl`}
         </span>
         <span className="mx-4 text-muted-foreground/40">{'\u25c6'}</span>
       </span>
