@@ -162,9 +162,9 @@ export function TvDashboard({
   // Which product row is expanded to show its campaigns + today's edits
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
-  // 2030 Vision rulebook: the animated cat anchor explaining every rule and
-  // indicator on the wall (shown on first TV entry, dismissible)
-  const [showRulesCat, setShowRulesCat] = useState(false)
+  // 2030 Vision mascot: the animated cat, present by default on the wall
+  // (toggleable from the header)
+  const [showRulesCat, setShowRulesCat] = useState(true)
   // Stable signature of today's edited products so the sync effect only
   // refires when the edited set (or their live numbers) actually changes
   const editedSignature = groups
@@ -864,10 +864,10 @@ export function TvDashboard({
                 ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-400'
                 : 'border-border bg-card hover:bg-muted'
             }`}
-            aria-label="Toggle 2030 Vision rules"
+            aria-label="Toggle 2030 Vision cat"
           >
             <Cat className="h-4 w-4" />
-            Rules
+            2030
           </button>
           <button
             onClick={onExit}
@@ -880,8 +880,8 @@ export function TvDashboard({
         </div>
       </div>
 
-      {/* The 2030 Vision cat anchor presenting the rulebook */}
-      {showRulesCat && <TvRulesCat onClose={() => setShowRulesCat(false)} />}
+      {/* The 2030 Vision animated cat mascot, on the wall by default */}
+      {showRulesCat && <TvRulesCat />}
 
       {/* Cost-per-client zone legend with per-zone product + client tallies */}
       <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
