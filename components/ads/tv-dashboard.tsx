@@ -333,27 +333,31 @@ export function TvDashboard({
                     {r.regions.length}
                   </span>
                 </div>
-                {/* Zone chips: each shows the zone name + how many of the
-                    rider's localities fall in it. Full locality list on hover. */}
-                <div className="mt-1 flex flex-wrap gap-1">
+                {/* Locality names listed per zone: the zone name is a small
+                    prefix, followed by the actual localities the rider covers. */}
+                <div className="mt-0.5 space-y-0.5">
                   {zones.map((z) => (
-                    <span
+                    <p
                       key={z.zone}
+                      className={`${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
+                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                       title={`${z.zone}: ${z.localities.join(', ')}`}
-                      className={`inline-flex items-center gap-1 rounded border border-blue-500/30 bg-blue-500/10 px-1.5 ${isTight ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-semibold text-blue-300`}
                     >
-                      {z.zone}
-                      <span className="tabular-nums text-blue-400/70">{z.localities.length}</span>
-                    </span>
+                      <span className="font-bold uppercase text-blue-400">{z.zone}</span>
+                      <span className="text-blue-400/60"> {z.localities.length} {'\u00b7'} </span>
+                      {z.localities.join(' \u00b7 ')}
+                    </p>
                   ))}
                   {unmatched.length > 0 && (
-                    <span
+                    <p
+                      className={`${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
+                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                       title={unmatched.join(', ')}
-                      className={`inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 ${isTight ? 'py-0 text-[10px]' : 'py-0.5 text-[11px]'} font-semibold text-muted-foreground`}
                     >
-                      Other
-                      <span className="tabular-nums">{unmatched.length}</span>
-                    </span>
+                      <span className="font-bold uppercase text-muted-foreground/70">Other</span>
+                      <span className="text-muted-foreground/50"> {unmatched.length} {'\u00b7'} </span>
+                      {unmatched.join(' \u00b7 ')}
+                    </p>
                   )}
                 </div>
               </div>
