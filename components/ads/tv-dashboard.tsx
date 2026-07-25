@@ -57,6 +57,8 @@ export interface TvRider {
   isContractor?: boolean
   regions: string[]
   todayClients?: number
+  // Daily client target (null = none configured)
+  target?: number | null
 }
 
 interface TvDashboardProps {
@@ -149,6 +151,20 @@ export function TvDashboard({
   // Riders panel: show/hide each rider's region coverage (default hidden so
   // every rider fits as a one-line row with today's client count)
   const [showRiderRegions, setShowRiderRegions] = useState(false)
+
+  // Rider daily targets adjusted from TV mode: optimistic local override,
+  // synced to the riders table via PATCH so Regions admin sees the same value
+  const [targetOverrides, setTargetOverrides] = useState<Record<string, number>>({})
+  const adjustTarget = (r: TvRider, delta: number) => {
+    const current = targetOverrides[r.id] ?? r.target ?? 0
+    const next = Math.max(0, current + delta)
+    setTargetOverrides((prev) => ({ ...prev, [r.id]: next }))
+    fetch('/api/ads/rider-targets', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ riderName: r.name, target: next }),
+    }).catch(() => {})
+  }
 
   // Cost/client baselines for products edited today: the FIRST cost seen at
   // edit time is stored server-side, so the row can show whether the edit is
@@ -555,10 +571,57 @@ export function TvDashboard({
                       )}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      {/* Today's clients: the number that adds up to the total */}
-                      <span className={`rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400`}>
-                        {r.todayClients || 0} cl
-                      </span>
+                      {/* Today's clients vs the rider's daily target: green
+                          when met, amber when close (80%+), blue otherwise */}
+                      {(() => {
+                        const target = targetOverrides[r.id] ?? r.target ?? null
+                        const clients = r.todayClients || 0
+                        if (target === null || target <= 0) {
+                          return (
+                            <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400">
+                              {clients} cl
+                            </span>
+                          )
+                        }
+                        const pct = clients / target
+                        const tone =
+                          pct >= 1
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : pct >= 0.8
+                              ? 'bg-amber-500/15 text-amber-500'
+                              : 'bg-blue-500/15 text-blue-400'
+                        return (
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${tone}`}
+                            title={`${clients} of ${target} target clients (${Math.round(pct * 100)}%)`}
+                          >
+                            {clients}/{target}
+                          </span>
+                        )
+                      })()}
+                      {/* Target quick-adjust (admin action, synced to DB and
+                          the Regions module). Visible with the Regions toggle
+                          so the default wall stays clean. */}
+                      {showRiderRegions && (r.target != null || targetOverrides[r.id] != null) && (
+                        <span className="flex items-center gap-0.5">
+                          <button
+                            onClick={() => adjustTarget(r, -7)}
+                            className="flex h-4 w-4 items-center justify-center rounded bg-red-500/15 text-[11px] font-bold leading-none text-red-400 hover:bg-red-500/30"
+                            aria-label={`Decrease ${r.name} target by 7`}
+                            title="Decrease target by 7"
+                          >
+                            {'\u2212'}
+                          </button>
+                          <button
+                            onClick={() => adjustTarget(r, 7)}
+                            className="flex h-4 w-4 items-center justify-center rounded bg-emerald-500/15 text-[11px] font-bold leading-none text-emerald-400 hover:bg-emerald-500/30"
+                            aria-label={`Increase ${r.name} target by 7`}
+                            title="Increase target by 7"
+                          >
+                            +
+                          </button>
+                        </span>
+                      )}
                       {showRiderRegions && (
                         <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
                           {r.regions.length} loc

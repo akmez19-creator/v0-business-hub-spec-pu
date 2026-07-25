@@ -38,6 +38,7 @@ interface PersonOption {
   id: string
   name: string
   contractor_id?: string
+  daily_target?: number | null
 }
 
 interface PlacementPlan {
@@ -76,6 +77,29 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
   const [plansOpen, setPlansOpen] = useState(false)
   const [planName, setPlanName] = useState('')
   const [planBusy, setPlanBusy] = useState<string | null>(null) // 'save' | planId
+  // Rider daily client targets (synced with TV mode via /api/ads/rider-targets)
+  const [targetsOpen, setTargetsOpen] = useState(false)
+  const [targets, setTargets] = useState<Record<string, number>>(() =>
+    Object.fromEntries(riders.filter(r => r.daily_target != null).map(r => [r.id, r.daily_target as number]))
+  )
+  const [targetBusy, setTargetBusy] = useState<string | null>(null)
+
+  const saveTarget = async (rider: PersonOption, value: number) => {
+    const next = Math.max(0, Math.round(value))
+    setTargets(prev => ({ ...prev, [rider.id]: next }))
+    setTargetBusy(rider.id)
+    try {
+      await fetch('/api/ads/rider-targets', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ riderName: rider.name, target: next }),
+      })
+    } catch {
+      // keep optimistic value; next page load shows the persisted truth
+    } finally {
+      setTargetBusy(null)
+    }
+  }
 
   // Delivery GROUP (zone) for a locality, e.g. 'PORT LOUIS', 'EAST - 1'
   const zoneOf = (l: Locality) => zoneForLocality(l.name) ?? 'UNGROUPED'
@@ -465,6 +489,61 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
               <p className="text-[10px] text-muted-foreground/70">
                 Applying a plan replaces ALL current assignments with the saved layout. You can then tweak individual groups or localities below.
               </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Rider daily client targets - the same numbers the Ads Manager TV
+          mode shows next to each rider (clients/target), editable here and
+          adjustable from TV mode; both write to riders.daily_target */}
+      {canEdit && (
+        <div className="rounded-xl border border-border/60 overflow-hidden">
+          <button
+            onClick={() => setTargetsOpen(v => !v)}
+            className="flex w-full items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <Bike className="w-4 h-4 text-primary" />
+            <span className="text-xs font-semibold">Rider Targets</span>
+            <span className="text-[10px] text-muted-foreground">daily clients per rider {'\u00b7'} shown live on the ads TV wall</span>
+            {targetsOpen ? <ChevronDown className="w-3.5 h-3.5 ml-auto text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 ml-auto text-muted-foreground" />}
+          </button>
+          {targetsOpen && (
+            <div className="grid grid-cols-2 gap-1.5 px-3 py-2.5 bg-card sm:grid-cols-3 lg:grid-cols-5">
+              {riders.map(r => (
+                <div key={r.id} className="flex items-center justify-between gap-1.5 rounded-lg border border-border/40 px-2 py-1.5">
+                  <span className="truncate text-xs font-semibold" title={r.name}>{r.name}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => saveTarget(r, (targets[r.id] ?? 0) - 7)}
+                      disabled={targetBusy === r.id}
+                      className="flex h-5 w-5 items-center justify-center rounded bg-red-500/10 text-xs font-bold text-red-500 hover:bg-red-500/25 disabled:opacity-50"
+                      aria-label={`Decrease ${r.name} target`}
+                    >
+                      {'\u2212'}
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={500}
+                      value={targets[r.id] ?? ''}
+                      placeholder="—"
+                      onChange={e => setTargets(prev => ({ ...prev, [r.id]: Number(e.target.value) }))}
+                      onBlur={e => saveTarget(r, Number(e.target.value))}
+                      className="h-6 w-12 rounded border border-border bg-background text-center text-xs font-bold tabular-nums"
+                      aria-label={`${r.name} daily target`}
+                    />
+                    <button
+                      onClick={() => saveTarget(r, (targets[r.id] ?? 0) + 7)}
+                      disabled={targetBusy === r.id}
+                      className="flex h-5 w-5 items-center justify-center rounded bg-emerald-500/10 text-xs font-bold text-emerald-500 hover:bg-emerald-500/25 disabled:opacity-50"
+                      aria-label={`Increase ${r.name} target`}
+                    >
+                      +
+                    </button>
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>

@@ -35,7 +35,7 @@ export default async function AdminRegionsPage() {
       .order('name'),
     adminDb
       .from('riders')
-      .select('id, name, contractor_id')
+      .select('id, name, contractor_id, daily_target')
       .eq('is_active', true)
       .order('name'),
   ])

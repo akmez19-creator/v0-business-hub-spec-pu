@@ -46,7 +46,7 @@ export async function GET() {
       batchDate = prevBatch?.[0]?.delivery_date as string | undefined
     }
 
-    const [{ data: localities }, { data: batchDeliveries }] = await Promise.all([
+    const [{ data: localities }, { data: batchDeliveries }, { data: riderTargets }] = await Promise.all([
       admin
         .from('localities')
         .select('name, contractor:contractors(name), rider:riders(name)')
@@ -60,7 +60,16 @@ export async function GET() {
             .select('customer_name, contact_1, locality, rider:riders(name), contractor:contractors(name)')
             .eq('delivery_date', batchDate)
         : Promise.resolve({ data: [] as any[] }),
+      // Daily client targets, keyed by UPPER(name) to match assignee merging
+      admin.from('riders').select('name, daily_target').eq('is_active', true),
     ])
+
+    const targetByName = new Map<string, number>()
+    for (const r of (riderTargets || []) as any[]) {
+      if (r.name && r.daily_target != null) {
+        targetByName.set(String(r.name).trim().toUpperCase(), Number(r.daily_target))
+      }
+    }
 
     // The SAME person can appear as a rider on some rows and a contractor on
     // others (e.g. rider "PATRICE" vs contractor "Patrice"), so merge
@@ -153,6 +162,8 @@ export async function GET() {
         isContractor: v.isContractor,
         regions: v.regions,
         todayClients: clientsByAssignee.get(key)?.size || 0,
+        // Daily client target (null when the assignee has none configured)
+        target: targetByName.get(key) ?? null,
       }))
       .sort((a, b) => b.todayClients - a.todayClients || b.regions.length - a.regions.length || a.name.localeCompare(b.name))
 
