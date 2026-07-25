@@ -3,6 +3,9 @@ import { createAdminClient } from '@/lib/supabase/server'
 
 // Returns distinct client counts per product name so the Ads Manager can show
 // how many clients each product has acquired and the ad cost per client (CAC).
+// Also returns per-page attribution (deliveries.medium is the page the client
+// came from, auto-captured by the extension): clients per product per page and
+// page totals, powering "clients per page" + "avg cost/client per page".
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -11,20 +14,23 @@ export async function POST(request: Request) {
       : []
 
     if (names.length === 0) {
-      return NextResponse.json({ stats: {} })
+      return NextResponse.json({ stats: {}, productPages: {}, pageTotals: {} })
     }
 
     const adminDb = createAdminClient()
-    const { data, error } = await adminDb.rpc('get_product_client_stats', { p_names: names })
+    const [main, pages] = await Promise.all([
+      adminDb.rpc('get_product_client_stats', { p_names: names }),
+      adminDb.rpc('get_product_page_client_stats', { p_names: names }),
+    ])
 
-    if (error) {
-      console.error('[v0] product-client-stats RPC error:', error)
-      return NextResponse.json({ stats: {}, error: error.message }, { status: 500 })
+    if (main.error) {
+      console.error('[v0] product-client-stats RPC error:', main.error)
+      return NextResponse.json({ stats: {}, productPages: {}, pageTotals: {}, error: main.error.message }, { status: 500 })
     }
 
     // Map by product name for easy lookup on the client
     const stats: Record<string, { clientCount: number; deliveredClientCount: number; orderCount: number }> = {}
-    for (const row of data || []) {
+    for (const row of main.data || []) {
       stats[row.product_name] = {
         clientCount: Number(row.client_count) || 0,
         deliveredClientCount: Number(row.delivered_client_count) || 0,
@@ -32,9 +38,28 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ stats })
+    // productPages: { [productName]: { [page]: clients } }
+    // pageTotals:   { [page]: clients } (distinct per product-page, summed)
+    const productPages: Record<string, Record<string, number>> = {}
+    const pageTotals: Record<string, number> = {}
+    if (pages.error) {
+      // Non-fatal: page attribution is an enhancement on top of core stats
+      console.error('[v0] product-page-client-stats RPC error:', pages.error)
+    } else {
+      for (const row of pages.data || []) {
+        const count = Number(row.client_count) || 0
+        if (count <= 0) continue
+        const product = row.product_name as string
+        const page = (row.medium as string) || 'Unknown'
+        if (!productPages[product]) productPages[product] = {}
+        productPages[product][page] = count
+        pageTotals[page] = (pageTotals[page] || 0) + count
+      }
+    }
+
+    return NextResponse.json({ stats, productPages, pageTotals })
   } catch (error) {
     console.error('[v0] product-client-stats error:', error)
-    return NextResponse.json({ stats: {}, error: 'Failed to fetch product client stats' }, { status: 500 })
+    return NextResponse.json({ stats: {}, productPages: {}, pageTotals: {}, error: 'Failed to fetch product client stats' }, { status: 500 })
   }
 }

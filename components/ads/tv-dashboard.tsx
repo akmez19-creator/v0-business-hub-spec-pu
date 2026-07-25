@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect } from 'react'
-import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge } from 'lucide-react'
+import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook } from 'lucide-react'
+import { RECOMMENDATION_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -22,6 +23,26 @@ export interface TvGroup {
   clients: number
   cac: number | null // Rs per client (null when not computable)
   campaigns: TvCampaign[]
+  // Budget action recommendation (HOLD/INCREASE/WATCH/DECREASE), null = n/a
+  recommendation?: Recommendation | null
+}
+
+// Page-level attribution: clients from each page + est. avg cost/client
+export interface TvPageStat {
+  page: string
+  clients: number
+  cac: number | null
+}
+
+// One normalized campaign edit from Facebook's Activities API
+export interface TvActivity {
+  eventTime: string
+  actorName: string
+  objectName: string
+  objectId: string
+  eventType: string
+  changeSummary: string
+  direction: 'increase' | 'decrease' | 'status' | 'other'
 }
 
 // A rider (or contractor fallback) with the regions allocated to them.
@@ -40,6 +61,8 @@ interface TvDashboardProps {
   campaignsWithSpendCount: number
   totalBalanceOwed: number
   riders: TvRider[]
+  pageStats?: TvPageStat[]
+  activities?: TvActivity[]
   showTodayOnly: boolean
   countdown: number
   lastRefresh: Date
@@ -75,7 +98,8 @@ const ZONE_STYLES: Record<Zone, { bg: string; text: string; dot: string }> = {
 const formatRs = (rs: number) => `Rs ${rs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
 // Shared dense grid template used by both the header and every row.
-const ROW_GRID = 'grid grid-cols-[1.9rem_1fr_4.5rem_2.6rem_4.5rem] items-center gap-1.5'
+// Last column: budget action badge (increase / decrease / hold).
+const ROW_GRID = 'grid grid-cols-[1.9rem_1fr_4.5rem_2.6rem_4.5rem_1.6rem] items-center gap-1.5'
 
 // Row density presets. The number of rows per column decides the density so
 // the whole league fits on the TV screen with NO scrolling.
@@ -93,6 +117,8 @@ export function TvDashboard({
   campaignsWithSpendCount,
   totalBalanceOwed,
   riders,
+  pageStats = [],
+  activities = [],
   showTodayOnly,
   countdown,
   lastRefresh,
@@ -205,6 +231,19 @@ export function TvDashboard({
         <span className={`text-right ${density.cac} font-bold tabular-nums ${zs.text}`}>
           {g.cac !== null ? formatRs(g.cac) : '—'}
         </span>
+
+        {/* Budget action: ↑ increase (scale), ↓ decrease (burning), ● hold (<4 days).
+            WATCH stays blank so only actionable rows draw the eye. */}
+        <span className="flex items-center justify-center">
+          {g.recommendation && g.recommendation.action !== 'WATCH' && (
+            <span
+              title={g.recommendation.reason}
+              className={`inline-flex h-4 w-4 items-center justify-center rounded ${RECOMMENDATION_STYLES[g.recommendation.action].bg} ${RECOMMENDATION_STYLES[g.recommendation.action].text} text-[11px] font-bold leading-none`}
+            >
+              {RECOMMENDATION_STYLES[g.recommendation.action].arrow}
+            </span>
+          )}
+        </span>
       </div>
     )
   }
@@ -219,6 +258,7 @@ export function TvDashboard({
         <span className="text-right">Spend</span>
         <span className="text-right">Cl</span>
         <span className="text-right">Cost/Cl</span>
+        <span className="text-center" title="Budget action: increase / decrease / hold">Act</span>
       </div>
       <div className="min-h-0 overflow-hidden">
         {rows.map((g, i) => renderRow(g, colIndex * perCol + i + 1, i % 2 === 1))}
@@ -269,6 +309,60 @@ export function TvDashboard({
               </p>
             </div>
           ))
+        )}
+      </div>
+    </div>
+  )
+
+  // Compact "how long ago" for the edits rail (2m / 3h / 1d)
+  const shortAgo = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime()
+    if (!isFinite(diff) || diff < 0) return ''
+    const m = Math.floor(diff / 60000)
+    if (m < 60) return `${m}m`
+    const h = Math.floor(m / 60)
+    if (h < 24) return `${h}h`
+    return `${Math.floor(h / 24)}d`
+  }
+
+  // Recent Edits: what got changed on Facebook (budget up/down, status),
+  // colored by direction so the wall shows edits at a glance.
+  const editsPanel = (
+    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
+      <div className={`flex shrink-0 items-center justify-between gap-2 bg-violet-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
+        <div className="flex items-center gap-2">
+          <History className="h-4 w-4 text-violet-400" />
+          <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold text-violet-400`}>Recent Edits</span>
+        </div>
+        <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-violet-400`}>{activities.length}</span>
+      </div>
+      <div className="min-h-0 overflow-hidden">
+        {activities.length === 0 ? (
+          <div className="px-3 py-3 text-center text-sm text-muted-foreground">No edits in the last 7 days</div>
+        ) : (
+          activities.slice(0, 10).map((act, i) => {
+            const color =
+              act.direction === 'increase'
+                ? 'text-emerald-500'
+                : act.direction === 'decrease'
+                  ? 'text-red-500'
+                  : act.direction === 'status'
+                    ? 'text-blue-400'
+                    : 'text-muted-foreground'
+            return (
+              <div
+                key={`${act.objectId}-${act.eventTime}-${i}`}
+                className={`border-b border-border/50 px-2.5 ${isTight ? 'py-0.5' : 'py-1'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
+                title={`${act.objectName} \u00b7 ${act.changeSummary} \u00b7 by ${act.actorName}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{shortAgo(act.eventTime)}</span>
+                  <span className={`truncate ${isTight ? 'text-[11px]' : 'text-xs'} font-semibold`}>{act.objectName || act.objectId}</span>
+                </div>
+                <p className={`truncate ${isTight ? 'text-[10px]' : 'text-[11px]'} ${color}`}>{act.changeSummary}</p>
+              </div>
+            )
+          })
         )}
       </div>
     </div>
@@ -386,6 +480,41 @@ export function TvDashboard({
             {zoneStats.red.clients.toLocaleString()}
           </span>
         </div>
+
+        {/* Pages strip: clients + est. avg cost/client per page, same thresholds
+            as the average KPI (green <75, yellow 76-99, red 100+) */}
+        {pageStats.length > 0 && (
+          <>
+            <span className="mx-1 h-5 w-px bg-border" />
+            <Facebook className="h-4 w-4 text-blue-400" />
+            {pageStats.slice(0, 6).map((p) => {
+              const color =
+                p.cac === null
+                  ? 'text-muted-foreground'
+                  : p.cac < 75
+                    ? 'text-emerald-500'
+                    : p.cac < 100
+                      ? 'text-amber-500'
+                      : 'text-red-500'
+              return (
+                <div
+                  key={p.page}
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1"
+                  title={`${p.clients} client${p.clients !== 1 ? 's' : ''} from ${p.page}${p.cac !== null ? ` \u00b7 est. Rs ${Math.round(p.cac)}/client` : ''}`}
+                >
+                  <span className="text-sm font-semibold">{p.page}</span>
+                  <span className="flex items-center gap-1 text-sm font-bold tabular-nums text-violet-400">
+                    <Users className="h-3 w-3" />
+                    {p.clients.toLocaleString()}
+                  </span>
+                  {p.cac !== null && (
+                    <span className={`text-sm font-bold tabular-nums ${color}`}>Rs {Math.round(p.cac)}</span>
+                  )}
+                </div>
+              )
+            })}
+          </>
+        )}
       </div>
 
       {/* One continuous ranked league flowing across 3 balanced columns (no
@@ -398,7 +527,11 @@ export function TvDashboard({
         ) : (
           <div className="grid h-full grid-cols-1 items-start gap-3 lg:grid-cols-[1fr_1fr_1fr_0.9fr]">
             {columns.map((rows, i) => leagueColumn(rows, i))}
-            {ridersPanel}
+            {/* Right rail: riders/regions on top, recent campaign edits below */}
+            <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+              {ridersPanel}
+              {editsPanel}
+            </div>
           </div>
         )}
       </div>

@@ -45,6 +45,9 @@ import {
   ExternalLink,
   Users,
   ArrowUpDown,
+  Pencil,
+  History,
+  Facebook,
 } from 'lucide-react'
 import {
   Dialog,
@@ -60,8 +63,20 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { format, subDays, startOfMonth, endOfMonth, subMonths } from 'date-fns'
+import { format, formatDistanceToNow, subDays, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 import { DateRange } from 'react-day-picker'
+import { getRecommendation, RECOMMENDATION_STYLES, type Recommendation } from '@/lib/ads-recommendations'
+
+// Shape of one normalized Facebook activity (campaign edit) from our API
+interface AdActivity {
+  eventTime: string
+  actorName: string
+  objectName: string
+  objectId: string
+  eventType: string
+  changeSummary: string
+  direction: 'increase' | 'decrease' | 'status' | 'other'
+}
 
 interface AdAccount {
   id: string
@@ -134,6 +149,13 @@ export default function AdsManagerPage() {
   const [campaignLinks, setCampaignLinks] = useState<Record<string, CampaignProductLink>>({})
   // Per-product client counts (for cost-per-client / CAC), keyed by product name
   const [productClientStats, setProductClientStats] = useState<Record<string, { clientCount: number; deliveredClientCount: number; orderCount: number }>>({})
+  // Per-page attribution: which page (deliveries.medium) each client came from.
+  // productPages: { [productName]: { [page]: clients } }
+  const [productPages, setProductPages] = useState<Record<string, Record<string, number>>>({})
+  // Campaign edit history from Facebook's Activities API
+  const [activities, setActivities] = useState<AdActivity[]>([])
+  const [lastEditByObject, setLastEditByObject] = useState<Record<string, AdActivity>>({})
+  const [showEditsPanel, setShowEditsPanel] = useState(false)
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [linkingProduct, setLinkingProduct] = useState(false)
@@ -462,6 +484,7 @@ export default function AdsManagerPage() {
   async function fetchProductClientStats(names: string[]) {
     if (names.length === 0) {
       setProductClientStats({})
+      setProductPages({})
       return
     }
     try {
@@ -472,10 +495,32 @@ export default function AdsManagerPage() {
       })
       const data = await res.json()
       setProductClientStats(data.stats || {})
+      setProductPages(data.productPages || {})
     } catch {
       console.error('[v0] Failed to fetch product client stats')
     }
   }
+
+  // Campaign edit history: what changed on Facebook (budget up/down, status),
+  // who did it and when. Refreshed with every data refresh cycle.
+  async function fetchActivities(accountList: AdAccount[]) {
+    if (accountList.length === 0) return
+    try {
+      const ids = accountList.map((a) => a.id).join(',')
+      const res = await fetch(`/api/facebook-ads/activities?accountIds=${ids}`)
+      const data = await res.json()
+      setActivities(data.activities || [])
+      setLastEditByObject(data.lastEditByObject || {})
+    } catch {
+      console.error('[v0] Failed to fetch campaign activities')
+    }
+  }
+
+  // Load/refresh the edit feed whenever accounts arrive or data refreshes
+  useEffect(() => {
+    fetchActivities(accounts)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, lastRefresh])
 
   async function linkProductToCampaign(productId: string | null) {
     if (!selectedCampaign) return
@@ -678,6 +723,84 @@ export default function AdsManagerPage() {
     return b.totalSpend - a.totalSpend
   })
 
+  // Budget recommendation for a product group: uses group CAC + the EARLIEST
+  // campaign created_time (an established product shouldn't show HOLD just
+  // because one new campaign was added).
+  const groupRecommendation = (g: { productName: string; totalSpend: number; campaigns: Campaign[]; key: string }): Recommendation | null => {
+    if (g.key === UNLINKED_KEY) return null
+    const earliest = g.campaigns.reduce<string | null>((min, c) => {
+      if (!c.created_time) return min
+      return min === null || c.created_time < min ? c.created_time : min
+    }, null)
+    return getRecommendation({ createdTime: earliest, cac: groupCac(g), hasSpend: g.totalSpend > 0 })
+  }
+
+  // Page-level stats across ALL products: total clients per page and the
+  // estimated avg cost/client per page. Page spend is estimated by splitting
+  // each product's spend across its pages proportionally to clients, so the
+  // page average is weighted by the real CAC of the products it sells.
+  const pageAgg: Record<string, { clients: number; spendRs: number }> = {}
+  for (const g of productGroups) {
+    if (g.key === UNLINKED_KEY) continue
+    const totalClients = productClientStats[g.productName]?.clientCount ?? 0
+    const pages = productPages[g.productName]
+    if (!pages) continue
+    const spendRs = g.totalSpend * USD_TO_RS
+    for (const [page, count] of Object.entries(pages)) {
+      if (!pageAgg[page]) pageAgg[page] = { clients: 0, spendRs: 0 }
+      pageAgg[page].clients += count
+      if (totalClients > 0 && spendRs > 0) {
+        pageAgg[page].spendRs += spendRs * (count / totalClients)
+      }
+    }
+  }
+  const pageStats = Object.entries(pageAgg)
+    .map(([page, v]) => ({
+      page,
+      clients: v.clients,
+      cac: v.spendRs > 0 && v.clients > 0 ? v.spendRs / v.clients : null,
+    }))
+    .sort((a, b) => b.clients - a.clients)
+
+  // Small colored badge for a budget recommendation (shared style map)
+  const renderRecBadge = (rec: Recommendation | null, compact = false) => {
+    if (!rec) return null
+    const s = RECOMMENDATION_STYLES[rec.action]
+    return (
+      <span
+        title={rec.reason}
+        className={`inline-flex shrink-0 items-center gap-0.5 rounded border px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide ${s.bg} ${s.text} ${s.border}`}
+      >
+        {s.arrow}
+        {!compact && <span>{s.label}</span>}
+      </span>
+    )
+  }
+
+  // "Edited 2h ago" indicator for a campaign that appears in the activity feed
+  const renderLastEdit = (campaignId: string) => {
+    const edit = lastEditByObject[campaignId]
+    if (!edit) return null
+    const color =
+      edit.direction === 'increase' ? 'text-emerald-500' : edit.direction === 'decrease' ? 'text-red-500' : 'text-blue-400'
+    let when = ''
+    try {
+      when = formatDistanceToNow(new Date(edit.eventTime), { addSuffix: true })
+    } catch {
+      when = ''
+    }
+    return (
+      <span
+        className={`inline-flex items-center gap-1 text-[11px] ${color}`}
+        title={`${edit.changeSummary} \u00b7 by ${edit.actorName}`}
+      >
+        <Pencil className="w-3 h-3" />
+        {edit.changeSummary}
+        {when && <span className="text-muted-foreground/70">{'\u00b7'} {when}</span>}
+      </span>
+    )
+  }
+
   // TV dashboard: product groups enriched with client count + cost-per-client (Rs)
   // so the TV view can color-code each product into a CAC efficiency zone.
   const tvGroups = productGroups.map((g) => ({
@@ -689,6 +812,7 @@ export default function AdsManagerPage() {
     clients: productClientStats[g.productName]?.clientCount ?? 0,
     cac: groupCac(g),
     campaigns: g.campaigns,
+    recommendation: groupRecommendation(g),
   }))
 
   // Number of columns shown in the campaigns table (drives colSpan for group headers)
@@ -795,6 +919,8 @@ export default function AdsManagerPage() {
         campaignsWithSpendCount={campaignsWithSpendCount}
         totalBalanceOwed={totalBalanceOwed}
         riders={tvRiders}
+        pageStats={pageStats}
+        activities={activities}
         showTodayOnly={showTodayOnly}
         countdown={countdown}
         lastRefresh={lastRefresh}
@@ -1016,6 +1142,109 @@ export default function AdsManagerPage() {
         </Card>
       </div>
 
+      {/* Clients by Page: which page each client came from, with estimated
+          avg cost/client per page (product spend split by client share) */}
+      {pageStats.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Facebook className="w-4 h-4 text-blue-500" />
+            <h2 className="text-sm font-semibold text-foreground">Clients by Page</h2>
+            <span className="text-xs text-muted-foreground">est. cost/client per page</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {pageStats.map((p) => {
+              const cacColor =
+                p.cac === null
+                  ? 'text-muted-foreground'
+                  : p.cac <= 75
+                    ? 'text-emerald-500'
+                    : p.cac < 100
+                      ? 'text-amber-500'
+                      : 'text-red-500'
+              return (
+                <div
+                  key={p.page}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5"
+                  title={`${p.clients} client${p.clients !== 1 ? 's' : ''} from ${p.page}${p.cac !== null ? ` \u00b7 est. Rs ${Math.round(p.cac)}/client` : ''}`}
+                >
+                  <span className="text-sm font-medium text-foreground">{p.page}</span>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <Users className="w-3 h-3" />
+                    {p.clients.toLocaleString()}
+                  </span>
+                  {p.cac !== null && (
+                    <span className={`text-xs font-semibold tabular-nums ${cacColor}`}>
+                      Rs {Math.round(p.cac)}/cl
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Recent Edits: live campaign change feed from Facebook (budget up/down,
+          status changes) so the team knows what got edited, by whom, and when */}
+      <Card>
+        <CardContent className="p-0">
+          <button
+            type="button"
+            onClick={() => setShowEditsPanel((v) => !v)}
+            className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+          >
+            {showEditsPanel ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <History className="w-4 h-4 text-blue-500 shrink-0" />
+            <span className="text-sm font-semibold text-foreground">Recent Edits</span>
+            <span className="text-xs text-muted-foreground">last 7 days from Facebook</span>
+            <Badge variant="secondary" className="ml-auto px-2 py-0 text-xs">
+              {activities.length}
+            </Badge>
+          </button>
+          {showEditsPanel && (
+            <div className="max-h-72 overflow-y-auto border-t border-border">
+              {activities.length === 0 ? (
+                <p className="px-4 py-6 text-center text-sm text-muted-foreground">No edits in the last 7 days</p>
+              ) : (
+                activities.slice(0, 30).map((act, i) => {
+                  const color =
+                    act.direction === 'increase'
+                      ? 'text-emerald-500'
+                      : act.direction === 'decrease'
+                        ? 'text-red-500'
+                        : act.direction === 'status'
+                          ? 'text-blue-400'
+                          : 'text-muted-foreground'
+                  let when = ''
+                  try {
+                    when = formatDistanceToNow(new Date(act.eventTime), { addSuffix: true })
+                  } catch {
+                    when = ''
+                  }
+                  return (
+                    <div
+                      key={`${act.objectId}-${act.eventTime}-${i}`}
+                      className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-border/50 px-4 py-2 last:border-b-0"
+                    >
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{when}</span>
+                      <span className="text-sm font-medium text-foreground truncate max-w-[280px]" title={act.objectName}>
+                        {act.objectName || act.objectId}
+                      </span>
+                      <span className={`text-sm ${color}`}>{act.changeSummary}</span>
+                      <span className="text-xs text-muted-foreground/70">by {act.actorName}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Account Spend Breakdown */}
       {selectedAccount === 'all' && accountSpendList.length > 0 && (
         <div className="space-y-3">
@@ -1145,6 +1374,37 @@ export default function AdsManagerPage() {
                                   </Badge>
                                 )
                               })()}
+                              {renderRecBadge(groupRecommendation(group))}
+                              {/* Which pages this product's clients came from */}
+                              {!isUnlinked && (() => {
+                                const pages = productPages[group.productName]
+                                if (!pages) return null
+                                const entries = Object.entries(pages).sort((a, b) => b[1] - a[1])
+                                if (entries.length === 0) return null
+                                const shown = entries.slice(0, 4)
+                                const moreCount = entries.length - shown.length
+                                return (
+                                  <span className="flex flex-wrap items-center gap-1">
+                                    {shown.map(([page, count]) => (
+                                      <span
+                                        key={page}
+                                        className="inline-flex items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0 text-[11px] text-blue-500"
+                                        title={`${count} client${count !== 1 ? 's' : ''} from page ${page}`}
+                                      >
+                                        {page} {'\u00b7'} {count}
+                                      </span>
+                                    ))}
+                                    {moreCount > 0 && (
+                                      <span
+                                        className="text-[11px] text-muted-foreground"
+                                        title={entries.slice(4).map(([p, c]) => `${p}: ${c}`).join(', ')}
+                                      >
+                                        +{moreCount} more
+                                      </span>
+                                    )}
+                                  </span>
+                                )
+                              })()}
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
@@ -1173,11 +1433,23 @@ export default function AdsManagerPage() {
                             <TableCell>
                               <div className="flex items-center gap-2 pl-6">
                                 <div className="min-w-0">
-                                  <p className="font-medium text-foreground truncate">{campaign.name}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-foreground truncate">{campaign.name}</p>
+                                    {!isUnlinked &&
+                                      renderRecBadge(
+                                        getRecommendation({
+                                          createdTime: campaign.created_time,
+                                          cac: groupCac(group),
+                                          hasSpend: parseFloat(campaign.spend || '0') > 0,
+                                        }),
+                                        true,
+                                      )}
+                                  </div>
                                   <p className="text-xs text-muted-foreground">
                                     {campaign.objective?.replace(/_/g, ' ')}
                                   </p>
                                   {renderCampaignBudget(campaign)}
+                                  {renderLastEdit(campaign.id)}
                                   {renderAdIds(campaign)}
                                 </div>
                                 {isUnlinked ? (
@@ -1244,6 +1516,7 @@ export default function AdsManagerPage() {
                           {campaign.objective?.replace(/_/g, ' ')}
                         </p>
                         {renderCampaignBudget(campaign)}
+                        {renderLastEdit(campaign.id)}
                         {renderAdIds(campaign)}
                       </div>
                     </TableCell>
