@@ -188,6 +188,8 @@ export default function AdsManagerPage() {
   // Riders + their allocated regions + today's client counts (TV mode display)
   const [tvRiders, setTvRiders] = useState<{ id: string; name: string; regions: string[]; todayClients?: number }[]>([])
   const [tvRidersTodayTotal, setTvRidersTodayTotal] = useState(0)
+  // The delivery batch date the rider client counts belong to
+  const [tvRidersBatchDate, setTvRidersBatchDate] = useState<string | null>(null)
 
   // Load riders/regions when TV mode opens (refreshed on each entry)
   useEffect(() => {
@@ -198,6 +200,7 @@ export default function AdsManagerPage() {
         if (data?.success) {
           setTvRiders(data.riders || [])
           setTvRidersTodayTotal(data.todayTotal || 0)
+          setTvRidersBatchDate(data.batchDate || null)
         }
       })
       .catch(() => {})
@@ -1050,6 +1053,7 @@ export default function AdsManagerPage() {
         totalBalanceOwed={totalBalanceOwed}
           riders={tvRiders}
           ridersTodayTotal={tvRidersTodayTotal}
+          ridersBatchDate={tvRidersBatchDate}
         pageStats={pageStats}
         activities={activities}
         showTodayOnly={showTodayOnly}

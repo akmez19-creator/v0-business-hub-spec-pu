@@ -66,9 +66,11 @@ interface TvDashboardProps {
   campaignsWithSpendCount: number
   totalBalanceOwed: number
   riders: TvRider[]
-  // Total distinct clients across ALL of today's deliveries (rider-assigned
-  // or not) - shown in the panel header so totals reconcile.
+  // Total distinct clients across ALL of the active batch's deliveries
+  // (rider-assigned or not) - shown in the panel header so totals reconcile.
   ridersTodayTotal?: number
+  // Delivery date (YYYY-MM-DD) of the active batch the counts belong to
+  ridersBatchDate?: string | null
   pageStats?: TvPageStat[]
   activities?: TvActivity[]
   showTodayOnly: boolean
@@ -126,6 +128,7 @@ export function TvDashboard({
   totalBalanceOwed,
   riders,
   ridersTodayTotal = 0,
+  ridersBatchDate = null,
   pageStats = [],
   activities = [],
   showTodayOnly,
@@ -315,7 +318,11 @@ export function TvDashboard({
         <div className="flex min-w-0 items-center gap-2">
           <Bike className="h-4 w-4 shrink-0 text-blue-400" />
           <span className={`truncate ${isTight ? 'text-sm' : 'text-base'} font-bold text-blue-400`}>Riders</span>
-          <span className={`${isTight ? 'text-[10px]' : 'text-xs'} text-blue-400/70`}>today{'\u2019'}s clients</span>
+          <span className={`${isTight ? 'text-[10px]' : 'text-xs'} text-blue-400/70`}>
+            {ridersBatchDate
+              ? `clients \u00b7 ${new Date(ridersBatchDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}`
+              : 'clients'}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
