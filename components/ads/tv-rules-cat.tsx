@@ -121,10 +121,53 @@ const GUIDE_SLIDES: { title: string; icon: string; lines: string[] }[] = [
   },
 ]
 
-export function TvRulesCat() {
+export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
   const [modeIdx, setModeIdx] = useState(0)
   const [guideOpen, setGuideOpen] = useState(false)
   const [slide, setSlide] = useState(0)
+  // Overlay view: the AI briefing is the default, rules guide one tab away
+  const [view, setView] = useState<'briefing' | 'guide'>('briefing')
+
+  // ---- The cat's AI briefing: a ChatGPT-written paragraph (with emojis)
+  // covering everything on the wall. Refreshed on click and every 30 min.
+  const [briefing, setBriefing] = useState<string | null>(null)
+  const [briefingAt, setBriefingAt] = useState<Date | null>(null)
+  const [briefingLoading, setBriefingLoading] = useState(false)
+  const [hasFresh, setHasFresh] = useState(false)
+
+  const fetchBriefing = useCallback(async () => {
+    if (!getSnapshot) return
+    setBriefingLoading(true)
+    try {
+      const res = await fetch('/api/ads/ai-briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getSnapshot()),
+      })
+      const json = await res.json()
+      if (json.success && json.briefing) {
+        setBriefing(json.briefing)
+        setBriefingAt(new Date())
+        setHasFresh(true)
+      }
+    } catch {
+      // keep the previous briefing on failure
+    } finally {
+      setBriefingLoading(false)
+    }
+  }, [getSnapshot])
+
+  // Auto-brief: first one shortly after mount (lets wall data load), then
+  // every 30 minutes so the wall always carries a current AI read
+  useEffect(() => {
+    if (!getSnapshot) return
+    const first = setTimeout(fetchBriefing, 20_000)
+    const loop = setInterval(fetchBriefing, 30 * 60 * 1000)
+    return () => {
+      clearTimeout(first)
+      clearInterval(loop)
+    }
+  }, [fetchBriefing, getSnapshot])
 
   // Rotate the idle playlist every 4.5s (paused while the guide is open)
   useEffect(() => {
@@ -137,11 +180,12 @@ export function TvRulesCat() {
   const onKey = useCallback(
     (e: KeyboardEvent) => {
       if (!guideOpen) return
+      if (e.key === 'Escape') setGuideOpen(false)
+      if (view !== 'guide') return // arrows only page the rules slides
       if (e.key === 'ArrowRight') setSlide((s) => (s + 1) % GUIDE_SLIDES.length)
       if (e.key === 'ArrowLeft') setSlide((s) => (s - 1 + GUIDE_SLIDES.length) % GUIDE_SLIDES.length)
-      if (e.key === 'Escape') setGuideOpen(false)
     },
-    [guideOpen],
+    [guideOpen, view],
   )
   useEffect(() => {
     window.addEventListener('keydown', onKey)
@@ -153,23 +197,34 @@ export function TvRulesCat() {
 
   return (
     <>
-      {/* ================= The free-standing playing cat =================
-          It owns the whole wall: a slow stroll across the full width of the
-          screen (flipping to face its walking direction), while the idle
-          playlist keeps it playing the entire way. The rail itself is
-          click-through - only the cat is interactive. */}
-      <div className="cat-wander pointer-events-none fixed bottom-14 left-0 z-[60] select-none">
+      {/* ================= The playing cat, merged with breaking news =====
+          It strolls along the TOP EDGE of the breaking-news ticker - part of
+          the bar, not a corner ornament. The rail is click-through; only the
+          cat is interactive. Clicking it opens the AI briefing. */}
+      <div className="cat-wander pointer-events-none fixed bottom-9 left-0 z-[60] select-none">
         <div className="cat-face pointer-events-auto">
         <button
           type="button"
           onClick={() => {
-            setSlide(0)
+            setView('briefing')
+            setHasFresh(false)
             setGuideOpen(true)
+            // Refresh if we have nothing yet or the last brief is >10 min old
+            if (!briefing || (briefingAt && Date.now() - briefingAt.getTime() > 10 * 60 * 1000)) {
+              fetchBriefing()
+            }
           }}
-          aria-label="Open the Vision guide"
-          className="relative block h-32 w-32 cursor-pointer bg-transparent outline-none"
-          title="Click me - I will explain the wall"
+          aria-label="Open the AI wall briefing"
+          className="relative block h-28 w-28 cursor-pointer bg-transparent outline-none"
+          title="Click me - AI update on the whole wall"
         >
+          {/* Fresh-briefing ping: a soft pulse until the update is read */}
+          {hasFresh && (
+            <span className="absolute -top-1 right-3 z-10 flex h-3.5 w-3.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-60" />
+              <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-cyan-400" />
+            </span>
+          )}
           {/* The cat itself: free, no circle, glow via drop-shadow */}
           <div key={modeIdx} className={`relative h-full w-full ${mode.cat}`}>
             <Image
@@ -215,10 +270,6 @@ export function TvRulesCat() {
         {/* Breathing ground shadow */}
         <div className="cat-shadow mx-auto -mt-2 h-2 w-20 rounded-full bg-cyan-950/70 blur-sm" />
         </div>
-        {/* Identity tag (kept upright regardless of walk direction) */}
-        <div className="cat-tag mt-1 text-center font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-400/90">
-          Vision
-        </div>
       </div>
 
       {/* ================= Full-screen VISION 2030 guide ================= */}
@@ -250,81 +301,155 @@ export function TvRulesCat() {
                 />
               </div>
               <div className="cat-shadow mx-auto h-2.5 w-28 rounded-full bg-cyan-950 blur-sm" />
-              <p className="cat-tag mt-3 font-mono text-xs font-black uppercase tracking-[0.4em] text-cyan-400">
-                Vision
+              <p className="mt-3 text-[11px] text-cyan-100/50">
+                {view === 'briefing' ? 'Your AI wall update' : 'The wall, explained'}
               </p>
-              <p className="mt-1 text-[11px] text-cyan-100/50">The wall, explained</p>
             </div>
 
-            {/* Right: the slide */}
+            {/* Right: AI briefing (default) or the rules guide */}
             <div className="flex min-h-[380px] flex-1 flex-col p-6 sm:p-8">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="font-mono text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-400/70">
-                    Rule {slide + 1} / {GUIDE_SLIDES.length}
-                  </p>
-                  <h2 key={`t-${slide}`} className="guide-line mt-1 text-balance text-2xl font-black text-cyan-50 sm:text-3xl">
-                    <span className="mr-2 text-cyan-400">{current.icon}</span>
-                    {current.title}
-                  </h2>
+                {/* View tabs */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setView('briefing')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                      view === 'briefing'
+                        ? 'bg-cyan-400 text-cyan-950'
+                        : 'border border-cyan-400/25 text-cyan-200/70 hover:bg-cyan-400/10'
+                    }`}
+                  >
+                    AI Update
+                  </button>
+                  <button
+                    onClick={() => setView('guide')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                      view === 'guide'
+                        ? 'bg-cyan-400 text-cyan-950'
+                        : 'border border-cyan-400/25 text-cyan-200/70 hover:bg-cyan-400/10'
+                    }`}
+                  >
+                    The Rules
+                  </button>
                 </div>
                 <button
                   onClick={() => setGuideOpen(false)}
-                  aria-label="Close guide"
+                  aria-label="Close"
                   className="rounded-lg border border-cyan-400/20 p-2 text-cyan-200/70 transition-colors hover:bg-cyan-400/10 hover:text-cyan-100"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              {/* The cat's speech: lines animate in one after the other */}
-              <div key={`s-${slide}`} className="mt-6 flex-1 space-y-3">
-                {current.lines.map((line, i) => (
-                  <p
-                    key={i}
-                    className="guide-line flex items-start gap-2.5 text-base leading-relaxed text-cyan-100/90 sm:text-lg"
-                    style={{ animationDelay: `${0.12 + i * 0.14}s` }}
-                  >
-                    <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
-                    {line}
-                  </p>
-                ))}
-              </div>
-
-              {/* Navigation: prev / dots / next - plus arrow keys and Esc */}
-              <div className="mt-6 flex items-center justify-between gap-3">
-                <button
-                  onClick={() => setSlide((s) => (s - 1 + GUIDE_SLIDES.length) % GUIDE_SLIDES.length)}
-                  aria-label="Previous rule"
-                  className="flex h-10 items-center gap-1 rounded-lg border border-cyan-400/25 px-3 text-sm font-semibold text-cyan-200 transition-colors hover:bg-cyan-400/10"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Prev
-                </button>
-                <div className="flex items-center gap-1.5">
-                  {GUIDE_SLIDES.map((_, i) => (
+              {view === 'briefing' ? (
+                <>
+                  {/* ---- The AI paragraph, refreshed on demand / every 30 min ---- */}
+                  <div className="mt-5 flex-1 overflow-y-auto">
+                    {briefingLoading && !briefing ? (
+                      <div className="flex h-full flex-col items-center justify-center gap-3 text-cyan-200/70">
+                        <span className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400/30 border-t-cyan-400" />
+                        <p className="text-sm">Reading the whole wall{'\u2026'}</p>
+                      </div>
+                    ) : briefing ? (
+                      <div key={briefingAt?.getTime()} className="guide-line space-y-3">
+                        {briefing.split(/\n+/).map((para, i) => (
+                          <p
+                            key={i}
+                            className="guide-line whitespace-pre-wrap text-base leading-relaxed text-cyan-50/95 sm:text-lg"
+                            style={{ animationDelay: `${0.08 + i * 0.12}s` }}
+                          >
+                            {para}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <p className="text-sm text-cyan-200/60">
+                          No update yet {'\u2014'} hit Refresh and I{'\u2019'}ll read the wall for you.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-5 flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-cyan-100/40">
+                      {briefingAt
+                        ? `Updated ${briefingAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} \u00b7 auto every 30 min`
+                        : 'Auto-updates every 30 min'}
+                    </p>
                     <button
-                      key={i}
-                      onClick={() => setSlide(i)}
-                      aria-label={`Go to rule ${i + 1}`}
-                      className={`h-2 rounded-full transition-all ${
-                        i === slide ? 'w-6 bg-cyan-400' : 'w-2 bg-cyan-400/25 hover:bg-cyan-400/50'
-                      }`}
-                    />
-                  ))}
-                </div>
-                <button
-                  onClick={() => setSlide((s) => (s + 1) % GUIDE_SLIDES.length)}
-                  aria-label="Next rule"
-                  className="flex h-10 items-center gap-1 rounded-lg bg-cyan-400 px-3 text-sm font-bold text-cyan-950 transition-opacity hover:opacity-90"
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-              <p className="mt-3 text-center text-[10px] uppercase tracking-widest text-cyan-100/30">
-                {'\u2190'} {'\u2192'} arrow keys {'\u00b7'} Esc to close
-              </p>
+                      onClick={fetchBriefing}
+                      disabled={briefingLoading}
+                      className="flex h-10 items-center gap-2 rounded-lg bg-cyan-400 px-4 text-sm font-bold text-cyan-950 transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      {briefingLoading && (
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cyan-950/30 border-t-cyan-950" />
+                      )}
+                      Refresh
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-5">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-400/70">
+                      Rule {slide + 1} / {GUIDE_SLIDES.length}
+                    </p>
+                    <h2 key={`t-${slide}`} className="guide-line mt-1 text-balance text-2xl font-black text-cyan-50 sm:text-3xl">
+                      <span className="mr-2 text-cyan-400">{current.icon}</span>
+                      {current.title}
+                    </h2>
+                  </div>
+
+                  {/* The cat's speech: lines animate in one after the other */}
+                  <div key={`s-${slide}`} className="mt-6 flex-1 space-y-3">
+                    {current.lines.map((line, i) => (
+                      <p
+                        key={i}
+                        className="guide-line flex items-start gap-2.5 text-base leading-relaxed text-cyan-100/90 sm:text-lg"
+                        style={{ animationDelay: `${0.12 + i * 0.14}s` }}
+                      >
+                        <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+
+                  {/* Navigation: prev / dots / next - plus arrow keys and Esc */}
+                  <div className="mt-6 flex items-center justify-between gap-3">
+                    <button
+                      onClick={() => setSlide((s) => (s - 1 + GUIDE_SLIDES.length) % GUIDE_SLIDES.length)}
+                      aria-label="Previous rule"
+                      className="flex h-10 items-center gap-1 rounded-lg border border-cyan-400/25 px-3 text-sm font-semibold text-cyan-200 transition-colors hover:bg-cyan-400/10"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Prev
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {GUIDE_SLIDES.map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setSlide(i)}
+                          aria-label={`Go to rule ${i + 1}`}
+                          className={`h-2 rounded-full transition-all ${
+                            i === slide ? 'w-6 bg-cyan-400' : 'w-2 bg-cyan-400/25 hover:bg-cyan-400/50'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setSlide((s) => (s + 1) % GUIDE_SLIDES.length)}
+                      aria-label="Next rule"
+                      className="flex h-10 items-center gap-1 rounded-lg bg-cyan-400 px-3 text-sm font-bold text-cyan-950 transition-opacity hover:opacity-90"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <p className="mt-3 text-center text-[10px] uppercase tracking-widest text-cyan-100/30">
+                    {'\u2190'} {'\u2192'} arrow keys {'\u00b7'} Esc to close
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>

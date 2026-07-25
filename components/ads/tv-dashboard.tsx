@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook, Cat } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
@@ -183,9 +183,12 @@ export function TvDashboard({
   // Which product row is expanded to show its campaigns + today's edits
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
-  // 2030 Vision mascot: the animated cat, present by default on the wall
-  // (toggleable from the header)
+  // The animated cat mascot, present by default on the wall (toggleable
+  // from the header). Its AI briefing reads the wall via a stable snapshot
+  // getter so the cat's internal timers survive re-renders.
   const [showRulesCat, setShowRulesCat] = useState(true)
+  const snapshotRef = useRef<() => unknown>(() => ({}))
+  const getWallSnapshot = useCallback(() => snapshotRef.current(), [])
   // Stable signature of today's edited products so the sync effect only
   // refires when the edited set (or their live numbers) actually changes
   const editedSignature = groups
@@ -841,6 +844,50 @@ export function TvDashboard({
     .filter((x): x is { g: TvGroup; info: { hoursAgo: number; turnOff: boolean } } => x.info !== null)
     .sort((a, b) => (b.g.cac ?? 0) - (a.g.cac ?? 0))
 
+  // ---- Snapshot of the whole wall for the cat's AI briefing. Stored in a
+  // ref + stable callback so the cat's 30-min auto-refresh timers never
+  // reset on re-render.
+  snapshotRef.current = () => ({
+    date: new Date().toISOString(),
+    totals: {
+      totalSpendRs: Math.round(totalSpend * USD_TO_RS),
+      totalClients: ranked.reduce((s, g) => s + g.clients, 0),
+      products: groups.length,
+      campaigns: campaignCount,
+      activeCampaigns,
+      balanceOwedRs: Math.round(totalBalanceOwed * USD_TO_RS),
+    },
+    breakingNews: {
+      noClients: noClient.map((g) => ({ product: g.productName, spentRs: Math.round(spendRs(g)) })),
+      decrease: decrease.map((g) => ({ product: g.productName, costPerClientRs: g.cac })),
+      increase: increase.map((g) => ({ product: g.productName, costPerClientRs: g.cac })),
+      stalled: stalledItems.map(({ g, info }) => ({
+        product: g.productName,
+        costPerClientRs: g.cac,
+        hoursSinceEdit: info.hoursAgo,
+        verdict: info.turnOff ? 'TURN OFF' : 'DECREASE MORE',
+      })),
+    },
+    // Cost/client leaders and losers so the cat names real products
+    bestProducts: ranked.filter((g) => g.cac !== null).slice(0, 5)
+      .map((g) => ({ product: g.productName, costPerClientRs: g.cac, clients: g.clients })),
+    worstProducts: ranked.filter((g) => g.cac !== null).slice(-5)
+      .map((g) => ({ product: g.productName, costPerClientRs: g.cac, clients: g.clients })),
+    editedToday: ranked.filter((g) => g.todayEdit)
+      .map((g) => ({ product: g.productName, edit: g.todayEdit?.summary, costPerClientRs: g.cac })),
+    riders: riders.map((r) => ({
+      name: r.name,
+      clientsToday: r.todayClients || 0,
+      dailyTarget: targetOverrides[r.id] ?? r.target ?? null,
+    })),
+    recentEdits: activities.slice(0, 25).map((a) => ({
+      time: a.eventTime,
+      campaign: a.objectName,
+      change: a.changeSummary,
+    })),
+    unassignedLocalities,
+  })
+
   const stalledTickerItem = ({ g, info }: { g: TvGroup; info: { hoursAgo: number; turnOff: boolean } }, idx: number) => {
     const base = editBaselines[g.key]
     return (
@@ -1006,7 +1053,7 @@ export function TvDashboard({
       </div>
 
       {/* The 2030 Vision animated cat mascot, on the wall by default */}
-      {showRulesCat && <TvRulesCat />}
+      {showRulesCat && <TvRulesCat getSnapshot={getWallSnapshot} />}
 
       {/* Cost-per-client zone legend with per-zone product + client tallies */}
       <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
