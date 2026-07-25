@@ -16,6 +16,7 @@ import {
   UserCheck,
   Bike,
   Pencil,
+  CalendarClock,
 } from 'lucide-react'
 import { getRegionImage } from '@/components/ui/region-avatar'
 import { zoneForLocality, ZONE_ORDER } from '@/lib/ads-region-zones'
@@ -37,6 +38,14 @@ interface PersonOption {
   id: string
   name: string
   contractor_id?: string
+}
+
+interface PlacementPlan {
+  id: string
+  name: string
+  createdAt: string
+  lastAppliedAt: string | null
+  assignmentCount: number
 }
 
 interface AdminRegionsContentProps {
@@ -62,6 +71,11 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
   const [bulkRegion, setBulkRegion] = useState<string | null>(null)
   // Group (zone) level bulk assignment
   const [bulkZone, setBulkZone] = useState<string | null>(null)
+  // Saved placement plans (daily scenarios that can be re-applied)
+  const [plans, setPlans] = useState<PlacementPlan[]>([])
+  const [plansOpen, setPlansOpen] = useState(false)
+  const [planName, setPlanName] = useState('')
+  const [planBusy, setPlanBusy] = useState<string | null>(null) // 'save' | planId
 
   // Delivery GROUP (zone) for a locality, e.g. 'PORT LOUIS', 'EAST - 1'
   const zoneOf = (l: Locality) => zoneForLocality(l.name) ?? 'UNGROUPED'
@@ -118,6 +132,74 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
       // keep the editor open so the admin can retry
     } finally {
       setSaving(false)
+    }
+  }
+
+  // --- Saved placement plans (repeat a past day's scenario) ---
+  const loadPlans = async () => {
+    try {
+      const res = await fetch('/api/admin/placement-plans')
+      const data = await res.json()
+      if (res.ok) setPlans(data.plans || [])
+    } catch {
+      // panel just shows empty list
+    }
+  }
+
+  const togglePlans = () => {
+    const next = !plansOpen
+    setPlansOpen(next)
+    if (next && plans.length === 0) loadPlans()
+  }
+
+  const savePlan = async () => {
+    if (!planName.trim()) return
+    setPlanBusy('save')
+    try {
+      const res = await fetch('/api/admin/placement-plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: planName.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed')
+      setPlanName('')
+      await loadPlans()
+    } catch {
+      // keep input so the admin can retry
+    } finally {
+      setPlanBusy(null)
+    }
+  }
+
+  const applyPlan = async (planId: string) => {
+    setPlanBusy(planId)
+    try {
+      const res = await fetch('/api/admin/placement-plans', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed')
+      // Assignments changed server-side for every locality: reload to resync
+      window.location.reload()
+    } catch {
+      setPlanBusy(null)
+    }
+  }
+
+  const deletePlan = async (planId: string) => {
+    setPlanBusy(planId)
+    try {
+      await fetch('/api/admin/placement-plans', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      })
+      setPlans(prev => prev.filter(p => p.id !== planId))
+    } finally {
+      setPlanBusy(null)
     }
   }
 
@@ -315,6 +397,78 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
           </p>
         </div>
       </div>
+
+      {/* Placement plans: save today's scenario, repeat it any other day */}
+      {canEdit && (
+        <div className="rounded-xl border border-border/60 overflow-hidden">
+          <button
+            onClick={togglePlans}
+            className="flex w-full items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <CalendarClock className="w-4 h-4 text-primary" />
+            <span className="text-xs font-semibold">Placement Plans</span>
+            <span className="text-[10px] text-muted-foreground">save today{'\u2019'}s layout {'\u00b7'} repeat a past day in one click</span>
+            {plansOpen ? <ChevronDown className="w-3.5 h-3.5 ml-auto text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 ml-auto text-muted-foreground" />}
+          </button>
+          {plansOpen && (
+            <div className="px-3 py-2.5 space-y-2 bg-card">
+              {/* Save current scenario */}
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Name this scenario, e.g. Monday layout"
+                  value={planName}
+                  onChange={e => setPlanName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) savePlan() }}
+                  className="h-8 text-xs max-w-[320px]"
+                />
+                <button
+                  onClick={savePlan}
+                  disabled={!planName.trim() || planBusy === 'save'}
+                  className="text-[11px] font-semibold px-3 py-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+                >
+                  {planBusy === 'save' ? 'Saving\u2026' : 'Save current layout'}
+                </button>
+              </div>
+              {/* Saved plans list */}
+              {plans.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">No saved plans yet. Assign riders below, then save the layout to reuse it another day.</p>
+              ) : (
+                <div className="space-y-1">
+                  {plans.map(p => (
+                    <div key={p.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border/40 px-2.5 py-1.5">
+                      <span className="text-xs font-semibold">{p.name}</span>
+                      <span className="text-[10px] text-muted-foreground tabular-nums">{p.assignmentCount} localities</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        saved {new Date(p.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        {p.lastAppliedAt && ` \u00b7 last applied ${new Date(p.lastAppliedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`}
+                      </span>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <button
+                          onClick={() => applyPlan(p.id)}
+                          disabled={planBusy !== null}
+                          className="text-[10px] font-semibold px-2.5 py-1 rounded-md bg-emerald-600 text-white disabled:opacity-50"
+                        >
+                          {planBusy === p.id ? 'Applying\u2026' : 'Apply'}
+                        </button>
+                        <button
+                          onClick={() => deletePlan(p.id)}
+                          disabled={planBusy !== null}
+                          className="text-[10px] font-semibold px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-red-500 hover:border-red-500/40 disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground/70">
+                Applying a plan replaces ALL current assignments with the saved layout. You can then tweak individual groups or localities below.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search + Filters */}
       <div className="space-y-2">
