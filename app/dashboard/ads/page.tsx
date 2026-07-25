@@ -185,8 +185,9 @@ export default function AdsManagerPage() {
   
   // Full-screen TV dashboard mode (separate glanceable wall-display view)
   const [tvMode, setTvMode] = useState(false)
-  // Riders + their allocated regions, shown on the TV mode display
-  const [tvRiders, setTvRiders] = useState<{ id: string; name: string; regions: string[] }[]>([])
+  // Riders + their allocated regions + today's client counts (TV mode display)
+  const [tvRiders, setTvRiders] = useState<{ id: string; name: string; regions: string[]; todayClients?: number }[]>([])
+  const [tvRidersTodayTotal, setTvRidersTodayTotal] = useState(0)
 
   // Load riders/regions when TV mode opens (refreshed on each entry)
   useEffect(() => {
@@ -194,7 +195,10 @@ export default function AdsManagerPage() {
     fetch('/api/ads/riders-regions')
       .then(res => res.json())
       .then(data => {
-        if (data?.success) setTvRiders(data.riders || [])
+        if (data?.success) {
+          setTvRiders(data.riders || [])
+          setTvRidersTodayTotal(data.todayTotal || 0)
+        }
       })
       .catch(() => {})
   }, [tvMode])
@@ -1044,7 +1048,8 @@ export default function AdsManagerPage() {
         activeCampaigns={activeCampaigns}
         campaignsWithSpendCount={campaignsWithSpendCount}
         totalBalanceOwed={totalBalanceOwed}
-        riders={tvRiders}
+          riders={tvRiders}
+          ridersTodayTotal={tvRidersTodayTotal}
         pageStats={pageStats}
         activities={activities}
         showTodayOnly={showTodayOnly}

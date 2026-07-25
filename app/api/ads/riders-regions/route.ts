@@ -22,11 +22,21 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const { data: localities } = await admin
-      .from('localities')
-      .select('name, contractor:contractors(name), rider:riders(name)')
-      .eq('is_active', true)
-      .order('name', { ascending: true })
+    // Today's date in Mauritius (UTC+4) for the per-rider client counts
+    const todayMu = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+    const [{ data: localities }, { data: todayDeliveries }] = await Promise.all([
+      admin
+        .from('localities')
+        .select('name, contractor:contractors(name), rider:riders(name)')
+        .eq('is_active', true)
+        .order('name', { ascending: true }),
+      // Today's deliveries grouped client-side by rider (fallback contractor)
+      admin
+        .from('deliveries')
+        .select('customer_name, contact_1, rider:riders(name), contractor:contractors(name)')
+        .eq('delivery_date', todayMu),
+    ])
 
     // Group allocated regions by rider; fall back to the contractor name when
     // a region has a contractor but no default rider yet. Regions with neither
@@ -42,12 +52,35 @@ export async function GET() {
       byAssignee.set(key, entry)
     }
 
-    // Most regions first so the busiest assignees lead the table
-    const riders = Array.from(byAssignee.entries())
-      .map(([key, v]) => ({ id: key, name: v.name, isContractor: v.isContractor, regions: v.regions }))
-      .sort((a, b) => b.regions.length - a.regions.length || a.name.localeCompare(b.name))
+    // Today's DISTINCT clients per rider (same key scheme: rider name first,
+    // contractor fallback). A client = unique customer (phone, else name).
+    const clientsByAssignee = new Map<string, Set<string>>()
+    const allClients = new Set<string>()
+    for (const d of (todayDeliveries || []) as any[]) {
+      const riderName: string | null = d.rider?.name || null
+      const contractorName: string | null = d.contractor?.name || null
+      const key = riderName ? `r:${riderName}` : contractorName ? `c:${contractorName}` : null
+      const clientKey = (d.contact_1 || d.customer_name || '').trim().toLowerCase()
+      if (!clientKey) continue
+      allClients.add(clientKey)
+      if (!key) continue
+      const set = clientsByAssignee.get(key) || new Set<string>()
+      set.add(clientKey)
+      clientsByAssignee.set(key, set)
+    }
 
-    return NextResponse.json({ success: true, riders })
+    // Most clients today first - the busiest riders lead the panel
+    const riders = Array.from(byAssignee.entries())
+      .map(([key, v]) => ({
+        id: key,
+        name: v.name,
+        isContractor: v.isContractor,
+        regions: v.regions,
+        todayClients: clientsByAssignee.get(key)?.size || 0,
+      }))
+      .sort((a, b) => b.todayClients - a.todayClients || b.regions.length - a.regions.length || a.name.localeCompare(b.name))
+
+    return NextResponse.json({ success: true, riders, todayTotal: allClients.size })
   } catch (error) {
     console.error('riders-regions error:', error)
     return NextResponse.json({ success: false, error: 'Failed to load riders' }, { status: 500 })

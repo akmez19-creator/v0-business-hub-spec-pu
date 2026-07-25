@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
@@ -48,12 +48,14 @@ export interface TvActivity {
   direction: 'increase' | 'decrease' | 'status' | 'other'
 }
 
-// A rider (or contractor fallback) with the regions allocated to them.
+// A rider (or contractor fallback) with the regions allocated to them and
+// how many distinct clients they have for TODAY's delivery date.
 export interface TvRider {
   id: string
   name: string
   isContractor?: boolean
   regions: string[]
+  todayClients?: number
 }
 
 interface TvDashboardProps {
@@ -64,6 +66,9 @@ interface TvDashboardProps {
   campaignsWithSpendCount: number
   totalBalanceOwed: number
   riders: TvRider[]
+  // Total distinct clients across ALL of today's deliveries (rider-assigned
+  // or not) - shown in the panel header so totals reconcile.
+  ridersTodayTotal?: number
   pageStats?: TvPageStat[]
   activities?: TvActivity[]
   showTodayOnly: boolean
@@ -120,6 +125,7 @@ export function TvDashboard({
   campaignsWithSpendCount,
   totalBalanceOwed,
   riders,
+  ridersTodayTotal = 0,
   pageStats = [],
   activities = [],
   showTodayOnly,
@@ -133,6 +139,9 @@ export function TvDashboard({
   refreshing,
   onExit,
 }: TvDashboardProps) {
+  // Riders panel: show/hide each rider's region coverage (default hidden so
+  // every rider fits as a one-line row with today's client count)
+  const [showRiderRegions, setShowRiderRegions] = useState(false)
   // ONE continuous league ranked by cost-per-client (best first), flowing
   // across balanced columns with no per-zone gaps. Zone colors stay on each
   // row so green/yellow/red reads at a glance.
@@ -294,75 +303,110 @@ export function TvDashboard({
     </div>
   )
 
-  // Riders panel: regions allocated per rider (from the localities table).
-  // Compact rows - count badge + region list clamped to a few lines so many
-  // riders fit; unallocated riders are not shown here.
+  // Riders panel: today's DISTINCT client count per rider (the number that
+  // must reconcile with the day's total), with an optional Regions toggle
+  // that expands each rider's zone/locality coverage. Compact rows + scroll
+  // so ALL riders are reachable, not just the first six.
+  const assignedClients = riders.reduce((sum, r) => sum + (r.todayClients || 0), 0)
+  const unassignedClients = Math.max(0, ridersTodayTotal - assignedClients)
   const ridersPanel = (
     <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border">
       <div className={`flex shrink-0 items-center justify-between gap-2 bg-blue-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
-        <div className="flex items-center gap-2">
-          <Bike className="h-4 w-4 text-blue-400" />
-          <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold text-blue-400`}>Riders &amp; Regions</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <Bike className="h-4 w-4 shrink-0 text-blue-400" />
+          <span className={`truncate ${isTight ? 'text-sm' : 'text-base'} font-bold text-blue-400`}>Riders</span>
+          <span className={`${isTight ? 'text-[10px]' : 'text-xs'} text-blue-400/70`}>today{'\u2019'}s clients</span>
         </div>
-        <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{riders.length}</span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowRiderRegions((v) => !v)}
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+              showRiderRegions
+                ? 'border-blue-400/60 bg-blue-500/20 text-blue-300'
+                : 'border-border text-muted-foreground hover:text-blue-400'
+            }`}
+          >
+            Regions
+          </button>
+          <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-blue-400`}>{ridersTodayTotal}</span>
+        </div>
       </div>
-      <div className="min-h-0 overflow-hidden">
+      <div className="min-h-0 overflow-y-auto">
         {riders.length === 0 ? (
           <div className="px-3 py-3 text-center text-sm text-muted-foreground">No regions allocated yet</div>
         ) : (
-          riders.map((r, i) => {
-            // Collapse the rider's flat locality list into delivery zones so
-            // it's obvious which zones they cover (a rider usually opts for
-            // one or a few zones).
-            const { zones, unmatched } = groupLocalitiesByZone(r.regions)
-            return (
-              <div
-                key={r.id}
-                className={`border-b border-border/50 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`truncate ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
-                    {r.name}
-                    {r.isContractor && (
-                      <span className="ml-1.5 rounded bg-blue-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-400">
-                        Contractor
+          <>
+            {riders.map((r, i) => {
+              const { zones, unmatched } = groupLocalitiesByZone(r.regions)
+              return (
+                <div
+                  key={r.id}
+                  className={`border-b border-border/50 px-2.5 ${isTight ? 'py-1' : 'py-1.5'} ${i % 2 === 1 ? 'bg-card/40' : ''}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`truncate ${isTight ? 'text-xs' : 'text-sm'} font-bold`} title={r.name}>
+                      {r.name}
+                      {r.isContractor && (
+                        <span className="ml-1.5 rounded bg-blue-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-blue-400">
+                          Contractor
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {/* Today's clients: the number that adds up to the total */}
+                      <span className={`rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400`}>
+                        {r.todayClients || 0} cl
                       </span>
-                    )}
-                  </span>
-                  <span className={`shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-blue-400`}>
-                    {r.regions.length}
-                  </span>
-                </div>
-                {/* Locality names listed per zone: the zone name is a small
-                    prefix, followed by the actual localities the rider covers. */}
-                <div className="mt-0.5 space-y-0.5">
-                  {zones.map((z) => (
-                    <p
-                      key={z.zone}
-                      className={`${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
-                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-                      title={`${z.zone}: ${z.localities.join(', ')}`}
-                    >
-                      <span className="font-bold uppercase text-blue-400">{z.zone}</span>
-                      <span className="text-blue-400/60"> {z.localities.length} {'\u00b7'} </span>
-                      {z.localities.join(' \u00b7 ')}
-                    </p>
-                  ))}
-                  {unmatched.length > 0 && (
-                    <p
-                      className={`${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
-                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-                      title={unmatched.join(', ')}
-                    >
-                      <span className="font-bold uppercase text-muted-foreground/70">Other</span>
-                      <span className="text-muted-foreground/50"> {unmatched.length} {'\u00b7'} </span>
-                      {unmatched.join(' \u00b7 ')}
-                    </p>
+                      {showRiderRegions && (
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+                          {r.regions.length} loc
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {/* Region coverage only when the Regions toggle is on -
+                      keeps default rows one line tall so all riders fit */}
+                  {showRiderRegions && (
+                    <div className="mt-0.5 space-y-0.5">
+                      {zones.map((z) => (
+                        <p
+                          key={z.zone}
+                          className={`${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
+                          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                          title={`${z.zone}: ${z.localities.join(', ')}`}
+                        >
+                          <span className="font-bold uppercase text-blue-400">{z.zone}</span>
+                          <span className="text-blue-400/60"> {z.localities.length} {'\u00b7'} </span>
+                          {z.localities.join(' \u00b7 ')}
+                        </p>
+                      ))}
+                      {unmatched.length > 0 && (
+                        <p
+                          className={`${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-muted-foreground`}
+                          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                          title={unmatched.join(', ')}
+                        >
+                          <span className="font-bold uppercase text-muted-foreground/70">Other</span>
+                          <span className="text-muted-foreground/50"> {unmatched.length} {'\u00b7'} </span>
+                          {unmatched.join(' \u00b7 ')}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
+              )
+            })}
+            {/* Reconciliation: clients not yet assigned to any rider */}
+            {unassignedClients > 0 && (
+              <div className={`flex items-center justify-between gap-2 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
+                <span className={`${isTight ? 'text-xs' : 'text-sm'} font-semibold text-amber-500`}>Unassigned</span>
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-amber-500">
+                  {unassignedClients} cl
+                </span>
               </div>
-            )
-          })
+            )}
+          </>
         )}
       </div>
     </div>
@@ -390,11 +434,11 @@ export function TvDashboard({
         </div>
         <span className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums text-violet-400`}>{activities.length}</span>
       </div>
-      <div className="min-h-0 overflow-hidden">
+      <div className="min-h-0 overflow-y-auto">
         {activities.length === 0 ? (
           <div className="px-3 py-3 text-center text-sm text-muted-foreground">No edits in the last 7 days</div>
         ) : (
-          activities.slice(0, 10).map((act, i) => {
+          activities.map((act, i) => {
             const color =
               act.direction === 'increase'
                 ? 'text-emerald-500'
