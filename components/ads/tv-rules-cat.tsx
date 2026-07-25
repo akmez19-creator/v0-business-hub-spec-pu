@@ -153,8 +153,13 @@ export function TvRulesCat() {
 
   return (
     <>
-      {/* ================= The free-standing playing cat ================= */}
-      <div className="fixed bottom-14 right-5 z-[60] select-none">
+      {/* ================= The free-standing playing cat =================
+          It owns the whole wall: a slow stroll across the full width of the
+          screen (flipping to face its walking direction), while the idle
+          playlist keeps it playing the entire way. The rail itself is
+          click-through - only the cat is interactive. */}
+      <div className="cat-wander pointer-events-none fixed bottom-14 left-0 z-[60] select-none">
+        <div className="cat-face pointer-events-auto">
         <button
           type="button"
           onClick={() => {
@@ -209,7 +214,8 @@ export function TvRulesCat() {
 
         {/* Breathing ground shadow */}
         <div className="cat-shadow mx-auto -mt-2 h-2 w-20 rounded-full bg-cyan-950/70 blur-sm" />
-        {/* Identity tag */}
+        </div>
+        {/* Identity tag (kept upright regardless of walk direction) */}
         <div className="cat-tag mt-1 text-center font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-400/90">
           Vision
         </div>
@@ -325,6 +331,22 @@ export function TvRulesCat() {
       )}
 
       <style>{`
+        /* ---------- the wall stroll ----------
+           The cat owns the full width of the TV: it slowly walks from the
+           left edge to the right edge and back (90s round trip), flipping
+           to face its walking direction exactly at the turnaround points. */
+        .cat-wander { animation: catWander 90s linear infinite; }
+        @keyframes catWander {
+          0% { transform: translateX(0); }
+          50% { transform: translateX(calc(100vw - 9rem)); }
+          100% { transform: translateX(0); }
+        }
+        .cat-face { animation: catFace 90s step-end infinite; }
+        @keyframes catFace {
+          0%, 49.999% { transform: scaleX(1); }
+          50%, 100% { transform: scaleX(-1); }
+        }
+
         /* ---------- idle playlist (10 animations) ---------- */
         .cat-anim-bob { animation: catBob 3.2s ease-in-out infinite; }
         @keyframes catBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
