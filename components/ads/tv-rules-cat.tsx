@@ -133,6 +133,33 @@ const GUIDE_SLIDES: { title: string; icon: string; lines: string[] }[] = [
   },
 ]
 
+// Parse the AI briefing plain-text protocol ("[emoji] TITLE" header lines
+// followed by body lines, blank line between sections) into cards. Falls
+// back to a single untitled section for free-form text, and strips any
+// stray markdown so asterisks never reach the screen.
+function parseBriefing(text: string): { icon: string; title: string; lines: string[] }[] {
+  const cleaned = text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,4}\s*/gm, '')
+  const blocks = cleaned.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean)
+  const sections: { icon: string; title: string; lines: string[] }[] = []
+  // Header = optional emoji(s) + a SHORT mostly-uppercase title on its own line
+  const headerRe = /^(\p{Extended_Pictographic}[\uFE0F\u200D\p{Extended_Pictographic}]*)?\s*([A-Z][A-Z0-9 /&'!-]{1,28})$/u
+  for (const block of blocks) {
+    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean)
+    const m = lines[0]?.match(headerRe)
+    if (m && lines.length > 0) {
+      sections.push({ icon: m[1] || '', title: m[2].trim(), lines: lines.slice(1) })
+    } else if (sections.length > 0 && sections[sections.length - 1].lines.length === 0) {
+      sections[sections.length - 1].lines = lines
+    } else {
+      sections.push({ icon: '', title: '', lines })
+    }
+  }
+  return sections.length > 0 ? sections : [{ icon: '', title: '', lines: [cleaned] }]
+}
+
 export function TvRulesCat({
   getSnapshot,
   alertCount = 0,
@@ -409,15 +436,29 @@ export function TvRulesCat({
                         <p className="text-sm">Reading the whole wall{'\u2026'}</p>
                       </div>
                     ) : briefing ? (
-                      <div key={briefingAt?.getTime()} className="guide-line space-y-3">
-                        {briefing.split(/\n+/).map((para, i) => (
-                          <p
+                      /* Structured section cards: emoji + title header, short
+                         lines beneath - scannable from across the room */
+                      <div key={briefingAt?.getTime()} className="space-y-3">
+                        {parseBriefing(briefing).map((section, i) => (
+                          <div
                             key={i}
-                            className="guide-line whitespace-pre-wrap text-base leading-relaxed text-cyan-50/95 sm:text-lg"
+                            className="guide-line rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4"
                             style={{ animationDelay: `${0.08 + i * 0.12}s` }}
                           >
-                            {para}
-                          </p>
+                            {section.title && (
+                              <p className="mb-2 flex items-center gap-2 font-mono text-xs font-black uppercase tracking-[0.25em] text-cyan-400">
+                                {section.icon && <span className="text-base tracking-normal">{section.icon}</span>}
+                                {section.title}
+                              </p>
+                            )}
+                            <div className="space-y-1.5">
+                              {section.lines.map((line, j) => (
+                                <p key={j} className="text-base leading-relaxed text-cyan-50/95">
+                                  {line}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     ) : (
