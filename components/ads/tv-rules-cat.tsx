@@ -31,6 +31,18 @@ const IDLE_MODES: IdleMode[] = [
   { cat: 'cat-anim-snooze', zzz: true }, // 10. quick snooze
 ]
 
+// ON-DUTY playlist: while ACTION NEEDED has items the cat stops playing and
+// works the news line - pacing, pointing at the ticker below, sounding the
+// alarm. Same rotation logic as the idle playlist, different energy.
+const ALERT_MODES: IdleMode[] = [
+  { cat: 'cat-anim-alarm' }, // 1. urgent alarm hop
+  { cat: 'cat-anim-pointdown' }, // 2. dipping toward the ticker below
+  { cat: 'cat-anim-pace' }, // 3. anxious quick pacing
+  { cat: 'cat-anim-headshake' }, // 4. disapproving head shake
+  { cat: 'cat-anim-alarm' }, // 5. alarm again - it IS urgent
+  { cat: 'cat-anim-pointdown' }, // 6. back to pointing at the queue
+]
+
 const BALL_COLORS: Record<string, string> = {
   cyan: 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.9)]',
   orange: 'bg-orange-400 shadow-[0_0_10px_rgba(251,146,60,0.9)]',
@@ -121,10 +133,20 @@ const GUIDE_SLIDES: { title: string; icon: string; lines: string[] }[] = [
   },
 ]
 
-export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
+export function TvRulesCat({
+  getSnapshot,
+  alertCount = 0,
+}: {
+  getSnapshot?: () => unknown
+  // Live ACTION NEEDED count from the breaking-news ticker. > 0 flips the
+  // cat into on-duty mode: red glow, urgent animations, count badge, and it
+  // rides the ticker's top edge. 0 = playtime.
+  alertCount?: number
+}) {
   const [modeIdx, setModeIdx] = useState(0)
   const [guideOpen, setGuideOpen] = useState(false)
   const [slide, setSlide] = useState(0)
+  const onDuty = alertCount > 0
   // Overlay view: the AI briefing is the default, rules guide one tab away
   const [view, setView] = useState<'briefing' | 'guide'>('briefing')
 
@@ -169,12 +191,19 @@ export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
     }
   }, [fetchBriefing, getSnapshot])
 
-  // Rotate the idle playlist every 4.5s (paused while the guide is open)
+  // Rotate the active playlist (idle when clear, alert when on duty) -
+  // urgent moves rotate faster. Paused while the overlay is open.
   useEffect(() => {
     if (guideOpen) return
-    const t = setInterval(() => setModeIdx((i) => (i + 1) % IDLE_MODES.length), 4500)
+    const playlist = onDuty ? ALERT_MODES : IDLE_MODES
+    const t = setInterval(() => setModeIdx((i) => (i + 1) % playlist.length), onDuty ? 3200 : 4500)
     return () => clearInterval(t)
-  }, [guideOpen])
+  }, [guideOpen, onDuty])
+
+  // Restart the rotation cleanly whenever duty state flips
+  useEffect(() => {
+    setModeIdx(0)
+  }, [onDuty])
 
   // Keyboard navigation for the guide: left/right arrows + Escape
   const onKey = useCallback(
@@ -192,17 +221,22 @@ export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onKey])
 
-  const mode = IDLE_MODES[modeIdx]
+  const playlist = onDuty ? ALERT_MODES : IDLE_MODES
+  const mode = playlist[modeIdx % playlist.length]
   const current = GUIDE_SLIDES[slide]
 
   return (
     <>
-      {/* ================= The playing cat, merged with breaking news =====
-          It strolls along the TOP EDGE of the breaking-news ticker - part of
-          the bar, not a corner ornament. The rail is click-through; only the
+      {/* ================= The cat, one system with breaking news =========
+          CLEAR wall: playtime - slow stroll, balls, cyan glow.
+          ACTION NEEDED: on duty - it rides the ticker's top edge, glows the
+          ticker's red, paces faster, points at the queue, and wears the same
+          alert count the red bar shows. The rail is click-through; only the
           cat is interactive. Clicking it opens the AI briefing. */}
-      <div className="cat-wander pointer-events-none fixed bottom-9 left-0 z-[60] select-none">
-        <div className="cat-face pointer-events-auto">
+      <div
+        className={`${onDuty ? 'cat-wander-duty bottom-9' : 'cat-wander bottom-2'} pointer-events-none fixed left-0 z-[60] select-none transition-[bottom] duration-700`}
+      >
+        <div className={`${onDuty ? 'cat-face-duty' : 'cat-face'} pointer-events-auto`}>
         <button
           type="button"
           onClick={() => {
@@ -219,25 +253,45 @@ export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
           title="Click me - AI update on the whole wall"
         >
           {/* Fresh-briefing ping: a soft pulse until the update is read */}
-          {hasFresh && (
+          {hasFresh && !onDuty && (
             <span className="absolute -top-1 right-3 z-10 flex h-3.5 w-3.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-60" />
               <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-cyan-400" />
             </span>
           )}
-          {/* The cat itself: free, no circle, glow via drop-shadow */}
-          <div key={modeIdx} className={`relative h-full w-full ${mode.cat}`}>
+          {/* On duty: the cat wears the SAME count as the ACTION NEEDED bar,
+              in the same red, flip-proof so it never mirrors while walking */}
+          {onDuty && (
+            <span className="cat-badge-upright absolute -top-1.5 right-1 z-10 flex min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[11px] font-black tabular-nums text-white shadow-[0_0_12px_rgba(220,38,38,0.8)]">
+              {alertCount}
+            </span>
+          )}
+          {/* The cat itself: free, no circle, glow via drop-shadow - cyan at
+              play, breaking-news red while on duty */}
+          <div key={`${onDuty}-${modeIdx}`} className={`relative h-full w-full ${mode.cat}`}>
             <Image
               src="/images/tv-cat-2030.png"
               alt=""
               fill
               sizes="128px"
-              className="object-contain [filter:drop-shadow(0_0_14px_rgba(34,211,238,0.45))]"
+              className={`object-contain transition-[filter] duration-700 ${
+                onDuty
+                  ? '[filter:drop-shadow(0_0_16px_rgba(239,68,68,0.65))]'
+                  : '[filter:drop-shadow(0_0_14px_rgba(34,211,238,0.45))]'
+              }`}
             />
-            {/* Visor light sweep */}
+            {/* Visor light sweep - red and twice as frequent on duty */}
             <div className="pointer-events-none absolute inset-x-3 top-1/3 h-2 overflow-hidden">
-              <div className="cat-blink-bar absolute -left-full h-full w-full bg-cyan-300/40 blur-sm" />
+              <div
+                className={`absolute -left-full h-full w-full blur-sm ${
+                  onDuty ? 'cat-blink-bar-duty bg-red-400/50' : 'cat-blink-bar bg-cyan-300/40'
+                }`}
+              />
             </div>
+            {/* Duty siren: a soft red pulse ring off the visor */}
+            {onDuty && (
+              <span className="cat-siren pointer-events-none absolute left-1/2 top-1/4 h-8 w-8 -translate-x-1/2 rounded-full border-2 border-red-500/70" />
+            )}
           </div>
 
           {/* Play balls, per mode */}
@@ -267,8 +321,12 @@ export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
           )}
         </button>
 
-        {/* Breathing ground shadow */}
-        <div className="cat-shadow mx-auto -mt-2 h-2 w-20 rounded-full bg-cyan-950/70 blur-sm" />
+        {/* Breathing ground shadow - matches the mood */}
+        <div
+          className={`cat-shadow mx-auto -mt-2 h-2 w-20 rounded-full blur-sm transition-colors duration-700 ${
+            onDuty ? 'bg-red-950/80' : 'bg-cyan-950/70'
+          }`}
+        />
         </div>
       </div>
 
@@ -470,6 +528,65 @@ export function TvRulesCat({ getSnapshot }: { getSnapshot?: () => unknown }) {
         @keyframes catFace {
           0%, 49.999% { transform: scaleX(1); }
           50%, 100% { transform: scaleX(-1); }
+        }
+
+        /* ---------- ON DUTY: riding the breaking-news line ----------
+           The ticker scrolls its stories leftward; the on-duty cat patrols
+           the same line on a faster 40s beat, facing its walking direction,
+           like an anchor pacing the newsroom. */
+        .cat-wander-duty { animation: catWanderDuty 40s linear infinite; }
+        @keyframes catWanderDuty {
+          0% { transform: translateX(calc(100vw - 9rem)); }
+          50% { transform: translateX(0); }
+          100% { transform: translateX(calc(100vw - 9rem)); }
+        }
+        .cat-face-duty { animation: catFaceDuty 40s step-end infinite; }
+        @keyframes catFaceDuty {
+          0%, 49.999% { transform: scaleX(-1); }
+          50%, 100% { transform: scaleX(1); }
+        }
+        /* Counter-flip so the count badge reads correctly in both directions */
+        .cat-face-duty .cat-badge-upright { animation: catBadgeFlip 40s step-end infinite; }
+        @keyframes catBadgeFlip {
+          0%, 49.999% { transform: scaleX(-1); }
+          50%, 100% { transform: scaleX(1); }
+        }
+
+        /* ---------- on-duty playlist ---------- */
+        .cat-anim-alarm { animation: catAlarm 0.55s cubic-bezier(0.36,0.07,0.19,0.97) infinite; transform-origin: 50% 100%; }
+        @keyframes catAlarm {
+          0%, 100% { transform: translateY(0) rotate(0); }
+          20% { transform: translateY(-7px) rotate(-4deg); }
+          40% { transform: translateY(0) rotate(3deg); }
+          60% { transform: translateY(-5px) rotate(-2deg); }
+          80% { transform: translateY(0) rotate(1deg); }
+        }
+        .cat-anim-pointdown { animation: catPointDown 1.6s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catPointDown {
+          0%, 100% { transform: translateY(0) rotate(0) scale(1); }
+          35% { transform: translateY(5px) rotate(10deg) scale(1.04, 0.94); }
+          55% { transform: translateY(6px) rotate(12deg) scale(1.05, 0.93); }
+          75% { transform: translateY(2px) rotate(4deg) scale(1.01, 0.99); }
+        }
+        .cat-anim-pace { animation: catPace 0.9s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catPace {
+          0%, 100% { transform: translateX(-10px) skewX(2deg); }
+          50% { transform: translateX(10px) skewX(-2deg); }
+        }
+        .cat-anim-headshake { animation: catHeadshake 1.3s ease-in-out infinite; transform-origin: 50% 85%; }
+        @keyframes catHeadshake {
+          0%, 100% { transform: rotate(0); }
+          20% { transform: rotate(-9deg); }
+          40% { transform: rotate(8deg); }
+          60% { transform: rotate(-6deg); }
+          80% { transform: rotate(4deg); }
+        }
+        .cat-blink-bar-duty { animation: catBlinkSweepDuty 2.2s ease-in-out infinite; }
+        @keyframes catBlinkSweepDuty { 0%, 70%, 100% { left: -100%; } 85% { left: 100%; } }
+        .cat-siren { animation: catSiren 1.4s ease-out infinite; }
+        @keyframes catSiren {
+          0% { opacity: 0.8; transform: translateX(-50%) scale(0.5); }
+          100% { opacity: 0; transform: translateX(-50%) scale(2.2); }
         }
 
         /* ---------- idle playlist (10 animations) ---------- */

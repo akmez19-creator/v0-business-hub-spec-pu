@@ -1052,8 +1052,12 @@ export function TvDashboard({
         </div>
       </div>
 
-      {/* The 2030 Vision animated cat mascot, on the wall by default */}
-      {showRulesCat && <TvRulesCat getSnapshot={getWallSnapshot} />}
+      {/* The animated cat mascot - one system with the breaking-news bar:
+          it plays when the wall is clean and goes on duty (red, urgent,
+          wearing the same count) whenever ACTION NEEDED has items */}
+      {showRulesCat && (
+        <TvRulesCat getSnapshot={getWallSnapshot} alertCount={tickerItems.length + stalledItems.length} />
+      )}
 
       {/* Cost-per-client zone legend with per-zone product + client tallies */}
       <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
