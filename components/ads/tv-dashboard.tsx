@@ -571,8 +571,10 @@ export function TvDashboard({
                       )}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      {/* Today's clients vs the rider's daily target: green
-                          when met, amber when close (80%+), blue otherwise */}
+                      {/* Today's clients vs the rider's daily target as a
+                          progress meter: bar fill + % + count. Green when the
+                          target is met, amber when close (80%+), blue while
+                          building - readable across the room on a TV. */}
                       {(() => {
                         const target = targetOverrides[r.id] ?? r.target ?? null
                         const clients = r.todayClients || 0
@@ -584,18 +586,38 @@ export function TvDashboard({
                           )
                         }
                         const pct = clients / target
-                        const tone =
-                          pct >= 1
-                            ? 'bg-emerald-500/15 text-emerald-400'
-                            : pct >= 0.8
-                              ? 'bg-amber-500/15 text-amber-500'
-                              : 'bg-blue-500/15 text-blue-400'
+                        const pctLabel = Math.round(pct * 100)
+                        const toneText =
+                          pct >= 1 ? 'text-emerald-400' : pct >= 0.8 ? 'text-amber-500' : 'text-blue-400'
+                        const toneBar =
+                          pct >= 1 ? 'bg-emerald-500' : pct >= 0.8 ? 'bg-amber-500' : 'bg-blue-500'
                         return (
                           <span
-                            className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${tone}`}
-                            title={`${clients} of ${target} target clients (${Math.round(pct * 100)}%)`}
+                            className="flex items-center gap-1.5"
+                            title={`${clients} of ${target} target clients (${pctLabel}%)`}
                           >
-                            {clients}/{target}
+                            {/* % - the instant read */}
+                            <span className={`text-[11px] font-black tabular-nums ${toneText}`}>
+                              {pctLabel}%
+                            </span>
+                            {/* progress track */}
+                            <span
+                              className="relative h-2 w-14 overflow-hidden rounded-full bg-muted"
+                              role="progressbar"
+                              aria-valuenow={clients}
+                              aria-valuemin={0}
+                              aria-valuemax={target}
+                              aria-label={`${r.name}: ${clients} of ${target} clients`}
+                            >
+                              <span
+                                className={`absolute inset-y-0 left-0 rounded-full ${toneBar} ${pct >= 1 ? 'animate-pulse' : ''}`}
+                                style={{ width: `${Math.min(100, pct * 100)}%` }}
+                              />
+                            </span>
+                            {/* raw count */}
+                            <span className={`text-[11px] font-bold tabular-nums ${toneText}`}>
+                              {clients}/{target}
+                            </span>
                           </span>
                         )
                       })()}
