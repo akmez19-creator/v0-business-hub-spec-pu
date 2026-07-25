@@ -71,6 +71,8 @@ interface TvDashboardProps {
   ridersTodayTotal?: number
   // Delivery date (YYYY-MM-DD) of the active batch the counts belong to
   ridersBatchDate?: string | null
+  // Localities whose clients resolve to no rider (with client counts)
+  unassignedLocalities?: { name: string; clients: number }[]
   pageStats?: TvPageStat[]
   activities?: TvActivity[]
   showTodayOnly: boolean
@@ -129,6 +131,7 @@ export function TvDashboard({
   riders,
   ridersTodayTotal = 0,
   ridersBatchDate = null,
+  unassignedLocalities = [],
   pageStats = [],
   activities = [],
   showTodayOnly,
@@ -406,13 +409,25 @@ export function TvDashboard({
                 </div>
               )
             })}
-            {/* Reconciliation: clients not yet assigned to any rider */}
+            {/* Reconciliation: clients not yet assigned to any rider, with
+                the localities they come from so dispatch knows where to act */}
             {unassignedClients > 0 && (
-              <div className={`flex items-center justify-between gap-2 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
-                <span className={`${isTight ? 'text-xs' : 'text-sm'} font-semibold text-amber-500`}>Unassigned</span>
-                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-amber-500">
-                  {unassignedClients} cl
-                </span>
+              <div className={`px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`${isTight ? 'text-xs' : 'text-sm'} font-semibold text-amber-500`}>Unassigned</span>
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-amber-500">
+                    {unassignedClients} cl
+                  </span>
+                </div>
+                {unassignedLocalities.length > 0 && (
+                  <p
+                    className={`mt-0.5 ${isTight ? 'text-[10px]' : 'text-[11px]'} leading-snug text-amber-500/80`}
+                    style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                    title={unassignedLocalities.map((l) => `${l.name} (${l.clients})`).join(', ')}
+                  >
+                    {unassignedLocalities.map((l) => `${l.name} ${l.clients}`).join(' \u00b7 ')}
+                  </p>
+                )}
               </div>
             )}
           </>

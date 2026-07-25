@@ -62,16 +62,28 @@ export async function GET() {
         : Promise.resolve({ data: [] as any[] }),
     ])
 
-    // Group allocated regions by rider; fall back to the contractor name when
-    // a region has a contractor but no default rider yet. Regions with neither
-    // are unallocated and excluded (this panel shows allocations only).
+    // The SAME person can appear as a rider on some rows and a contractor on
+    // others (e.g. rider "PATRICE" vs contractor "Patrice"), so merge
+    // assignees by case-insensitive name - never by rider/contractor role.
+    const assigneeKey = (riderName: string | null, contractorName: string | null) => {
+      const name = riderName || contractorName
+      return name ? name.trim().toUpperCase() : null
+    }
+
+    // Group allocated regions by assignee. isContractor stays true only when
+    // the person is NEVER seen as a rider anywhere.
     const byAssignee = new Map<string, { name: string; isContractor: boolean; regions: string[] }>()
     for (const l of (localities || []) as any[]) {
       const riderName: string | null = l.rider?.name || null
       const contractorName: string | null = l.contractor?.name || null
-      const key = riderName ? `r:${riderName}` : contractorName ? `c:${contractorName}` : null
+      const key = assigneeKey(riderName, contractorName)
       if (!key || !l.name) continue
       const entry = byAssignee.get(key) || { name: riderName || contractorName!, isContractor: !riderName, regions: [] }
+      // Seen as an actual rider on this row: prefer the rider identity
+      if (riderName) {
+        entry.isContractor = false
+        entry.name = riderName
+      }
       if (!entry.regions.includes(l.name)) entry.regions.push(l.name)
       byAssignee.set(key, entry)
     }
@@ -80,32 +92,43 @@ export async function GET() {
     // assigned a rider (most of the batch until dispatch happens)
     const localityToKey = new Map<string, string>()
     for (const l of (localities || []) as any[]) {
-      const riderName: string | null = l.rider?.name || null
-      const contractorName: string | null = l.contractor?.name || null
-      const key = riderName ? `r:${riderName}` : contractorName ? `c:${contractorName}` : null
+      const key = assigneeKey(l.rider?.name || null, l.contractor?.name || null)
       if (key && l.name) localityToKey.set(String(l.name).trim().toLowerCase(), key)
     }
 
     // The batch's DISTINCT clients per rider. Attribution: explicit rider on
     // the delivery first, then contractor, then the locality allocation map.
-    // A client = unique customer (phone, else name).
+    // A client = unique customer (phone, else name). Deliveries that resolve
+    // to nobody are tallied per-locality so the panel can say WHERE the
+    // unassigned clients are.
     const clientsByAssignee = new Map<string, Set<string>>()
     const allClients = new Set<string>()
+    const unassignedByLocality = new Map<string, Set<string>>()
     for (const d of (batchDeliveries || []) as any[]) {
-      const riderName: string | null = d.rider?.name || null
-      const contractorName: string | null = d.contractor?.name || null
+      const locality = String(d.locality || '').trim()
       const key =
-        (riderName ? `r:${riderName}` : contractorName ? `c:${contractorName}` : null) ||
-        localityToKey.get(String(d.locality || '').trim().toLowerCase()) ||
+        assigneeKey(d.rider?.name || null, d.contractor?.name || null) ||
+        localityToKey.get(locality.toLowerCase()) ||
         null
       const clientKey = (d.contact_1 || d.customer_name || '').trim().toLowerCase()
       if (!clientKey) continue
       allClients.add(clientKey)
-      if (!key) continue
+      if (!key) {
+        const locLabel = locality || 'Unknown locality'
+        const set = unassignedByLocality.get(locLabel) || new Set<string>()
+        set.add(clientKey)
+        unassignedByLocality.set(locLabel, set)
+        continue
+      }
       const set = clientsByAssignee.get(key) || new Set<string>()
       set.add(clientKey)
       clientsByAssignee.set(key, set)
     }
+
+    // Unassigned breakdown: locality + client count, biggest first
+    const unassignedLocalities = Array.from(unassignedByLocality.entries())
+      .map(([name, set]) => ({ name, clients: set.size }))
+      .sort((a, b) => b.clients - a.clients)
 
     // Most clients today first - the busiest riders lead the panel
     const riders = Array.from(byAssignee.entries())
@@ -118,7 +141,13 @@ export async function GET() {
       }))
       .sort((a, b) => b.todayClients - a.todayClients || b.regions.length - a.regions.length || a.name.localeCompare(b.name))
 
-    return NextResponse.json({ success: true, riders, todayTotal: allClients.size, batchDate: batchDate || null })
+    return NextResponse.json({
+      success: true,
+      riders,
+      todayTotal: allClients.size,
+      batchDate: batchDate || null,
+      unassignedLocalities,
+    })
   } catch (error) {
     console.error('riders-regions error:', error)
     return NextResponse.json({ success: false, error: 'Failed to load riders' }, { status: 500 })
