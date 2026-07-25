@@ -65,7 +65,7 @@ import {
 } from '@/components/ui/command'
 import { format, formatDistanceToNow, subDays, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 import { DateRange } from 'react-day-picker'
-import { getRecommendation, RECOMMENDATION_STYLES, type Recommendation } from '@/lib/ads-recommendations'
+import { getRecommendation, RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 
 // Shape of one normalized Facebook activity (campaign edit) from our API
 interface AdActivity {
@@ -732,7 +732,21 @@ export default function AdsManagerPage() {
       if (!c.created_time) return min
       return min === null || c.created_time < min ? c.created_time : min
     }, null)
-    return getRecommendation({ createdTime: earliest, cac: groupCac(g), hasSpend: g.totalSpend > 0 })
+    // Most recent budget edit across the group's campaigns (from the FB
+    // activity feed): if one exists within the watch window, the group shows
+    // EDITED (already taken care of) instead of re-recommending.
+    const lastEdit = g.campaigns.reduce<AdActivity | null>((latest, c) => {
+      const e = lastEditByObject[c.id]
+      if (!e || (e.direction !== 'increase' && e.direction !== 'decrease')) return latest
+      return latest === null || e.eventTime > latest.eventTime ? e : latest
+    }, null)
+    return getRecommendation({
+      createdTime: earliest,
+      cac: groupCac(g),
+      hasSpend: g.totalSpend > 0,
+      lastEditTime: lastEdit?.eventTime ?? null,
+      lastEditDirection: lastEdit?.direction ?? null,
+    })
   }
 
   // Page-level stats across ALL products: total clients per page and the
@@ -762,17 +776,26 @@ export default function AdsManagerPage() {
     }))
     .sort((a, b) => b.clients - a.clients)
 
-  // Small colored badge for a budget recommendation (shared style map)
+  // Small colored badge for a budget recommendation (shared style map).
+  // EDITED additionally shows the live verdict: is the change paying off?
   const renderRecBadge = (rec: Recommendation | null, compact = false) => {
     if (!rec) return null
     const s = RECOMMENDATION_STYLES[rec.action]
+    const verdict = rec.action === 'EDITED' && rec.verdict ? VERDICT_STYLES[rec.verdict] : null
     return (
-      <span
-        title={rec.reason}
-        className={`inline-flex shrink-0 items-center gap-0.5 rounded border px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide ${s.bg} ${s.text} ${s.border}`}
-      >
-        {s.arrow}
-        {!compact && <span>{s.label}</span>}
+      <span className="inline-flex shrink-0 items-center gap-1">
+        <span
+          title={rec.reason}
+          className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide ${s.bg} ${s.text} ${s.border}`}
+        >
+          {s.arrow}
+          {!compact && <span>{rec.action === 'EDITED' ? 'Edited - watching' : s.label}</span>}
+        </span>
+        {verdict && !compact && (
+          <span title={rec.reason} className={`text-[10px] font-semibold ${verdict.text}`}>
+            {verdict.label}
+          </span>
+        )}
       </span>
     )
   }
@@ -1441,6 +1464,8 @@ export default function AdsManagerPage() {
                                           createdTime: campaign.created_time,
                                           cac: groupCac(group),
                                           hasSpend: parseFloat(campaign.spend || '0') > 0,
+                                          lastEditTime: lastEditByObject[campaign.id]?.eventTime ?? null,
+                                          lastEditDirection: lastEditByObject[campaign.id]?.direction ?? null,
                                         }),
                                         true,
                                       )}

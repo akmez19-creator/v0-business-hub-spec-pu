@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook } from 'lucide-react'
-import { RECOMMENDATION_STYLES, type Recommendation } from '@/lib/ads-recommendations'
+import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -232,17 +232,25 @@ export function TvDashboard({
           {g.cac !== null ? formatRs(g.cac) : '—'}
         </span>
 
-        {/* Budget action: ↑ increase (scale), ↓ decrease (burning), ● hold (<4 days).
+        {/* Budget action: ↑ increase (scale), ↓ decrease (burning), ● hold (<4 days),
+            ✓ edited (already taken care of - glyph tinted by whether results are
+            improving: green better, amber no change, red still expensive).
             WATCH stays blank so only actionable rows draw the eye. */}
         <span className="flex items-center justify-center">
-          {g.recommendation && g.recommendation.action !== 'WATCH' && (
-            <span
-              title={g.recommendation.reason}
-              className={`inline-flex h-4 w-4 items-center justify-center rounded ${RECOMMENDATION_STYLES[g.recommendation.action].bg} ${RECOMMENDATION_STYLES[g.recommendation.action].text} text-[11px] font-bold leading-none`}
-            >
-              {RECOMMENDATION_STYLES[g.recommendation.action].arrow}
-            </span>
-          )}
+          {g.recommendation && g.recommendation.action !== 'WATCH' && (() => {
+            const rec = g.recommendation
+            const s = RECOMMENDATION_STYLES[rec.action]
+            const tint =
+              rec.action === 'EDITED' && rec.verdict ? VERDICT_STYLES[rec.verdict].text : s.text
+            return (
+              <span
+                title={rec.reason}
+                className={`inline-flex h-4 w-4 items-center justify-center rounded ${s.bg} ${tint} text-[11px] font-bold leading-none`}
+              >
+                {s.arrow}
+              </span>
+            )
+          })()}
         </span>
       </div>
     )
