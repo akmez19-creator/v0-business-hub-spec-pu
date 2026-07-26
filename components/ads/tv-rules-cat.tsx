@@ -218,6 +218,34 @@ export function TvRulesCat({
     }
   }, [fetchBriefing, getSnapshot])
 
+  // ---- Live agent comms: who is logging entries right now (last 10 min),
+  // on which products, how many entries. Polled every 60s.
+  const [agentFeed, setAgentFeed] = useState<{
+    totalEntries: number
+    agents: { agent: string; entries: number; products: string[]; lastEntryAt: string }[]
+  } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const res = await fetch('/api/ads/agent-activity')
+        const json = await res.json()
+        if (alive && json.success) {
+          setAgentFeed({ totalEntries: json.totalEntries, agents: json.agents })
+        }
+      } catch {
+        // keep last feed on failure
+      }
+    }
+    load()
+    const t = setInterval(load, 60_000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [])
+
   // Rotate the active playlist (idle when clear, alert when on duty) -
   // urgent moves rotate faster. Paused while the overlay is open.
   useEffect(() => {
@@ -355,6 +383,56 @@ export function TvRulesCat({
           }`}
         />
         </div>
+
+        {/* ===== AGENT LINK comms box: travels with the cat but sits OUTSIDE
+            the flipping wrapper so its text never mirrors. Shows who is
+            logging entries right now, on what, and the 10-min counts. */}
+        {agentFeed && agentFeed.agents.length > 0 && (
+          <div
+            className={`absolute bottom-2 left-full ml-2 w-56 rounded-lg border backdrop-blur-sm ${
+              onDuty ? 'border-red-500/25 bg-red-950/60' : 'border-cyan-400/25 bg-cyan-950/50'
+            }`}
+          >
+            {/* speech tail pointing at the cat */}
+            <span
+              className={`absolute -left-1.5 bottom-4 h-3 w-3 rotate-45 border-b border-l ${
+                onDuty ? 'border-red-500/25 bg-red-950/60' : 'border-cyan-400/25 bg-cyan-950/50'
+              }`}
+            />
+            <div
+              className={`flex items-center justify-between gap-2 border-b px-2.5 py-1 ${
+                onDuty ? 'border-red-500/20' : 'border-cyan-400/20'
+              }`}
+            >
+              <span className={`font-mono text-[9px] font-black uppercase tracking-[0.25em] ${onDuty ? 'text-red-400' : 'text-cyan-400'}`}>
+                Agent link
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.9)]" />
+                <span className="font-mono text-[9px] font-bold tabular-nums text-emerald-400">
+                  {agentFeed.totalEntries} / 10min
+                </span>
+              </span>
+            </div>
+            <div className="space-y-1 px-2.5 py-1.5">
+              {agentFeed.agents.slice(0, 3).map((a) => (
+                <div key={a.agent} className="min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[11px] font-bold uppercase tracking-wide text-foreground">
+                      {a.agent}
+                    </span>
+                    <span className={`shrink-0 font-mono text-[10px] font-black tabular-nums ${onDuty ? 'text-red-300' : 'text-cyan-300'}`}>
+                      {a.entries} {a.entries === 1 ? 'entry' : 'entries'}
+                    </span>
+                  </div>
+                  <p className="truncate text-[9px] leading-tight text-muted-foreground" title={a.products.join(', ')}>
+                    {a.products.join(' \u00b7 ') || 'logging\u2026'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ================= Full-screen VISION 2030 guide ================= */}
@@ -562,7 +640,7 @@ export function TvRulesCat({
         .cat-wander { animation: catWander 90s linear infinite; }
         @keyframes catWander {
           0% { transform: translateX(0); }
-          50% { transform: translateX(calc(100vw - 9rem)); }
+          50% { transform: translateX(calc(100vw - 24rem)); }
           100% { transform: translateX(0); }
         }
         .cat-face { animation: catFace 90s step-end infinite; }
@@ -577,9 +655,9 @@ export function TvRulesCat({
            like an anchor pacing the newsroom. */
         .cat-wander-duty { animation: catWanderDuty 40s linear infinite; }
         @keyframes catWanderDuty {
-          0% { transform: translateX(calc(100vw - 9rem)); }
+          0% { transform: translateX(calc(100vw - 24rem)); }
           50% { transform: translateX(0); }
-          100% { transform: translateX(calc(100vw - 9rem)); }
+          100% { transform: translateX(calc(100vw - 24rem)); }
         }
         .cat-face-duty { animation: catFaceDuty 40s step-end infinite; }
         @keyframes catFaceDuty {
