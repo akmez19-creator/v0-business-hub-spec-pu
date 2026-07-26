@@ -543,10 +543,14 @@ export default function AdsManagerPage() {
       return
     }
     try {
+      // Cl counts = clients ENTERED today (Mauritius time), pairing with
+      // today's ad spend. The Riders panel intentionally differs: it groups
+      // by delivery date (the batch riders deliver today).
+      const entryDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Indian/Mauritius' })
       const res = await fetch('/api/product-client-stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ names }),
+        body: JSON.stringify({ names, entryDate }),
       })
       const data = await res.json()
       setProductClientStats(data.stats || {})

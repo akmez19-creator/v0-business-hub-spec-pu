@@ -6,12 +6,21 @@ import { createAdminClient } from '@/lib/supabase/server'
 // Also returns per-page attribution (deliveries.medium is the page the client
 // came from, auto-captured by the extension): clients per product per page and
 // page totals, powering "clients per page" + "avg cost/client per page".
+//
+// Optional body.entryDate (YYYY-MM-DD): count only clients whose delivery was
+// ENTERED on that date - the wall passes today so counts pair with today's ad
+// spend. (The Riders panel is different by design: it groups by delivery date.)
+// Omit for all-time counts.
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const names: string[] = Array.isArray(body?.names)
       ? body.names.filter((n: unknown) => typeof n === 'string' && n.trim().length > 0)
       : []
+    const entryDate: string | null =
+      typeof body?.entryDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.entryDate)
+        ? body.entryDate
+        : null
 
     if (names.length === 0) {
       return NextResponse.json({ stats: {}, productPages: {}, pageTotals: {} })
@@ -19,8 +28,8 @@ export async function POST(request: Request) {
 
     const adminDb = createAdminClient()
     const [main, pages] = await Promise.all([
-      adminDb.rpc('get_product_client_stats', { p_names: names }),
-      adminDb.rpc('get_product_page_client_stats', { p_names: names }),
+      adminDb.rpc('get_product_client_stats', { p_names: names, p_entry_date: entryDate }),
+      adminDb.rpc('get_product_page_client_stats', { p_names: names, p_entry_date: entryDate }),
     ])
 
     if (main.error) {
