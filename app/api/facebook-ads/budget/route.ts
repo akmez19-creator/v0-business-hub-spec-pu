@@ -9,16 +9,21 @@ const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
 // BOOST (percent 20 | 50): increase the REMAINING budget by the given
 // percent. Daily campaigns grow the daily amount itself.
 //
-// OPTIMUM DECREASE (percent 'optimum'): shrink the budget to the calculated
-// floor - keep what is already spent, and allocate exactly 1.25 (account
-// currency) per remaining day until the campaign's end date:
-//   new lifetime budget = spent so far + remaining_days x 1.25
-// Daily campaigns simply get their daily budget set to 1.25/day.
+// OPTIMUM DECREASE (percent 'optimum' | 'optimum2'): shrink the budget to a
+// calculated floor - keep what is already spent, and allocate a fixed daily
+// rate per remaining day until the campaign's end date:
+//   'optimum'  -> 1.25/day (the tightest floor)
+//   'optimum2' -> 2.00/day (the least-aggressive optimum)
+//   new lifetime budget = spent so far + remaining_days x rate
+// Daily campaigns simply get their daily budget set to the rate.
 // Refuses to run if the campaign is already at/below its optimum, or if a
 // lifetime campaign has no end date (remaining days would be undefined).
 //
 // Auth-gated: only signed-in dashboard users can move money.
-const OPTIMUM_PER_DAY_MINOR = 125 // 1.25 in minor units (cents)
+const OPTIMUM_RATES_MINOR: Record<string, number> = {
+  optimum: 125, // 1.25/day in minor units (cents)
+  optimum2: 200, // 2.00/day
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -37,10 +42,13 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
     const campaignId: string | undefined = typeof body?.campaignId === 'string' ? body.campaignId : undefined
-    const percent: number | 'optimum' | undefined = body?.percent
-    if (!campaignId || (percent !== 20 && percent !== 50 && percent !== 'optimum')) {
+    const percent: number | 'optimum' | 'optimum2' | undefined = body?.percent
+    if (
+      !campaignId ||
+      (percent !== 20 && percent !== 50 && percent !== 'optimum' && percent !== 'optimum2')
+    ) {
       return NextResponse.json(
-        { error: "campaignId and percent (20 | 50 | 'optimum') are required" },
+        { error: "campaignId and percent (20 | 50 | 'optimum' | 'optimum2') are required" },
         { status: 400 },
       )
     }
@@ -66,18 +74,19 @@ export async function POST(request: Request) {
     let newBudget: number
     let remainingDays: number | null = null
 
-    if (percent === 'optimum') {
-      // ---- OPTIMUM DECREASE: spent + remaining_days x 1.25 ----
+    if (percent === 'optimum' || percent === 'optimum2') {
+      // ---- OPTIMUM DECREASE: spent + remaining_days x daily rate ----
+      const rate = OPTIMUM_RATES_MINOR[percent]
       if (daily > 0 && lifetime <= 0) {
-        // Daily campaign: the optimum daily allocation IS 1.25/day
-        if (daily <= OPTIMUM_PER_DAY_MINOR) {
+        // Daily campaign: the optimum daily allocation IS the rate
+        if (daily <= rate) {
           return NextResponse.json(
-            { error: 'Daily budget is already at or below the 1.25/day optimum' },
+            { error: `Daily budget is already at or below the ${(rate / 100).toFixed(2)}/day optimum` },
             { status: 400 },
           )
         }
         field = 'daily_budget'
-        newBudget = OPTIMUM_PER_DAY_MINOR
+        newBudget = rate
       } else if (lifetime > 0) {
         if (!current.stop_time) {
           return NextResponse.json(
@@ -95,7 +104,7 @@ export async function POST(request: Request) {
           )
         }
         const spent = Math.max(0, lifetime - remaining)
-        const optimum = spent + remainingDays * OPTIMUM_PER_DAY_MINOR
+        const optimum = spent + remainingDays * rate
         if (optimum >= lifetime) {
           return NextResponse.json(
             {

@@ -211,13 +211,15 @@ export function TvDashboard({
   }
 
   // Budget adjust: +20% / +50% of the REMAINING budget added to the campaign
-  // budget (daily campaigns grow the daily amount), or 'optimum' - decrease
-  // to spent + remaining_days x 1.25/day, tallied to the campaign end date.
+  // budget (daily campaigns grow the daily amount), or the optimum decreases:
+  // 'optimum' = spent + remaining_days x 1.25/day (tightest floor),
+  // 'optimum2' = spent + remaining_days x 2.00/day (least-aggressive floor),
+  // both tallied to the campaign end date.
   // Tracks which id+action is mid-flight and marks done ids with a summary.
   const [boostingKey, setBoostingKey] = useState<string | null>(null)
   const [boostedNotes, setBoostedNotes] = useState<Record<string, string>>({})
 
-  const boostBudget = async (campaignId: string, percent: 20 | 50 | 'optimum') => {
+  const boostBudget = async (campaignId: string, percent: 20 | 50 | 'optimum' | 'optimum2') => {
     setBoostingKey(`${campaignId}:${percent}`)
     try {
       const res = await fetch('/api/facebook-ads/budget', {
@@ -227,11 +229,12 @@ export function TvDashboard({
       })
       const json = await res.json()
       if (res.ok && json.success) {
+        const optLabel = percent === 'optimum' ? 'OPT' : 'OPT2'
         setBoostedNotes((m) => ({
           ...m,
           [campaignId]:
-            percent === 'optimum'
-              ? `OPT${json.remainingDays ? ` ${json.remainingDays}d` : ''} \u2192 Rs ${json.next.toLocaleString()}`
+            percent === 'optimum' || percent === 'optimum2'
+              ? `${optLabel}${json.remainingDays ? ` ${json.remainingDays}d` : ''} \u2192 Rs ${json.next.toLocaleString()}`
               : `+${percent}% \u2192 Rs ${json.next.toLocaleString()}`,
         }))
       } else {
@@ -584,6 +587,25 @@ export function TvDashboard({
                           title="Decrease budget to optimum: spent + 1.25/day for each day left until the end date"
                         >
                           {boostingKey === `${c.id}:optimum` ? '\u2026' : '\u2193OPT'}
+                        </button>
+                        {/* Least-aggressive optimum: same logic at 2.00/day */}
+                        <button
+                          type="button"
+                          disabled={boostingKey !== null}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (
+                              !window.confirm(
+                                `Decrease "${c.name}" to its least optimum? Budget becomes: spent so far + 2.00/day for each remaining day until the campaign ends.`,
+                              )
+                            )
+                              return
+                            boostBudget(c.id, 'optimum2')
+                          }}
+                          className="rounded bg-orange-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-orange-400 transition-colors hover:bg-orange-500/30 disabled:opacity-50"
+                          title="Decrease budget to least optimum: spent + 2.00/day for each day left until the end date"
+                        >
+                          {boostingKey === `${c.id}:optimum2` ? '\u2026' : '\u2193OPT2'}
                         </button>
                       </>
                     )}
