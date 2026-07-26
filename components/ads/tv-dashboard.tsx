@@ -211,7 +211,9 @@ export function TvDashboard({
   }
 
   // Budget adjust: +20% / +50% of the REMAINING budget added to the campaign
-  // budget (daily campaigns grow the daily amount), or the optimum decreases:
+  // budget (daily campaigns grow the daily amount); -10 = STABILIZE (shave
+  // 10% off the remaining budget - the undo lever after over-boosting);
+  // or the optimum decreases:
   // 'optimum' = spent + remaining_days x 1.25/day (tightest floor),
   // 'optimum2' = spent + remaining_days x 2.00/day (least-aggressive floor),
   // both tallied to the campaign end date.
@@ -219,7 +221,7 @@ export function TvDashboard({
   const [boostingKey, setBoostingKey] = useState<string | null>(null)
   const [boostedNotes, setBoostedNotes] = useState<Record<string, string>>({})
 
-  const boostBudget = async (campaignId: string, percent: 20 | 50 | 'optimum' | 'optimum2') => {
+  const boostBudget = async (campaignId: string, percent: 20 | 50 | -10 | 'optimum' | 'optimum2') => {
     setBoostingKey(`${campaignId}:${percent}`)
     try {
       const res = await fetch('/api/facebook-ads/budget', {
@@ -229,13 +231,17 @@ export function TvDashboard({
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const optLabel = percent === 'optimum' ? 'OPT' : 'OPT2'
+        const label =
+          percent === 'optimum'
+            ? `OPT${json.remainingDays ? ` ${json.remainingDays}d` : ''}`
+            : percent === 'optimum2'
+              ? `OPT2${json.remainingDays ? ` ${json.remainingDays}d` : ''}`
+              : percent === -10
+                ? 'STAB \u221210%'
+                : `+${percent}%`
         setBoostedNotes((m) => ({
           ...m,
-          [campaignId]:
-            percent === 'optimum' || percent === 'optimum2'
-              ? `${optLabel}${json.remainingDays ? ` ${json.remainingDays}d` : ''} \u2192 Rs ${json.next.toLocaleString()}`
-              : `+${percent}% \u2192 Rs ${json.next.toLocaleString()}`,
+          [campaignId]: `${label} \u2192 Rs ${json.next.toLocaleString()}`,
         }))
       } else {
         alert(json.error || 'Facebook rejected the budget change')
@@ -569,6 +575,21 @@ export function TvDashboard({
                             {boostingKey === `${c.id}:${pct}` ? '\u2026' : `+${pct}%`}
                           </button>
                         ))}
+                        {/* Stabilize: shave 10% off the remaining budget -
+                            the counterweight when a boost overshoots */}
+                        <button
+                          type="button"
+                          disabled={boostingKey !== null}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (!window.confirm(`Stabilize "${c.name}": decrease remaining budget by 10%?`)) return
+                            boostBudget(c.id, -10)
+                          }}
+                          className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-sky-400 transition-colors hover:bg-sky-500/30 disabled:opacity-50"
+                          title="Stabilize: cut 10% of the remaining budget (use after an over-boost)"
+                        >
+                          {boostingKey === `${c.id}:-10` ? '\u2026' : '\u221210%'}
+                        </button>
                         {/* Optimum decrease: budget = spent + days-to-end x 1.25/day */}
                         <button
                           type="button"

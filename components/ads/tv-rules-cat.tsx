@@ -19,16 +19,21 @@ type IdleMode = {
   zzz?: boolean
 }
 const IDLE_MODES: IdleMode[] = [
-  { cat: 'cat-anim-bob' }, // 1. gentle float
-  { cat: 'cat-anim-bat', balls: ['cyan'] }, // 2. batting a rolling ball
-  { cat: 'cat-anim-tilt' }, // 3. curious head tilt
-  { cat: 'cat-anim-bounce', balls: ['orange'] }, // 4. hopping with a bouncing ball
-  { cat: 'cat-anim-tailchase' }, // 5. chasing its tail
-  { cat: 'cat-anim-juggle', balls: ['cyan', 'orange', 'violet'] }, // 6. juggling three balls
-  { cat: 'cat-anim-stretch' }, // 7. big cat stretch
-  { cat: 'cat-anim-pounce', balls: ['violet'] }, // 8. pouncing on a ball
-  { cat: 'cat-anim-wiggle' }, // 9. happy wiggle
-  { cat: 'cat-anim-snooze', zzz: true }, // 10. quick snooze
+  { cat: 'cat-anim-bob' }, // 1. gentle breathing sway
+  { cat: 'cat-anim-slowblink' }, // 2. contented slow blink (real cat trust signal)
+  { cat: 'cat-anim-bat', balls: ['cyan'] }, // 3. batting a rolling ball
+  { cat: 'cat-anim-groom' }, // 4. grooming - rhythmic head-down licks
+  { cat: 'cat-anim-tilt' }, // 5. curious head tilt
+  { cat: 'cat-anim-earflick' }, // 6. quick ear-flick shiver
+  { cat: 'cat-anim-bounce', balls: ['orange'] }, // 7. hopping with a bouncing ball
+  { cat: 'cat-anim-tailchase' }, // 8. chasing its tail
+  { cat: 'cat-anim-stalk' }, // 9. low crouch-stalk creep
+  { cat: 'cat-anim-juggle', balls: ['cyan', 'orange', 'violet'] }, // 10. juggling three balls
+  { cat: 'cat-anim-stretch' }, // 11. big cat stretch
+  { cat: 'cat-anim-knead' }, // 12. happy kneading (making biscuits)
+  { cat: 'cat-anim-pounce', balls: ['violet'] }, // 13. pouncing on a ball
+  { cat: 'cat-anim-wiggle' }, // 14. happy wiggle
+  { cat: 'cat-anim-snooze', zzz: true }, // 15. quick snooze
 ]
 
 // ON-DUTY playlist: while ACTION NEEDED has items the cat stops playing and
@@ -38,9 +43,10 @@ const ALERT_MODES: IdleMode[] = [
   { cat: 'cat-anim-alarm' }, // 1. urgent alarm hop
   { cat: 'cat-anim-pointdown' }, // 2. dipping toward the ticker below
   { cat: 'cat-anim-pace' }, // 3. anxious quick pacing
-  { cat: 'cat-anim-headshake' }, // 4. disapproving head shake
-  { cat: 'cat-anim-alarm' }, // 5. alarm again - it IS urgent
-  { cat: 'cat-anim-pointdown' }, // 6. back to pointing at the queue
+  { cat: 'cat-anim-crouch' }, // 4. tense low crouch, ready to strike
+  { cat: 'cat-anim-headshake' }, // 5. disapproving head shake
+  { cat: 'cat-anim-alarm' }, // 6. alarm again - it IS urgent
+  { cat: 'cat-anim-pointdown' }, // 7. back to pointing at the queue
 ]
 
 const BALL_COLORS: Record<string, string> = {
@@ -288,10 +294,16 @@ export function TvRulesCat({
     'cat-anim-alarm': `SOUNDING ALARM \u2014 ${alertCount} NEED ACTION`,
     'cat-anim-pointdown': 'LOOK DOWN \u2014 THE TICKER HAS THEM',
     'cat-anim-pace': 'PACING UNTIL THESE GET FIXED\u2026',
+    'cat-anim-crouch': 'LOCKED ON \u2014 READY TO STRIKE',
     'cat-anim-headshake': 'THESE NUMBERS? UNACCEPTABLE.',
     // playtime narration - wall is clean
     'cat-anim-bob': 'ALL CLEAR \u2014 WALL IS PURRING',
+    'cat-anim-slowblink': 'SLOW BLINK \u2014 I TRUST THESE NUMBERS',
     'cat-anim-bat': 'BATTING PRACTICE \u2014 ZERO ALERTS',
+    'cat-anim-groom': 'GROOMING BREAK \u2014 ALL TIDY',
+    'cat-anim-earflick': 'EAR FLICK \u2014 JUST STATIC, NO ALERTS',
+    'cat-anim-stalk': 'STALKING MODE \u2014 WATCHING THE SPEND',
+    'cat-anim-knead': 'MAKING BISCUITS \u2014 PROFITS RISING',
     'cat-anim-tilt': 'SCANNING\u2026 NOTHING SUSPICIOUS',
     'cat-anim-bounce': 'BOUNCE CHECK \u2014 ALL GREEN',
     'cat-anim-tailchase': 'CHASING TAIL, NOT PROBLEMS',
@@ -350,7 +362,7 @@ export function TvRulesCat({
               play, breaking-news red while on duty */}
           <div key={`${onDuty}-${modeIdx}`} className={`relative h-full w-full ${mode.cat}`}>
             <Image
-              src="/images/tv-cat-2030.png"
+              src="/images/tv-cat-realistic.png"
               alt=""
               fill
               sizes="128px"
@@ -523,7 +535,7 @@ export function TvRulesCat({
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_70%,rgba(34,211,238,0.14),transparent_65%)]" />
               <div className="guide-cat relative h-52 w-52">
                 <Image
-                  src="/images/tv-cat-2030.png"
+                  src="/images/tv-cat-realistic.png"
                   alt="The Vision cat presenter"
                   fill
                   sizes="208px"
@@ -773,6 +785,60 @@ export function TvRulesCat({
         @keyframes catSiren {
           0% { opacity: 0.8; transform: translateX(-50%) scale(0.5); }
           100% { opacity: 0; transform: translateX(-50%) scale(2.2); }
+        }
+
+        /* ---------- realistic cat motions ---------- */
+        /* Slow blink: a real cat's trust signal - long, lazy eyelid squash */
+        .cat-anim-slowblink { animation: catSlowBlink 4.5s ease-in-out infinite; transform-origin: 50% 85%; }
+        @keyframes catSlowBlink {
+          0%, 38%, 62%, 100% { transform: scaleY(1); }
+          46%, 54% { transform: scaleY(0.94) translateY(2px); }
+          50% { transform: scaleY(0.90) translateY(3px); }
+        }
+        /* Grooming: rhythmic head-dip licks toward a raised paw */
+        .cat-anim-groom { animation: catGroom 1.6s ease-in-out infinite; transform-origin: 50% 90%; }
+        @keyframes catGroom {
+          0%, 100% { transform: rotate(0deg) translateY(0); }
+          20% { transform: rotate(-7deg) translateY(3px) scaleY(0.96); }
+          35% { transform: rotate(-4deg) translateY(1px); }
+          55% { transform: rotate(-8deg) translateY(3px) scaleY(0.95); }
+          70% { transform: rotate(-3deg) translateY(1px); }
+        }
+        /* Ear flick: sudden tiny shiver from the head, body barely moves */
+        .cat-anim-earflick { animation: catEarflick 2.8s ease-in-out infinite; transform-origin: 55% 20%; }
+        @keyframes catEarflick {
+          0%, 74%, 100% { transform: rotate(0deg); }
+          76% { transform: rotate(2.5deg); }
+          79% { transform: rotate(-2deg); }
+          82% { transform: rotate(1.2deg); }
+          85% { transform: rotate(0deg); }
+        }
+        /* Crouch-stalk: dropped low, slow forward creep with frozen pauses */
+        .cat-anim-stalk { animation: catStalk 3.6s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catStalk {
+          0%, 100% { transform: translateX(0) scaleY(1); }
+          20% { transform: translateX(3px) scaleY(0.86) translateY(5px); }
+          40% { transform: translateX(7px) scaleY(0.86) translateY(5px); }
+          55% { transform: translateX(7px) scaleY(0.85) translateY(6px); } /* freeze */
+          75% { transform: translateX(12px) scaleY(0.88) translateY(4px); }
+          90% { transform: translateX(4px) scaleY(0.97) translateY(1px); }
+        }
+        /* Kneading: alternating gentle left-right press, "making biscuits" */
+        .cat-anim-knead { animation: catKnead 1.1s ease-in-out infinite; transform-origin: 50% 95%; }
+        @keyframes catKnead {
+          0%, 100% { transform: rotate(-1.5deg) translateY(1px) scaleY(0.985); }
+          50% { transform: rotate(1.5deg) translateY(1px) scaleY(0.985); }
+        }
+        /* Tense crouch (on duty): low, coiled, micro-trembling with intent */
+        .cat-anim-crouch { animation: catCrouch 2.4s ease-in-out infinite; transform-origin: 50% 100%; }
+        @keyframes catCrouch {
+          0%, 100% { transform: scaleY(0.88) translateY(5px); }
+          10% { transform: scaleY(0.87) translateY(5px) translateX(-1px); }
+          20% { transform: scaleY(0.88) translateY(5px) translateX(1px); }
+          30% { transform: scaleY(0.87) translateY(5px) translateX(-1px); }
+          40% { transform: scaleY(0.88) translateY(5px); }
+          70% { transform: scaleY(0.86) translateY(6px); } /* deepest coil */
+          85% { transform: scaleY(0.90) translateY(4px); }
         }
 
         /* ---------- comms box, synced to the cat ---------- */

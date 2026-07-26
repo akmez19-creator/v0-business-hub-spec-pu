@@ -4,10 +4,15 @@ import { createClient } from '@/lib/supabase/server'
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
 
-// Adjust a campaign's budget straight from the wall. Two actions:
+// Adjust a campaign's budget straight from the wall. Three actions:
 //
 // BOOST (percent 20 | 50): increase the REMAINING budget by the given
 // percent. Daily campaigns grow the daily amount itself.
+//
+// STABILIZE (percent -10): decrease the REMAINING budget by 10% - the undo
+// lever for when boosts push a campaign higher than usual. Lifetime:
+//   new budget = lifetime - remaining x 10% (never below what is spent).
+// Daily campaigns shrink the daily amount by 10%.
 //
 // OPTIMUM DECREASE (percent 'optimum' | 'optimum2'): shrink the budget to a
 // calculated floor - keep what is already spent, and allocate a fixed daily
@@ -45,10 +50,10 @@ export async function POST(request: Request) {
     const percent: number | 'optimum' | 'optimum2' | undefined = body?.percent
     if (
       !campaignId ||
-      (percent !== 20 && percent !== 50 && percent !== 'optimum' && percent !== 'optimum2')
+      (percent !== 20 && percent !== 50 && percent !== -10 && percent !== 'optimum' && percent !== 'optimum2')
     ) {
       return NextResponse.json(
-        { error: "campaignId and percent (20 | 50 | 'optimum' | 'optimum2') are required" },
+        { error: "campaignId and percent (20 | 50 | -10 | 'optimum' | 'optimum2') are required" },
         { status: 400 },
       )
     }
@@ -115,6 +120,30 @@ export async function POST(request: Request) {
         }
         field = 'lifetime_budget'
         newBudget = optimum
+      } else {
+        return NextResponse.json(
+          { error: 'This campaign has no campaign-level budget (budget may be set at ad-set level)' },
+          { status: 400 },
+        )
+      }
+    } else if (percent === -10) {
+      // ---- STABILIZE: shave 10% off the REMAINING budget ----
+      if (lifetime > 0) {
+        if (remaining <= 0) {
+          return NextResponse.json(
+            { error: 'No remaining budget to stabilize on this campaign' },
+            { status: 400 },
+          )
+        }
+        const cut = Math.round(remaining * 0.10)
+        const spent = Math.max(0, lifetime - remaining)
+        field = 'lifetime_budget'
+        // Never cut below what is already spent
+        newBudget = Math.max(spent, lifetime - cut)
+      } else if (daily > 0) {
+        // Daily campaign: shrink the daily budget itself by 10%
+        field = 'daily_budget'
+        newBudget = Math.max(100, Math.round(daily * 0.90)) // keep >= 1.00/day
       } else {
         return NextResponse.json(
           { error: 'This campaign has no campaign-level budget (budget may be set at ad-set level)' },
