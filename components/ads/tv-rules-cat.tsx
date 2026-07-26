@@ -280,6 +280,31 @@ export function TvRulesCat({
   const mode = playlist[modeIdx % playlist.length]
   const current = GUIDE_SLIDES[slide]
 
+  // ---- The cat's VOICE: every animation mode has a matching status line,
+  // so the comms box always narrates exactly what the cat is doing. The
+  // typewriter re-runs on each mode change (keyed by modeIdx).
+  const CAT_LINES: Record<string, string> = {
+    // on-duty narration - tied to the ACTION NEEDED queue
+    'cat-anim-alarm': `SOUNDING ALARM \u2014 ${alertCount} NEED ACTION`,
+    'cat-anim-pointdown': 'LOOK DOWN \u2014 THE TICKER HAS THEM',
+    'cat-anim-pace': 'PACING UNTIL THESE GET FIXED\u2026',
+    'cat-anim-headshake': 'THESE NUMBERS? UNACCEPTABLE.',
+    // playtime narration - wall is clean
+    'cat-anim-bob': 'ALL CLEAR \u2014 WALL IS PURRING',
+    'cat-anim-bat': 'BATTING PRACTICE \u2014 ZERO ALERTS',
+    'cat-anim-tilt': 'SCANNING\u2026 NOTHING SUSPICIOUS',
+    'cat-anim-bounce': 'BOUNCE CHECK \u2014 ALL GREEN',
+    'cat-anim-tailchase': 'CHASING TAIL, NOT PROBLEMS',
+    'cat-anim-juggle': 'JUGGLING BALLS, NOT BUDGETS',
+    'cat-anim-stretch': 'BIG STRETCH \u2014 SYSTEMS NOMINAL',
+    'cat-anim-pounce': 'POUNCE DRILL \u2014 STAYING SHARP',
+    'cat-anim-wiggle': 'HAPPY WIGGLE \u2014 NUMBERS LOOK GOOD',
+    'cat-anim-snooze': 'POWER NAP \u2014 WAKE ME IF IT GOES RED',
+  }
+  const catLine = CAT_LINES[mode.cat] ?? (onDuty ? 'ON DUTY' : 'ON PATROL')
+  const isSnoozing = mode.cat === 'cat-anim-snooze'
+  const isAlarming = mode.cat === 'cat-anim-alarm'
+
   return (
     <>
       {/* ================= The cat, one system with breaking news =========
@@ -384,44 +409,82 @@ export function TvRulesCat({
         />
         </div>
 
-        {/* ===== AGENT LINK comms box: travels with the cat but sits OUTSIDE
-            the flipping wrapper so its text never mirrors. Shows who is
-            logging entries right now, on what, and the 10-min counts. */}
-        {agentFeed && agentFeed.agents.length > 0 && (
+        {/* ===== CAT COMMS: the cat's voice terminal. Anchored to the cat's
+            BODY (vertically centered on it, tail meeting its shoulder), it
+            sits outside the flipping wrapper so text never mirrors. Fully
+            synchronized with the cat's state machine:
+            - narrates the exact animation playing (typewriter per mode)
+            - mirrors the mood (cyan play / red duty, 700ms cross-fade)
+            - shakes WITH the alarm hop, dims WITH the snooze
+            - lists live agents + their products + 10-min entry counts */}
+        <div
+          className={`absolute left-full top-1/2 ml-3 w-60 -translate-y-1/2 rounded-lg border shadow-lg backdrop-blur-md transition-colors duration-700 ${
+            onDuty
+              ? 'border-red-500/30 bg-red-950/70 shadow-red-950/50'
+              : 'border-cyan-400/30 bg-cyan-950/60 shadow-cyan-950/50'
+          } ${isAlarming ? 'comms-shake' : ''} ${isSnoozing ? 'opacity-60' : 'opacity-100'} transition-opacity`}
+        >
+          {/* speech tail - vertically centered, meets the cat's shoulder */}
+          <span
+            className={`absolute -left-[7px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-45 border-b border-l transition-colors duration-700 ${
+              onDuty ? 'border-red-500/30 bg-red-950/70' : 'border-cyan-400/30 bg-cyan-950/60'
+            }`}
+          />
+          {/* header: unit name + live entry rate */}
           <div
-            className={`absolute bottom-2 left-full ml-2 w-56 rounded-lg border backdrop-blur-sm ${
-              onDuty ? 'border-red-500/25 bg-red-950/60' : 'border-cyan-400/25 bg-cyan-950/50'
+            className={`flex items-center justify-between gap-2 border-b px-2.5 py-1 transition-colors duration-700 ${
+              onDuty ? 'border-red-500/20' : 'border-cyan-400/20'
             }`}
           >
-            {/* speech tail pointing at the cat */}
             <span
-              className={`absolute -left-1.5 bottom-4 h-3 w-3 rotate-45 border-b border-l ${
-                onDuty ? 'border-red-500/25 bg-red-950/60' : 'border-cyan-400/25 bg-cyan-950/50'
-              }`}
-            />
-            <div
-              className={`flex items-center justify-between gap-2 border-b px-2.5 py-1 ${
-                onDuty ? 'border-red-500/20' : 'border-cyan-400/20'
+              className={`font-mono text-[9px] font-black uppercase tracking-[0.25em] transition-colors duration-700 ${
+                onDuty ? 'text-red-400' : 'text-cyan-400'
               }`}
             >
-              <span className={`font-mono text-[9px] font-black uppercase tracking-[0.25em] ${onDuty ? 'text-red-400' : 'text-cyan-400'}`}>
-                Agent link
+              Cat comms
+            </span>
+            <span className="flex items-center gap-1">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isSnoozing
+                    ? 'bg-slate-500'
+                    : isAlarming
+                      ? 'animate-ping bg-red-400 shadow-[0_0_5px_rgba(248,113,113,0.9)]'
+                      : 'animate-pulse bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.9)]'
+                }`}
+              />
+              <span className="font-mono text-[9px] font-bold tabular-nums text-emerald-400">
+                {agentFeed ? `${agentFeed.totalEntries} / 10min` : '\u2014'}
               </span>
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.9)]" />
-                <span className="font-mono text-[9px] font-bold tabular-nums text-emerald-400">
-                  {agentFeed.totalEntries} / 10min
-                </span>
-              </span>
-            </div>
-            <div className="space-y-1 px-2.5 py-1.5">
-              {agentFeed.agents.slice(0, 3).map((a) => (
+            </span>
+          </div>
+          {/* the cat SPEAKS: narration of the exact animation playing right
+              now, retyped on every mode change */}
+          <div className={`border-b px-2.5 py-1.5 transition-colors duration-700 ${onDuty ? 'border-red-500/20' : 'border-cyan-400/20'}`}>
+            <p
+              key={`${onDuty}-${modeIdx}`}
+              className={`comms-type overflow-hidden whitespace-nowrap font-mono text-[10px] font-black tracking-wider transition-colors duration-700 ${
+                onDuty ? 'text-red-300' : 'text-cyan-300'
+              }`}
+            >
+              {'> '}
+              {catLine}
+            </p>
+          </div>
+          {/* live agents on the line */}
+          <div className="space-y-1 px-2.5 py-1.5">
+            {agentFeed && agentFeed.agents.length > 0 ? (
+              agentFeed.agents.slice(0, 3).map((a) => (
                 <div key={a.agent} className="min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[11px] font-bold uppercase tracking-wide text-foreground">
                       {a.agent}
                     </span>
-                    <span className={`shrink-0 font-mono text-[10px] font-black tabular-nums ${onDuty ? 'text-red-300' : 'text-cyan-300'}`}>
+                    <span
+                      className={`shrink-0 font-mono text-[10px] font-black tabular-nums transition-colors duration-700 ${
+                        onDuty ? 'text-red-300' : 'text-cyan-300'
+                      }`}
+                    >
                       {a.entries} {a.entries === 1 ? 'entry' : 'entries'}
                     </span>
                   </div>
@@ -429,10 +492,14 @@ export function TvRulesCat({
                     {a.products.join(' \u00b7 ') || 'logging\u2026'}
                   </p>
                 </div>
-              ))}
-            </div>
+              ))
+            ) : (
+              <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                No agents on the line
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* ================= Full-screen VISION 2030 guide ================= */}
@@ -706,6 +773,21 @@ export function TvRulesCat({
         @keyframes catSiren {
           0% { opacity: 0.8; transform: translateX(-50%) scale(0.5); }
           100% { opacity: 0; transform: translateX(-50%) scale(2.2); }
+        }
+
+        /* ---------- comms box, synced to the cat ---------- */
+        /* Typewriter: retypes the status line on every mode change */
+        .comms-type { animation: commsType 0.9s steps(30, end); }
+        @keyframes commsType { 0% { max-width: 0; } 100% { max-width: 100%; } }
+        /* Alarm shake: SAME 0.55s beat as the cat's alarm hop, so the box
+           rattles in step with the cat jumping */
+        .comms-shake { animation: commsShake 0.55s cubic-bezier(0.36,0.07,0.19,0.97) infinite; }
+        @keyframes commsShake {
+          0%, 100% { transform: translateY(-50%) translateX(0); }
+          20% { transform: translateY(calc(-50% - 2px)) translateX(-1px); }
+          40% { transform: translateY(-50%) translateX(1px); }
+          60% { transform: translateY(calc(-50% - 1px)) translateX(-1px); }
+          80% { transform: translateY(-50%) translateX(1px); }
         }
 
         /* ---------- idle playlist (10 animations) ---------- */
