@@ -183,6 +183,8 @@ export default function AdsManagerPage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [countdown, setCountdown] = useState(15 * 60) // 15 minutes in seconds
   const AUTO_REFRESH_INTERVAL = 15 * 60 // 15 minutes in seconds
+  // Latest client-stats refresher, callable from the []-deps interval
+  const refreshClientStatsRef = useRef<(() => void) | null>(null)
   
   // Full-screen TV dashboard mode (separate glanceable wall-display view)
   const [tvMode, setTvMode] = useState(false)
@@ -313,8 +315,10 @@ export default function AdsManagerPage() {
     const countdownTimer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          // Auto-refresh when countdown hits 0
+          // Auto-refresh when countdown hits 0: fresh ad spend AND fresh
+          // client counts (via ref so we never use a stale product list)
           fetchCachedData(true)
+          refreshClientStatsRef.current?.()
           return AUTO_REFRESH_INTERVAL
         }
         return prev - 1
@@ -378,8 +382,10 @@ export default function AdsManagerPage() {
     }
   }
 
-  // Refresh per-product client counts whenever the set of linked products changes
-  useEffect(() => {
+  // Re-pull today's client counts for all linked products. Used by the
+  // campaignLinks effect below AND by every refresh (manual + auto) so the
+  // Cl column moves in lockstep with fresh ad spend as agents log entries.
+  const refreshClientStats = () => {
     const names = Array.from(
       new Set(
         Object.values(campaignLinks)
@@ -388,6 +394,13 @@ export default function AdsManagerPage() {
       )
     )
     fetchProductClientStats(names)
+  }
+  // Keep a ref to the latest version for the []-deps auto-refresh interval
+  refreshClientStatsRef.current = refreshClientStats
+
+  // Refresh per-product client counts whenever the set of linked products changes
+  useEffect(() => {
+    refreshClientStats()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaignLinks])
 
@@ -1018,8 +1031,10 @@ export default function AdsManagerPage() {
     return format(date, 'HH:mm:ss')
   }
   
-  // Manual refresh handler
+  // Manual refresh handler: fresh ad spend + fresh client entry counts
+  // together, so the Cl column reflects what agents just logged
   const handleManualRefresh = () => {
+    refreshClientStats()
     if (showTodayOnly) {
       fetchCachedData(true) // Force refresh from Facebook
     } else {
