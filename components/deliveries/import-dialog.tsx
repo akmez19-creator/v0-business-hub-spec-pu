@@ -112,7 +112,7 @@ export function ImportDeliveriesDialog() {
   const [savedProductMappings, setSavedProductMappings] = useState<Record<string, string>>({}) // excelProduct -> productId
   const [savedSalesTypeMappings, setSavedSalesTypeMappings] = useState<Record<string, string>>({}) // excelSalesType -> SalesType
   const [returnProductOverrides, setReturnProductOverrides] = useState<Record<number, string>>({}) // rowIndex -> returnProduct
-  const [duplicateContacts, setDuplicateContacts] = useState<{ contact: string; names: string[]; deliveryDate: string; rows: number[]; inSystem?: boolean; systemNames?: string[] }[]>([])
+  const [duplicateContacts, setDuplicateContacts] = useState<{ contact: string; names: string[]; deliveryDate: string; rows: number[]; inSystem?: boolean; systemNames?: string[]; fileProducts?: string[]; systemProducts?: string[]; differentProduct?: boolean }[]>([])
   const [duplicateResolutions, setDuplicateResolutions] = useState<Record<string, string>>({}) // contact-date key -> resolved name
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -574,14 +574,17 @@ export function ImportDeliveriesDialog() {
       // Detect duplicate contacts with different names for the same delivery date
       const contactNamesByDate = new Map<string, Map<string, Set<number>>>() // deliveryDate -> contact -> Set of row indices
       const contactNamesMap = new Map<string, Map<string, Set<string>>>() // deliveryDate -> contact -> Set of names
+      const contactProductsMap = new Map<string, Map<string, Set<string>>>() // deliveryDate -> contact -> Set of products (from the file)
       
       normalizedData.forEach((row, index) => {
         const contact1 = getValue(row, 'contact_1')
         const contact2 = getValue(row, 'contact_2')
         const customerName = getValue(row, 'customer_name')
+        const productsRaw = getValue(row, 'products')
         const deliveryDateRaw = getValue(row, 'delivery_date')
         const deliveryDate = parseDate(deliveryDateRaw as string | number | Date | null | undefined) || 'no_date'
         const name = customerName ? String(customerName).trim() : ''
+        const product = productsRaw ? String(productsRaw).trim() : ''
         
         const contacts = [contact1, contact2].filter(c => c && String(c).trim() !== '').map(c => String(c).trim())
         
@@ -589,23 +592,27 @@ export function ImportDeliveriesDialog() {
           if (!contactNamesByDate.has(deliveryDate)) {
             contactNamesByDate.set(deliveryDate, new Map())
             contactNamesMap.set(deliveryDate, new Map())
+            contactProductsMap.set(deliveryDate, new Map())
           }
           
           const dateContactRows = contactNamesByDate.get(deliveryDate)!
           const dateContactNames = contactNamesMap.get(deliveryDate)!
+          const dateContactProducts = contactProductsMap.get(deliveryDate)!
           
           if (!dateContactRows.has(contact)) {
             dateContactRows.set(contact, new Set())
             dateContactNames.set(contact, new Set())
+            dateContactProducts.set(contact, new Set())
           }
           
           dateContactRows.get(contact)!.add(index)
           if (name) dateContactNames.get(contact)!.add(name)
+          if (product) dateContactProducts.get(contact)!.add(product)
         }
       })
       
       // Find contacts with multiple different names for the same date
-      const duplicates: { contact: string; names: string[]; deliveryDate: string; rows: number[]; inSystem?: boolean; systemNames?: string[] }[] = []
+      const duplicates: { contact: string; names: string[]; deliveryDate: string; rows: number[]; inSystem?: boolean; systemNames?: string[]; fileProducts?: string[]; systemProducts?: string[]; differentProduct?: boolean }[] = []
       for (const [deliveryDate, contactMap] of contactNamesByDate) {
         const namesMap = contactNamesMap.get(deliveryDate)!
         for (const [contact, rowIndices] of contactMap) {
@@ -639,31 +646,49 @@ export function ImportDeliveriesDialog() {
           const inList = contacts.map((c) => `"${c.replace(/"/g, '')}"`).join(',')
           const { data: existing, error } = await supabase
             .from('deliveries')
-            .select('contact_1, contact_2, customer_name')
+            .select('contact_1, contact_2, customer_name, products')
             .gte('delivery_date', deliveryDate)
             .lt('delivery_date', nextDay)
             .or(`contact_1.in.(${inList}),contact_2.in.(${inList})`)
           if (error || !existing) continue
 
-          // contact -> names already in the system for that date
+          // contact -> names + products already in the system for that date
           const systemNamesByContact = new Map<string, Set<string>>()
+          const systemProductsByContact = new Map<string, Set<string>>()
           for (const row of existing) {
             for (const c of [row.contact_1, row.contact_2]) {
               const key = c ? String(c).trim() : ''
               if (!key || !contactMap.has(key)) continue
-              if (!systemNamesByContact.has(key)) systemNamesByContact.set(key, new Set())
+              if (!systemNamesByContact.has(key)) {
+                systemNamesByContact.set(key, new Set())
+                systemProductsByContact.set(key, new Set())
+              }
               if (row.customer_name) systemNamesByContact.get(key)!.add(String(row.customer_name).trim())
+              if (row.products) systemProductsByContact.get(key)!.add(String(row.products).trim())
             }
           }
 
           const namesMap = contactNamesMap.get(deliveryDate)!
+          const productsMap = contactProductsMap.get(deliveryDate)!
           for (const [contact, sysNames] of systemNamesByContact) {
             const systemNames = Array.from(sysNames)
+            const systemProducts = Array.from(systemProductsByContact.get(contact) || [])
+            const fileProducts = Array.from(productsMap.get(contact) || [])
+            // Same number but NO overlapping product = likely a repeat order,
+            // not a true duplicate. Compare case-insensitively.
+            const sysLower = systemProducts.map((p) => p.toLowerCase())
+            const overlap = fileProducts.some((p) => sysLower.includes(p.toLowerCase()))
+            const differentProduct =
+              fileProducts.length > 0 && systemProducts.length > 0 && !overlap
+
             const already = duplicates.find((d) => d.contact === contact && d.deliveryDate === deliveryDate)
             if (already) {
               // Enrich the in-file duplicate with the system side
               already.inSystem = true
               already.systemNames = systemNames
+              already.fileProducts = fileProducts
+              already.systemProducts = systemProducts
+              already.differentProduct = differentProduct
               for (const n of systemNames) if (!already.names.includes(n)) already.names.push(n)
             } else {
               // New: number appears once in the file but already in the system
@@ -677,6 +702,9 @@ export function ImportDeliveriesDialog() {
                 rows: Array.from(contactMap.get(contact) || []),
                 inSystem: true,
                 systemNames,
+                fileProducts,
+                systemProducts,
+                differentProduct,
               })
             }
           }
@@ -1220,12 +1248,42 @@ export function ImportDeliveriesDialog() {
                             </div>
                           </div>
                           {dup.inSystem && (
-                            <Badge variant="outline" className="shrink-0 border-red-500/40 bg-red-500/10 text-red-400">
-                              Already in system
-                              {dup.systemNames && dup.systemNames.length > 0 ? ` as ${dup.systemNames[0]}` : ''}
-                            </Badge>
+                            dup.differentProduct ? (
+                              <Badge variant="outline" className="shrink-0 border-amber-500/40 bg-amber-500/10 text-amber-400">
+                                Same number, different product
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="shrink-0 border-red-500/40 bg-red-500/10 text-red-400">
+                                Already in system
+                                {dup.systemNames && dup.systemNames.length > 0 ? ` as ${dup.systemNames[0]}` : ''}
+                              </Badge>
+                            )
                           )}
                         </div>
+                        {/* Product context: what this number is ordering in the
+                            file vs what it already has in the system, so a
+                            repeat order is judged at a glance */}
+                        {dup.inSystem && (dup.fileProducts?.length || dup.systemProducts?.length) ? (
+                          <div className="mt-1.5 space-y-0.5 text-xs">
+                            {dup.fileProducts && dup.fileProducts.length > 0 && (
+                              <div className="text-muted-foreground">
+                                <span className="font-medium text-foreground">In this file:</span>{' '}
+                                {dup.fileProducts.join(', ')}
+                              </div>
+                            )}
+                            {dup.systemProducts && dup.systemProducts.length > 0 && (
+                              <div className="text-muted-foreground">
+                                <span className="font-medium text-foreground">Already in system:</span>{' '}
+                                {dup.systemProducts.join(', ')}
+                              </div>
+                            )}
+                            {dup.differentProduct && (
+                              <div className="text-amber-400">
+                                Products don&apos;t overlap - this is likely a repeat client ordering something new, not a duplicate entry.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
                         
                         <div className="space-y-2">
                           <div className="text-xs font-medium text-muted-foreground">Select the correct name:</div>
