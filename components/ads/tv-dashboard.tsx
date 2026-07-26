@@ -183,6 +183,33 @@ export function TvDashboard({
   // Which product row is expanded to show its campaigns + today's edits
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
+  // Per-campaign ON/OFF straight from the wall: optimistic status overrides
+  // (campaign id -> new status) + which id is mid-flight
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({})
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  const toggleCampaign = async (campaignId: string, currentStatus: string) => {
+    const next = currentStatus === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
+    setTogglingId(campaignId)
+    try {
+      const res = await fetch('/api/facebook-ads/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId, status: next }),
+      })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setStatusOverrides((m) => ({ ...m, [campaignId]: next }))
+      } else {
+        alert(json.error || 'Facebook rejected the change')
+      }
+    } catch {
+      alert('Network error - could not reach Facebook')
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   // The animated cat mascot, present by default on the wall (toggleable
   // from the header). Its AI briefing reads the wall via a stable snapshot
   // getter so the cat's internal timers survive re-renders.
@@ -467,19 +494,46 @@ export function TvDashboard({
       {expanded && (
         <div className="border-b border-blue-500/30 bg-blue-500/5 px-2 py-1.5">
           <div className="space-y-0.5">
-            {g.campaigns.map((c) => (
-              <div key={c.id} className="flex items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  <span className={`truncate ${isTight ? 'text-[10px]' : 'text-[11px]'} font-medium`} title={c.name}>
-                    {c.name}
+            {g.campaigns.map((c) => {
+              // Live status = optimistic override if we flipped it just now
+              const status = statusOverrides[c.id] ?? c.status
+              const isOn = status === 'ACTIVE'
+              const busy = togglingId === c.id
+              return (
+                <div key={c.id} className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isOn ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                    <span className={`truncate ${isTight ? 'text-[10px]' : 'text-[11px]'} font-medium`} title={c.name}>
+                      {c.name}
+                    </span>
                   </span>
-                </span>
-                <span className={`shrink-0 ${isTight ? 'text-[10px]' : 'text-[11px]'} font-bold tabular-nums text-amber-500`}>
-                  {formatSpend(c.spend)}
-                </span>
-              </div>
-            ))}
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <span className={`${isTight ? 'text-[10px]' : 'text-[11px]'} font-bold tabular-nums text-amber-500`}>
+                      {formatSpend(c.spend)}
+                    </span>
+                    {/* Kill switch: pause / reactivate this ad on Facebook.
+                        stopPropagation so the row doesn't collapse. */}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (isOn && !window.confirm(`Turn OFF "${c.name}" on Facebook?`)) return
+                        toggleCampaign(c.id, status)
+                      }}
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide transition-colors disabled:opacity-50 ${
+                        isOn
+                          ? 'bg-red-500/15 text-red-400 hover:bg-red-500/30'
+                          : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30'
+                      }`}
+                      title={isOn ? 'Pause this campaign on Facebook' : 'Reactivate this campaign on Facebook'}
+                    >
+                      {busy ? '\u2026' : isOn ? 'Turn off' : 'Turn on'}
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
           </div>
           {/* Today's edits on those campaigns, newest first */}
           <div className="mt-1 border-t border-border/40 pt-1">
