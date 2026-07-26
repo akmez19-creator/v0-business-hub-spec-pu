@@ -210,6 +210,36 @@ export function TvDashboard({
     }
   }
 
+  // Budget boost: +20% / +50% of the REMAINING budget added to the campaign
+  // budget (daily campaigns grow the daily amount). Tracks which id+percent
+  // is mid-flight and marks boosted ids with the applied summary.
+  const [boostingKey, setBoostingKey] = useState<string | null>(null)
+  const [boostedNotes, setBoostedNotes] = useState<Record<string, string>>({})
+
+  const boostBudget = async (campaignId: string, percent: 20 | 50) => {
+    setBoostingKey(`${campaignId}:${percent}`)
+    try {
+      const res = await fetch('/api/facebook-ads/budget', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId, percent }),
+      })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setBoostedNotes((m) => ({
+          ...m,
+          [campaignId]: `+${percent}% \u2192 Rs ${json.next.toLocaleString()}`,
+        }))
+      } else {
+        alert(json.error || 'Facebook rejected the budget change')
+      }
+    } catch {
+      alert('Network error - could not reach Facebook')
+    } finally {
+      setBoostingKey(null)
+    }
+  }
+
   // The animated cat mascot, present by default on the wall (toggleable
   // from the header). Its AI briefing reads the wall via a stable snapshot
   // getter so the cat's internal timers survive re-renders.
@@ -511,6 +541,30 @@ export function TvDashboard({
                     <span className={`${isTight ? 'text-[10px]' : 'text-[11px]'} font-bold tabular-nums text-amber-500`}>
                       {formatSpend(c.spend)}
                     </span>
+                    {/* Budget boost: add 20% / 50% of the remaining budget.
+                        Shows the applied result inline once done. */}
+                    {boostedNotes[c.id] ? (
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-black tabular-nums text-emerald-400">
+                        {boostedNotes[c.id]}
+                      </span>
+                    ) : (
+                      ([20, 50] as const).map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          disabled={boostingKey !== null}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (!window.confirm(`Increase remaining budget of "${c.name}" by ${pct}%?`)) return
+                            boostBudget(c.id, pct)
+                          }}
+                          className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-cyan-400 transition-colors hover:bg-cyan-500/30 disabled:opacity-50"
+                          title={`Add ${pct}% of the remaining budget to this campaign`}
+                        >
+                          {boostingKey === `${c.id}:${pct}` ? '\u2026' : `+${pct}%`}
+                        </button>
+                      ))
+                    )}
                     {/* Kill switch: pause / reactivate this ad on Facebook.
                         stopPropagation so the row doesn't collapse. */}
                     <button
