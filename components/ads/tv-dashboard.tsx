@@ -210,13 +210,14 @@ export function TvDashboard({
     }
   }
 
-  // Budget boost: +20% / +50% of the REMAINING budget added to the campaign
-  // budget (daily campaigns grow the daily amount). Tracks which id+percent
-  // is mid-flight and marks boosted ids with the applied summary.
+  // Budget adjust: +20% / +50% of the REMAINING budget added to the campaign
+  // budget (daily campaigns grow the daily amount), or 'optimum' - decrease
+  // to spent + remaining_days x 1.25/day, tallied to the campaign end date.
+  // Tracks which id+action is mid-flight and marks done ids with a summary.
   const [boostingKey, setBoostingKey] = useState<string | null>(null)
   const [boostedNotes, setBoostedNotes] = useState<Record<string, string>>({})
 
-  const boostBudget = async (campaignId: string, percent: 20 | 50) => {
+  const boostBudget = async (campaignId: string, percent: 20 | 50 | 'optimum') => {
     setBoostingKey(`${campaignId}:${percent}`)
     try {
       const res = await fetch('/api/facebook-ads/budget', {
@@ -228,7 +229,10 @@ export function TvDashboard({
       if (res.ok && json.success) {
         setBoostedNotes((m) => ({
           ...m,
-          [campaignId]: `+${percent}% \u2192 Rs ${json.next.toLocaleString()}`,
+          [campaignId]:
+            percent === 'optimum'
+              ? `OPT${json.remainingDays ? ` ${json.remainingDays}d` : ''} \u2192 Rs ${json.next.toLocaleString()}`
+              : `+${percent}% \u2192 Rs ${json.next.toLocaleString()}`,
         }))
       } else {
         alert(json.error || 'Facebook rejected the budget change')
@@ -548,22 +552,43 @@ export function TvDashboard({
                         {boostedNotes[c.id]}
                       </span>
                     ) : (
-                      ([20, 50] as const).map((pct) => (
+                      <>
+                        {([20, 50] as const).map((pct) => (
+                          <button
+                            key={pct}
+                            type="button"
+                            disabled={boostingKey !== null}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (!window.confirm(`Increase remaining budget of "${c.name}" by ${pct}%?`)) return
+                              boostBudget(c.id, pct)
+                            }}
+                            className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-cyan-400 transition-colors hover:bg-cyan-500/30 disabled:opacity-50"
+                            title={`Add ${pct}% of the remaining budget to this campaign`}
+                          >
+                            {boostingKey === `${c.id}:${pct}` ? '\u2026' : `+${pct}%`}
+                          </button>
+                        ))}
+                        {/* Optimum decrease: budget = spent + days-to-end x 1.25/day */}
                         <button
-                          key={pct}
                           type="button"
                           disabled={boostingKey !== null}
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (!window.confirm(`Increase remaining budget of "${c.name}" by ${pct}%?`)) return
-                            boostBudget(c.id, pct)
+                            if (
+                              !window.confirm(
+                                `Decrease "${c.name}" to its optimum? Budget becomes: spent so far + 1.25/day for each remaining day until the campaign ends.`,
+                              )
+                            )
+                              return
+                            boostBudget(c.id, 'optimum')
                           }}
-                          className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-cyan-400 transition-colors hover:bg-cyan-500/30 disabled:opacity-50"
-                          title={`Add ${pct}% of the remaining budget to this campaign`}
+                          className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-400 transition-colors hover:bg-amber-500/30 disabled:opacity-50"
+                          title="Decrease budget to optimum: spent + 1.25/day for each day left until the end date"
                         >
-                          {boostingKey === `${c.id}:${pct}` ? '\u2026' : `+${pct}%`}
+                          {boostingKey === `${c.id}:optimum` ? '\u2026' : '\u2193OPT'}
                         </button>
-                      ))
+                      </>
                     )}
                     {/* Kill switch: pause / reactivate this ad on Facebook.
                         stopPropagation so the row doesn't collapse. */}
