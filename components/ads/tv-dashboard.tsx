@@ -309,14 +309,11 @@ export function TvDashboard({
   // Total clients across every product - the headline the team watches.
   const totalClients = groups.reduce((sum, g) => sum + g.clients, 0)
 
-  // Average cost per client (Rs) across ALL products with clients: each cac is
-  // Rs/client, so cac * clients recovers each product's Rs spend and the sum
-  // over total clients is the true weighted average.
-  const rsSpendWithClients = groups.reduce(
-    (sum, g) => (g.cac !== null ? sum + g.cac * g.clients : sum),
-    0,
-  )
-  const avgCac = totalClients > 0 ? rsSpendWithClients / totalClients : null
+  // Average cost per client (Rs) = TOTAL spend / TOTAL clients, so it tallies
+  // exactly with the Total Spend and Total Clients tiles next to it. Spend on
+  // zero-client products is real money spent acquiring these clients, so it
+  // is included (previously excluded, which understated the average).
+  const avgCac = totalClients > 0 ? (totalSpend * USD_TO_RS) / totalClients : null
   // Health thresholds for the average: green below Rs 75, yellow Rs 76-99,
   // red at Rs 100 and above.
   const avgStyle =
