@@ -112,7 +112,7 @@ export function ImportDeliveriesDialog() {
   const [savedProductMappings, setSavedProductMappings] = useState<Record<string, string>>({}) // excelProduct -> productId
   const [savedSalesTypeMappings, setSavedSalesTypeMappings] = useState<Record<string, string>>({}) // excelSalesType -> SalesType
   const [returnProductOverrides, setReturnProductOverrides] = useState<Record<number, string>>({}) // rowIndex -> returnProduct
-  const [duplicateContacts, setDuplicateContacts] = useState<{ contact: string; names: string[]; deliveryDate: string; rows: number[] }[]>([])
+  const [duplicateContacts, setDuplicateContacts] = useState<{ contact: string; names: string[]; deliveryDate: string; rows: number[]; inSystem?: boolean; systemNames?: string[] }[]>([])
   const [duplicateResolutions, setDuplicateResolutions] = useState<Record<string, string>>({}) // contact-date key -> resolved name
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -605,7 +605,7 @@ export function ImportDeliveriesDialog() {
       })
       
       // Find contacts with multiple different names for the same date
-      const duplicates: { contact: string; names: string[]; deliveryDate: string; rows: number[] }[] = []
+      const duplicates: { contact: string; names: string[]; deliveryDate: string; rows: number[]; inSystem?: boolean; systemNames?: string[] }[] = []
       for (const [deliveryDate, contactMap] of contactNamesByDate) {
         const namesMap = contactNamesMap.get(deliveryDate)!
         for (const [contact, rowIndices] of contactMap) {
@@ -620,7 +620,71 @@ export function ImportDeliveriesDialog() {
           }
         }
       }
-      
+
+      // CROSS-LIST CHECK: a number in the import that ALREADY EXISTS in the
+      // system for the same delivery date is a duplicate client, even if the
+      // file itself only mentions it once. Query existing deliveries per
+      // date and flag any contact found in both lists.
+      try {
+        const supabase = createClient()
+        for (const [deliveryDate, contactMap] of contactNamesByDate) {
+          if (deliveryDate === 'no_date') continue
+          const contacts = Array.from(contactMap.keys())
+          if (contacts.length === 0) continue
+
+          // delivery_date is stored as a timestamp at midnight - match the day
+          const nextDay = new Date(new Date(`${deliveryDate}T00:00:00Z`).getTime() + 86_400_000)
+            .toISOString()
+            .slice(0, 10)
+          const inList = contacts.map((c) => `"${c.replace(/"/g, '')}"`).join(',')
+          const { data: existing, error } = await supabase
+            .from('deliveries')
+            .select('contact_1, contact_2, customer_name')
+            .gte('delivery_date', deliveryDate)
+            .lt('delivery_date', nextDay)
+            .or(`contact_1.in.(${inList}),contact_2.in.(${inList})`)
+          if (error || !existing) continue
+
+          // contact -> names already in the system for that date
+          const systemNamesByContact = new Map<string, Set<string>>()
+          for (const row of existing) {
+            for (const c of [row.contact_1, row.contact_2]) {
+              const key = c ? String(c).trim() : ''
+              if (!key || !contactMap.has(key)) continue
+              if (!systemNamesByContact.has(key)) systemNamesByContact.set(key, new Set())
+              if (row.customer_name) systemNamesByContact.get(key)!.add(String(row.customer_name).trim())
+            }
+          }
+
+          const namesMap = contactNamesMap.get(deliveryDate)!
+          for (const [contact, sysNames] of systemNamesByContact) {
+            const systemNames = Array.from(sysNames)
+            const already = duplicates.find((d) => d.contact === contact && d.deliveryDate === deliveryDate)
+            if (already) {
+              // Enrich the in-file duplicate with the system side
+              already.inSystem = true
+              already.systemNames = systemNames
+              for (const n of systemNames) if (!already.names.includes(n)) already.names.push(n)
+            } else {
+              // New: number appears once in the file but already in the system
+              const fileNames = Array.from(namesMap.get(contact) || [])
+              const allNames = [...fileNames]
+              for (const n of systemNames) if (!allNames.includes(n)) allNames.push(n)
+              duplicates.push({
+                contact,
+                names: allNames.length > 0 ? allNames : ['(no name)'],
+                deliveryDate,
+                rows: Array.from(contactMap.get(contact) || []),
+                inSystem: true,
+                systemNames,
+              })
+            }
+          }
+        }
+      } catch {
+        // Cross-check is best-effort: never block the import flow on it
+      }
+
       setDuplicateContacts(duplicates)
       
       // If duplicates found, initialize default resolutions and go to duplicate_check step
@@ -1135,7 +1199,8 @@ export function ImportDeliveriesDialog() {
                   <span className="font-medium text-amber-500">Potential Duplicate Customers</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  The following contacts have different customer names for the same delivery date. 
+                  Duplicates are detected two ways: the same number with different names inside your file,
+                  and numbers that already exist in the system for the same delivery date.
                   Please select the correct name to use for each.
                 </p>
               </div>
@@ -1147,13 +1212,19 @@ export function ImportDeliveriesDialog() {
                     const selectedName = duplicateResolutions[key] || dup.names[0]
                     return (
                       <div key={idx} className="bg-muted/50 rounded-lg p-4 space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-2">
                           <div>
                             <div className="font-medium">{dup.contact}</div>
                             <div className="text-xs text-muted-foreground">
                               {dup.deliveryDate !== 'no_date' ? `Delivery: ${dup.deliveryDate}` : 'No delivery date'} · {dup.rows.length} rows affected
                             </div>
                           </div>
+                          {dup.inSystem && (
+                            <Badge variant="outline" className="shrink-0 border-red-500/40 bg-red-500/10 text-red-400">
+                              Already in system
+                              {dup.systemNames && dup.systemNames.length > 0 ? ` as ${dup.systemNames[0]}` : ''}
+                            </Badge>
+                          )}
                         </div>
                         
                         <div className="space-y-2">
