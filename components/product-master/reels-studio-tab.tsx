@@ -11,11 +11,13 @@ import {
   ArrowUp,
   Clapperboard,
   Download,
+  Eraser,
   Film,
   ImageIcon,
   Link2,
   Loader2,
   Merge,
+  Move,
   Scissors,
   Stamp,
   Trash2,
@@ -33,7 +35,15 @@ interface Clip {
   height: number
 }
 
-type LogoCorner = 'tl' | 'tr' | 'bl' | 'br' | 'c'
+// Banner style presets for the product-name title
+const TITLE_STYLES = [
+  { id: 'sunny', label: 'Sunny', bubble: '#FFD934', text: '#F97316', stroke: '#C2410C', shape: 'pill' },
+  { id: 'clean', label: 'Clean', bubble: '#FFFFFF', text: '#111111', stroke: null, shape: 'pill' },
+  { id: 'bold', label: 'Bold', bubble: '#111111', text: '#FFFFFF', stroke: null, shape: 'bar' },
+  { id: 'flash', label: 'Flash', bubble: '#DC2626', text: '#FFFFFF', stroke: null, shape: 'pill' },
+  { id: 'outline', label: 'Outline', bubble: null, text: '#FFFFFF', stroke: '#000000', shape: 'none' },
+] as const
+type TitleStyleId = (typeof TITLE_STYLES)[number]['id']
 
 // Reels Studio: everything runs IN the browser via ffmpeg.wasm - cut a scene
 // out of a clip (trim), brand it (product-name title + logo watermark), or
@@ -52,16 +62,106 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // ---- Branding: product-name title bubble + logo watermark ----
+  // ---- Branding: product-name title banner + logo watermark ----
   const [titleOn, setTitleOn] = useState(true)
   const [titleText, setTitleText] = useState(productName)
-  const [titleY, setTitleY] = useState(7) // % from top
+  const [titleStyle, setTitleStyle] = useState<TitleStyleId>('sunny')
   const [logoOn, setLogoOn] = useState(true)
   const [logoOpacity, setLogoOpacity] = useState(50) // %
   const [logoSize, setLogoSize] = useState(18) // % of video width
-  const [logoPos, setLogoPos] = useState<LogoCorner>('br')
   const [logoSrc, setLogoSrc] = useState('/images/reels-brand-logo.png')
+  const [logoRemoveBg, setLogoRemoveBg] = useState(false)
+  const [logoBgTol, setLogoBgTol] = useState(30) // background match tolerance %
+  const [processedLogo, setProcessedLogo] = useState<string | null>(null)
   const logoInputRef = useRef<HTMLInputElement>(null)
+
+  // Free placement: element centers as % of video width/height, draggable
+  // directly on the preview
+  const [titlePos, setTitlePos] = useState({ x: 50, y: 10 })
+  const [logoXY, setLogoXY] = useState({ x: 82, y: 88 })
+  const previewBoxRef = useRef<HTMLDivElement>(null)
+  const [previewW, setPreviewW] = useState(0)
+  const dragTarget = useRef<'title' | 'logo' | null>(null)
+
+  // Keep the preview font/logo scale proportional to the rendered video box
+  useEffect(() => {
+    const el = previewBoxRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setPreviewW(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
+
+  const onPreviewPointerMove = (e: React.PointerEvent) => {
+    if (!dragTarget.current || !previewBoxRef.current) return
+    const rect = previewBoxRef.current.getBoundingClientRect()
+    const x = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100))
+    const y = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100))
+    if (dragTarget.current === 'title') setTitlePos({ x, y })
+    else setLogoXY({ x, y })
+  }
+
+  // Remove the logo's background in the browser: flood-fill from the borders,
+  // clearing pixels that match the corner colors within the tolerance. Runs
+  // whenever the logo, toggle, or tolerance changes.
+  useEffect(() => {
+    if (!logoRemoveBg) {
+      setProcessedLogo(null)
+      return
+    }
+    let cancelled = false
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const w = img.naturalWidth
+      const h = img.naturalHeight
+      if (!w || !h) return
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(img, 0, 0)
+      const data = ctx.getImageData(0, 0, w, h)
+      const px = data.data
+      // Sample the 4 corners as background reference colors
+      const corners = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + w - 1) * 4].map((o) => [px[o], px[o + 1], px[o + 2]])
+      const tol = (logoBgTol / 100) * 255
+      const matches = (o: number) =>
+        corners.some(([r, g, b]) => Math.abs(px[o] - r) + Math.abs(px[o + 1] - g) + Math.abs(px[o + 2] - b) < tol * 3)
+      // BFS from every border pixel so interior same-colored details survive
+      const visited = new Uint8Array(w * h)
+      const queue: number[] = []
+      for (let x = 0; x < w; x++) queue.push(x, (h - 1) * w + x)
+      for (let y = 0; y < h; y++) queue.push(y * w, y * w + w - 1)
+      while (queue.length) {
+        const i = queue.pop()!
+        if (visited[i]) continue
+        visited[i] = 1
+        const o = i * 4
+        if (px[o + 3] === 0 || !matches(o)) continue
+        px[o + 3] = 0
+        const x = i % w
+        const y = (i / w) | 0
+        if (x > 0) queue.push(i - 1)
+        if (x < w - 1) queue.push(i + 1)
+        if (y > 0) queue.push(i - w)
+        if (y < h - 1) queue.push(i + w)
+      }
+      ctx.putImageData(data, 0, 0)
+      if (!cancelled) setProcessedLogo(canvas.toDataURL('image/png'))
+    }
+    img.onerror = () => {
+      if (!cancelled) setProcessedLogo(null)
+    }
+    img.src = logoSrc
+    return () => {
+      cancelled = true
+    }
+  }, [logoSrc, logoRemoveBg, logoBgTol])
+
+  const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
+  const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
 
   // ---- Fetch-by-link: paste a TikTok/Facebook/YouTube URL and the video is
   // resolved watermark-free in HD and dropped straight into the feed ----
@@ -268,9 +368,8 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
     }
   }
 
-  // Draw the product-name title bubble (rounded yellow pill, bold orange
-  // text - like a viral TikTok caption) onto a transparent canvas sized to
-  // the video, and return it as a PNG.
+  // Draw the product-name title banner in the chosen style, centered on the
+  // user-dragged position, onto a transparent canvas sized to the video.
   const renderTitlePng = (vw: number, vh: number): Promise<Uint8Array> =>
     new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas')
@@ -280,6 +379,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       if (!ctx) return reject(new Error('no canvas'))
       const text = titleText.trim()
       if (!text) return reject(new Error('no title'))
+      const st = activeStyle
 
       let fontSize = Math.round(vw * 0.085)
       ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
@@ -293,24 +393,28 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       const padY = fontSize * 0.42
       const bw = tw + padX * 2
       const bh = fontSize + padY * 2
-      const bx = (vw - bw) / 2
-      const by = Math.max(0, Math.min(vh - bh, (titleY / 100) * vh))
-      const r = bh / 2
+      // Center the banner on the dragged position, clamped inside the frame
+      const cx = Math.max(bw / 2, Math.min(vw - bw / 2, (titlePos.x / 100) * vw))
+      const cy = Math.max(bh / 2, Math.min(vh - bh / 2, (titlePos.y / 100) * vh))
+      const bx = cx - bw / 2
+      const by = cy - bh / 2
 
-      // Bubble
-      ctx.beginPath()
-      ctx.roundRect(bx, by, bw, bh, r)
-      ctx.fillStyle = '#FFD934'
-      ctx.fill()
-      // Text with subtle stroke, centered in bubble
+      if (st.bubble) {
+        ctx.beginPath()
+        ctx.roundRect(bx, by, bw, bh, st.shape === 'bar' ? bh * 0.18 : bh / 2)
+        ctx.fillStyle = st.bubble
+        ctx.fill()
+      }
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.lineJoin = 'round'
-      ctx.strokeStyle = '#C2410C'
-      ctx.lineWidth = Math.max(2, fontSize * 0.08)
-      ctx.strokeText(text, vw / 2, by + bh / 2 + fontSize * 0.05)
-      ctx.fillStyle = '#F97316'
-      ctx.fillText(text, vw / 2, by + bh / 2 + fontSize * 0.05)
+      if (st.stroke) {
+        ctx.strokeStyle = st.stroke
+        ctx.lineWidth = Math.max(2, fontSize * (st.shape === 'none' ? 0.16 : 0.08))
+        ctx.strokeText(text, cx, cy + fontSize * 0.05)
+      }
+      ctx.fillStyle = st.text
+      ctx.fillText(text, cx, cy + fontSize * 0.05)
 
       canvas.toBlob(async (blob) => {
         if (!blob) return reject(new Error('toBlob failed'))
@@ -318,9 +422,9 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       }, 'image/png')
     })
 
-  // Draw the logo at the chosen opacity onto a small transparent canvas and
-  // return a PNG - baking opacity into the pixels keeps the ffmpeg graph
-  // simple and fast.
+  // Draw the logo (background removed if enabled) at the chosen opacity onto
+  // a small transparent canvas - baking opacity into the pixels keeps the
+  // ffmpeg graph simple and fast.
   const renderLogoPng = (vw: number): Promise<{ png: Uint8Array; w: number; h: number }> =>
     new Promise((resolve, reject) => {
       const img = new Image()
@@ -341,19 +445,8 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
         }, 'image/png')
       }
       img.onerror = () => reject(new Error('logo load failed'))
-      img.src = logoSrc
+      img.src = effectiveLogoSrc
     })
-
-  const logoOverlayXY = (corner: LogoCorner) => {
-    const m = 'W*0.03'
-    switch (corner) {
-      case 'tl': return { x: m, y: 'H*0.03' }
-      case 'tr': return { x: `W-w-${m}`, y: 'H*0.03' }
-      case 'bl': return { x: m, y: 'H-h-H*0.03' }
-      case 'br': return { x: `W-w-${m}`, y: 'H-h-H*0.03' }
-      case 'c': return { x: '(W-w)/2', y: '(H-h)/2' }
-    }
-  }
 
   // BRAND: burn the title + logo onto the current result (if any) or the
   // selected clip. Runs fully in the browser like cut/merge.
@@ -396,10 +489,14 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
         idx++
       }
       if (logoOn) {
-        const { png } = await renderLogoPng(dims.w)
+        const { png, w: lw, h: lh } = await renderLogoPng(dims.w)
         await ffmpeg.writeFile('logo.png', png)
         inputs.push('-i', 'logo.png')
-        const { x, y } = logoOverlayXY(logoPos)
+        // Center the logo on the dragged position, clamped inside the frame
+        // (computed here as plain numbers - commas inside overlay expressions
+        // break ffmpeg's filter parser)
+        const x = Math.round(Math.min(Math.max((logoXY.x / 100) * dims.w - lw / 2, 0), dims.w - lw))
+        const y = Math.round(Math.min(Math.max((logoXY.y / 100) * dims.h - lh / 2, 0), dims.h - lh))
         chains.push(`[${last}][${idx}:v]overlay=${x}:${y}[v${idx}]`)
         last = `v${idx}`
         idx++
@@ -630,7 +727,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
             : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
         </p>
 
-        {/* Title bubble controls */}
+        {/* Title banner controls */}
         <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={titleOn} onChange={(e) => setTitleOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
@@ -640,15 +737,26 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
           {titleOn && (
             <div className="flex flex-col gap-2 pl-6">
               <Input value={titleText} onChange={(e) => setTitleText(e.target.value)} placeholder="Title shown on the video" className="h-8" />
-              <div className="flex items-center gap-3">
-                <span className="w-24 shrink-0 text-xs text-muted-foreground">Position: {titleY}% from top</span>
-                <Slider min={2} max={85} step={1} value={[titleY]} onValueChange={(v) => setTitleY(v[0])} className="flex-1" />
-              </div>
-              {/* Live preview of the bubble style */}
-              <div className="flex justify-center rounded bg-black/60 py-2">
-                <span className="rounded-full bg-[#FFD934] px-4 py-1 text-sm font-extrabold text-[#F97316]" style={{ WebkitTextStroke: '0.5px #C2410C' }}>
-                  {titleText.trim() || 'Product Name'}
-                </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs text-muted-foreground">Style</span>
+                {TITLE_STYLES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setTitleStyle(s.id)}
+                    className={`rounded-full px-3 py-1 text-xs font-extrabold transition-shadow ${
+                      titleStyle === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
+                    } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
+                    style={{
+                      backgroundColor: s.bubble ?? 'transparent',
+                      color: s.text,
+                      WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
+                      border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -665,12 +773,19 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
             <div className="flex flex-col gap-3 pl-6 sm:flex-row sm:items-start">
               <div className="flex flex-col items-center gap-1.5">
                 <img
-                  src={logoSrc || "/placeholder.svg"}
+                  src={effectiveLogoSrc || '/placeholder.svg'}
                   alt="Logo preview"
-                  className="h-16 w-16 rounded border bg-black/40 object-contain"
-                  style={{ opacity: logoOpacity / 100 }}
+                  className="h-16 w-16 rounded border object-contain"
+                  style={{
+                    opacity: logoOpacity / 100,
+                    backgroundImage:
+                      'linear-gradient(45deg,#333 25%,transparent 25%),linear-gradient(-45deg,#333 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#333 75%),linear-gradient(-45deg,transparent 75%,#333 75%)',
+                    backgroundSize: '12px 12px',
+                    backgroundPosition: '0 0,0 6px,6px -6px,-6px 0',
+                    backgroundColor: '#1a1a1a',
+                  }}
                 />
-                <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => logoInputRef.current?.click()}>
+                <Button size="sm" variant="outline" className="h-6 px-2 text-[11px] bg-transparent" onClick={() => logoInputRef.current?.click()}>
                   Change
                 </Button>
                 <input
@@ -693,32 +808,101 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                   <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {logoSize}% width</span>
                   <Slider min={6} max={45} step={1} value={[logoSize]} onValueChange={(v) => setLogoSize(v[0])} className="flex-1" />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-28 shrink-0 text-xs text-muted-foreground">Placement</span>
-                  {(
-                    [
-                      ['tl', 'Top L'],
-                      ['tr', 'Top R'],
-                      ['c', 'Center'],
-                      ['bl', 'Bot L'],
-                      ['br', 'Bot R'],
-                    ] as const
-                  ).map(([pos, label]) => (
-                    <Button
-                      key={pos}
-                      size="sm"
-                      variant={logoPos === pos ? 'default' : 'outline'}
-                      className="h-6 px-2 text-[11px]"
-                      onClick={() => setLogoPos(pos)}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
+                <label className="flex items-center gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={logoRemoveBg}
+                    onChange={(e) => setLogoRemoveBg(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-500"
+                  />
+                  <Eraser className="h-3.5 w-3.5 text-amber-500" />
+                  Remove logo background
+                </label>
+                {logoRemoveBg && (
+                  <div className="flex items-center gap-3">
+                    <span className="w-28 shrink-0 text-xs text-muted-foreground">Strength: {logoBgTol}%</span>
+                    <Slider min={5} max={80} step={1} value={[logoBgTol]} onValueChange={(v) => setLogoBgTol(v[0])} className="flex-1" />
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
+
+        {/* Drag-to-place preview: position the title and logo anywhere */}
+        {brandSource && (titleOn || logoOn) && (
+          <div className="flex flex-col gap-1.5 rounded-md border bg-background/60 p-2.5">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <Move className="h-3.5 w-3.5 text-amber-500" />
+              Drag to place on the video
+            </p>
+            <div className="flex justify-center">
+              <div
+                ref={previewBoxRef}
+                className="relative touch-none select-none overflow-hidden rounded-md bg-black"
+                onPointerMove={onPreviewPointerMove}
+                onPointerUp={() => (dragTarget.current = null)}
+                onPointerLeave={() => (dragTarget.current = null)}
+              >
+                <video
+                  src={output?.url ?? selectedClip?.url}
+                  className="pointer-events-none max-h-80 w-auto"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+                {titleOn && titleText.trim() && (
+                  <span
+                    role="button"
+                    aria-label="Drag to position the title"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                      dragTarget.current = 'title'
+                    }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap font-extrabold active:cursor-grabbing ${
+                      activeStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
+                    }`}
+                    style={{
+                      left: `${titlePos.x}%`,
+                      top: `${titlePos.y}%`,
+                      backgroundColor: activeStyle.bubble ?? 'transparent',
+                      color: activeStyle.text,
+                      WebkitTextStroke: activeStyle.stroke ? `${activeStyle.shape === 'none' ? 1.2 : 0.5}px ${activeStyle.stroke}` : undefined,
+                      fontSize: Math.max(10, previewW * 0.055),
+                      padding: `${Math.max(2, previewW * 0.012)}px ${Math.max(6, previewW * 0.03)}px`,
+                    }}
+                  >
+                    {titleText.trim()}
+                  </span>
+                )}
+                {logoOn && (
+                  <img
+                    src={effectiveLogoSrc || '/placeholder.svg'}
+                    alt="Drag to position the logo"
+                    role="button"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                      dragTarget.current = 'logo'
+                    }}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing"
+                    style={{
+                      left: `${logoXY.x}%`,
+                      top: `${logoXY.y}%`,
+                      width: `${logoSize}%`,
+                      opacity: logoOpacity / 100,
+                    }}
+                    draggable={false}
+                  />
+                )}
+              </div>
+            </div>
+            <p className="text-center text-[11px] text-muted-foreground">
+              The exact positions shown here are burned into the video.
+            </p>
+          </div>
+        )}
       </section>
 
       {(busy === 'cut' || busy === 'merge' || busy === 'brand') && (
