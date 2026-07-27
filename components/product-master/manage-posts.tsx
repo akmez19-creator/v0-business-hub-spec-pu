@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -91,11 +91,25 @@ const EMPTY_FORM: PostForm = {
   hashtags: '',
 }
 
+interface ManagePostsProps {
+  /** Controlled open state - when provided the parent owns the dialog */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Pre-fill the search with a product name (e.g. clicking a Posts badge) */
+  productFilter?: string
+}
+
 // Manage Posts: full post management attributed to products - add existing
 // posts manually, edit, copy, delete. Everything saved here feeds the AI
 // knowledge centre so new generations never repeat old angles.
-export function ManagePosts() {
-  const [open, setOpen] = useState(false)
+export function ManagePosts({ open: controlledOpen, onOpenChange, productFilter }: ManagePostsProps = {}) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : internalOpen
+  const setOpen = (v: boolean) => {
+    if (isControlled) onOpenChange?.(v)
+    else setInternalOpen(v)
+  }
   const { data, isLoading, mutate } = useSWR<{ success: boolean; posts: ProductPost[] }>(
     open ? '/api/product-master/posts' : null,
     fetcher,
@@ -109,6 +123,15 @@ export function ManagePosts() {
 
   const [search, setSearch] = useState('')
   const [openPost, setOpenPost] = useState<string | null>(null)
+
+  // When opened via a product's Posts badge, pre-filter the list to it
+  useEffect(() => {
+    if (open && productFilter !== undefined) {
+      setSearch(productFilter)
+      setTab('library')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, productFilter])
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [form, setForm] = useState<PostForm | null>(null)

@@ -104,6 +104,10 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
   const [togglingSoldOut, setTogglingSoldOut] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  // Manage Posts dialog - controlled so a Posts badge click can open it
+  // pre-filtered to that product
+  const [postsOpen, setPostsOpen] = useState(false)
+  const [postsProductFilter, setPostsProductFilter] = useState('')
 
   // Click a column header to sort; click again to flip direction
   const handleSort = (key: SortKey) => {
@@ -228,7 +232,14 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
               Purchase Orders <ExternalLink className="ml-1 h-3 w-3" />
             </Link>
           </Button>
-          <ManagePosts />
+          <ManagePosts
+            open={postsOpen}
+            onOpenChange={(v) => {
+              setPostsOpen(v)
+              if (!v) setPostsProductFilter('')
+            }}
+            productFilter={postsProductFilter}
+          />
         </div>
       </div>
 
@@ -359,10 +370,33 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                   </span>
                   <span className="text-right">
                     {p.postsCount > 0 ? (
-                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">
-                        <FileText className="mr-1 h-3 w-3" />
-                        {p.postsCount}
-                      </Badge>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title={`View ${p.postsCount} post(s) for ${p.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPostsProductFilter(p.name)
+                          setPostsOpen(true)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setPostsProductFilter(p.name)
+                            setPostsOpen(true)
+                          }
+                        }}
+                        className="inline-flex cursor-pointer"
+                      >
+                        <Badge
+                          variant="outline"
+                          className="border-amber-500/40 bg-amber-500/10 text-amber-500 transition-colors hover:bg-amber-500/25"
+                        >
+                          <FileText className="mr-1 h-3 w-3" />
+                          {p.postsCount}
+                        </Badge>
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">{'\u2014'}</span>
                     )}
