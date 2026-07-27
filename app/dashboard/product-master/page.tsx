@@ -1,80 +1,125 @@
 'use client'
 
 import { useState } from 'react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Boxes, Sparkles, Clapperboard, Frame, Copy } from 'lucide-react'
+import { Sparkles, Clapperboard, Frame, Copy } from 'lucide-react'
 import { ProductsTab } from '@/components/product-master/products-tab'
 import { AiPostsTab } from '@/components/product-master/ai-posts-tab'
 import { ReelsStudioTab } from '@/components/product-master/reels-studio-tab'
 import { CampaignCreatorTab } from '@/components/product-master/campaign-creator-tab'
-import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
-// Product Master: one hub per product - stock + purchase orders, AI post
-// generation, reels cut/merge studio, and FB campaign duplication.
+type ToolId = 'ai-posts' | 'reels' | 'frames' | 'campaigns' | null
+
+// Product Master: the inventory + purchase-order table IS the page.
+// The creation tools (AI Posts, Reels Studio, Frame Input, Campaign
+// Creator) are toolbar buttons beside the title that open as popups.
 export default function ProductMasterPage() {
-  const [tab, setTab] = useState('products')
+  const [openTool, setOpenTool] = useState<ToolId>(null)
 
   return (
     <main className="flex flex-col gap-6 p-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Product Master</h1>
-        <p className="text-sm text-muted-foreground">
-          Inventory, purchasing, content and campaign creation in one place
-        </p>
-      </header>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Product Master</h1>
+          <p className="text-sm text-muted-foreground">
+            Inventory, purchasing, content and campaign creation in one place
+          </p>
+        </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start gap-1">
-          <TabsTrigger value="products" className="gap-1.5">
-            <Boxes className="h-4 w-4" /> Products
-          </TabsTrigger>
-          <TabsTrigger value="ai-posts" className="gap-1.5">
-            <Sparkles className="h-4 w-4" /> AI Posts
-          </TabsTrigger>
-          <TabsTrigger value="reels" className="gap-1.5">
-            <Clapperboard className="h-4 w-4" /> Reels Studio
-          </TabsTrigger>
-          <TabsTrigger value="frames" className="gap-1.5">
-            <Frame className="h-4 w-4" /> Frame Input
-            <Badge variant="outline" className="ml-1 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-500">
+        {/* Functionality tools - pop up over the product table */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOpenTool('ai-posts')}>
+            <Sparkles className="h-4 w-4 text-amber-500" /> AI Posts
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOpenTool('reels')}>
+            <Clapperboard className="h-4 w-4 text-sky-500" /> Reels Studio
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setOpenTool('frames')}
+          >
+            <Frame className="h-4 w-4 text-muted-foreground" /> Frame Input
+            <Badge variant="outline" className="ml-0.5 border-amber-500/40 bg-amber-500/10 px-1 text-[9px] text-amber-500">
               Soon
             </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="campaigns" className="gap-1.5">
-            <Copy className="h-4 w-4" /> Campaign Creator
-          </TabsTrigger>
-        </TabsList>
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOpenTool('campaigns')}>
+            <Copy className="h-4 w-4 text-emerald-500" /> Campaign Creator
+          </Button>
+        </div>
+      </header>
 
-        <TabsContent value="products">
-          <ProductsTab />
-        </TabsContent>
-        <TabsContent value="ai-posts">
+      {/* The product table is the page content */}
+      <ProductsTab />
+
+      {/* ---- Tool popups ---- */}
+      <Dialog open={openTool === 'ai-posts'} onOpenChange={(o) => !o && setOpenTool(null)}>
+        <DialogContent className="max-h-[85vh] w-full max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-500" /> AI Post Generation
+            </DialogTitle>
+            <DialogDescription>Generate ad copy, captions and descriptions per product</DialogDescription>
+          </DialogHeader>
           <AiPostsTab />
-        </TabsContent>
-        <TabsContent value="reels">
-          {/* Mount only when opened so the ~30MB ffmpeg wasm core never loads early */}
-          {tab === 'reels' && <ReelsStudioTab />}
-        </TabsContent>
-        <TabsContent value="frames">
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-              <Frame className="h-10 w-10 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Structured Frame Input</h2>
-              <p className="max-w-md text-sm text-muted-foreground text-pretty">
-                Feed a structured frame template (hook, scenes, captions, CTA) and generate
-                ready-to-post reels automatically. This workflow is coming soon.
-              </p>
-              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">
-                Coming soon
-              </Badge>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="campaigns">
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openTool === 'reels'} onOpenChange={(o) => !o && setOpenTool(null)}>
+        <DialogContent className="max-h-[85vh] w-full max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clapperboard className="h-5 w-5 text-sky-500" /> Reels Studio
+            </DialogTitle>
+            <DialogDescription>Cut scenes and merge clips into a reel, all in your browser</DialogDescription>
+          </DialogHeader>
+          {/* Mount only while open so the ~30MB ffmpeg wasm core never loads early */}
+          {openTool === 'reels' && <ReelsStudioTab />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openTool === 'frames'} onOpenChange={(o) => !o && setOpenTool(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Frame className="h-5 w-5" /> Structured Frame Input
+            </DialogTitle>
+            <DialogDescription>
+              Feed a structured frame template (hook, scenes, captions, CTA) and generate
+              ready-to-post reels automatically. This workflow is coming soon.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center py-4">
+            <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">
+              Coming soon
+            </Badge>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openTool === 'campaigns'} onOpenChange={(o) => !o && setOpenTool(null)}>
+        <DialogContent className="max-h-[85vh] w-full max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-5 w-5 text-emerald-500" /> Campaign Creator
+            </DialogTitle>
+            <DialogDescription>
+              Duplicate an existing campaign and rename campaign, ad sets and ads to one common name
+            </DialogDescription>
+          </DialogHeader>
           <CampaignCreatorTab />
-        </TabsContent>
-      </Tabs>
+        </DialogContent>
+      </Dialog>
     </main>
   )
 }
