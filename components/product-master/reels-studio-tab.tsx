@@ -12,11 +12,14 @@ import {
   Clapperboard,
   Download,
   Film,
+  ImageIcon,
   Link2,
   Loader2,
   Merge,
   Scissors,
+  Stamp,
   Trash2,
+  Type,
   Upload,
 } from 'lucide-react'
 
@@ -26,23 +29,39 @@ interface Clip {
   url: string
   file: File
   duration: number
+  width: number
+  height: number
 }
 
+type LogoCorner = 'tl' | 'tr' | 'bl' | 'br' | 'c'
+
 // Reels Studio: everything runs IN the browser via ffmpeg.wasm - cut a scene
-// out of a clip (trim), or merge the strip into one reel. No server cost,
-// files never leave the machine until the user downloads the result.
-export function ReelsStudioTab() {
+// out of a clip (trim), brand it (product-name title + logo watermark), or
+// merge the strip into one reel. No server cost, files never leave the
+// machine until the user downloads the result.
+export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   const [clips, setClips] = useState<Clip[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [range, setRange] = useState<[number, number]>([0, 0])
-  const [busy, setBusy] = useState<'cut' | 'merge' | 'load' | null>(null)
+  const [busy, setBusy] = useState<'cut' | 'merge' | 'brand' | 'load' | null>(null)
   const [progress, setProgress] = useState(0)
-  const [output, setOutput] = useState<{ url: string; name: string } | null>(null)
+  const [output, setOutput] = useState<{ url: string; name: string; blob: Blob } | null>(null)
   const [error, setError] = useState('')
   const [ffmpegReady, setFfmpegReady] = useState(false)
   const ffmpegRef = useRef<any>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // ---- Branding: product-name title bubble + logo watermark ----
+  const [titleOn, setTitleOn] = useState(true)
+  const [titleText, setTitleText] = useState(productName)
+  const [titleY, setTitleY] = useState(7) // % from top
+  const [logoOn, setLogoOn] = useState(true)
+  const [logoOpacity, setLogoOpacity] = useState(50) // %
+  const [logoSize, setLogoSize] = useState(18) // % of video width
+  const [logoPos, setLogoPos] = useState<LogoCorner>('br')
+  const [logoSrc, setLogoSrc] = useState('/images/reels-brand-logo.png')
+  const logoInputRef = useRef<HTMLInputElement>(null)
 
   // ---- Fetch-by-link: paste a TikTok/Facebook/YouTube URL and the video is
   // resolved watermark-free in HD and dropped straight into the feed ----
@@ -129,7 +148,15 @@ export function ReelsStudioTab() {
       probe.onloadedmetadata = () => {
         setClips((prev) => [
           ...prev,
-          { id: `${Date.now()}-${file.name}`, name: file.name, url, file, duration: probe.duration || 0 },
+          {
+            id: `${Date.now()}-${file.name}`,
+            name: file.name,
+            url,
+            file,
+            duration: probe.duration || 0,
+            width: probe.videoWidth || 1080,
+            height: probe.videoHeight || 1920,
+          },
         ])
       }
       probe.src = url
@@ -189,7 +216,7 @@ export function ReelsStudioTab() {
       }
       const data = await ffmpeg.readFile('out.mp4')
       const blob = new Blob([data], { type: 'video/mp4' })
-      setOutput({ url: URL.createObjectURL(blob), name: `cut-${selectedClip.name.replace(/\.[^.]+$/, '')}.mp4` })
+      setOutput({ url: URL.createObjectURL(blob), name: `cut-${selectedClip.name.replace(/\.[^.]+$/, '')}.mp4`, blob })
     } catch (e) {
       setError('Cut failed. Try a shorter range or a different clip.')
     } finally {
@@ -232,7 +259,7 @@ export function ReelsStudioTab() {
       ])
       const data = await ffmpeg.readFile('merged.mp4')
       const blob = new Blob([data], { type: 'video/mp4' })
-      setOutput({ url: URL.createObjectURL(blob), name: `reel-merged-${clips.length}clips.mp4` })
+      setOutput({ url: URL.createObjectURL(blob), name: `reel-merged-${clips.length}clips.mp4`, blob })
     } catch (e) {
       setError('Merge failed. Clips without audio tracks can cause this - try clips with sound.')
     } finally {
@@ -240,6 +267,167 @@ export function ReelsStudioTab() {
       setProgress(0)
     }
   }
+
+  // Draw the product-name title bubble (rounded yellow pill, bold orange
+  // text - like a viral TikTok caption) onto a transparent canvas sized to
+  // the video, and return it as a PNG.
+  const renderTitlePng = (vw: number, vh: number): Promise<Uint8Array> =>
+    new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = vw
+      canvas.height = vh
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return reject(new Error('no canvas'))
+      const text = titleText.trim()
+      if (!text) return reject(new Error('no title'))
+
+      let fontSize = Math.round(vw * 0.085)
+      ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
+      const maxW = vw * 0.82
+      while (ctx.measureText(text).width > maxW && fontSize > 18) {
+        fontSize -= 2
+        ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
+      }
+      const tw = ctx.measureText(text).width
+      const padX = fontSize * 0.75
+      const padY = fontSize * 0.42
+      const bw = tw + padX * 2
+      const bh = fontSize + padY * 2
+      const bx = (vw - bw) / 2
+      const by = Math.max(0, Math.min(vh - bh, (titleY / 100) * vh))
+      const r = bh / 2
+
+      // Bubble
+      ctx.beginPath()
+      ctx.roundRect(bx, by, bw, bh, r)
+      ctx.fillStyle = '#FFD934'
+      ctx.fill()
+      // Text with subtle stroke, centered in bubble
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = '#C2410C'
+      ctx.lineWidth = Math.max(2, fontSize * 0.08)
+      ctx.strokeText(text, vw / 2, by + bh / 2 + fontSize * 0.05)
+      ctx.fillStyle = '#F97316'
+      ctx.fillText(text, vw / 2, by + bh / 2 + fontSize * 0.05)
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) return reject(new Error('toBlob failed'))
+        resolve(new Uint8Array(await blob.arrayBuffer()))
+      }, 'image/png')
+    })
+
+  // Draw the logo at the chosen opacity onto a small transparent canvas and
+  // return a PNG - baking opacity into the pixels keeps the ffmpeg graph
+  // simple and fast.
+  const renderLogoPng = (vw: number): Promise<{ png: Uint8Array; w: number; h: number }> =>
+    new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        const w = Math.max(24, Math.round((logoSize / 100) * vw))
+        const h = Math.round(w * (img.naturalHeight / img.naturalWidth))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return reject(new Error('no canvas'))
+        ctx.globalAlpha = logoOpacity / 100
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(async (blob) => {
+          if (!blob) return reject(new Error('toBlob failed'))
+          resolve({ png: new Uint8Array(await blob.arrayBuffer()), w, h })
+        }, 'image/png')
+      }
+      img.onerror = () => reject(new Error('logo load failed'))
+      img.src = logoSrc
+    })
+
+  const logoOverlayXY = (corner: LogoCorner) => {
+    const m = 'W*0.03'
+    switch (corner) {
+      case 'tl': return { x: m, y: 'H*0.03' }
+      case 'tr': return { x: `W-w-${m}`, y: 'H*0.03' }
+      case 'bl': return { x: m, y: 'H-h-H*0.03' }
+      case 'br': return { x: `W-w-${m}`, y: 'H-h-H*0.03' }
+      case 'c': return { x: '(W-w)/2', y: '(H-h)/2' }
+    }
+  }
+
+  // BRAND: burn the title + logo onto the current result (if any) or the
+  // selected clip. Runs fully in the browser like cut/merge.
+  const brandVideo = async () => {
+    const ffmpeg = ffmpegRef.current
+    if (!ffmpeg) return
+    const source: { data: Blob | File; name: string } | null = output
+      ? { data: output.blob, name: output.name }
+      : selectedClip
+        ? { data: selectedClip.file, name: selectedClip.name }
+        : null
+    if (!source || (!titleOn && !logoOn) || (titleOn && !titleText.trim() && !logoOn)) return
+    setBusy('brand')
+    setProgress(0)
+    setError('')
+    try {
+      const { fetchFile } = await import('@ffmpeg/util')
+      // Probe actual dimensions of the source we are branding
+      const probeUrl = URL.createObjectURL(source.data)
+      const dims = await new Promise<{ w: number; h: number }>((res, rej) => {
+        const v = document.createElement('video')
+        v.preload = 'metadata'
+        v.onloadedmetadata = () => res({ w: v.videoWidth || 1080, h: v.videoHeight || 1920 })
+        v.onerror = () => rej(new Error('probe failed'))
+        v.src = probeUrl
+      })
+      URL.revokeObjectURL(probeUrl)
+
+      await ffmpeg.writeFile('brand-in.mp4', await fetchFile(source.data))
+      const inputs = ['-i', 'brand-in.mp4']
+      const chains: string[] = []
+      let last = '0:v'
+      let idx = 1
+
+      if (titleOn && titleText.trim()) {
+        await ffmpeg.writeFile('title.png', await renderTitlePng(dims.w, dims.h))
+        inputs.push('-i', 'title.png')
+        chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
+        last = `v${idx}`
+        idx++
+      }
+      if (logoOn) {
+        const { png } = await renderLogoPng(dims.w)
+        await ffmpeg.writeFile('logo.png', png)
+        inputs.push('-i', 'logo.png')
+        const { x, y } = logoOverlayXY(logoPos)
+        chains.push(`[${last}][${idx}:v]overlay=${x}:${y}[v${idx}]`)
+        last = `v${idx}`
+        idx++
+      }
+
+      await ffmpeg.exec([
+        ...inputs,
+        '-filter_complex', chains.join(';'),
+        '-map', `[${last}]`, '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'copy',
+        'branded.mp4',
+      ])
+      const data = await ffmpeg.readFile('branded.mp4')
+      const blob = new Blob([data], { type: 'video/mp4' })
+      setOutput({
+        url: URL.createObjectURL(blob),
+        name: `branded-${source.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')}.mp4`,
+        blob,
+      })
+    } catch (e) {
+      setError('Branding failed. Try a shorter clip, or re-fetch the video and try again.')
+    } finally {
+      setBusy(null)
+      setProgress(0)
+    }
+  }
+
+  const brandSource = output ? 'the current result' : selectedClip ? 'the selected clip' : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -420,7 +608,120 @@ export function ReelsStudioTab() {
         </div>
       </section>
 
-      {(busy === 'cut' || busy === 'merge') && (
+      {/* ---- Step 3: brand (title + logo) ---- */}
+      <section className="flex flex-col gap-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-bold text-amber-500">3</span>
+            Brand it: product title + logo
+          </p>
+          <Button
+            size="sm"
+            onClick={brandVideo}
+            disabled={!ffmpegReady || busy !== null || !brandSource || (!titleOn && !logoOn) || (titleOn && !titleText.trim() && !logoOn)}
+          >
+            {busy === 'brand' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Stamp className="mr-1.5 h-3.5 w-3.5" />}
+            {busy === 'brand' ? 'Branding\u2026' : 'Apply branding'}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {brandSource
+            ? `Burns the title bubble and/or logo onto ${brandSource}.`
+            : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
+        </p>
+
+        {/* Title bubble controls */}
+        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={titleOn} onChange={(e) => setTitleOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+            <Type className="h-3.5 w-3.5 text-amber-500" />
+            Product name title
+          </label>
+          {titleOn && (
+            <div className="flex flex-col gap-2 pl-6">
+              <Input value={titleText} onChange={(e) => setTitleText(e.target.value)} placeholder="Title shown on the video" className="h-8" />
+              <div className="flex items-center gap-3">
+                <span className="w-24 shrink-0 text-xs text-muted-foreground">Position: {titleY}% from top</span>
+                <Slider min={2} max={85} step={1} value={[titleY]} onValueChange={(v) => setTitleY(v[0])} className="flex-1" />
+              </div>
+              {/* Live preview of the bubble style */}
+              <div className="flex justify-center rounded bg-black/60 py-2">
+                <span className="rounded-full bg-[#FFD934] px-4 py-1 text-sm font-extrabold text-[#F97316]" style={{ WebkitTextStroke: '0.5px #C2410C' }}>
+                  {titleText.trim() || 'Product Name'}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Logo controls */}
+        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={logoOn} onChange={(e) => setLogoOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+            <ImageIcon className="h-3.5 w-3.5 text-amber-500" />
+            Logo watermark
+          </label>
+          {logoOn && (
+            <div className="flex flex-col gap-3 pl-6 sm:flex-row sm:items-start">
+              <div className="flex flex-col items-center gap-1.5">
+                <img
+                  src={logoSrc || "/placeholder.svg"}
+                  alt="Logo preview"
+                  className="h-16 w-16 rounded border bg-black/40 object-contain"
+                  style={{ opacity: logoOpacity / 100 }}
+                />
+                <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => logoInputRef.current?.click()}>
+                  Change
+                </Button>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) setLogoSrc(URL.createObjectURL(f))
+                  }}
+                />
+              </div>
+              <div className="flex flex-1 flex-col gap-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 text-xs text-muted-foreground">Transparency: {logoOpacity}%</span>
+                  <Slider min={5} max={100} step={1} value={[logoOpacity]} onValueChange={(v) => setLogoOpacity(v[0])} className="flex-1" />
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {logoSize}% width</span>
+                  <Slider min={6} max={45} step={1} value={[logoSize]} onValueChange={(v) => setLogoSize(v[0])} className="flex-1" />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-28 shrink-0 text-xs text-muted-foreground">Placement</span>
+                  {(
+                    [
+                      ['tl', 'Top L'],
+                      ['tr', 'Top R'],
+                      ['c', 'Center'],
+                      ['bl', 'Bot L'],
+                      ['br', 'Bot R'],
+                    ] as const
+                  ).map(([pos, label]) => (
+                    <Button
+                      key={pos}
+                      size="sm"
+                      variant={logoPos === pos ? 'default' : 'outline'}
+                      className="h-6 px-2 text-[11px]"
+                      onClick={() => setLogoPos(pos)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {(busy === 'cut' || busy === 'merge' || busy === 'brand') && (
         <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
           <Clapperboard className="h-4 w-4 shrink-0 animate-pulse text-sky-500" />
           <Progress value={progress} className="flex-1" />

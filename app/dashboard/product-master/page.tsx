@@ -116,7 +116,7 @@ export default function ProductMasterPage() {
           </DialogHeader>
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {/* Mount only while open so the ~30MB ffmpeg wasm core never loads early */}
-            {request?.tool === 'reels' && <ReelsStudioTab />}
+            {request?.tool === 'reels' && <ReelsStudioTab productName={productName} />}
           </div>
         </DialogContent>
       </Dialog>
