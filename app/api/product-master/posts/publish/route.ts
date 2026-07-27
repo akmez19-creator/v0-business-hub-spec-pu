@@ -1,19 +1,16 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { getManageablePages } from '@/lib/facebook/pages'
 
 // Publish a finished Reels Studio video straight to a Facebook Page.
-// GET  -> list all Pages the token can manage (name + id) via /me/accounts
+// GET  -> list all Pages the token can manage (name + id). Pages are
+//         discovered via /me/accounts PLUS the ad accounts' promote_pages
+//         edge, because Facebook hides pages not ticked during app login.
 // POST -> JSON { videoUrl, description, pageId }: the browser uploads the
 //         video to Supabase Storage first (request bodies through this API
 //         are size-capped), then Facebook fetches it via file_url
 
-import { getManageablePages } from '@/lib/facebook/pages'
-
 const GRAPH = 'https://graph.facebook.com/v21.0'
-
-// Pages are discovered via /me/accounts PLUS the ad accounts' promote_pages
-// edge, because Facebook hides pages that weren't ticked during app login
-const getPages = getManageablePages
 
 export async function GET() {
   try {
@@ -26,7 +23,7 @@ export async function GET() {
     const token = process.env.FACEBOOK_ACCESS_TOKEN
     if (!token) return NextResponse.json({ success: false, error: 'Facebook token not configured' }, { status: 500 })
 
-    const pages = await getPages(token)
+    const pages = await getManageablePages(token)
     if (pages.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No Facebook Page found for this token. It needs pages_show_list + pages_manage_posts permissions.' },
@@ -66,7 +63,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'No valid video URL provided' }, { status: 400 })
     }
 
-    const pages = await getPages(token)
+    const pages = await getManageablePages(token)
     if (pages.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No Facebook Page found for this token. It needs pages_show_list + pages_manage_posts permissions.' },
