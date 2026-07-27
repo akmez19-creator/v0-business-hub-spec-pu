@@ -1,17 +1,20 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 
-// Publish a finished Reels Studio video straight to the Facebook Page.
-// GET  -> discover the target Page (name + id) via /me/accounts
-// POST -> multipart upload: video + description published to {page}/videos
+// Publish a finished Reels Studio video straight to a Facebook Page.
+// GET  -> list all Pages the token can manage (name + id) via /me/accounts
+// POST -> multipart upload: video + description published to the chosen
+//         Page's /videos (pageId selects which one)
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
-async function getPage(token: string): Promise<{ id: string; name: string; access_token: string } | null> {
-  const res = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(token)}`)
-  if (!res.ok) return null
-  const json = (await res.json()) as { data?: { id: string; name: string; access_token: string }[] }
-  return json.data?.[0] ?? null
+type FbPage = { id: string; name: string; access_token: string }
+
+async function getPages(token: string): Promise<FbPage[]> {
+  const res = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&limit=100&access_token=${encodeURIComponent(token)}`)
+  if (!res.ok) return []
+  const json = (await res.json()) as { data?: FbPage[] }
+  return json.data ?? []
 }
 
 export async function GET() {
@@ -25,17 +28,17 @@ export async function GET() {
     const token = process.env.FACEBOOK_ACCESS_TOKEN
     if (!token) return NextResponse.json({ success: false, error: 'Facebook token not configured' }, { status: 500 })
 
-    const page = await getPage(token)
-    if (!page) {
+    const pages = await getPages(token)
+    if (pages.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No Facebook Page found for this token. It needs pages_show_list + pages_manage_posts permissions.' },
         { status: 404 },
       )
     }
-    return NextResponse.json({ success: true, page: { id: page.id, name: page.name } })
+    return NextResponse.json({ success: true, pages: pages.map((p) => ({ id: p.id, name: p.name })) })
   } catch (error) {
     console.error('publish page lookup error:', error)
-    return NextResponse.json({ success: false, error: 'Failed to look up Facebook Page' }, { status: 500 })
+    return NextResponse.json({ success: false, error: 'Failed to look up Facebook Pages' }, { status: 500 })
   }
 }
 
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
     const video = form.get('video')
     const description = String(form.get('description') || '').slice(0, 6000)
     const productName = String(form.get('productName') || '').slice(0, 200)
+    const pageId = String(form.get('pageId') || '')
 
     if (!(video instanceof Blob) || video.size === 0) {
       return NextResponse.json({ success: false, error: 'No video provided' }, { status: 400 })
@@ -63,13 +67,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Video too large to publish (max 500MB)' }, { status: 413 })
     }
 
-    const page = await getPage(token)
-    if (!page) {
+    const pages = await getPages(token)
+    if (pages.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No Facebook Page found for this token. It needs pages_show_list + pages_manage_posts permissions.' },
         { status: 404 },
       )
     }
+    // Publish to the chosen page; fall back to the first if none was picked
+    const page = (pageId && pages.find((p) => p.id === pageId)) || pages[0]
 
     // Upload the video to the Page feed with the caption
     const fd = new FormData()

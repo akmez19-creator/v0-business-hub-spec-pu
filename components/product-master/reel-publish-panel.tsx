@@ -37,12 +37,19 @@ export function ReelPublishPanel({
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState('')
   const [published, setPublished] = useState<{ postUrl: string; pageName: string } | null>(null)
+  const [pageId, setPageId] = useState('')
 
-  // Target page shown up front so the user knows where it goes
-  const { data: pageData } = useSWR<{ success: boolean; page?: { id: string; name: string }; error?: string }>(
+  // All pages the token can manage - the user picks the destination
+  const { data: pageData } = useSWR<{ success: boolean; pages?: { id: string; name: string }[]; error?: string }>(
     '/api/product-master/posts/publish',
     fetcher,
   )
+  const pages = pageData?.pages ?? []
+
+  // Default the selection to the first page once the list loads
+  useEffect(() => {
+    if (!pageId && pages.length > 0) setPageId(pages[0].id)
+  }, [pages, pageId])
 
   // Auto-generate the caption on open: resolve the product by name so the
   // copy is grounded in real inventory facts (price, offers, description)
@@ -102,6 +109,7 @@ export function ReelPublishPanel({
       fd.append('video', videoBlob, 'reel.mp4')
       fd.append('description', caption)
       fd.append('productName', productName)
+      fd.append('pageId', pageId)
       const res = await fetch('/api/product-master/posts/publish', { method: 'POST', body: fd })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Publish failed')
@@ -136,14 +144,32 @@ export function ReelPublishPanel({
   return (
     <div className="flex flex-col gap-2.5 rounded-md border bg-background/60 p-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">
-          Post to Facebook
-          {pageData?.page && <span className="ml-1.5 text-xs font-normal text-muted-foreground">Page: {pageData.page.name}</span>}
-        </p>
+        <p className="text-sm font-medium">Post to Facebook</p>
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onClose} aria-label="Close post panel">
           <X className="h-4 w-4" />
         </Button>
       </div>
+
+      {pages.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label htmlFor="fb-page-select" className="shrink-0 text-xs text-muted-foreground">
+            Page
+          </label>
+          <select
+            id="fb-page-select"
+            value={pageId}
+            onChange={(e) => setPageId(e.target.value)}
+            disabled={publishing}
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {pages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {generating ? (
         <div className="flex items-center gap-2 rounded-md border border-dashed px-3 py-6 text-sm text-muted-foreground">
