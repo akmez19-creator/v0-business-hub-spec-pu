@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { Check, ChevronsUpDown, Copy, ExternalLink, Loader2 } from 'lucide-react'
 
 interface Account {
   id: string
@@ -40,6 +42,7 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
     fetcher,
   )
   const [campaignId, setCampaignId] = useState('')
+  const [campaignOpen, setCampaignOpen] = useState(false)
   const [commonName, setCommonName] = useState(initialName ?? '')
   // Post-to-boost picker: pick the page, then one of its recent posts.
   // Every ad in the copy is re-pointed at that post's creative.
@@ -117,20 +120,61 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
           </Select>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor="cc-campaign" className="text-xs font-medium text-muted-foreground">Campaign to duplicate</label>
-          <Select value={campaignId} onValueChange={setCampaignId} disabled={!accountId}>
-            <SelectTrigger id="cc-campaign">
-              <SelectValue placeholder={loadingCampaigns ? 'Loading campaigns\u2026' : accountId ? 'Pick a campaign' : 'Pick an account first'} />
-            </SelectTrigger>
-            <SelectContent>
-              {campaigns.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={campaignOpen} onOpenChange={setCampaignOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                id="cc-campaign"
+                variant="outline"
+                role="combobox"
+                aria-expanded={campaignOpen}
+                disabled={!accountId}
+                className="w-full justify-between bg-transparent font-normal"
+              >
+                <span className="truncate">
+                  {source
+                    ? source.name
+                    : loadingCampaigns
+                      ? 'Loading campaigns\u2026'
+                      : accountId
+                        ? 'Search campaigns\u2026'
+                        : 'Pick an account first'}
+                </span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+              <Command>
+                <CommandInput placeholder={'Type to search campaigns\u2026'} />
+                <CommandList>
+                  <CommandEmpty>
+                    No campaign found. Drafts in Ads Manager are invisible to the API {'\u2014'} publish them first.
+                  </CommandEmpty>
+                  <CommandGroup>
+                    {campaigns.map((c) => (
+                      <CommandItem
+                        key={c.id}
+                        value={c.name + ' ' + c.id}
+                        onSelect={() => {
+                          setCampaignId(c.id === campaignId ? '' : c.id)
+                          setCampaignOpen(false)
+                        }}
+                      >
+                        <Check className={campaignId === c.id ? 'mr-2 h-4 w-4 opacity-100' : 'mr-2 h-4 w-4 opacity-0'} />
+                        <span className="truncate">{c.name}</span>
+                        {c.status !== 'ACTIVE' && (
+                          <Badge variant="outline" className="ml-auto shrink-0 text-[10px]">
+                            {c.status}
+                          </Badge>
+                        )}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
 
         <div className="flex flex-col gap-1.5 sm:col-span-2">
