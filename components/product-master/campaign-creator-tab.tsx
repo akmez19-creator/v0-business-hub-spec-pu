@@ -28,7 +28,7 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
   const { data: accountsData } = useSWR('/api/facebook-ads?action=accounts', fetcher)
   const [accountId, setAccountId] = useState('')
   const { data: campaignsData, isLoading: loadingCampaigns } = useSWR(
-    accountId ? `/api/facebook-ads?action=campaigns&accountId=${accountId}` : null,
+    accountId ? `/api/facebook-ads?action=campaigns-list&accountId=${accountId}` : null,
     fetcher,
   )
   const [campaignId, setCampaignId] = useState('')

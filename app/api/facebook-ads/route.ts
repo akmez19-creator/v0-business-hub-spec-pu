@@ -26,6 +26,8 @@ export async function GET(request: Request) {
         return await getAdAccounts(accessToken)
       case 'campaigns':
         return await getCampaignsWithSpend(accessToken, accountId, datePreset, since, until)
+      case 'campaigns-list':
+        return await getCampaignsList(accessToken, accountId)
       case 'account_spend':
         return await getAccountSpend(accessToken, accountId, datePreset, since, until)
       default:
@@ -54,6 +56,34 @@ async function getAdAccounts(accessToken: string) {
   return NextResponse.json(data)
 }
 
+// Lightweight campaign list for pickers (e.g. Campaign Creator) - names only,
+// no per-campaign insights. The full 'campaigns' action makes one insights
+// call per campaign, which takes minutes on accounts with hundreds of them.
+async function getCampaignsList(accessToken: string, accountId: string | null) {
+  if (!accountId) {
+    return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
+  }
+
+  let campaigns: Array<{ id: string; name: string; status: string; objective: string; created_time: string }> = []
+  let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=500`
+
+  while (nextUrl) {
+    const response: Response = await fetch(nextUrl)
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error?.message || 'Failed to fetch campaigns')
+    }
+    const data = await response.json()
+    campaigns = [...campaigns, ...(data.data || [])]
+    nextUrl = data.paging?.next || null
+  }
+
+  // Newest first so the picker surfaces recent campaigns at the top
+  campaigns.sort((a, b) => (b.created_time || '').localeCompare(a.created_time || ''))
+
+  return NextResponse.json({ campaigns })
+}
+
 async function getCampaignsWithSpend(
   accessToken: string, 
   accountId: string | null,
@@ -79,14 +109,14 @@ async function getCampaignsWithSpend(
   let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time,lifetime_budget,daily_budget,budget_remaining,start_time,stop_time&access_token=${accessToken}&limit=500`
   
   while (nextUrl) {
-    const campaignsResponse = await fetch(nextUrl)
+    const campaignsResponse: Response = await fetch(nextUrl)
     
     if (!campaignsResponse.ok) {
       const error = await campaignsResponse.json()
       throw new Error(error.error?.message || 'Failed to fetch campaigns')
     }
     
-    const campaignsData = await campaignsResponse.json()
+    const campaignsData: { data?: typeof allCampaigns; paging?: { next?: string } } = await campaignsResponse.json()
     allCampaigns = [...allCampaigns, ...(campaignsData.data || [])]
     
     // Check for next page
