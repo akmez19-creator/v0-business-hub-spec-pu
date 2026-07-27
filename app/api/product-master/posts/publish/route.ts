@@ -3,8 +3,9 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 
 // Publish a finished Reels Studio video straight to a Facebook Page.
 // GET  -> list all Pages the token can manage (name + id) via /me/accounts
-// POST -> multipart upload: video + description published to the chosen
-//         Page's /videos (pageId selects which one)
+// POST -> JSON { videoUrl, description, pageId }: the browser uploads the
+//         video to Supabase Storage first (request bodies through this API
+//         are size-capped), then Facebook fetches it via file_url
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
@@ -53,18 +54,19 @@ export async function POST(request: Request) {
     const token = process.env.FACEBOOK_ACCESS_TOKEN
     if (!token) return NextResponse.json({ success: false, error: 'Facebook token not configured' }, { status: 500 })
 
-    const form = await request.formData()
-    const video = form.get('video')
-    const description = String(form.get('description') || '').slice(0, 6000)
-    const productName = String(form.get('productName') || '').slice(0, 200)
-    const pageId = String(form.get('pageId') || '')
+    // The video is uploaded to Supabase Storage by the browser (sending the
+    // bytes through this API hits the request body size limit) - we only
+    // receive its public URL and hand it to Facebook via file_url
+    const body = (await request.json()) as { videoUrl?: string; description?: string; productName?: string; pageId?: string }
+    const videoUrl = String(body.videoUrl || '')
+    const description = String(body.description || '').slice(0, 6000)
+    const productName = String(body.productName || '').slice(0, 200)
+    const pageId = String(body.pageId || '')
 
-    if (!(video instanceof Blob) || video.size === 0) {
-      return NextResponse.json({ success: false, error: 'No video provided' }, { status: 400 })
-    }
-    // Graph API non-resumable upload limit is 1GB; our reels are far below
-    if (video.size > 500 * 1024 * 1024) {
-      return NextResponse.json({ success: false, error: 'Video too large to publish (max 500MB)' }, { status: 413 })
+    // Only accept URLs from our own Supabase Storage reels bucket
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || ''
+    if (!videoUrl || !supabaseUrl || !videoUrl.startsWith(`${supabaseUrl}/storage/v1/object/public/reels/`)) {
+      return NextResponse.json({ success: false, error: 'No valid video URL provided' }, { status: 400 })
     }
 
     const pages = await getPages(token)
@@ -77,9 +79,9 @@ export async function POST(request: Request) {
     // Publish to the chosen page; fall back to the first if none was picked
     const page = (pageId && pages.find((p) => p.id === pageId)) || pages[0]
 
-    // Upload the video to the Page feed with the caption
+    // Publish to the Page feed - Facebook downloads the video from the URL
     const fd = new FormData()
-    fd.append('source', video, 'reel.mp4')
+    fd.append('file_url', videoUrl)
     fd.append('description', description)
     fd.append('access_token', page.access_token)
     const upRes = await fetch(`${GRAPH}/${page.id}/videos`, { method: 'POST', body: fd })

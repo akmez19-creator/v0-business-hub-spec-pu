@@ -105,12 +105,22 @@ export function ReelPublishPanel({
     setPublishing(true)
     setError('')
     try {
-      const fd = new FormData()
-      fd.append('video', videoBlob, 'reel.mp4')
-      fd.append('description', caption)
-      fd.append('productName', productName)
-      fd.append('pageId', pageId)
-      const res = await fetch('/api/product-master/posts/publish', { method: 'POST', body: fd })
+      // Upload the video straight to Supabase Storage from the browser -
+      // sending it through our API hits the request body size limit (413)
+      const supabase = createClient()
+      const path = `${Date.now()}-${(productName || 'reel').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.mp4`
+      const { error: uploadError } = await supabase.storage
+        .from('reels')
+        .upload(path, videoBlob, { contentType: 'video/mp4' })
+      if (uploadError) throw new Error(`Video upload failed: ${uploadError.message}`)
+      const { data: pub } = supabase.storage.from('reels').getPublicUrl(path)
+
+      // Hand Facebook the URL - it fetches the file itself
+      const res = await fetch('/api/product-master/posts/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl: pub.publicUrl, description: caption, productName, pageId }),
+      })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Publish failed')
       setPublished({ postUrl: json.postUrl, pageName: json.pageName })
