@@ -18,6 +18,7 @@ import {
   Loader2,
   Merge,
   Move,
+  Megaphone,
   Scissors,
   Send,
   Stamp,
@@ -27,6 +28,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { ReelPublishPanel } from './reel-publish-panel'
+import { ReelAdPanel } from './reel-ad-panel'
 
 interface Clip {
   id: string
@@ -65,6 +67,8 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   const [preBrand, setPreBrand] = useState<{ url: string; name: string; blob: Blob; wasOutput: boolean } | null>(null)
   // Post-to-Facebook panel visibility (opens on "Post it")
   const [showPublish, setShowPublish] = useState(false)
+  // Create-ad panel visibility (opens on "Create ad")
+  const [showAdPanel, setShowAdPanel] = useState(false)
   const [error, setError] = useState('')
   const [ffmpegReady, setFfmpegReady] = useState(false)
   const ffmpegRef = useRef<any>(null)
@@ -1074,8 +1078,13 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                   <Download className="mr-1.5 h-3.5 w-3.5" /> Download
                 </a>
               </Button>
+              {!showAdPanel && (
+                <Button size="sm" variant="outline" onClick={() => { setShowAdPanel(true); setShowPublish(false) }} disabled={busy !== null} className="bg-transparent">
+                  <Megaphone className="mr-1.5 h-3.5 w-3.5" /> Create ad
+                </Button>
+              )}
               {!showPublish && (
-                <Button size="sm" onClick={() => setShowPublish(true)} disabled={busy !== null}>
+                <Button size="sm" onClick={() => { setShowPublish(true); setShowAdPanel(false) }} disabled={busy !== null}>
                   <Send className="mr-1.5 h-3.5 w-3.5" /> Post it
                 </Button>
               )}
@@ -1088,6 +1097,14 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                 productName={productName}
                 priceText={priceOn ? priceText.trim() : ''}
                 onClose={() => setShowPublish(false)}
+              />
+            )}
+            {showAdPanel && (
+              <ReelAdPanel
+                videoBlob={output.blob}
+                productName={productName}
+                priceText={priceOn ? priceText.trim() : ''}
+                onClose={() => setShowAdPanel(false)}
               />
             )}
             <video src={output.url} controls className="mx-auto max-h-72 rounded-md bg-black" />
