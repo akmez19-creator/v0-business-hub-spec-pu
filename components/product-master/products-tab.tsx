@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -15,9 +14,11 @@ import {
   Copy,
   ExternalLink,
   Frame,
+  Megaphone,
   Search,
   ShoppingCart,
   Sparkles,
+  Users,
 } from 'lucide-react'
 
 // A row tool click: which tool, for which product
@@ -26,21 +27,8 @@ export interface ToolRequest {
   product: { id: string; name: string }
 }
 
-interface Product {
-  id: string
-  name: string
-  sku: string | null
-  category: string | null
-  price: number | null
-  quantity: number | null
-  image_url: string | null
-  is_active: boolean
-}
-
 interface PurchaseOrder {
   id: string
-  product_id: string | null
-  product_name: string | null
   status: string | null
   qty: number | null
   unit_price: number | null
@@ -49,64 +37,59 @@ interface PurchaseOrder {
   created_at: string
 }
 
-const LOW_STOCK = 10
-
-// Everything inventory + purchase orders in one master view: a row per
-// product with stock level and its open POs expandable inline.
-async function fetchMasterData() {
-  const supabase = createClient()
-  const [{ data: products, error: pErr }, { data: pos, error: poErr }] = await Promise.all([
-    supabase.from('products').select('id, name, sku, category, price, quantity, image_url, is_active').order('name'),
-    supabase
-      .from('purchase_orders')
-      .select('id, product_id, product_name, status, qty, unit_price, supplier_name, tracking_number, created_at')
-      .order('created_at', { ascending: false }),
-  ])
-  if (pErr) throw pErr
-  if (poErr) throw poErr
-  return { products: (products || []) as Product[], pos: (pos || []) as PurchaseOrder[] }
+// Enriched product row from /api/product-master/overview:
+// inventory + merged POs + ads intelligence + client demand
+interface OverviewProduct {
+  id: string
+  name: string
+  sku: string | null
+  category: string | null
+  price: number | null
+  quantity: number | null
+  image_url: string | null
+  is_active: boolean
+  soldOut: boolean
+  activeCampaigns: number
+  activeAds: number
+  clientsPerDay: number
+  clientsPerWeek: number
+  openPOs: number
+  openPOQty: number
+  pos: PurchaseOrder[]
+  aliases: string[]
 }
 
+const LOW_STOCK = 10
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
 export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) => void }) {
-  const { data, error, isLoading } = useSWR('product-master-data', fetchMasterData)
+  const { data, error, isLoading } = useSWR<{ success: boolean; products: OverviewProduct[] }>(
+    '/api/product-master/overview',
+    fetcher,
+  )
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'all' | 'low' | 'with-po'>('all')
+  const [filter, setFilter] = useState<'all' | 'low' | 'sold-out' | 'with-po' | 'advertised'>('all')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  // POs grouped per product (by id when linked, by name as fallback)
-  const posByProduct = useMemo(() => {
-    const map = new Map<string, PurchaseOrder[]>()
-    for (const po of data?.pos || []) {
-      const key = po.product_id || (po.product_name || '').toLowerCase().trim()
-      if (!key) continue
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(po)
-    }
-    return map
-  }, [data])
-
-  const productPos = (p: Product) =>
-    posByProduct.get(p.id) || posByProduct.get(p.name.toLowerCase().trim()) || []
-
-  const openPos = (p: Product) =>
-    productPos(p).filter((po) => {
-      const s = (po.status || '').toLowerCase()
-      return s !== 'received' && s !== 'cancelled' && s !== 'completed' && s !== 'imported'
-    })
 
   const filtered = useMemo(() => {
     let list = data?.products || []
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(
-        (p) => p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q),
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.sku || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q) ||
+          p.aliases.some((a) => a.toLowerCase().includes(q)),
       )
     }
-    if (filter === 'low') list = list.filter((p) => (p.quantity ?? 0) <= LOW_STOCK)
-    if (filter === 'with-po') list = list.filter((p) => openPos(p).length > 0)
+    if (filter === 'low') list = list.filter((p) => (p.quantity ?? 0) <= LOW_STOCK && !p.soldOut)
+    if (filter === 'sold-out') list = list.filter((p) => p.soldOut)
+    if (filter === 'with-po') list = list.filter((p) => p.openPOs > 0)
+    if (filter === 'advertised') list = list.filter((p) => p.activeAds > 0)
     return list
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, search, filter, posByProduct])
+  }, [data, search, filter])
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -116,8 +99,12 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
       return next
     })
 
-  if (error) {
-    return <Card><CardContent className="py-10 text-center text-sm text-destructive">Failed to load products: {String(error.message || error)}</CardContent></Card>
+  if (error || (data && !data.success)) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-destructive">Failed to load product overview.</CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -126,7 +113,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search product, SKU, category..."
+            placeholder="Search product, alias, SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-8"
@@ -135,16 +122,13 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
         {(
           [
             ['all', 'All'],
+            ['sold-out', 'Sold out'],
             ['low', `Low stock (\u2264${LOW_STOCK})`],
             ['with-po', 'Has open PO'],
+            ['advertised', 'Advertised'],
           ] as const
         ).map(([key, label]) => (
-          <Button
-            key={key}
-            variant={filter === key ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter(key)}
-          >
+          <Button key={key} variant={filter === key ? 'default' : 'outline'} size="sm" onClick={() => setFilter(key)}>
             {label}
           </Button>
         ))}
@@ -164,21 +148,21 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
 
       <Card>
         <CardContent className="p-0">
-          <div className="grid grid-cols-[24px_1fr_90px_90px_90px_110px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[24px_1fr_80px_80px_72px_72px_70px_96px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <span />
             <span>Product</span>
             <span className="text-right">Stock</span>
-            <span className="text-right">Price</span>
-            <span className="text-right">Open POs</span>
+            <span className="text-right" title="Active ads running for this product">Ads</span>
+            <span className="text-right" title="Clients today">Cl/day</span>
+            <span className="text-right" title="Clients last 7 days">Cl/wk</span>
+            <span className="text-right">POs</span>
             <span className="text-right">Status</span>
           </div>
-          {isLoading && <div className="px-4 py-10 text-center text-sm text-muted-foreground">{'Loading inventory\u2026'}</div>}
+          {isLoading && <div className="px-4 py-10 text-center text-sm text-muted-foreground">{'Loading product intelligence\u2026'}</div>}
           {!isLoading && filtered.length === 0 && (
             <div className="px-4 py-10 text-center text-sm text-muted-foreground">No products match.</div>
           )}
           {filtered.map((p) => {
-            const pos = productPos(p)
-            const open = openPos(p)
             const qty = p.quantity ?? 0
             const isOpen = expanded.has(p.id)
             return (
@@ -194,7 +178,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                     }
                   }}
                   aria-expanded={isOpen}
-                  className="grid w-full cursor-pointer grid-cols-[24px_1fr_90px_90px_90px_110px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
+                  className="grid w-full cursor-pointer grid-cols-[24px_1fr_80px_80px_72px_72px_70px_96px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
                 >
                   {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   <span className="flex items-center gap-2 truncate">
@@ -207,7 +191,6 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       </span>
                     )}
                     <span className="truncate font-medium">{p.name}</span>
-                    {p.sku && <span className="hidden truncate text-xs text-muted-foreground lg:inline">{p.sku}</span>}
                     {/* Per-product tools - popups pre-loaded with this product */}
                     {onOpenTool && (
                       <span className="ml-1 flex shrink-0 items-center gap-1">
@@ -237,17 +220,34 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       </span>
                     )}
                   </span>
-                  <span className={`text-right font-semibold tabular-nums ${qty <= 0 ? 'text-destructive' : qty <= LOW_STOCK ? 'text-amber-500' : ''}`}>
-                    {qty}
-                  </span>
-                  <span className="text-right tabular-nums text-muted-foreground">
-                    {p.price != null ? `Rs ${Number(p.price).toLocaleString()}` : '\u2014'}
+                  <span className="text-right">
+                    {p.soldOut ? (
+                      <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">Sold out</Badge>
+                    ) : (
+                      <span className={`font-semibold tabular-nums ${qty <= LOW_STOCK ? 'text-amber-500' : ''}`}>{qty}</span>
+                    )}
                   </span>
                   <span className="text-right">
-                    {open.length > 0 ? (
+                    {p.activeAds > 0 ? (
+                      <Badge variant="outline" className="border-blue-500/40 bg-blue-500/10 text-blue-400">
+                        <Megaphone className="mr-1 h-3 w-3" />
+                        {p.activeAds}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">{'\u2014'}</span>
+                    )}
+                  </span>
+                  <span className="text-right tabular-nums">
+                    {p.clientsPerDay > 0 ? p.clientsPerDay : <span className="text-muted-foreground">{'\u2014'}</span>}
+                  </span>
+                  <span className="text-right tabular-nums">
+                    {p.clientsPerWeek > 0 ? p.clientsPerWeek : <span className="text-muted-foreground">{'\u2014'}</span>}
+                  </span>
+                  <span className="text-right">
+                    {p.openPOs > 0 ? (
                       <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/10 text-cyan-500">
                         <ShoppingCart className="mr-1 h-3 w-3" />
-                        {open.length}
+                        {p.openPOs}
                       </Badge>
                     ) : (
                       <span className="text-muted-foreground">{'\u2014'}</span>
@@ -258,12 +258,38 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                   </span>
                 </div>
                 {isOpen && (
-                  <div className="bg-muted/30 px-10 py-3">
-                    {pos.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No purchase orders for this product.</p>
+                  <div className="flex flex-col gap-3 bg-muted/30 px-10 py-3">
+                    {/* Demand + ads summary line */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3 w-3" /> {p.clientsPerDay} client(s) today {'\u00b7'} {p.clientsPerWeek} this week
+                      </span>
+                      {p.activeAds > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Megaphone className="h-3 w-3" /> {p.activeAds} active ad(s) across {p.activeCampaigns} campaign(s)
+                        </span>
+                      )}
+                      {p.openPOQty > 0 && (
+                        <span className="flex items-center gap-1">
+                          <ShoppingCart className="h-3 w-3" /> {p.openPOQty} unit(s) incoming
+                        </span>
+                      )}
+                    </div>
+                    {/* Aliases from validated merges */}
+                    {p.aliases.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="text-muted-foreground">Also known as:</span>
+                        {p.aliases.map((a) => (
+                          <Badge key={a} variant="outline" className="font-normal">{a}</Badge>
+                        ))}
+                      </div>
+                    )}
+                    {/* Open POs detail */}
+                    {p.pos.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No open purchase orders for this product.</p>
                     ) : (
                       <div className="flex flex-col gap-1.5">
-                        {pos.slice(0, 8).map((po) => (
+                        {p.pos.slice(0, 8).map((po) => (
                           <div key={po.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                             <Badge variant="outline" className="capitalize">{po.status || 'unknown'}</Badge>
                             <span className="tabular-nums">Qty {po.qty ?? '\u2014'}</span>
@@ -277,8 +303,8 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                             </span>
                           </div>
                         ))}
-                        {pos.length > 8 && (
-                          <p className="text-xs text-muted-foreground">+{pos.length - 8} more in Purchase Orders</p>
+                        {p.pos.length > 8 && (
+                          <p className="text-xs text-muted-foreground">+{p.pos.length - 8} more in Purchase Orders</p>
                         )}
                       </div>
                     )}
