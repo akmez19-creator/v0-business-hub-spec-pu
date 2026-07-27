@@ -22,7 +22,7 @@ export async function GET() {
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
 
-    const [{ data: products }, { data: aliases }, { data: pos }, { data: links }, { data: cache }, { data: deliveries }] =
+    const [{ data: products }, { data: aliases }, { data: pos }, { data: links }, { data: cache }, { data: deliveries }, { data: postRows }] =
       await Promise.all([
         admin.from('products').select('id, name, sku, category, price, quantity, image_url, is_active, sold_out').order('name'),
         admin.from('product_aliases').select('alias_name, product_id'),
@@ -36,7 +36,15 @@ export async function GET() {
           .from('deliveries')
           .select('product_id, products, created_at')
           .gte('created_at', since.toISOString()),
+        admin.from('product_posts').select('product_id'),
       ])
+
+    // ---- Post library count per product ----
+    const postsByProduct = new Map<string, number>()
+    for (const row of postRows || []) {
+      if (!row.product_id) continue
+      postsByProduct.set(row.product_id, (postsByProduct.get(row.product_id) || 0) + 1)
+    }
 
     // alias name -> product id (for matching deliveries/POs still unlinked)
     const aliasMap = new Map<string, string>()
@@ -107,6 +115,7 @@ export async function GET() {
         clientsPerWeek: clientsWeek.get(p.id) ?? 0,
         openPOs: productPos.length,
         openPOQty: productPos.reduce((s, po) => s + (po.qty || 0), 0),
+        postsCount: postsByProduct.get(p.id) ?? 0,
         pos: productPos,
         aliases: aliasesByProduct.get(p.id) ?? [],
       }

@@ -16,6 +16,7 @@ import {
   Clapperboard,
   Copy,
   ExternalLink,
+  FileText,
   Frame,
   Megaphone,
   Search,
@@ -59,6 +60,7 @@ interface OverviewProduct {
   clientsPerWeek: number
   openPOs: number
   openPOQty: number
+  postsCount: number
   pos: PurchaseOrder[]
   aliases: string[]
 }
@@ -67,7 +69,7 @@ const LOW_STOCK = 10
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
-type SortKey = 'name' | 'stock' | 'ads' | 'clday' | 'clwk' | 'pos' | 'status'
+type SortKey = 'name' | 'stock' | 'ads' | 'clday' | 'clwk' | 'pos' | 'posts' | 'status'
 type SortDir = 'asc' | 'desc'
 
 // Status severity for sorting: sold out first, then low stock, then inactive, then ok
@@ -86,6 +88,7 @@ function sortValue(p: OverviewProduct, key: SortKey): number | string {
     case 'clday': return p.clientsPerDay
     case 'clwk': return p.clientsPerWeek
     case 'pos': return p.openPOs
+    case 'posts': return p.postsCount
     case 'status': return statusRank(p)
   }
 }
@@ -231,7 +234,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
 
       <Card>
         <CardContent className="p-0">
-          <div className="grid grid-cols-[24px_1fr_80px_80px_72px_72px_70px_96px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[24px_1fr_80px_80px_72px_72px_70px_70px_96px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <span />
             {(
               [
@@ -241,6 +244,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                 ['clday', 'Cl/day', 'justify-end', 'Sort by clients today'],
                 ['clwk', 'Cl/wk', 'justify-end', 'Sort by clients last 7 days'],
                 ['pos', 'POs', 'justify-end', 'Sort by open purchase orders'],
+                ['posts', 'Posts', 'justify-end', 'Sort by number of posts in the library'],
                 ['status', 'Status', 'justify-end', 'Sort by status severity (sold out, low stock first)'],
               ] as const
             ).map(([key, label, align, title]) => (
@@ -280,7 +284,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                     }
                   }}
                   aria-expanded={isOpen}
-                  className="grid w-full cursor-pointer grid-cols-[24px_1fr_80px_80px_72px_72px_70px_96px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
+                  className="grid w-full cursor-pointer grid-cols-[24px_1fr_80px_80px_72px_72px_70px_70px_96px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
                 >
                   {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   <span className="flex items-center gap-2 truncate">
@@ -348,6 +352,16 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/10 text-cyan-500">
                         <ShoppingCart className="mr-1 h-3 w-3" />
                         {p.openPOs}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">{'\u2014'}</span>
+                    )}
+                  </span>
+                  <span className="text-right">
+                    {p.postsCount > 0 ? (
+                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">
+                        <FileText className="mr-1 h-3 w-3" />
+                        {p.postsCount}
                       </Badge>
                     ) : (
                       <span className="text-muted-foreground">{'\u2014'}</span>
