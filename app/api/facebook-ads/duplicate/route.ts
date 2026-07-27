@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getManageablePages } from '@/lib/facebook/pages'
 
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
@@ -32,14 +33,13 @@ export async function GET(request: Request) {
 
   try {
     if (action === 'pages') {
-      const res = await fetch(
-        `${FACEBOOK_GRAPH_URL}/me/accounts?fields=id,name&limit=100&access_token=${encodeURIComponent(accessToken)}`,
-      )
-      const json = await res.json()
-      if (!res.ok || json.error) {
-        return NextResponse.json({ error: json.error?.message || 'Failed to list pages' }, { status: 502 })
+      // Discovers via /me/accounts AND ad-account promote_pages, because
+      // Facebook hides pages that weren't ticked during the app login flow
+      const pages = await getManageablePages(accessToken)
+      if (pages.length === 0) {
+        return NextResponse.json({ error: 'Failed to list pages' }, { status: 502 })
       }
-      return NextResponse.json({ pages: (json.data || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })) })
+      return NextResponse.json({ pages: pages.map((p) => ({ id: p.id, name: p.name })) })
     }
 
     if (action === 'posts') {
@@ -48,11 +48,8 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'pageId required' }, { status: 400 })
       }
       // Use the page's own token so unpublished/dark posts are included too
-      const pageRes = await fetch(
-        `${FACEBOOK_GRAPH_URL}/me/accounts?fields=id,access_token&limit=100&access_token=${encodeURIComponent(accessToken)}`,
-      )
-      const pageJson = await pageRes.json()
-      const page = (pageJson.data || []).find((p: { id: string }) => p.id === pageId)
+      const pages = await getManageablePages(accessToken)
+      const page = pages.find((p) => p.id === pageId)
       const pageToken: string = page?.access_token || accessToken
       const res = await fetch(
         `${FACEBOOK_GRAPH_URL}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture&limit=50&access_token=${encodeURIComponent(pageToken)}`,

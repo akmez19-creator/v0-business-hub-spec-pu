@@ -7,16 +7,13 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 //         video to Supabase Storage first (request bodies through this API
 //         are size-capped), then Facebook fetches it via file_url
 
+import { getManageablePages } from '@/lib/facebook/pages'
+
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
-type FbPage = { id: string; name: string; access_token: string }
-
-async function getPages(token: string): Promise<FbPage[]> {
-  const res = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&limit=100&access_token=${encodeURIComponent(token)}`)
-  if (!res.ok) return []
-  const json = (await res.json()) as { data?: FbPage[] }
-  return json.data ?? []
-}
+// Pages are discovered via /me/accounts PLUS the ad accounts' promote_pages
+// edge, because Facebook hides pages that weren't ticked during app login
+const getPages = getManageablePages
 
 export async function GET() {
   try {
