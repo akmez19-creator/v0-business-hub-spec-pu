@@ -8,6 +8,9 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronRight,
   Clapperboard,
@@ -20,6 +23,7 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react'
+import { ManagePosts } from '@/components/product-master/manage-posts'
 
 // A row tool click: which tool, for which product
 export interface ToolRequest {
@@ -63,6 +67,29 @@ const LOW_STOCK = 10
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+type SortKey = 'name' | 'stock' | 'ads' | 'clday' | 'clwk' | 'pos' | 'status'
+type SortDir = 'asc' | 'desc'
+
+// Status severity for sorting: sold out first, then low stock, then inactive, then ok
+function statusRank(p: OverviewProduct): number {
+  if (p.soldOut) return 0
+  if ((p.quantity ?? 0) <= LOW_STOCK) return 1
+  if (!p.is_active) return 2
+  return 3
+}
+
+function sortValue(p: OverviewProduct, key: SortKey): number | string {
+  switch (key) {
+    case 'name': return p.name.toLowerCase()
+    case 'stock': return p.quantity ?? 0
+    case 'ads': return p.activeAds
+    case 'clday': return p.clientsPerDay
+    case 'clwk': return p.clientsPerWeek
+    case 'pos': return p.openPOs
+    case 'status': return statusRank(p)
+  }
+}
+
 export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) => void }) {
   const { data, error, isLoading, mutate } = useSWR<{ success: boolean; products: OverviewProduct[] }>(
     '/api/product-master/overview',
@@ -72,6 +99,19 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
   const [filter, setFilter] = useState<'all' | 'low' | 'sold-out' | 'with-po' | 'advertised'>('all')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [togglingSoldOut, setTogglingSoldOut] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  // Click a column header to sort; click again to flip direction
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      // Numeric columns default to descending (biggest first), name/status ascending
+      setSortDir(key === 'name' || key === 'status' ? 'asc' : 'desc')
+    }
+  }
 
   // Manual, user-initiated sold-out toggle with optimistic update
   const toggleSoldOut = async (product: OverviewProduct) => {
@@ -123,8 +163,15 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
     if (filter === 'sold-out') list = list.filter((p) => p.soldOut)
     if (filter === 'with-po') list = list.filter((p) => p.openPOs > 0)
     if (filter === 'advertised') list = list.filter((p) => p.activeAds > 0)
-    return list
-  }, [data, search, filter])
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...list].sort((a, b) => {
+      const va = sortValue(a, sortKey)
+      const vb = sortValue(b, sortKey)
+      if (va < vb) return -1 * dir
+      if (va > vb) return 1 * dir
+      return a.name.localeCompare(b.name)
+    })
+  }, [data, search, filter, sortKey, sortDir])
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -178,6 +225,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
               Purchase Orders <ExternalLink className="ml-1 h-3 w-3" />
             </Link>
           </Button>
+          <ManagePosts />
         </div>
       </div>
 
@@ -185,13 +233,32 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
         <CardContent className="p-0">
           <div className="grid grid-cols-[24px_1fr_80px_80px_72px_72px_70px_96px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <span />
-            <span>Product</span>
-            <span className="text-right">Stock</span>
-            <span className="text-right" title="Active ads running for this product">Ads</span>
-            <span className="text-right" title="Clients today">Cl/day</span>
-            <span className="text-right" title="Clients last 7 days">Cl/wk</span>
-            <span className="text-right">POs</span>
-            <span className="text-right">Status</span>
+            {(
+              [
+                ['name', 'Product', 'justify-start', 'Sort by product name'],
+                ['stock', 'Stock', 'justify-end', 'Sort by stock level'],
+                ['ads', 'Ads', 'justify-end', 'Sort by active ads'],
+                ['clday', 'Cl/day', 'justify-end', 'Sort by clients today'],
+                ['clwk', 'Cl/wk', 'justify-end', 'Sort by clients last 7 days'],
+                ['pos', 'POs', 'justify-end', 'Sort by open purchase orders'],
+                ['status', 'Status', 'justify-end', 'Sort by status severity (sold out, low stock first)'],
+              ] as const
+            ).map(([key, label, align, title]) => (
+              <button
+                key={key}
+                type="button"
+                title={title}
+                onClick={() => handleSort(key)}
+                className={`flex items-center gap-1 ${align} uppercase tracking-wide transition-colors hover:text-foreground ${sortKey === key ? 'text-foreground' : ''}`}
+              >
+                {label}
+                {sortKey === key ? (
+                  sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                ) : (
+                  <ArrowUpDown className="h-3 w-3 opacity-40" />
+                )}
+              </button>
+            ))}
           </div>
           {isLoading && <div className="px-4 py-10 text-center text-sm text-muted-foreground">{'Loading product intelligence\u2026'}</div>}
           {!isLoading && filtered.length === 0 && (
@@ -255,10 +322,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       </span>
                     )}
                   </span>
-                  <span className="flex items-center justify-end gap-1.5">
-                    {p.soldOut && (
-                      <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">Sold out</Badge>
-                    )}
+                  <span className="text-right">
                     <span className={`font-semibold tabular-nums ${p.soldOut ? 'text-muted-foreground line-through' : qty <= LOW_STOCK ? 'text-amber-500' : ''}`}>
                       {qty}
                     </span>
@@ -290,7 +354,16 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                     )}
                   </span>
                   <span className="text-right">
-                    <Badge variant={p.is_active ? 'default' : 'secondary'}>{p.is_active ? 'Active' : 'Inactive'}</Badge>
+                    {/* One structured status flag per row - severity drives sorting too */}
+                    {p.soldOut ? (
+                      <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">Sold out</Badge>
+                    ) : qty <= LOW_STOCK ? (
+                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">Low stock</Badge>
+                    ) : !p.is_active ? (
+                      <Badge variant="secondary">Inactive</Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-500">In stock</Badge>
+                    )}
                   </span>
                 </div>
                 {isOpen && (

@@ -45,16 +45,30 @@ export async function POST(request: Request) {
     const language: string = ['en', 'fr', 'kreol_mix'].includes(body?.language) ? body.language : 'en'
     const extra: string = String(body?.extra || '').slice(0, 500)
 
-    // ---- Ground the copy in the real inventory record ----
+    // ---- Ground the copy in the real inventory record + post history ----
     let inventoryFacts = ''
     let offers: string[] = []
+    let pastHooks: string[] = []
     if (productId) {
       const admin = createAdminClient()
-      const { data: p } = await admin
-        .from('products')
-        .select('name, description, price, quantity, category, sold_out')
-        .eq('id', productId)
-        .single()
+      const [{ data: p }, { data: pastPosts }] = await Promise.all([
+        admin
+          .from('products')
+          .select('name, description, price, quantity, category, sold_out')
+          .eq('id', productId)
+          .single(),
+        // AI knowledge centre: previous posts for this product inform the new
+        // one - reuse what worked, never repeat the same hook twice
+        admin
+          .from('product_posts')
+          .select('content')
+          .eq('product_id', productId)
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ])
+      pastHooks = (pastPosts ?? [])
+        .map((r) => (r.content as { hook?: string })?.hook || '')
+        .filter(Boolean)
       if (p) {
         productName = p.name
         if (p.price != null) productPrice = `Rs ${p.price}`
@@ -106,6 +120,9 @@ export async function POST(request: Request) {
         (offers.length > 0
           ? `\n\nACTIVE OFFERS - lead with these, they are the main selling angle: ${offers.join('; ')}`
           : '\n\nNo special offer is running. Do NOT invent discounts, B1G1, or bundle deals.') +
+        (pastHooks.length > 0
+          ? `\n\nHooks already used for this product (write something DIFFERENT):\n${pastHooks.map((h) => `- ${h}`).join('\n')}`
+          : '') +
         (extra ? `\n\nExtra instructions from the marketer: ${extra}` : ''),
     })
 
@@ -115,15 +132,40 @@ export async function POST(request: Request) {
       return m ? m[1].trim() : ''
     }
 
+    const post = {
+      hook: section('HOOK'),
+      body: section('BODY'),
+      cta: section('CTA'),
+      hashtags: section('HASHTAGS'),
+      raw: text.trim(),
+    }
+
+    // Persist to product_posts so posts are managed and attributed to the
+    // product across all pages, and feed future generations as knowledge
+    let savedId: string | null = null
+    if (productId) {
+      const admin = createAdminClient()
+      const { data: saved } = await admin
+        .from('product_posts')
+        .insert({
+          product_id: productId,
+          product_name: productName,
+          post_type: postType,
+          tone,
+          language,
+          content: post,
+          offers_used: offers,
+          created_by: user.id,
+        })
+        .select('id')
+        .single()
+      savedId = saved?.id ?? null
+    }
+
     return NextResponse.json({
       success: true,
-      post: {
-        hook: section('HOOK'),
-        body: section('BODY'),
-        cta: section('CTA'),
-        hashtags: section('HASHTAGS'),
-        raw: text.trim(),
-      },
+      post,
+      postId: savedId,
       offersUsed: offers,
       generatedAt: new Date().toISOString(),
     })
