@@ -63,26 +63,36 @@ export async function GET() {
     }
     const capped = adMeta.slice(0, 300)
 
-    // Batch-fetch creatives, 50 ids per request (Graph API limit)
-    const creatives = new Map<string, { body?: string; title?: string; name?: string; status?: string }>()
+    // Batch-fetch creatives, 50 ids per request (Graph API limit).
+    // effective_object_story_id (pageId_postId) gives the post permalink.
+    const creatives = new Map<
+      string,
+      { body?: string; title?: string; name?: string; status?: string; postUrl?: string }
+    >()
     for (let i = 0; i < capped.length; i += 50) {
       const ids = capped
         .slice(i, i + 50)
         .map((a) => a.adId)
         .join(',')
-      const url = `https://graph.facebook.com/v21.0/?ids=${ids}&fields=name,status,creative{body,title}&access_token=${encodeURIComponent(token)}`
+      const url = `https://graph.facebook.com/v21.0/?ids=${ids}&fields=name,status,creative{body,title,effective_object_story_id}&access_token=${encodeURIComponent(token)}`
       const res = await fetch(url)
       if (!res.ok) continue
       const json = (await res.json()) as Record<
         string,
-        { name?: string; status?: string; creative?: { body?: string; title?: string } }
+        {
+          name?: string
+          status?: string
+          creative?: { body?: string; title?: string; effective_object_story_id?: string }
+        }
       >
       for (const [id, ad] of Object.entries(json)) {
+        const storyId = ad.creative?.effective_object_story_id
         creatives.set(id, {
           body: ad.creative?.body,
           title: ad.creative?.title,
           name: ad.name,
           status: ad.status,
+          postUrl: storyId ? `https://www.facebook.com/${storyId}` : undefined,
         })
       }
     }
@@ -105,6 +115,7 @@ export async function GET() {
           campaignName: campaign.name,
           title: cr.title ?? '',
           body: cr.body,
+          postUrl: cr.postUrl ?? null,
           productId,
           productName: productId ? (productById.get(productId) ?? null) : null,
           imported: importedAdIds.has(adId),
@@ -161,6 +172,7 @@ export async function POST(request: Request) {
           raw: text,
           sourceAdId: adId,
           sourceCampaign: String(body?.campaignName || '').slice(0, 200),
+          postUrl: body?.postUrl ? String(body.postUrl).slice(0, 500) : '',
         },
         offers_used: [],
         created_by: user.id,

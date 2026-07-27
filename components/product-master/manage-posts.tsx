@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Check, Copy, Download, Facebook, FileText, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Check, Copy, Download, ExternalLink, Facebook, FileText, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 
 interface PostContent {
   hook?: string
@@ -28,6 +28,7 @@ interface PostContent {
   cta?: string
   hashtags?: string
   raw?: string
+  postUrl?: string
 }
 
 interface ProductPost {
@@ -64,6 +65,7 @@ interface FacebookPost {
   campaignName: string
   title: string
   body: string
+  postUrl: string | null
   productId: string | null
   productName: string | null
   imported: boolean
@@ -173,6 +175,7 @@ export function ManagePosts({ open: controlledOpen, onOpenChange, productFilter 
           productId: p.productId,
           productName: p.productName,
           campaignName: p.campaignName,
+          postUrl: p.postUrl,
         }),
       })
       if (res.ok) {
@@ -376,6 +379,25 @@ export function ManagePosts({ open: controlledOpen, onOpenChange, productFilter 
                             </Badge>
                           )}
                           <span className="ml-auto flex items-center gap-1">
+                            {p.postUrl && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                title="View post on Facebook"
+                                asChild
+                              >
+                                <a
+                                  href={p.postUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5 text-sky-400" />
+                                  <span className="sr-only">View post on Facebook</span>
+                                </a>
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -560,6 +582,25 @@ export function ManagePosts({ open: controlledOpen, onOpenChange, productFilter 
                         <span className="mr-1 text-xs text-muted-foreground">
                           {new Date(p.created_at).toLocaleDateString()}
                         </span>
+                        {c.postUrl && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="View post on Facebook"
+                            asChild
+                          >
+                            <a
+                              href={c.postUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ExternalLink className="h-3.5 w-3.5 text-sky-400" />
+                              <span className="sr-only">View post on Facebook</span>
+                            </a>
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
