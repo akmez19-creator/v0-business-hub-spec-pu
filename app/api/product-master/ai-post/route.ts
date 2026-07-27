@@ -1,10 +1,27 @@
 import { NextResponse } from 'next/server'
 import { generateText } from 'ai'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
+
+// Detect offer/bundle mentions (B1G1, bundles, free delivery, discounts) in
+// inventory text so the AI can lead with them instead of inventing offers.
+function extractOffers(text: string): string[] {
+  const offers: string[] = []
+  const t = text.toLowerCase()
+  if (/b1g1|buy\s*1\s*get\s*1|buy\s*one\s*get\s*one|1\s*\+\s*1/.test(t)) offers.push('Buy 1 Get 1 Free')
+  if (/b2g1|buy\s*2\s*get\s*1/.test(t)) offers.push('Buy 2 Get 1 Free')
+  if (/bundle|combo|pack of|set of|duo|trio/.test(t)) offers.push('Bundle / combo deal')
+  if (/free\s*deliver/.test(t)) offers.push('Free delivery')
+  const disc = text.match(/(\d{1,2})\s*%\s*(?:off|discount)/i)
+  if (disc) offers.push(`${disc[1]}% off`)
+  const wasNow = text.match(/rs\.?\s*(\d[\d,]*)\s*(?:instead of|was|au lieu de)\s*rs\.?\s*(\d[\d,]*)/i)
+  if (wasNow) offers.push(`Promo price Rs ${wasNow[1]} (was Rs ${wasNow[2]})`)
+  return offers
+}
 
 // AI post generation for Product Master: turns a product + post type + tone
-// into ready-to-paste social copy (hook / body / CTA / hashtags). Uses the
-// same AI gateway pattern as the ads briefing route.
+// into ready-to-paste social copy (hook / body / CTA / hashtags). Reads the
+// real inventory record (description, price, stock, offers) so copy is
+// grounded in facts - especially offers like Buy1Get1 or bundles.
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -16,8 +33,9 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const productName: string = String(body?.productName || '').slice(0, 200)
-    const productPrice: string = body?.productPrice ? String(body.productPrice).slice(0, 40) : ''
+    const productId: string = String(body?.productId || '')
+    let productName: string = String(body?.productName || '').slice(0, 200)
+    let productPrice: string = body?.productPrice ? String(body.productPrice).slice(0, 40) : ''
     const postType: string = ['fb_ad', 'reel_caption', 'description'].includes(body?.postType)
       ? body.postType
       : 'fb_ad'
@@ -26,6 +44,31 @@ export async function POST(request: Request) {
       : 'energetic'
     const language: string = ['en', 'fr', 'kreol_mix'].includes(body?.language) ? body.language : 'en'
     const extra: string = String(body?.extra || '').slice(0, 500)
+
+    // ---- Ground the copy in the real inventory record ----
+    let inventoryFacts = ''
+    let offers: string[] = []
+    if (productId) {
+      const admin = createAdminClient()
+      const { data: p } = await admin
+        .from('products')
+        .select('name, description, price, quantity, category, sold_out')
+        .eq('id', productId)
+        .single()
+      if (p) {
+        productName = p.name
+        if (p.price != null) productPrice = `Rs ${p.price}`
+        const facts: string[] = []
+        if (p.category) facts.push(`Category: ${p.category}`)
+        if (p.description) facts.push(`Inventory description: ${String(p.description).slice(0, 600)}`)
+        if ((p.quantity ?? 0) > 0) facts.push(`In stock: ${p.quantity} units available now`)
+        if (p.sold_out) facts.push('MARKED SOLD OUT - write a waitlist/back-soon angle, do NOT push immediate orders')
+        inventoryFacts = facts.join('\n')
+        offers = extractOffers(`${p.name} ${p.description || ''}`)
+      }
+    }
+    // Offers can also come from the marketer's extra instructions
+    offers = [...new Set([...offers, ...extractOffers(extra)])]
 
     if (!productName) {
       return NextResponse.json({ success: false, error: 'productName is required' }, { status: 400 })
@@ -59,7 +102,11 @@ export async function POST(request: Request) {
       prompt:
         `Write ${typeLabel} in ${langLabel}, tone: ${tone}.\n` +
         `Product: ${productName}${productPrice ? ` - price ${productPrice}` : ''}.` +
-        (extra ? `\nExtra instructions from the marketer: ${extra}` : ''),
+        (inventoryFacts ? `\n\nInventory facts (use these, do not invent specs):\n${inventoryFacts}` : '') +
+        (offers.length > 0
+          ? `\n\nACTIVE OFFERS - lead with these, they are the main selling angle: ${offers.join('; ')}`
+          : '\n\nNo special offer is running. Do NOT invent discounts, B1G1, or bundle deals.') +
+        (extra ? `\n\nExtra instructions from the marketer: ${extra}` : ''),
     })
 
     // Parse the labeled sections; tolerate missing labels
@@ -77,6 +124,7 @@ export async function POST(request: Request) {
         hashtags: section('HASHTAGS'),
         raw: text.trim(),
       },
+      offersUsed: offers,
       generatedAt: new Date().toISOString(),
     })
   } catch (error) {

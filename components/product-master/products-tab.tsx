@@ -64,13 +64,48 @@ const LOW_STOCK = 10
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) => void }) {
-  const { data, error, isLoading } = useSWR<{ success: boolean; products: OverviewProduct[] }>(
+  const { data, error, isLoading, mutate } = useSWR<{ success: boolean; products: OverviewProduct[] }>(
     '/api/product-master/overview',
     fetcher,
   )
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'low' | 'sold-out' | 'with-po' | 'advertised'>('all')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [togglingSoldOut, setTogglingSoldOut] = useState<string | null>(null)
+
+  // Manual, user-initiated sold-out toggle with optimistic update
+  const toggleSoldOut = async (product: OverviewProduct) => {
+    setTogglingSoldOut(product.id)
+    const next = !product.soldOut
+    try {
+      await mutate(
+        async (current) => {
+          const res = await fetch('/api/product-master/overview', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: product.id, soldOut: next }),
+          })
+          const json = await res.json()
+          if (!res.ok || !json.success) throw new Error(json.error || 'Update failed')
+          return current
+            ? { ...current, products: current.products.map((p) => (p.id === product.id ? { ...p, soldOut: next } : p)) }
+            : current
+        },
+        {
+          optimisticData: (current) =>
+            current
+              ? { ...current, products: current.products.map((p) => (p.id === product.id ? { ...p, soldOut: next } : p)) }
+              : { success: true, products: [] },
+          rollbackOnError: true,
+          revalidate: false,
+        },
+      )
+    } catch {
+      /* rollback handled by SWR */
+    } finally {
+      setTogglingSoldOut(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     let list = data?.products || []
@@ -220,12 +255,13 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       </span>
                     )}
                   </span>
-                  <span className="text-right">
-                    {p.soldOut ? (
+                  <span className="flex items-center justify-end gap-1.5">
+                    {p.soldOut && (
                       <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">Sold out</Badge>
-                    ) : (
-                      <span className={`font-semibold tabular-nums ${qty <= LOW_STOCK ? 'text-amber-500' : ''}`}>{qty}</span>
                     )}
+                    <span className={`font-semibold tabular-nums ${p.soldOut ? 'text-muted-foreground line-through' : qty <= LOW_STOCK ? 'text-amber-500' : ''}`}>
+                      {qty}
+                    </span>
                   </span>
                   <span className="text-right">
                     {p.activeAds > 0 ? (
@@ -259,7 +295,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                 </div>
                 {isOpen && (
                   <div className="flex flex-col gap-3 bg-muted/30 px-10 py-3">
-                    {/* Demand + ads summary line */}
+                    {/* Demand + ads summary line + manual sold-out control */}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Users className="h-3 w-3" /> {p.clientsPerDay} client(s) today {'\u00b7'} {p.clientsPerWeek} this week
@@ -274,6 +310,22 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                           <ShoppingCart className="h-3 w-3" /> {p.openPOQty} unit(s) incoming
                         </span>
                       )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={`ml-auto h-7 text-xs ${p.soldOut ? 'border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10' : 'border-red-500/40 text-red-400 hover:bg-red-500/10'}`}
+                        disabled={togglingSoldOut === p.id}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleSoldOut(p)
+                        }}
+                      >
+                        {togglingSoldOut === p.id
+                          ? 'Updating\u2026'
+                          : p.soldOut
+                            ? 'Mark back in stock'
+                            : 'Mark sold out'}
+                      </Button>
                     </div>
                     {/* Aliases from validated merges */}
                     {p.aliases.length > 0 && (

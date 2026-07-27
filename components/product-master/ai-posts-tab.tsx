@@ -71,6 +71,7 @@ export function AiPostsTab({ initialProductId }: { initialProductId?: string }) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          productId: product.id,
           productName: product.name,
           productPrice: product.price != null ? `Rs ${product.price}` : '',
           postType,

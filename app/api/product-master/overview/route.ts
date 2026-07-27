@@ -24,7 +24,7 @@ export async function GET() {
 
     const [{ data: products }, { data: aliases }, { data: pos }, { data: links }, { data: cache }, { data: deliveries }] =
       await Promise.all([
-        admin.from('products').select('id, name, sku, category, price, quantity, image_url, is_active').order('name'),
+        admin.from('products').select('id, name, sku, category, price, quantity, image_url, is_active, sold_out').order('name'),
         admin.from('product_aliases').select('alias_name, product_id'),
         admin
           .from('purchase_orders')
@@ -99,7 +99,8 @@ export async function GET() {
       const productPos = posByProduct.get(p.id) || []
       return {
         ...p,
-        soldOut: (p.quantity ?? 0) <= 0,
+        // Sold-out is a MANUAL flag toggled by the user, never derived from stock
+        soldOut: p.sold_out === true,
         activeCampaigns: ads?.campaigns ?? 0,
         activeAds: ads?.ads ?? 0,
         clientsPerDay: clientsToday.get(p.id) ?? 0,
@@ -115,5 +116,33 @@ export async function GET() {
   } catch (error) {
     console.error('overview error:', error)
     return NextResponse.json({ success: false, error: 'Failed to load overview' }, { status: 500 })
+  }
+}
+
+// PATCH: manually toggle a product's sold-out flag (user-initiated only)
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
+
+    const body = await request.json()
+    const productId: string = String(body?.productId || '')
+    const soldOut: boolean = body?.soldOut === true
+
+    if (!productId) {
+      return NextResponse.json({ success: false, error: 'productId is required' }, { status: 400 })
+    }
+
+    const admin = createAdminClient()
+    const { error } = await admin.from('products').update({ sold_out: soldOut }).eq('id', productId)
+    if (error) throw error
+
+    return NextResponse.json({ success: true, productId, soldOut })
+  } catch (error) {
+    console.error('sold-out toggle error:', error)
+    return NextResponse.json({ success: false, error: 'Failed to update sold-out flag' }, { status: 500 })
   }
 }
