@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Check, Copy, FileText, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Check, Copy, Download, Facebook, FileText, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 
 interface PostContent {
   hook?: string
@@ -53,6 +53,20 @@ const TYPE_LABEL: Record<string, string> = {
   fb_ad: 'FB ad',
   reel_caption: 'Reel caption',
   description: 'Description',
+  fb_imported: 'FB imported',
+}
+
+interface FacebookPost {
+  adId: string
+  adName: string
+  adStatus: string
+  campaignId: string
+  campaignName: string
+  title: string
+  body: string
+  productId: string | null
+  productName: string | null
+  imported: boolean
 }
 
 interface PostForm {
@@ -100,6 +114,52 @@ export function ManagePosts() {
   const [form, setForm] = useState<PostForm | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [tab, setTab] = useState<'library' | 'facebook'>('library')
+  const [importingId, setImportingId] = useState<string | null>(null)
+  const [importedIds, setImportedIds] = useState<Set<string>>(new Set())
+
+  // Live Facebook ad posts - all existing posts pulled from ad creatives
+  const { data: fbData, isLoading: fbLoading } = useSWR<{ success: boolean; posts: FacebookPost[]; error?: string }>(
+    open && tab === 'facebook' ? '/api/product-master/posts/facebook' : null,
+    fetcher,
+  )
+
+  const fbPosts = useMemo(() => {
+    let list = fbData?.posts || []
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(
+        (p) =>
+          (p.productName || '').toLowerCase().includes(q) ||
+          p.campaignName.toLowerCase().includes(q) ||
+          p.body.toLowerCase().includes(q),
+      )
+    }
+    return list
+  }, [fbData, search])
+
+  const importFbPost = async (p: FacebookPost) => {
+    setImportingId(p.adId)
+    try {
+      const res = await fetch('/api/product-master/posts/facebook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adId: p.adId,
+          body: p.body,
+          productId: p.productId,
+          productName: p.productName,
+          campaignName: p.campaignName,
+        }),
+      })
+      if (res.ok) {
+        setImportedIds((prev) => new Set(prev).add(p.adId))
+        mutate()
+      }
+    } finally {
+      setImportingId(null)
+    }
+  }
 
   const posts = useMemo(() => {
     let list = data?.posts || []
@@ -208,7 +268,145 @@ export function ManagePosts() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* ---- Tabs: saved library vs live Facebook posts ---- */}
+          <div className="flex gap-1 border-b px-6 pt-2">
+            {(
+              [
+                ['library', 'Library', FileText],
+                ['facebook', 'Facebook posts', Facebook],
+              ] as const
+            ).map(([key, label, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setTab(key); setOpenPost(null) }}
+                className={`flex items-center gap-1.5 rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  tab === key
+                    ? 'border-amber-500 text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+                {key === 'facebook' && fbData?.posts && (
+                  <Badge variant="outline" className="ml-1 text-xs">{fbData.posts.length}</Badge>
+                )}
+              </button>
+            ))}
+          </div>
+
           <div className="flex-1 overflow-y-auto px-6 py-4">
+            {tab === 'facebook' ? (
+              <>
+                <div className="relative mb-3 max-w-xs">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search product, campaign, content..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+                {fbLoading && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    {'Fetching your Facebook posts\u2026 (reading ad creatives)'}
+                  </p>
+                )}
+                {!fbLoading && fbData && !fbData.success && (
+                  <p className="py-8 text-center text-sm text-red-400">{fbData.error || 'Failed to load Facebook posts'}</p>
+                )}
+                {!fbLoading && fbPosts.length === 0 && fbData?.success && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">No Facebook ad posts found in the cache.</p>
+                )}
+                <div className="flex flex-col gap-2">
+                  {fbPosts.map((p) => {
+                    const isOpen = openPost === p.adId
+                    const done = p.imported || importedIds.has(p.adId)
+                    return (
+                      <div key={p.adId} className="rounded-lg border">
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setOpenPost(isOpen ? null : p.adId)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              setOpenPost(isOpen ? null : p.adId)
+                            }
+                          }}
+                          className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted/50"
+                        >
+                          <span className="truncate font-medium">{p.productName || p.campaignName}</span>
+                          <Badge
+                            variant="outline"
+                            className={
+                              p.adStatus === 'ACTIVE'
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-500'
+                                : 'text-xs'
+                            }
+                          >
+                            {p.adStatus === 'ACTIVE' ? 'Live' : p.adStatus.toLowerCase()}
+                          </Badge>
+                          {!p.productName && (
+                            <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-xs text-amber-500">
+                              Unlinked
+                            </Badge>
+                          )}
+                          <span className="ml-auto flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title="Copy post text"
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                await navigator.clipboard.writeText(p.body)
+                                setCopiedId(p.adId)
+                                setTimeout(() => setCopiedId(null), 1500)
+                              }}
+                            >
+                              {copiedId === p.adId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={done || importingId === p.adId}
+                              title="Import into the post library so it feeds the AI"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                importFbPost(p)
+                              }}
+                            >
+                              {importingId === p.adId ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : done ? (
+                                <>
+                                  <Check className="mr-1 h-3 w-3 text-emerald-500" /> Imported
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="mr-1 h-3 w-3" /> Import
+                                </>
+                              )}
+                            </Button>
+                          </span>
+                        </div>
+                        {isOpen && (
+                          <div className="flex flex-col gap-2 border-t bg-muted/30 px-3 py-2.5">
+                            <p className="text-xs text-muted-foreground">
+                              Campaign: {p.campaignName} {'\u00b7'} Ad: {p.adName}
+                            </p>
+                            <p className="whitespace-pre-wrap text-sm leading-relaxed">{p.body}</p>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
             {/* ---- Create / Edit form ---- */}
             {form ? (
               <div className="mb-4 flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
@@ -406,6 +604,8 @@ export function ManagePosts() {
                 )
               })}
             </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
