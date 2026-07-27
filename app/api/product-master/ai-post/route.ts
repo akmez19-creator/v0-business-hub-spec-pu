@@ -1,6 +1,23 @@
 import { NextResponse } from 'next/server'
 import { generateText } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+
+// Generate with the AI Gateway; if its key is missing/invalid, fall back to
+// Gemini directly via GOOGLE_AI_API_KEY so post generation never goes down.
+async function generateCopy(system: string, prompt: string): Promise<string> {
+  try {
+    const { text } = await generateText({ model: 'openai/gpt-5.4-mini', system, prompt })
+    return text
+  } catch (gatewayError) {
+    const googleKey = process.env.GOOGLE_AI_API_KEY
+    if (!googleKey) throw gatewayError
+    console.error('ai-post: gateway failed, falling back to Gemini:', gatewayError instanceof Error ? gatewayError.name : gatewayError)
+    const google = createGoogleGenerativeAI({ apiKey: googleKey })
+    const { text } = await generateText({ model: google('gemini-2.5-flash'), system, prompt })
+    return text
+  }
+}
 
 // Detect offer/bundle mentions (B1G1, bundles, free delivery, discounts) in
 // inventory text so the AI can lead with them instead of inventing offers.
@@ -102,10 +119,8 @@ export async function POST(request: Request) {
           ? 'a natural Mauritian mix of English/French with a touch of Kreol - the way local FB ads read'
           : 'English'
 
-    const { text } = await generateText({
-      model: 'openai/gpt-5.4-mini',
-      system:
-        'You write social commerce copy for a Mauritius-based delivery e-commerce brand selling household gadgets. ' +
+    const text = await generateCopy(
+      'You write social commerce copy for a Mauritius-based delivery e-commerce brand selling household gadgets. ' +
         'Prices are in Mauritian Rupees written like "Rs 675". Delivery is offered across the island, cash on delivery. ' +
         'OUTPUT FORMAT - follow exactly, it is parsed by the UI:\n' +
         'HOOK: <one attention line>\n' +
@@ -113,7 +128,6 @@ export async function POST(request: Request) {
         'CTA: <one action line, e.g. order via inbox / WhatsApp>\n' +
         'HASHTAGS: <5-8 hashtags space separated>\n' +
         'Plain text only, no markdown. Emojis welcome where natural.',
-      prompt:
         `Write ${typeLabel} in ${langLabel}, tone: ${tone}.\n` +
         `Product: ${productName}${productPrice ? ` - price ${productPrice}` : ''}.` +
         (inventoryFacts ? `\n\nInventory facts (use these, do not invent specs):\n${inventoryFacts}` : '') +
@@ -124,11 +138,12 @@ export async function POST(request: Request) {
           ? `\n\nHooks already used for this product (write something DIFFERENT):\n${pastHooks.map((h) => `- ${h}`).join('\n')}`
           : '') +
         (extra ? `\n\nExtra instructions from the marketer: ${extra}` : ''),
-    })
+    )
 
-    // Parse the labeled sections; tolerate missing labels
+    // Parse the labeled sections; tolerate missing labels (some models skip
+    // them) by falling back to a structural split of the raw text
     const section = (label: string) => {
-      const m = text.match(new RegExp(`${label}:\\s*([\\s\\S]*?)(?=\\n(?:HOOK|BODY|CTA|HASHTAGS):|$)`, 'i'))
+      const m = text.match(new RegExp(`\\*{0,2}${label}\\*{0,2}:\\s*([\\s\\S]*?)(?=\\n\\*{0,2}(?:HOOK|BODY|CTA|HASHTAGS)\\*{0,2}:|$)`, 'i'))
       return m ? m[1].trim() : ''
     }
 
@@ -138,6 +153,18 @@ export async function POST(request: Request) {
       cta: section('CTA'),
       hashtags: section('HASHTAGS'),
       raw: text.trim(),
+    }
+
+    if (!post.hook && !post.body && !post.cta && !post.hashtags) {
+      // No labels found: first line is the hook, trailing hashtag lines are
+      // the hashtags, everything between is the body
+      const lines = text.trim().split('\n').map((l) => l.trim()).filter(Boolean)
+      const isTags = (l: string) => l.startsWith('#') || /^(#\S+\s*)+$/.test(l)
+      let tagStart = lines.length
+      while (tagStart > 1 && isTags(lines[tagStart - 1])) tagStart--
+      post.hook = lines[0] ?? ''
+      post.body = lines.slice(1, tagStart).join('\n')
+      post.hashtags = lines.slice(tagStart).join(' ')
     }
 
     // Persist to product_posts so posts are managed and attributed to the
