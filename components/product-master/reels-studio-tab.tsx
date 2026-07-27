@@ -5,12 +5,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Slider } from '@/components/ui/slider'
+import { Input } from '@/components/ui/input'
 import {
   ArrowDown,
   ArrowUp,
   Clapperboard,
   Download,
   Film,
+  Link2,
   Loader2,
   Merge,
   Scissors,
@@ -41,6 +43,49 @@ export function ReelsStudioTab() {
   const ffmpegRef = useRef<any>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // ---- Fetch-by-link: paste a TikTok/Facebook/YouTube URL and the video is
+  // resolved watermark-free in HD and dropped straight into the feed ----
+  const [link, setLink] = useState('')
+  const [fetching, setFetching] = useState(false)
+  const [fetchError, setFetchError] = useState('')
+  const [fetchInfo, setFetchInfo] = useState('')
+
+  const fetchFromLink = async () => {
+    const url = link.trim()
+    if (!url || fetching) return
+    setFetching(true)
+    setFetchError('')
+    setFetchInfo('Resolving video\u2026')
+    try {
+      const res = await fetch('/api/product-master/video-fetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const meta = await res.json()
+      if (!meta.success) throw new Error(meta.error || 'Could not fetch this video')
+
+      setFetchInfo(`Downloading ${meta.quality === 'hd' ? 'HD' : 'SD'} video\u2026`)
+      const safeName = `${meta.source}-${(meta.title || 'video').replace(/[^\w\- ]+/g, '').trim().slice(0, 40) || 'video'}.mp4`
+      const proxied = `/api/product-master/video-fetch?src=${encodeURIComponent(meta.videoUrl)}&filename=${encodeURIComponent(safeName)}`
+      const fileRes = await fetch(proxied)
+      if (!fileRes.ok) throw new Error('Download failed - the video link may have expired, try again')
+      const blob = await fileRes.blob()
+      if (blob.size < 10_000) throw new Error('Downloaded file looks empty - try again')
+
+      const file = new File([blob], safeName, { type: 'video/mp4' })
+      addFiles([file])
+      setLink('')
+      setFetchInfo(`Added: ${safeName}`)
+      setTimeout(() => setFetchInfo(''), 4000)
+    } catch (e) {
+      setFetchError(e instanceof Error ? e.message : 'Could not fetch this video')
+      setFetchInfo('')
+    } finally {
+      setFetching(false)
+    }
+  }
 
   // Lazy-load the wasm core only when this tab mounts
   useEffect(() => {
@@ -198,6 +243,39 @@ export function ReelsStudioTab() {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* ---- Fetch from link ---- */}
+      <section className="flex flex-col gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 p-3">
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Link2 className="h-4 w-4 text-sky-500" />
+          Fetch a product video from a link
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Paste a TikTok or Facebook video link - the full HD, watermark-free video is downloaded and added to
+          the feed automatically. No external website needed.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            placeholder="https://www.tiktok.com/... or https://www.facebook.com/..."
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) {
+                e.preventDefault()
+                fetchFromLink()
+              }
+            }}
+            disabled={fetching}
+            className="flex-1"
+          />
+          <Button onClick={fetchFromLink} disabled={fetching || !link.trim()}>
+            {fetching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
+            {fetching ? 'Fetching\u2026' : 'Fetch video'}
+          </Button>
+        </div>
+        {fetchInfo && <p className="text-xs text-sky-400">{fetchInfo}</p>}
+        {fetchError && <p className="text-xs text-destructive">{fetchError}</p>}
+      </section>
+
       {/* ---- Step 1: feed ---- */}
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">

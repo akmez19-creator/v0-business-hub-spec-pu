@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/gateway": "3.0.66",
+    "@distube/ytdl-core": "^4.16.12",
     "@emotion/is-prop-valid": "latest",
     "@fal-ai/serverless-client": "0.15.0",
     "@ffmpeg/ffmpeg": "^0.12.15",
