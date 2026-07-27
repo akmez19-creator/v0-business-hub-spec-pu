@@ -30,6 +30,20 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
+  // ---- API auth gate ----
+  // Every /api route requires a signed-in session, EXCEPT routes that
+  // validate their own Bearer token inside the handler (Chrome extension +
+  // shared dashboard/extension endpoints). A Bearer header only grants
+  // passage on those prefixes - it is still verified by the route itself.
+  // Unauthenticated API calls get a 401 JSON response, never a redirect.
+  if (pathname.startsWith('/api') && !user) {
+    const tokenAuthPrefixes = ['/api/extension', '/api/clients/rating', '/api/clients/last-delivered']
+    const isTokenAuthRoute = tokenAuthPrefixes.some((p) => pathname.startsWith(p))
+    if (!isTokenAuthRoute) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
+
   // Redirect to login if not authenticated and trying to access protected routes
   if (!user && pathname.startsWith('/dashboard')) {
     const url = request.nextUrl.clone()

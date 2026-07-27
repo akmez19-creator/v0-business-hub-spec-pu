@@ -86,16 +86,13 @@ export function ContractorMobileLayout({
   const toggleFullscreen = useCallback(() => {
     // Use functional updates to avoid stale closure issues
     setIsFullscreen(prev => {
-      console.log("[v0] toggleFullscreen called, prev isFullscreen:", prev)
       if (!prev) {
         // Enter focus mode: hide app header/footer bars
-        console.log("[v0] Entering focus mode - hiding bars")
         setBarsVisible(false)
         if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
         return true
       } else {
         // Exit focus mode: restore bars
-        console.log("[v0] Exiting focus mode - showing bars")
         setBarsVisible(true)
         startHideTimer()
         return false
@@ -182,10 +179,7 @@ export function ContractorMobileLayout({
           {/* Actions */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                console.log("[v0] Header fullscreen button clicked")
-                toggleFullscreen()
-              }}
+              onClick={toggleFullscreen}
               className="relative z-10 p-2 rounded-xl glass-card hover:glow-accent transition-all active:scale-95"
               aria-label={isFullscreen ? 'Exit focus mode' : 'Enter focus mode'}
             >

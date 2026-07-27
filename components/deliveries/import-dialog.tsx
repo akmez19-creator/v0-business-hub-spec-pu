@@ -1296,12 +1296,7 @@ export function ImportDeliveriesDialog() {
                                 variant={selectedName === name ? "default" : "outline"}
                                 size="sm"
                                 onClick={() => {
-                                  console.log("[v0] Button clicked - key:", resKey, "name:", name)
-                                  setDuplicateResolutions(prev => {
-                                    const updated = { ...prev, [resKey]: name }
-                                    console.log("[v0] Updated resolutions:", updated)
-                                    return updated
-                                  })
+                                  setDuplicateResolutions(prev => ({ ...prev, [resKey]: name }))
                                 }}
                               >
                                 {name}
