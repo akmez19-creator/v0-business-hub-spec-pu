@@ -19,6 +19,14 @@ interface Campaign {
   status: string
 }
 
+interface PagePost {
+  id: string
+  message: string
+  created_time: string
+  permalink_url: string
+  full_picture: string
+}
+
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 // Campaign creation by duplication: pick a proven campaign, give ONE common
@@ -33,24 +41,40 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
   )
   const [campaignId, setCampaignId] = useState('')
   const [commonName, setCommonName] = useState(initialName ?? '')
+  // Post-to-boost picker: pick the page, then one of its recent posts.
+  // Every ad in the copy is re-pointed at that post's creative.
+  const { data: pagesData } = useSWR('/api/facebook-ads/duplicate?action=pages', fetcher)
+  const [pageId, setPageId] = useState('')
+  const { data: postsData, isLoading: loadingPosts } = useSWR(
+    pageId ? `/api/facebook-ads/duplicate?action=posts&pageId=${pageId}` : null,
+    fetcher,
+  )
+  const [boostPostId, setBoostPostId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<{
     newCampaignId: string
     commonName: string
     renamed: { campaign: number; adSets: number; ads: number }
+    boosted?: { post: string; ads: number; error?: string }
     failures: number
   } | null>(null)
 
   const accounts: Account[] = accountsData?.accounts || accountsData?.data || []
   const campaigns: Campaign[] = campaignsData?.campaigns || campaignsData?.data || []
   const source = campaigns.find((c) => c.id === campaignId)
+  const pages: Account[] = pagesData?.pages || []
+  const posts: PagePost[] = postsData?.posts || []
+  const boostPost = posts.find((p) => p.id === boostPostId)
 
   const duplicate = async () => {
     if (!campaignId || !commonName.trim()) return
+    const boostLine = boostPost
+      ? `\n\nEvery ad in the copy will boost the post:\n"${boostPost.message.slice(0, 80) || boostPost.id}"`
+      : '\n\nCreatives are copied unchanged from the source.'
     if (
       !window.confirm(
-        `Duplicate "${source?.name}"?\n\nThe new campaign, all its ad sets and all its ads will be named:\n"${commonName.trim()}"\n\nIt will start PAUSED.`,
+        `Duplicate "${source?.name}"?\n\nThe new campaign, all its ad sets and all its ads will be named:\n"${commonName.trim()}"${boostLine}\n\nIt will start PAUSED.`,
       )
     )
       return
@@ -61,7 +85,7 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
       const res = await fetch('/api/facebook-ads/duplicate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId, commonName: commonName.trim() }),
+        body: JSON.stringify({ campaignId, commonName: commonName.trim(), boostPostId: boostPostId || undefined }),
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Duplication failed')
@@ -121,6 +145,60 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
             maxLength={200}
           />
         </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="cc-page" className="text-xs font-medium text-muted-foreground">Facebook page (for post to boost)</label>
+          <Select value={pageId} onValueChange={(v) => { setPageId(v); setBoostPostId('') }}>
+            <SelectTrigger id="cc-page">
+              <SelectValue placeholder="Keep source creatives" />
+            </SelectTrigger>
+            <SelectContent>
+              {pages.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <label htmlFor="cc-post" className="text-xs font-medium text-muted-foreground">Post to boost</label>
+          <Select value={boostPostId} onValueChange={setBoostPostId} disabled={!pageId}>
+            <SelectTrigger id="cc-post" className="w-full max-w-full [&>span]:truncate">
+              <SelectValue
+                placeholder={loadingPosts ? 'Loading posts\u2026' : pageId ? 'Pick a post' : 'Pick a page first'}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {posts.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {(p.created_time || '').slice(0, 10)} {'\u2014'} {p.message ? p.message.slice(0, 70) : '(no text)'}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {boostPost && (
+            <div className="mt-1 flex items-center gap-2 rounded-md border px-2.5 py-1.5">
+              {boostPost.full_picture && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={boostPost.full_picture || "/placeholder.svg"} alt="Selected post preview" className="h-9 w-9 shrink-0 rounded object-cover" />
+              )}
+              <p className="line-clamp-2 text-xs text-muted-foreground">{boostPost.message || boostPost.id}</p>
+              {boostPost.permalink_url && (
+                <a
+                  href={boostPost.permalink_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Open post on Facebook"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ---- Live naming preview, inline under the form ---- */}
@@ -137,8 +215,12 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
           </div>
           {source && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Structure, targeting, budgets and creatives are copied from{' '}
-              <span className="font-medium text-foreground">{source.name}</span>. The copy starts PAUSED.
+              Structure, targeting and budgets are copied from{' '}
+              <span className="font-medium text-foreground">{source.name}</span>.{' '}
+              {boostPost
+                ? 'Every ad will boost the selected post.'
+                : 'Creatives are copied unchanged.'}{' '}
+              The copy starts PAUSED.
             </p>
           )}
         </div>
@@ -166,6 +248,16 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
               <Badge variant="outline">Campaign renamed</Badge>
               <Badge variant="outline">{result.renamed.adSets} ad sets renamed</Badge>
               <Badge variant="outline">{result.renamed.ads} ads renamed</Badge>
+              {result.boosted && !result.boosted.error && (
+                <Badge variant="outline" className="border-sky-500/40 bg-sky-500/10 text-sky-400">
+                  {result.boosted.ads} ad(s) boosting the selected post
+                </Badge>
+              )}
+              {result.boosted?.error && (
+                <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">
+                  Boost failed: {result.boosted.error.slice(0, 80)}
+                </Badge>
+              )}
               <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">
                 Status: PAUSED
               </Badge>
