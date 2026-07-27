@@ -38,9 +38,9 @@ async function fetchProducts() {
   return data as { id: string; name: string; price: number | null }[]
 }
 
-export function AiPostsTab() {
+export function AiPostsTab({ initialProductId }: { initialProductId?: string }) {
   const { data: products } = useSWR('pm-products-list', fetchProducts)
-  const [productId, setProductId] = useState('')
+  const [productId, setProductId] = useState(initialProductId ?? '')
   const [postType, setPostType] = useState('fb_ad')
   const [tone, setTone] = useState('energetic')
   const [language, setLanguage] = useState('en')

@@ -8,7 +8,23 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronRight, ExternalLink, Search, ShoppingCart } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Clapperboard,
+  Copy,
+  ExternalLink,
+  Frame,
+  Search,
+  ShoppingCart,
+  Sparkles,
+} from 'lucide-react'
+
+// A row tool click: which tool, for which product
+export interface ToolRequest {
+  tool: 'ai-posts' | 'reels' | 'frames' | 'campaigns'
+  product: { id: string; name: string }
+}
 
 interface Product {
   id: string
@@ -51,7 +67,7 @@ async function fetchMasterData() {
   return { products: (products || []) as Product[], pos: (pos || []) as PurchaseOrder[] }
 }
 
-export function ProductsTab() {
+export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) => void }) {
   const { data, error, isLoading } = useSWR('product-master-data', fetchMasterData)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'low' | 'with-po'>('all')
@@ -167,10 +183,18 @@ export function ProductsTab() {
             const isOpen = expanded.has(p.id)
             return (
               <div key={p.id} className="border-b last:border-b-0">
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => toggle(p.id)}
-                  className="grid w-full grid-cols-[24px_1fr_90px_90px_90px_110px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      toggle(p.id)
+                    }
+                  }}
+                  aria-expanded={isOpen}
+                  className="grid w-full cursor-pointer grid-cols-[24px_1fr_90px_90px_90px_110px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
                 >
                   {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   <span className="flex items-center gap-2 truncate">
@@ -183,7 +207,35 @@ export function ProductsTab() {
                       </span>
                     )}
                     <span className="truncate font-medium">{p.name}</span>
-                    {p.sku && <span className="hidden truncate text-xs text-muted-foreground md:inline">{p.sku}</span>}
+                    {p.sku && <span className="hidden truncate text-xs text-muted-foreground lg:inline">{p.sku}</span>}
+                    {/* Per-product tools - popups pre-loaded with this product */}
+                    {onOpenTool && (
+                      <span className="ml-1 flex shrink-0 items-center gap-1">
+                        {(
+                          [
+                            ['ai-posts', Sparkles, 'text-amber-500', 'AI Post'],
+                            ['reels', Clapperboard, 'text-sky-500', 'Reels Studio'],
+                            ['frames', Frame, 'text-muted-foreground', 'Frame Input (soon)'],
+                            ['campaigns', Copy, 'text-emerald-500', 'Campaign Creator'],
+                          ] as const
+                        ).map(([tool, Icon, color, label]) => (
+                          <Button
+                            key={tool}
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            title={label}
+                            aria-label={`${label} for ${p.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onOpenTool({ tool, product: { id: p.id, name: p.name } })
+                            }}
+                          >
+                            <Icon className={`h-3.5 w-3.5 ${color}`} />
+                          </Button>
+                        ))}
+                      </span>
+                    )}
                   </span>
                   <span className={`text-right font-semibold tabular-nums ${qty <= 0 ? 'text-destructive' : qty <= LOW_STOCK ? 'text-amber-500' : ''}`}>
                     {qty}
@@ -204,7 +256,7 @@ export function ProductsTab() {
                   <span className="text-right">
                     <Badge variant={p.is_active ? 'default' : 'secondary'}>{p.is_active ? 'Active' : 'Inactive'}</Badge>
                   </span>
-                </button>
+                </div>
                 {isOpen && (
                   <div className="bg-muted/30 px-10 py-3">
                     {pos.length === 0 ? (

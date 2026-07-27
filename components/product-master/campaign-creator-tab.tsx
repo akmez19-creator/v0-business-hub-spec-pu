@@ -25,7 +25,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 // Campaign creation by duplication: pick a proven campaign, give ONE common
 // name, and the copy's campaign + all ad sets + all ads get exactly that
 // name. New campaign starts PAUSED for review.
-export function CampaignCreatorTab() {
+export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
   const { data: accountsData } = useSWR('/api/facebook-ads?action=accounts', fetcher)
   const [accountId, setAccountId] = useState('')
   const { data: campaignsData, isLoading: loadingCampaigns } = useSWR(
@@ -33,7 +33,7 @@ export function CampaignCreatorTab() {
     fetcher,
   )
   const [campaignId, setCampaignId] = useState('')
-  const [commonName, setCommonName] = useState('')
+  const [commonName, setCommonName] = useState(initialName ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<{
