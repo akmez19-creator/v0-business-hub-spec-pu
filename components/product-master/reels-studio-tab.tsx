@@ -57,6 +57,10 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   const [busy, setBusy] = useState<'cut' | 'merge' | 'brand' | 'load' | null>(null)
   const [progress, setProgress] = useState(0)
   const [output, setOutput] = useState<{ url: string; name: string; blob: Blob } | null>(null)
+  // Clean (un-branded) snapshot of whatever was branded, so branding is
+  // non-destructive: re-applying replaces the old branding instead of
+  // stacking, and it can be removed entirely.
+  const [preBrand, setPreBrand] = useState<{ url: string; name: string; blob: Blob; wasOutput: boolean } | null>(null)
   const [error, setError] = useState('')
   const [ffmpegReady, setFfmpegReady] = useState(false)
   const ffmpegRef = useRef<any>(null)
@@ -278,6 +282,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
     setSelected(c.id)
     setRange([0, Math.floor(c.duration)])
     setOutput(null)
+    setPreBrand(null)
   }
 
   const move = (id: string, dir: -1 | 1) =>
@@ -310,6 +315,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
     setProgress(0)
     setError('')
     setOutput(null)
+    setPreBrand(null)
     try {
       const { fetchFile } = await import('@ffmpeg/util')
       await ffmpeg.writeFile('in.mp4', await fetchFile(selectedClip.file))
@@ -343,6 +349,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
     setProgress(0)
     setError('')
     setOutput(null)
+    setPreBrand(null)
     try {
       const { fetchFile } = await import('@ffmpeg/util')
       const names: string[] = []
@@ -464,16 +471,20 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       img.src = effectiveLogoSrc
     })
 
-  // BRAND: burn the title + logo onto the current result (if any) or the
-  // selected clip. Runs fully in the browser like cut/merge.
+  // BRAND: burn the title + price + logo onto the clean (un-branded) source.
+  // Non-destructive: the first brand snapshots the clean source, and every
+  // re-apply renders from that snapshot - so changing settings and applying
+  // again EDITS the branding instead of stacking on top of it.
   const brandVideo = async () => {
     const ffmpeg = ffmpegRef.current
     if (!ffmpeg) return
-    const source: { data: Blob | File; name: string } | null = output
-      ? { data: output.blob, name: output.name }
-      : selectedClip
-        ? { data: selectedClip.file, name: selectedClip.name }
-        : null
+    const source: { data: Blob | File; name: string; wasOutput: boolean } | null = preBrand
+      ? { data: preBrand.blob, name: preBrand.name, wasOutput: preBrand.wasOutput }
+      : output
+        ? { data: output.blob, name: output.name, wasOutput: true }
+        : selectedClip
+          ? { data: selectedClip.file, name: selectedClip.name, wasOutput: false }
+          : null
     const wantsTitle = titleOn && titleText.trim() !== ''
     const wantsPrice = priceOn && priceText.trim() !== ''
     if (!source || (!wantsTitle && !wantsPrice && !logoOn)) return
@@ -536,6 +547,11 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       ])
       const data = await ffmpeg.readFile('branded.mp4')
       const blob = new Blob([data], { type: 'video/mp4' })
+      // Snapshot the clean source (first brand only) so branding stays editable
+      if (!preBrand) {
+        const cleanBlob = source.data instanceof Blob ? source.data : new Blob([source.data], { type: 'video/mp4' })
+        setPreBrand({ url: URL.createObjectURL(cleanBlob), name: source.name, blob: cleanBlob, wasOutput: source.wasOutput })
+      }
       setOutput({
         url: URL.createObjectURL(blob),
         name: `branded-${source.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')}.mp4`,
@@ -547,6 +563,13 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       setBusy(null)
       setProgress(0)
     }
+  }
+
+  // Strip all branding: restore the clean pre-brand video
+  const removeBranding = () => {
+    if (!preBrand) return
+    setOutput(preBrand.wasOutput ? { url: preBrand.url, name: preBrand.name, blob: preBrand.blob } : null)
+    setPreBrand(null)
   }
 
   const brandSource = output ? 'the current result' : selectedClip ? 'the selected clip' : null
@@ -737,24 +760,34 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-bold text-amber-500">3</span>
             Brand it: title + price + logo
           </p>
-          <Button
-            size="sm"
-            onClick={brandVideo}
-            disabled={
-              !ffmpegReady ||
-              busy !== null ||
-              !brandSource ||
-              (!(titleOn && titleText.trim()) && !(priceOn && priceText.trim()) && !logoOn)
-            }
-          >
-            {busy === 'brand' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Stamp className="mr-1.5 h-3.5 w-3.5" />}
-            {busy === 'brand' ? 'Branding\u2026' : 'Apply branding'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {preBrand && (
+              <Button size="sm" variant="outline" onClick={removeBranding} disabled={busy !== null} className="bg-transparent">
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                Remove branding
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={brandVideo}
+              disabled={
+                !ffmpegReady ||
+                busy !== null ||
+                !brandSource ||
+                (!(titleOn && titleText.trim()) && !(priceOn && priceText.trim()) && !logoOn)
+              }
+            >
+              {busy === 'brand' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Stamp className="mr-1.5 h-3.5 w-3.5" />}
+              {busy === 'brand' ? 'Branding\u2026' : preBrand ? 'Update branding' : 'Apply branding'}
+            </Button>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          {brandSource
-            ? `Burns the title, price tag, and/or logo onto ${brandSource}.`
-            : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
+          {preBrand
+            ? 'Branding is editable: change anything below and hit Update branding to replace it, or remove it entirely.'
+            : brandSource
+              ? `Burns the title, price tag, and/or logo onto ${brandSource}.`
+              : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
         </p>
 
         {/* Title banner controls */}
@@ -923,7 +956,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                 onPointerLeave={() => (dragTarget.current = null)}
               >
                 <video
-                  src={output?.url ?? selectedClip?.url}
+                  src={preBrand?.url ?? output?.url ?? selectedClip?.url}
                   className="pointer-events-none max-h-80 w-auto"
                   muted
                   playsInline
@@ -1023,16 +1056,29 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       {/* ---- Result ---- */}
       {output && (
         <section className="overflow-hidden rounded-lg border border-emerald-500/30 bg-emerald-500/5">
-          <div className="flex items-center justify-between gap-2 border-b border-emerald-500/20 px-4 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/20 px-4 py-2.5">
             <span className="text-sm font-semibold">Result ready</span>
-            <Button asChild size="sm">
-              <a href={output.url} download={output.name}>
-                <Download className="mr-1.5 h-3.5 w-3.5" /> Download
-              </a>
-            </Button>
+            <div className="flex items-center gap-2">
+              {preBrand && (
+                <Button size="sm" variant="outline" onClick={removeBranding} disabled={busy !== null} className="bg-transparent">
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Remove branding
+                </Button>
+              )}
+              <Button asChild size="sm">
+                <a href={output.url} download={output.name}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" /> Download
+                </a>
+              </Button>
+            </div>
           </div>
           <div className="p-3">
             <video src={output.url} controls className="mx-auto max-h-72 rounded-md bg-black" />
+            {preBrand && (
+              <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+                Branding is not locked in - tweak the title, price, or logo above and hit Update branding, or remove it.
+              </p>
+            )}
           </div>
         </section>
       )}
