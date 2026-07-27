@@ -19,12 +19,14 @@ import {
   Merge,
   Move,
   Scissors,
+  Send,
   Stamp,
   Tag,
   Trash2,
   Type,
   Upload,
 } from 'lucide-react'
+import { ReelPublishPanel } from './reel-publish-panel'
 
 interface Clip {
   id: string
@@ -61,6 +63,8 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   // non-destructive: re-applying replaces the old branding instead of
   // stacking, and it can be removed entirely.
   const [preBrand, setPreBrand] = useState<{ url: string; name: string; blob: Blob; wasOutput: boolean } | null>(null)
+  // Post-to-Facebook panel visibility (opens on "Post it")
+  const [showPublish, setShowPublish] = useState(false)
   const [error, setError] = useState('')
   const [ffmpegReady, setFfmpegReady] = useState(false)
   const ffmpegRef = useRef<any>(null)
@@ -1065,17 +1069,30 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                   Remove branding
                 </Button>
               )}
-              <Button asChild size="sm">
+              <Button asChild size="sm" variant="outline" className="bg-transparent">
                 <a href={output.url} download={output.name}>
                   <Download className="mr-1.5 h-3.5 w-3.5" /> Download
                 </a>
               </Button>
+              {!showPublish && (
+                <Button size="sm" onClick={() => setShowPublish(true)} disabled={busy !== null}>
+                  <Send className="mr-1.5 h-3.5 w-3.5" /> Post it
+                </Button>
+              )}
             </div>
           </div>
-          <div className="p-3">
+          <div className="flex flex-col gap-3 p-3">
+            {showPublish && (
+              <ReelPublishPanel
+                videoBlob={output.blob}
+                productName={productName}
+                priceText={priceOn ? priceText.trim() : ''}
+                onClose={() => setShowPublish(false)}
+              />
+            )}
             <video src={output.url} controls className="mx-auto max-h-72 rounded-md bg-black" />
             {preBrand && (
-              <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+              <p className="text-center text-[11px] text-muted-foreground">
                 Branding is not locked in - tweak the title, price, or logo above and hit Update branding, or remove it.
               </p>
             )}
