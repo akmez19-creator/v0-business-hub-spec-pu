@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook, Cat } from 'lucide-react'
+import { CalendarDays, DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook, Cat } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
 import { TvRulesCat } from '@/components/ads/tv-rules-cat'
@@ -76,6 +76,9 @@ interface TvDashboardProps {
   ridersTodayTotal?: number
   // Delivery date (YYYY-MM-DD) of the active batch the counts belong to
   ridersBatchDate?: string | null
+  // Called when the user picks a batch date on the Riders panel
+  // (null = back to auto: the active batch)
+  onRidersDateChange?: (date: string | null) => void
   // Localities whose clients resolve to no rider (with client counts)
   unassignedLocalities?: { name: string; clients: number }[]
   pageStats?: TvPageStat[]
@@ -139,6 +142,7 @@ export function TvDashboard({
   riders,
   ridersTodayTotal = 0,
   ridersBatchDate = null,
+  onRidersDateChange,
   unassignedLocalities = [],
   pageStats = [],
   activities = [],
@@ -736,10 +740,27 @@ export function TvDashboard({
           <span className={`truncate ${isTight ? 'text-sm' : 'text-base'} font-black uppercase tracking-[0.15em] text-blue-400`}>
             Riders
           </span>
-          <span className={`font-mono ${isTight ? 'text-[10px]' : 'text-xs'} uppercase text-blue-400/60`}>
-            {ridersBatchDate
-              ? `clients \u00b7 ${new Date(ridersBatchDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}`
-              : 'clients'}
+          <span className={`flex items-center gap-1 font-mono ${isTight ? 'text-[10px]' : 'text-xs'} uppercase text-blue-400/60`}>
+            {'clients'}
+            {ridersBatchDate && <span aria-hidden>{'\u00b7'}</span>}
+            {/* Clickable batch date: a native date input drives the panel so
+                any past/future delivery batch can be inspected */}
+            <span className="relative inline-flex items-center">
+              <input
+                type="date"
+                value={ridersBatchDate ?? ''}
+                onChange={(e) => onRidersDateChange?.(e.target.value || null)}
+                aria-label="Select delivery batch date"
+                title="Select delivery batch date"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+              />
+              <span className="pointer-events-none flex items-center gap-1 rounded border border-blue-400/30 px-1 py-px text-blue-300 transition-colors">
+                {ridersBatchDate
+                  ? new Date(ridersBatchDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+                  : 'pick date'}
+                <CalendarDays className="h-3 w-3" />
+              </span>
+            </span>
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">

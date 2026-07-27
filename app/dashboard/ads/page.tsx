@@ -195,11 +195,17 @@ export default function AdsManagerPage() {
   const [tvRidersBatchDate, setTvRidersBatchDate] = useState<string | null>(null)
   // Localities of clients that resolve to no rider (with client counts)
   const [tvUnassignedLocalities, setTvUnassignedLocalities] = useState<{ name: string; clients: number }[]>([])
+  // User-selected batch date (null = auto: the active delivery batch)
+  const [tvRidersDate, setTvRidersDate] = useState<string | null>(null)
 
-  // Load riders/regions when TV mode opens (refreshed on each entry)
+  // Load riders/regions when TV mode opens (refreshed on each entry) or
+  // when the user picks a different batch date on the Riders panel
   useEffect(() => {
     if (!tvMode) return
-    fetch('/api/ads/riders-regions')
+    const url = tvRidersDate
+      ? `/api/ads/riders-regions?date=${tvRidersDate}`
+      : '/api/ads/riders-regions'
+    fetch(url)
       .then(res => res.json())
       .then(data => {
         if (data?.success) {
@@ -210,7 +216,7 @@ export default function AdsManagerPage() {
         }
       })
       .catch(() => {})
-  }, [tvMode])
+  }, [tvMode, tvRidersDate])
 
   // Product grouping view (a product can have multiple campaigns)
   const [groupByProduct, setGroupByProduct] = useState(true)
@@ -1079,6 +1085,7 @@ export default function AdsManagerPage() {
           riders={tvRiders}
           ridersTodayTotal={tvRidersTodayTotal}
           ridersBatchDate={tvRidersBatchDate}
+          onRidersDateChange={setTvRidersDate}
           unassignedLocalities={tvUnassignedLocalities}
         pageStats={pageStats}
         activities={activities}

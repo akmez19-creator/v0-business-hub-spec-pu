@@ -9,7 +9,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 // only a per-delivery-day route ordering helper.
 // Signed-in users only; read uses the service-role client since marketing
 // viewers have no RLS grant on localities/contractors/riders.
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -22,28 +22,39 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
+    // Optional explicit date (YYYY-MM-DD) - lets the panel show any past or
+    // future delivery batch instead of only the active one
+    const { searchParams } = new URL(request.url)
+    const requestedDate = searchParams.get('date')
+    const validRequested = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : null
+
     // Today's date in Mauritius (UTC+4)
     const todayMu = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
-    // Deliveries are scheduled AHEAD (entered today for the next working
-    // day), so "today's clients" = the ACTIVE delivery batch: the nearest
-    // delivery_date >= today that has rows; if none upcoming, the most
-    // recent past batch.
-    const { data: nextBatch } = await admin
-      .from('deliveries')
-      .select('delivery_date')
-      .gte('delivery_date', todayMu)
-      .order('delivery_date', { ascending: true })
-      .limit(1)
-    let batchDate = nextBatch?.[0]?.delivery_date as string | undefined
-    if (!batchDate) {
-      const { data: prevBatch } = await admin
+    let batchDate: string | undefined
+    if (validRequested) {
+      batchDate = validRequested
+    } else {
+      // Deliveries are scheduled AHEAD (entered today for the next working
+      // day), so "today's clients" = the ACTIVE delivery batch: the nearest
+      // delivery_date >= today that has rows; if none upcoming, the most
+      // recent past batch.
+      const { data: nextBatch } = await admin
         .from('deliveries')
         .select('delivery_date')
-        .lt('delivery_date', todayMu)
-        .order('delivery_date', { ascending: false })
+        .gte('delivery_date', todayMu)
+        .order('delivery_date', { ascending: true })
         .limit(1)
-      batchDate = prevBatch?.[0]?.delivery_date as string | undefined
+      batchDate = nextBatch?.[0]?.delivery_date as string | undefined
+      if (!batchDate) {
+        const { data: prevBatch } = await admin
+          .from('deliveries')
+          .select('delivery_date')
+          .lt('delivery_date', todayMu)
+          .order('delivery_date', { ascending: false })
+          .limit(1)
+        batchDate = prevBatch?.[0]?.delivery_date as string | undefined
+      }
     }
 
     const [{ data: localities }, { data: batchDeliveries }, { data: riderTargets }] = await Promise.all([
