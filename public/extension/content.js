@@ -578,7 +578,22 @@ let isDragging = false, dragOffset = {x:0,y:0};
   let statsSearchTimer = null;
   let statsSearchTerm = '';
 
-// Drag functionality
+// Drag functionality. Clamp with the widget's REAL rendered size (it varies
+// with screen width/zoom) so it can never be dragged past the viewport edge,
+// and shrink its height when dragged down so the footer always stays visible.
+function clampWidget() {
+  const r = widget.getBoundingClientRect();
+  const maxLeft = Math.max(0, window.innerWidth - r.width);
+  const left = Math.max(0, Math.min(maxLeft, r.left));
+  const maxTop = Math.max(0, window.innerHeight - Math.min(r.height, 300));
+  const top = Math.max(0, Math.min(maxTop, r.top));
+  widget.style.left = left + 'px';
+  widget.style.top = top + 'px';
+  widget.style.right = 'auto';
+  // Same fonts, adjusted frame: the widget height always fits between its
+  // current top and the bottom of the screen; the body scrolls inside it
+  widget.style.height = Math.max(300, window.innerHeight - top - 20) + 'px';
+}
 document.getElementById('akmez-drag').addEventListener('mousedown', e => {
   if (e.target.closest('button')) return;
   isDragging = true;
@@ -587,16 +602,22 @@ document.getElementById('akmez-drag').addEventListener('mousedown', e => {
 });
 document.addEventListener('mousemove', e => {
   if (!isDragging) return;
-  widget.style.left = Math.max(0, Math.min(window.innerWidth - 400, e.clientX - dragOffset.x)) + 'px';
-  widget.style.top = Math.max(0, Math.min(window.innerHeight - 500, e.clientY - dragOffset.y)) + 'px';
+  widget.style.left = (e.clientX - dragOffset.x) + 'px';
+  widget.style.top = (e.clientY - dragOffset.y) + 'px';
   widget.style.right = 'auto';
+  clampWidget();
 });
 document.addEventListener('mouseup', () => isDragging = false);
+// Keep the widget on-screen when the window is resized or the page is zoomed
+window.addEventListener('resize', () => {
+  if (widget.style.display !== 'none') clampWidget();
+});
 
-// Toggle widget
+// Toggle widget. 'flex' (not 'block') keeps the column layout so the body
+// area gets flex:1 + overflow-y:auto and scrolls instead of overflowing
 toggleBtn.addEventListener('click', () => {
-  widget.style.display = widget.style.display === 'none' ? 'block' : 'none';
-  if (widget.style.display === 'block') loadData();
+  widget.style.display = widget.style.display === 'none' ? 'flex' : 'none';
+  if (widget.style.display === 'flex') { clampWidget(); loadData(); }
 });
 document.getElementById('akmez-close').addEventListener('click', () => widget.style.display = 'none');
 
@@ -1043,6 +1064,8 @@ function renderSettings() {
       widget.style.left = 'auto';
       widget.style.top = '60px';
       widget.style.right = '20px';
+      widget.style.height = '';
+      clampWidget();
       toast('Position reset');
     };
     const logoutBtn = document.getElementById('set-logout');
@@ -1387,7 +1410,8 @@ function startPicker(kind) {
     document.removeEventListener('keydown', onKey, true);
     hl.remove();
     hint.remove();
-    widget.style.display = 'block';
+    widget.style.display = 'flex';
+    clampWidget();
   }
   function onClick(e) {
     e.preventDefault();
