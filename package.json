@@ -12,6 +12,8 @@
     "@ai-sdk/gateway": "3.0.66",
     "@emotion/is-prop-valid": "latest",
     "@fal-ai/serverless-client": "0.15.0",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",

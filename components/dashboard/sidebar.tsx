@@ -64,6 +64,13 @@ const navItems: NavItem[] = [
     color: '#f97316',
   },
   {
+    href: '/dashboard/product-master',
+    label: 'Product Master',
+    icon: Package,
+    roles: ['admin', 'manager'],
+    color: '#eab308',
+  },
+  {
     href: '/dashboard/deliveries',
     label: 'Deliveries',
     icon: Truck,
