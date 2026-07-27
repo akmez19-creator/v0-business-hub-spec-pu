@@ -20,6 +20,7 @@ import {
   Move,
   Scissors,
   Stamp,
+  Tag,
   Trash2,
   Type,
   Upload,
@@ -62,10 +63,15 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // ---- Branding: product-name title banner + logo watermark ----
+  // ---- Branding: product-name title banner + price tag + logo watermark ----
   const [titleOn, setTitleOn] = useState(true)
   const [titleText, setTitleText] = useState(productName)
   const [titleStyle, setTitleStyle] = useState<TitleStyleId>('sunny')
+  const [titleSize, setTitleSize] = useState(8.5) // font size as % of video width
+  const [priceOn, setPriceOn] = useState(false)
+  const [priceText, setPriceText] = useState('')
+  const [priceStyle, setPriceStyle] = useState<TitleStyleId>('flash')
+  const [priceSize, setPriceSize] = useState(7) // font size as % of video width
   const [logoOn, setLogoOn] = useState(true)
   const [logoOpacity, setLogoOpacity] = useState(50) // %
   const [logoSize, setLogoSize] = useState(18) // % of video width
@@ -78,10 +84,11 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
   // Free placement: element centers as % of video width/height, draggable
   // directly on the preview
   const [titlePos, setTitlePos] = useState({ x: 50, y: 10 })
+  const [pricePos, setPricePos] = useState({ x: 50, y: 22 })
   const [logoXY, setLogoXY] = useState({ x: 82, y: 88 })
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
-  const dragTarget = useRef<'title' | 'logo' | null>(null)
+  const dragTarget = useRef<'title' | 'price' | 'logo' | null>(null)
 
   // Keep the preview font/logo scale proportional to the rendered video box
   useEffect(() => {
@@ -98,6 +105,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
     const x = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100))
     const y = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100))
     if (dragTarget.current === 'title') setTitlePos({ x, y })
+    else if (dragTarget.current === 'price') setPricePos({ x, y })
     else setLogoXY({ x, y })
   }
 
@@ -162,6 +170,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
 
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
+  const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
 
   // ---- Fetch-by-link: paste a TikTok/Facebook/YouTube URL and the video is
   // resolved watermark-free in HD and dropped straight into the feed ----
@@ -368,23 +377,30 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
     }
   }
 
-  // Draw the product-name title banner in the chosen style, centered on the
-  // user-dragged position, onto a transparent canvas sized to the video.
-  const renderTitlePng = (vw: number, vh: number): Promise<Uint8Array> =>
+  // Draw a text banner (title or price) in the chosen style and size,
+  // centered on the user-dragged position, onto a transparent canvas sized
+  // to the video.
+  const renderBannerPng = (
+    vw: number,
+    vh: number,
+    rawText: string,
+    st: (typeof TITLE_STYLES)[number],
+    sizePct: number,
+    pos: { x: number; y: number },
+  ): Promise<Uint8Array> =>
     new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas')
       canvas.width = vw
       canvas.height = vh
       const ctx = canvas.getContext('2d')
       if (!ctx) return reject(new Error('no canvas'))
-      const text = titleText.trim()
-      if (!text) return reject(new Error('no title'))
-      const st = activeStyle
+      const text = rawText.trim()
+      if (!text) return reject(new Error('no text'))
 
-      let fontSize = Math.round(vw * 0.085)
+      let fontSize = Math.round(vw * (sizePct / 100))
       ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
-      const maxW = vw * 0.82
-      while (ctx.measureText(text).width > maxW && fontSize > 18) {
+      const maxW = vw * 0.92
+      while (ctx.measureText(text).width > maxW && fontSize > 14) {
         fontSize -= 2
         ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
       }
@@ -394,8 +410,8 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       const bw = tw + padX * 2
       const bh = fontSize + padY * 2
       // Center the banner on the dragged position, clamped inside the frame
-      const cx = Math.max(bw / 2, Math.min(vw - bw / 2, (titlePos.x / 100) * vw))
-      const cy = Math.max(bh / 2, Math.min(vh - bh / 2, (titlePos.y / 100) * vh))
+      const cx = Math.max(bw / 2, Math.min(vw - bw / 2, (pos.x / 100) * vw))
+      const cy = Math.max(bh / 2, Math.min(vh - bh / 2, (pos.y / 100) * vh))
       const bx = cx - bw / 2
       const by = cy - bh / 2
 
@@ -458,7 +474,9 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       : selectedClip
         ? { data: selectedClip.file, name: selectedClip.name }
         : null
-    if (!source || (!titleOn && !logoOn) || (titleOn && !titleText.trim() && !logoOn)) return
+    const wantsTitle = titleOn && titleText.trim() !== ''
+    const wantsPrice = priceOn && priceText.trim() !== ''
+    if (!source || (!wantsTitle && !wantsPrice && !logoOn)) return
     setBusy('brand')
     setProgress(0)
     setError('')
@@ -481,9 +499,16 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
       let last = '0:v'
       let idx = 1
 
-      if (titleOn && titleText.trim()) {
-        await ffmpeg.writeFile('title.png', await renderTitlePng(dims.w, dims.h))
+      if (wantsTitle) {
+        await ffmpeg.writeFile('title.png', await renderBannerPng(dims.w, dims.h, titleText, activeStyle, titleSize, titlePos))
         inputs.push('-i', 'title.png')
+        chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
+        last = `v${idx}`
+        idx++
+      }
+      if (wantsPrice) {
+        await ffmpeg.writeFile('price.png', await renderBannerPng(dims.w, dims.h, priceText, activePriceStyle, priceSize, pricePos))
+        inputs.push('-i', 'price.png')
         chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
         last = `v${idx}`
         idx++
@@ -710,12 +735,17 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
         <div className="flex items-center justify-between gap-2">
           <p className="flex items-center gap-2 text-sm font-semibold">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-bold text-amber-500">3</span>
-            Brand it: product title + logo
+            Brand it: title + price + logo
           </p>
           <Button
             size="sm"
             onClick={brandVideo}
-            disabled={!ffmpegReady || busy !== null || !brandSource || (!titleOn && !logoOn) || (titleOn && !titleText.trim() && !logoOn)}
+            disabled={
+              !ffmpegReady ||
+              busy !== null ||
+              !brandSource ||
+              (!(titleOn && titleText.trim()) && !(priceOn && priceText.trim()) && !logoOn)
+            }
           >
             {busy === 'brand' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Stamp className="mr-1.5 h-3.5 w-3.5" />}
             {busy === 'brand' ? 'Branding\u2026' : 'Apply branding'}
@@ -723,7 +753,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
         </div>
         <p className="text-xs text-muted-foreground">
           {brandSource
-            ? `Burns the title bubble and/or logo onto ${brandSource}.`
+            ? `Burns the title, price tag, and/or logo onto ${brandSource}.`
             : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
         </p>
 
@@ -757,6 +787,54 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                     {s.label}
                   </button>
                 ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {titleSize.toFixed(1)}%</span>
+                <Slider min={3} max={16} step={0.5} value={[titleSize]} onValueChange={(v) => setTitleSize(v[0])} className="flex-1" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Price tag controls */}
+        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={priceOn} onChange={(e) => setPriceOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+            <Tag className="h-3.5 w-3.5 text-amber-500" />
+            Price tag
+          </label>
+          {priceOn && (
+            <div className="flex flex-col gap-2 pl-6">
+              <Input
+                value={priceText}
+                onChange={(e) => setPriceText(e.target.value)}
+                placeholder="e.g. Rs 499 / BUY 1 GET 1 FREE"
+                className="h-8"
+              />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs text-muted-foreground">Style</span>
+                {TITLE_STYLES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setPriceStyle(s.id)}
+                    className={`rounded-full px-3 py-1 text-xs font-extrabold transition-shadow ${
+                      priceStyle === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
+                    } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
+                    style={{
+                      backgroundColor: s.bubble ?? 'transparent',
+                      color: s.text,
+                      WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
+                      border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {priceSize.toFixed(1)}%</span>
+                <Slider min={3} max={16} step={0.5} value={[priceSize]} onValueChange={(v) => setPriceSize(v[0])} className="flex-1" />
               </div>
             </div>
           )}
@@ -829,8 +907,8 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
           )}
         </div>
 
-        {/* Drag-to-place preview: position the title and logo anywhere */}
-        {brandSource && (titleOn || logoOn) && (
+        {/* Drag-to-place preview: position the title, price, and logo anywhere */}
+        {brandSource && (titleOn || priceOn || logoOn) && (
           <div className="flex flex-col gap-1.5 rounded-md border bg-background/60 p-2.5">
             <p className="flex items-center gap-2 text-sm font-medium">
               <Move className="h-3.5 w-3.5 text-amber-500" />
@@ -869,11 +947,38 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                       backgroundColor: activeStyle.bubble ?? 'transparent',
                       color: activeStyle.text,
                       WebkitTextStroke: activeStyle.stroke ? `${activeStyle.shape === 'none' ? 1.2 : 0.5}px ${activeStyle.stroke}` : undefined,
-                      fontSize: Math.max(10, previewW * 0.055),
-                      padding: `${Math.max(2, previewW * 0.012)}px ${Math.max(6, previewW * 0.03)}px`,
+                      fontSize: Math.max(8, previewW * (titleSize / 100) * 0.62),
+                      padding: `${Math.max(2, previewW * (titleSize / 100) * 0.26)}px ${Math.max(5, previewW * (titleSize / 100) * 0.47)}px`,
                     }}
                   >
                     {titleText.trim()}
+                  </span>
+                )}
+                {priceOn && priceText.trim() && (
+                  <span
+                    role="button"
+                    aria-label="Drag to position the price"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                      dragTarget.current = 'price'
+                    }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap font-extrabold active:cursor-grabbing ${
+                      activePriceStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
+                    }`}
+                    style={{
+                      left: `${pricePos.x}%`,
+                      top: `${pricePos.y}%`,
+                      backgroundColor: activePriceStyle.bubble ?? 'transparent',
+                      color: activePriceStyle.text,
+                      WebkitTextStroke: activePriceStyle.stroke
+                        ? `${activePriceStyle.shape === 'none' ? 1.2 : 0.5}px ${activePriceStyle.stroke}`
+                        : undefined,
+                      fontSize: Math.max(8, previewW * (priceSize / 100) * 0.62),
+                      padding: `${Math.max(2, previewW * (priceSize / 100) * 0.26)}px ${Math.max(5, previewW * (priceSize / 100) * 0.47)}px`,
+                    }}
+                  >
+                    {priceText.trim()}
                   </span>
                 )}
                 {logoOn && (
