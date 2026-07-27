@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -198,21 +197,22 @@ export function ReelsStudioTab() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Feed / upload strip */}
-      <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Film className="h-4 w-4 text-cyan-500" /> Reels feed
-          </CardTitle>
+    <div className="flex flex-col gap-5">
+      {/* ---- Step 1: feed ---- */}
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-bold text-sky-500">1</span>
+            Add clips to the feed
+          </p>
           <div className="flex items-center gap-2">
             {!ffmpegReady && busy === 'load' && (
-              <Badge variant="outline" className="gap-1">
+              <Badge variant="outline" className="gap-1 text-xs">
                 <Loader2 className="h-3 w-3 animate-spin" /> Loading engine
               </Badge>
             )}
-            <Button size="sm" onClick={() => inputRef.current?.click()}>
-              <Upload className="mr-1.5 h-4 w-4" /> Add videos
+            <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()}>
+              <Upload className="mr-1.5 h-3.5 w-3.5" /> Add videos
             </Button>
             <input
               ref={inputRef}
@@ -223,133 +223,150 @@ export function ReelsStudioTab() {
               onChange={(e) => e.target.files && addFiles(e.target.files)}
             />
           </div>
-        </CardHeader>
-        <CardContent>
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault()
-              addFiles(e.dataTransfer.files)
-            }}
-            className={`flex min-h-24 flex-wrap gap-3 rounded-lg border border-dashed p-3 ${clips.length === 0 ? 'items-center justify-center' : ''}`}
-          >
-            {clips.length === 0 && (
-              <p className="text-sm text-muted-foreground">Drag and drop videos here, or click Add videos</p>
-            )}
-            {clips.map((c, i) => (
-              <div
-                key={c.id}
-                className={`group relative w-40 cursor-pointer overflow-hidden rounded-md border ${selected === c.id ? 'ring-2 ring-cyan-500' : ''}`}
-                onClick={() => selectClip(c)}
-              >
-                <video src={c.url} className="h-24 w-40 bg-black object-cover" muted playsInline />
-                <div className="flex items-center justify-between gap-1 px-1.5 py-1">
-                  <span className="truncate text-[10px]">{i + 1}. {c.name}</span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">{fmt(c.duration)}</span>
-                </div>
-                <div className="absolute right-1 top-1 hidden gap-0.5 group-hover:flex">
-                  <Button variant="secondary" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); move(c.id, -1) }}>
-                    <ArrowUp className="h-3 w-3" />
-                  </Button>
-                  <Button variant="secondary" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); move(c.id, 1) }}>
-                    <ArrowDown className="h-3 w-3" />
-                  </Button>
-                  <Button variant="destructive" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); remove(c.id) }}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Cut scene */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Scissors className="h-4 w-4 text-amber-500" /> Cut scene
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {!selectedClip ? (
-              <p className="text-sm text-muted-foreground">Select a clip in the feed to trim it.</p>
-            ) : (
-              <>
-                <video ref={videoRef} src={selectedClip.url} controls className="max-h-64 w-full rounded-md bg-black" />
-                <div className="px-1">
-                  <Slider
-                    min={0}
-                    max={Math.max(1, Math.floor(selectedClip.duration))}
-                    step={1}
-                    value={range}
-                    onValueChange={(v) => {
-                      setRange([v[0], v[1]] as [number, number])
-                      if (videoRef.current) videoRef.current.currentTime = v[0]
-                    }}
-                  />
-                  <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-                    <span>Start {fmt(range[0])}</span>
-                    <span>Keep {fmt(Math.max(0, range[1] - range[0]))}</span>
-                    <span>End {fmt(range[1])}</span>
-                  </div>
-                </div>
-                <Button onClick={cutScene} disabled={!ffmpegReady || busy !== null || range[1] <= range[0]}>
-                  {busy === 'cut' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Scissors className="mr-2 h-4 w-4" />}
-                  {busy === 'cut' ? 'Cutting\u2026' : 'Cut this scene'}
-                </Button>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Merge */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Merge className="h-4 w-4 text-emerald-500" /> Merge into one reel
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-              Merges every clip in the feed, in order, into a single 1080x1920 reel (30fps). Reorder with the arrows on each thumbnail.
+        </div>
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            addFiles(e.dataTransfer.files)
+          }}
+          className={`flex gap-3 overflow-x-auto rounded-lg border border-dashed p-3 ${
+            clips.length === 0 ? 'min-h-28 items-center justify-center' : ''
+          }`}
+        >
+          {clips.length === 0 && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Film className="h-4 w-4" /> Drag and drop videos here, or click Add videos
             </p>
-            <Button onClick={mergeClips} disabled={!ffmpegReady || busy !== null || clips.length < 2}>
-              {busy === 'merge' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Merge className="mr-2 h-4 w-4" />}
-              {busy === 'merge' ? 'Merging\u2026' : `Merge ${clips.length} clips`}
-            </Button>
-            {clips.length < 2 && <p className="text-xs text-muted-foreground">Add at least 2 clips to merge.</p>}
-          </CardContent>
-        </Card>
-      </div>
+          )}
+          {clips.map((c, i) => (
+            <div
+              key={c.id}
+              className={`group relative w-36 shrink-0 cursor-pointer overflow-hidden rounded-md border transition-shadow ${
+                selected === c.id ? 'ring-2 ring-sky-500' : 'hover:ring-1 hover:ring-muted-foreground/30'
+              }`}
+              onClick={() => selectClip(c)}
+            >
+              <video src={c.url} className="h-20 w-36 bg-black object-cover" muted playsInline />
+              <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                {i + 1}
+              </span>
+              <span className="absolute bottom-7 right-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
+                {fmt(c.duration)}
+              </span>
+              <div className="flex items-center justify-between gap-1 px-1.5 py-1">
+                <span className="truncate text-[10px]">{c.name}</span>
+              </div>
+              <div className="absolute right-1 top-1 hidden gap-0.5 group-hover:flex">
+                <Button variant="secondary" size="icon" className="h-6 w-6" title="Move earlier" onClick={(e) => { e.stopPropagation(); move(c.id, -1) }}>
+                  <ArrowUp className="h-3 w-3" />
+                </Button>
+                <Button variant="secondary" size="icon" className="h-6 w-6" title="Move later" onClick={(e) => { e.stopPropagation(); move(c.id, 1) }}>
+                  <ArrowDown className="h-3 w-3" />
+                </Button>
+                <Button variant="destructive" size="icon" className="h-6 w-6" title="Remove" onClick={(e) => { e.stopPropagation(); remove(c.id) }}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ---- Step 2: cut or merge ---- */}
+      <section className="flex flex-col gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-bold text-sky-500">2</span>
+          Cut a scene or merge the feed
+        </p>
+
+        {selectedClip ? (
+          <div className="flex flex-col gap-3 rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                <Scissors className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <span className="truncate">{selectedClip.name}</span>
+              </p>
+              <Button
+                size="sm"
+                onClick={cutScene}
+                disabled={!ffmpegReady || busy !== null || range[1] <= range[0]}
+              >
+                {busy === 'cut' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Scissors className="mr-1.5 h-3.5 w-3.5" />}
+                {busy === 'cut' ? 'Cutting\u2026' : 'Cut this scene'}
+              </Button>
+            </div>
+            <video ref={videoRef} src={selectedClip.url} controls className="max-h-56 w-full rounded-md bg-black" />
+            <div className="px-1">
+              <Slider
+                min={0}
+                max={Math.max(1, Math.floor(selectedClip.duration))}
+                step={1}
+                value={range}
+                onValueChange={(v) => {
+                  setRange([v[0], v[1]] as [number, number])
+                  if (videoRef.current) videoRef.current.currentTime = v[0]
+                }}
+              />
+              <div className="mt-1.5 flex justify-between text-xs text-muted-foreground">
+                <span>Start {fmt(range[0])}</span>
+                <span className="font-medium text-foreground">Keep {fmt(Math.max(0, range[1] - range[0]))}</span>
+                <span>End {fmt(range[1])}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          clips.length > 0 && (
+            <p className="rounded-lg border border-dashed px-3 py-2.5 text-sm text-muted-foreground">
+              <Scissors className="mr-1.5 inline h-3.5 w-3.5" />
+              Click a clip above to trim it.
+            </p>
+          )
+        )}
+
+        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-sm font-medium">
+              <Merge className="h-3.5 w-3.5 text-emerald-500" /> Merge into one reel
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {clips.length < 2
+                ? 'Add at least 2 clips - they merge in feed order into a 1080x1920 reel (30fps).'
+                : `${clips.length} clips will merge in feed order into a 1080x1920 reel (30fps).`}
+            </p>
+          </div>
+          <Button size="sm" onClick={mergeClips} disabled={!ffmpegReady || busy !== null || clips.length < 2}>
+            {busy === 'merge' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Merge className="mr-1.5 h-3.5 w-3.5" />}
+            {busy === 'merge' ? 'Merging\u2026' : 'Merge'}
+          </Button>
+        </div>
+      </section>
 
       {(busy === 'cut' || busy === 'merge') && (
-        <Card>
-          <CardContent className="flex items-center gap-3 py-4">
-            <Clapperboard className="h-5 w-5 shrink-0 text-cyan-500" />
-            <Progress value={progress} className="flex-1" />
-            <span className="w-10 text-right text-sm tabular-nums">{progress}%</span>
-          </CardContent>
-        </Card>
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+          <Clapperboard className="h-4 w-4 shrink-0 animate-pulse text-sky-500" />
+          <Progress value={progress} className="flex-1" />
+          <span className="w-10 text-right text-sm tabular-nums">{progress}%</span>
+        </div>
       )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
+      {/* ---- Result ---- */}
       {output && (
-        <Card className="border-emerald-500/30">
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Result</CardTitle>
+        <section className="overflow-hidden rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+          <div className="flex items-center justify-between gap-2 border-b border-emerald-500/20 px-4 py-2.5">
+            <span className="text-sm font-semibold">Result ready</span>
             <Button asChild size="sm">
               <a href={output.url} download={output.name}>
-                <Download className="mr-1.5 h-4 w-4" /> Download {output.name}
+                <Download className="mr-1.5 h-3.5 w-3.5" /> Download
               </a>
             </Button>
-          </CardHeader>
-          <CardContent>
-            <video src={output.url} controls className="max-h-80 w-full rounded-md bg-black" />
-          </CardContent>
-        </Card>
+          </div>
+          <div className="p-3">
+            <video src={output.url} controls className="mx-auto max-h-72 rounded-md bg-black" />
+          </div>
+        </section>
       )}
     </div>
   )

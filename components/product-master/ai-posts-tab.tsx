@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { createClient } from '@/lib/supabase/client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -106,16 +105,13 @@ export function AiPostsTab({ initialProductId }: { initialProductId?: string }) 
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[380px_1fr]">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Sparkles className="h-4 w-4 text-amber-500" /> Generate a post
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
+      {/* ---- Setup: labeled fields in a compact grid ---- */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <label htmlFor="ai-product" className="text-xs font-medium text-muted-foreground">Product</label>
           <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger>
+            <SelectTrigger id="ai-product">
               <SelectValue placeholder="Pick a product" />
             </SelectTrigger>
             <SelectContent>
@@ -127,104 +123,118 @@ export function AiPostsTab({ initialProductId }: { initialProductId?: string }) 
               ))}
             </SelectContent>
           </Select>
+        </div>
 
-          <Select value={postType} onValueChange={setPostType}>
-            <SelectTrigger>
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <label className="text-xs font-medium text-muted-foreground">Post type</label>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ['fb_ad', 'Facebook ad copy'],
+                ['reel_caption', 'Reel caption'],
+                ['description', 'Product description'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setPostType(value)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  postType === value
+                    ? 'border-amber-500/50 bg-amber-500/15 text-amber-500'
+                    : 'text-muted-foreground hover:bg-muted/50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="ai-tone" className="text-xs font-medium text-muted-foreground">Tone</label>
+          <Select value={tone} onValueChange={setTone}>
+            <SelectTrigger id="ai-tone">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="fb_ad">Facebook ad copy</SelectItem>
-              <SelectItem value="reel_caption">Reel caption</SelectItem>
-              <SelectItem value="description">Product description</SelectItem>
+              <SelectItem value="energetic">Energetic</SelectItem>
+              <SelectItem value="friendly">Friendly</SelectItem>
+              <SelectItem value="professional">Professional</SelectItem>
+              <SelectItem value="funny">Funny</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="ai-lang" className="text-xs font-medium text-muted-foreground">Language</label>
+          <Select value={language} onValueChange={setLanguage}>
+            <SelectTrigger id="ai-lang">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="en">English</SelectItem>
+              <SelectItem value="fr">French</SelectItem>
+              <SelectItem value="kreol_mix">Mauritian mix</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={tone} onValueChange={setTone}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="energetic">Energetic</SelectItem>
-                <SelectItem value="friendly">Friendly</SelectItem>
-                <SelectItem value="professional">Professional</SelectItem>
-                <SelectItem value="funny">Funny</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={language} onValueChange={setLanguage}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="en">English</SelectItem>
-                <SelectItem value="fr">French</SelectItem>
-                <SelectItem value="kreol_mix">Mauritian mix</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <label htmlFor="ai-extra" className="text-xs font-medium text-muted-foreground">
+            Offer details <span className="font-normal">(optional)</span>
+          </label>
           <Textarea
-            placeholder="Optional: promo details, angle, offer (e.g. B1G1, free delivery)..."
+            id="ai-extra"
+            placeholder="Promo details, angle, offer (e.g. B1G1, free delivery)..."
             value={extra}
             onChange={(e) => setExtra(e.target.value)}
-            rows={3}
+            rows={2}
+            className="resize-none"
           />
+        </div>
+      </div>
 
-          <Button onClick={generate} disabled={!product || loading}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            {loading ? 'Generating\u2026' : 'Generate'}
-          </Button>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </CardContent>
-      </Card>
+      <Button onClick={generate} disabled={!product || loading} size="lg" className="w-full">
+        {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+        {loading ? 'Generating\u2026' : 'Generate post'}
+      </Button>
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex flex-col gap-4">
-        {result && (
-          <Card className="border-amber-500/30">
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-base">Generated post</CardTitle>
-              <Button variant="outline" size="sm" onClick={() => copyPost(result)}>
-                {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
-                {copied ? 'Copied' : 'Copy all'}
-              </Button>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3 text-sm">
-              {result.hook && (
-                <div>
-                  <Badge variant="outline" className="mb-1">Hook</Badge>
-                  <p className="whitespace-pre-wrap font-medium">{result.hook}</p>
+      {/* ---- Result ---- */}
+      {result && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-center justify-between border-b border-amber-500/20 px-4 py-2.5">
+            <span className="text-sm font-semibold">Generated post</span>
+            <Button variant="outline" size="sm" onClick={() => copyPost(result)}>
+              {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
+              {copied ? 'Copied' : 'Copy all'}
+            </Button>
+          </div>
+          <div className="flex flex-col gap-3 px-4 py-3 text-sm">
+            {(
+              [
+                ['Hook', result.hook, 'font-medium'],
+                ['Body', result.body, 'leading-relaxed'],
+                ['CTA', result.cta, ''],
+                ['Hashtags', result.hashtags, 'text-muted-foreground'],
+              ] as const
+            ).map(([label, text, cls]) =>
+              text ? (
+                <div key={label} className="grid grid-cols-[76px_1fr] gap-2">
+                  <Badge variant="outline" className="h-fit justify-center">{label}</Badge>
+                  <p className={`whitespace-pre-wrap ${cls}`}>{text}</p>
                 </div>
-              )}
-              {result.body && (
-                <div>
-                  <Badge variant="outline" className="mb-1">Body</Badge>
-                  <p className="whitespace-pre-wrap leading-relaxed">{result.body}</p>
-                </div>
-              )}
-              {result.cta && (
-                <div>
-                  <Badge variant="outline" className="mb-1">CTA</Badge>
-                  <p className="whitespace-pre-wrap">{result.cta}</p>
-                </div>
-              )}
-              {result.hashtags && (
-                <div>
-                  <Badge variant="outline" className="mb-1">Hashtags</Badge>
-                  <p className="whitespace-pre-wrap text-muted-foreground">{result.hashtags}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recent generations</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {history.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing yet. Generated posts are kept here for reuse.</p>
+              ) : null,
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ---- History: collapsed rows, only when there is any ---- */}
+      {history.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent generations</p>
+          <div className="flex max-h-44 flex-col gap-1.5 overflow-y-auto pr-1">
             {history.map((h, i) => (
               <button
                 key={`${h.at}-${i}`}
@@ -238,12 +248,14 @@ export function AiPostsTab({ initialProductId }: { initialProductId?: string }) 
                     {h.postType === 'fb_ad' ? 'FB ad' : h.postType === 'reel_caption' ? 'Reel caption' : 'Description'}
                   </span>
                 </span>
-                <span className="shrink-0 text-xs text-muted-foreground">{new Date(h.at).toLocaleString()}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {new Date(h.at).toLocaleDateString()}
+                </span>
               </button>
             ))}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
