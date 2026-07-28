@@ -2,12 +2,22 @@ const GRAPH = 'https://graph.facebook.com/v21.0'
 
 export type FbPage = { id: string; name: string; access_token: string }
 
+// Discovery costs 10+ Graph calls, and Facebook enforces an app-wide hourly
+// request limit (error #4). Page lists change rarely, so cache per token for
+// 10 minutes. Module-level cache survives across warm serverless invocations.
+const cache = new Map<string, { pages: FbPage[]; at: number }>()
+const CACHE_TTL_MS = 10 * 60 * 1000
+
 // Facebook's /me/accounts only returns pages granted during the app's login
 // flow (granular scoping) - it can silently hide pages the user actually
 // manages. So we ALSO discover pages through the ad accounts' promote_pages
 // edge and try to resolve a page access token for each directly. Any page
 // that hands us a token is manageable and gets included.
 export async function getManageablePages(token: string): Promise<FbPage[]> {
+  const cacheKey = token.slice(-24)
+  const hit = cache.get(cacheKey)
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.pages
+
   const enc = encodeURIComponent(token)
   const byId = new Map<string, FbPage>()
 
@@ -66,5 +76,9 @@ export async function getManageablePages(token: string): Promise<FbPage[]> {
     if (p) byId.set(p.id, p)
   }
 
-  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name))
+  const pages = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name))
+  // Don't cache empty results - a rate-limited or failed pass shouldn't
+  // stick for 10 minutes and hide every page
+  if (pages.length > 0) cache.set(cacheKey, { pages, at: Date.now() })
+  return pages
 }
