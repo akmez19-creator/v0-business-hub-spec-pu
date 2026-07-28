@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
-import { Check, ChevronsUpDown, Copy, ExternalLink, Loader2 } from 'lucide-react'
+import { Check, ChevronsUpDown, Copy, ExternalLink, Loader2, Rocket } from 'lucide-react'
 
 interface Account {
   id: string
@@ -34,7 +34,14 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 // Campaign creation by duplication: pick a proven campaign, give ONE common
 // name, and the copy's campaign + all ad sets + all ads get exactly that
 // name. New campaign starts PAUSED for review.
-export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
+export function CampaignCreatorTab({
+  initialName,
+  initialBoost,
+}: {
+  initialName?: string
+  /** Pre-filled page + post when arriving from "Boost this post" after publishing */
+  initialBoost?: { pageId: string; postId: string }
+}) {
   const { data: accountsData } = useSWR('/api/facebook-ads?action=accounts', fetcher)
   const [accountId, setAccountId] = useState('')
   const { data: campaignsData, isLoading: loadingCampaigns } = useSWR(
@@ -47,12 +54,12 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
   // Post-to-boost picker: pick the page, then one of its recent posts.
   // Every ad in the copy is re-pointed at that post's creative.
   const { data: pagesData } = useSWR('/api/facebook-ads/duplicate?action=pages', fetcher)
-  const [pageId, setPageId] = useState('')
+  const [pageId, setPageId] = useState(initialBoost?.pageId ?? '')
   const { data: postsData, isLoading: loadingPosts } = useSWR(
     pageId ? `/api/facebook-ads/duplicate?action=posts&pageId=${pageId}` : null,
     fetcher,
   )
-  const [boostPostId, setBoostPostId] = useState('')
+  const [boostPostId, setBoostPostId] = useState(initialBoost?.postId ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<{
@@ -102,6 +109,17 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* ---- Arrived from "Boost this post": the post is locked in ---- */}
+      {initialBoost && !result && (
+        <div className="flex items-center gap-2.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3.5 py-2.5">
+          <Rocket className="h-4 w-4 shrink-0 text-sky-400" />
+          <p className="text-xs leading-relaxed text-sky-200">
+            <span className="font-semibold">Your post is queued for boosting.</span> Pick a proven campaign to copy
+            its targeting and budget, name the new campaign, and hit Duplicate {'\u2014'} every ad will run your
+            just-published post.
+          </p>
+        </div>
+      )}
       {/* ---- Setup: labeled fields ---- */}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
@@ -215,6 +233,11 @@ export function CampaignCreatorTab({ initialName }: { initialName?: string }) {
               />
             </SelectTrigger>
             <SelectContent>
+              {/* A just-published post can lag behind the feed listing -
+                  keep the handed-off selection visible regardless */}
+              {boostPostId && !posts.some((p) => p.id === boostPostId) && (
+                <SelectItem value={boostPostId}>Just published {'\u2014'} your new post</SelectItem>
+              )}
               {posts.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {(p.created_time || '').slice(0, 10)} {'\u2014'} {p.message ? p.message.slice(0, 70) : '(no text)'}

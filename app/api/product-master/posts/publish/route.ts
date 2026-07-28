@@ -118,7 +118,17 @@ export async function POST(request: Request) {
       created_by: user.id,
     })
 
-    return NextResponse.json({ success: true, videoId: upJson.id, postUrl, pageName: page.name })
+    // boostPostId is the object_story_id format the Campaign Creator's boost
+    // flow expects (pageId_videoId) - returned so "Boost this post" can hand
+    // off straight into campaign duplication without re-finding the post
+    return NextResponse.json({
+      success: true,
+      videoId: upJson.id,
+      postUrl,
+      pageName: page.name,
+      pageId: page.id,
+      boostPostId: `${page.id}_${upJson.id}`,
+    })
   } catch (error) {
     console.error('publish error:', error)
     return NextResponse.json({ success: false, error: 'Failed to publish video' }, { status: 500 })

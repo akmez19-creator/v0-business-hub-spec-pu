@@ -54,7 +54,14 @@ type TitleStyleId = (typeof TITLE_STYLES)[number]['id']
 // out of a clip (trim), brand it (product-name title + logo watermark), or
 // merge the strip into one reel. No server cost, files never leave the
 // machine until the user downloads the result.
-export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
+export function ReelsStudioTab({
+  productName = '',
+  onBoostPost,
+}: {
+  productName?: string
+  /** Called when the user wants to boost the post they just published */
+  onBoostPost?: (boost: { pageId: string; postId: string }) => void
+}) {
   const [clips, setClips] = useState<Clip[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [range, setRange] = useState<[number, number]>([0, 0])
@@ -1097,6 +1104,7 @@ export function ReelsStudioTab({ productName = '' }: { productName?: string }) {
                 productName={productName}
                 priceText={priceOn ? priceText.trim() : ''}
                 onClose={() => setShowPublish(false)}
+                onBoost={onBoostPost}
               />
             )}
             {showAdPanel && (

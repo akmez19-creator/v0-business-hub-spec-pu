@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckCircle2, ExternalLink, Loader2, RefreshCw, Send, X } from 'lucide-react'
+import { CheckCircle2, ExternalLink, Loader2, RefreshCw, Rocket, Send, X } from 'lucide-react'
 
 // Post the finished Reels Studio video to the Facebook Page without leaving
 // the studio. The description is auto-generated (reel caption grounded in
@@ -26,17 +26,25 @@ export function ReelPublishPanel({
   productName,
   priceText,
   onClose,
+  onBoost,
 }: {
   videoBlob: Blob
   productName: string
   priceText?: string
   onClose: () => void
+  /** Hand the just-published post off to the Campaign Creator pre-filled */
+  onBoost?: (boost: { pageId: string; postId: string }) => void
 }) {
   const [caption, setCaption] = useState('')
   const [generating, setGenerating] = useState(true)
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState('')
-  const [published, setPublished] = useState<{ postUrl: string; pageName: string } | null>(null)
+  const [published, setPublished] = useState<{
+    postUrl: string
+    pageName: string
+    pageId: string
+    boostPostId: string
+  } | null>(null)
   const [pageId, setPageId] = useState('')
 
   // All pages the token can manage - the user picks the destination
@@ -123,7 +131,12 @@ export function ReelPublishPanel({
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Publish failed')
-      setPublished({ postUrl: json.postUrl, pageName: json.pageName })
+      setPublished({
+        postUrl: json.postUrl,
+        pageName: json.pageName,
+        pageId: json.pageId || pageId,
+        boostPostId: json.boostPostId || '',
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Publish failed')
     } finally {
@@ -136,14 +149,22 @@ export function ReelPublishPanel({
       <div className="flex flex-col items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-4 text-center">
         <CheckCircle2 className="h-8 w-8 text-emerald-500" />
         <p className="text-sm font-semibold">Posted to {published.pageName}</p>
-        <p className="text-xs text-muted-foreground">The video and caption are live on your Facebook Page.</p>
-        <div className="mt-1 flex items-center gap-2">
+        <p className="text-xs text-muted-foreground">
+          The video and caption are live on your Facebook Page.
+          {onBoost && published.boostPostId ? ' Next step: put budget behind it.' : ''}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
           <Button asChild size="sm" variant="outline" className="bg-transparent">
             <a href={published.postUrl} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="mr-1.5 h-3.5 w-3.5" /> View post
             </a>
           </Button>
-          <Button size="sm" onClick={onClose}>
+          {onBoost && published.boostPostId && (
+            <Button size="sm" onClick={() => onBoost({ pageId: published.pageId, postId: published.boostPostId })}>
+              <Rocket className="mr-1.5 h-3.5 w-3.5" /> Boost this post
+            </Button>
+          )}
+          <Button size="sm" variant={onBoost && published.boostPostId ? 'outline' : 'default'} onClick={onClose} className={onBoost && published.boostPostId ? 'bg-transparent' : undefined}>
             Done
           </Button>
         </div>

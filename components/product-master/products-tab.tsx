@@ -30,6 +30,8 @@ import { ManagePosts } from '@/components/product-master/manage-posts'
 export interface ToolRequest {
   tool: 'ai-posts' | 'reels' | 'frames' | 'campaigns'
   product: { id: string; name: string }
+  /** Pre-selected page + post when arriving from "Boost this post" */
+  boost?: { pageId: string; postId: string }
 }
 
 interface PurchaseOrder {

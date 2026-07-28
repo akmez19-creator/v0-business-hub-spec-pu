@@ -116,7 +116,16 @@ export default function ProductMasterPage() {
           </DialogHeader>
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {/* Mount only while open so the ~30MB ffmpeg wasm core never loads early */}
-            {request?.tool === 'reels' && <ReelsStudioTab productName={productName} />}
+            {request?.tool === 'reels' && (
+              <ReelsStudioTab
+                productName={productName}
+                onBoostPost={(boost) =>
+                  // Seamless handoff: swap this dialog for the Campaign
+                  // Creator pre-filled with the just-published post
+                  setRequest((r) => (r ? { ...r, tool: 'campaigns', boost } : r))
+                }
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -155,7 +164,9 @@ export default function ProductMasterPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto px-6 py-4">
-            {request?.tool === 'campaigns' && <CampaignCreatorTab initialName={productName} />}
+            {request?.tool === 'campaigns' && (
+              <CampaignCreatorTab initialName={productName} initialBoost={request.boost} />
+            )}
           </div>
         </DialogContent>
       </Dialog>
