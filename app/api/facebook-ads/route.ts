@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fbGet, fbGetAll } from '@/lib/facebook/graph'
 
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
@@ -43,16 +44,11 @@ export async function GET(request: Request) {
 }
 
 async function getAdAccounts(accessToken: string) {
-  const response = await fetch(
-    `${FACEBOOK_GRAPH_URL}/me/adaccounts?fields=id,name,account_status,currency,amount_spent,balance&access_token=${accessToken}`
+  // Ad account metadata changes rarely - cache aggressively (10 min)
+  const data = await fbGet(
+    `${FACEBOOK_GRAPH_URL}/me/adaccounts?fields=id,name,account_status,currency,amount_spent,balance&access_token=${accessToken}`,
+    { cacheTtl: 10 * 60 * 1000 },
   )
-  
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error?.message || 'Failed to fetch ad accounts')
-  }
-  
-  const data = await response.json()
   return NextResponse.json(data)
 }
 
@@ -64,19 +60,10 @@ async function getCampaignsList(accessToken: string, accountId: string | null) {
     return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
   }
 
-  let campaigns: Array<{ id: string; name: string; status: string; objective: string; created_time: string }> = []
-  let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=500`
-
-  while (nextUrl) {
-    const response: Response = await fetch(nextUrl)
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error?.message || 'Failed to fetch campaigns')
-    }
-    const data = await response.json()
-    campaigns = [...campaigns, ...(data.data || [])]
-    nextUrl = data.paging?.next || null
-  }
+  const campaigns = await fbGetAll<{ id: string; name: string; status: string; objective: string; created_time: string }>(
+    `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time&access_token=${accessToken}&limit=500`,
+    { cacheTtl: 5 * 60 * 1000 },
+  )
 
   // Newest first so the picker surfaces recent campaigns at the top
   campaigns.sort((a, b) => (b.created_time || '').localeCompare(a.created_time || ''))
@@ -95,82 +82,59 @@ async function getCampaignsWithSpend(
     return NextResponse.json({ error: 'Account ID required' }, { status: 400 })
   }
   
-  // Build time range params
+  // Insights are requested through FIELD EXPANSION on the campaigns listing,
+  // so one page of 500 campaigns costs ONE call instead of 500 per-campaign
+  // insights calls. This is what was exhausting the app's hourly quota.
+  let insightsExpansion: string
+  if (since && until) {
+    insightsExpansion = `insights.time_range({"since":"${since}","until":"${until}"}){spend,impressions,clicks,reach}`
+  } else {
+    insightsExpansion = `insights.date_preset(${datePreset === 'lifetime' ? 'maximum' : datePreset}){spend,impressions,clicks,reach}`
+  }
+
+  const firstUrl =
+    `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time,` +
+    `lifetime_budget,daily_budget,budget_remaining,start_time,stop_time,${encodeURIComponent(insightsExpansion)}` +
+    `&access_token=${accessToken}&limit=500`
+
+  type CampaignRow = {
+    id: string; name: string; status: string; objective: string; created_time: string
+    lifetime_budget?: string; daily_budget?: string; budget_remaining?: string
+    start_time?: string; stop_time?: string
+    insights?: { data?: Array<{ spend?: string; impressions?: string; clicks?: string; reach?: string }> }
+  }
+  const allCampaigns = await fbGetAll<CampaignRow>(firstUrl, { cacheTtl: 5 * 60 * 1000 })
+
+  // Account-level spend for the accurate total (single call, cached)
   let timeRange = ''
   if (since && until) {
     timeRange = `&time_range={"since":"${since}","until":"${until}"}`
-  } else if (datePreset !== 'lifetime') {
-    timeRange = `&date_preset=${datePreset}`
+  } else {
+    timeRange = `&date_preset=${datePreset === 'lifetime' ? 'maximum' : datePreset}`
   }
-  
-  // Get ALL campaigns with pagination. Budget + schedule fields (lifetime_budget,
-  // budget_remaining, stop_time) power the per-campaign spent/remaining/end-date UI.
-  let allCampaigns: Array<{ id: string; name: string; status: string; objective: string; created_time: string; lifetime_budget?: string; daily_budget?: string; budget_remaining?: string; start_time?: string; stop_time?: string }> = []
-  let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${accountId}/campaigns?fields=id,name,status,objective,created_time,lifetime_budget,daily_budget,budget_remaining,start_time,stop_time&access_token=${accessToken}&limit=500`
-  
-  while (nextUrl) {
-    const campaignsResponse: Response = await fetch(nextUrl)
-    
-    if (!campaignsResponse.ok) {
-      const error = await campaignsResponse.json()
-      throw new Error(error.error?.message || 'Failed to fetch campaigns')
-    }
-    
-    const campaignsData: { data?: typeof allCampaigns; paging?: { next?: string } } = await campaignsResponse.json()
-    allCampaigns = [...allCampaigns, ...(campaignsData.data || [])]
-    
-    // Check for next page
-    nextUrl = campaignsData.paging?.next || null
-  }
-  
-  // Get account-level spend for accurate total
-  const accountInsightsUrl = datePreset === 'lifetime'
-    ? `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend&date_preset=maximum&access_token=${accessToken}`
-    : `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend${timeRange}&access_token=${accessToken}`
-  
-  const accountInsightsResponse = await fetch(accountInsightsUrl)
-  const accountInsightsData = await accountInsightsResponse.json()
-  const accountTotalSpend = accountInsightsData.data?.[0]?.spend || '0'
-  
-  // Get spend for each campaign (batch to avoid rate limits)
-  const batchSize = 50
-  const campaignsWithSpend: Array<Record<string, unknown>> = []
-  
-  for (let i = 0; i < allCampaigns.length; i += batchSize) {
-    const batch = allCampaigns.slice(i, i + batchSize)
-    const batchResults = await Promise.all(
-      batch.map(async (campaign) => {
-        try {
-          const insightsUrl = datePreset === 'lifetime'
-            ? `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach&date_preset=maximum&access_token=${accessToken}`
-            : `${FACEBOOK_GRAPH_URL}/${campaign.id}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`
-          
-          const insightsResponse = await fetch(insightsUrl)
-          const insightsData = await insightsResponse.json()
-          
-          const insights = insightsData.data?.[0] || {}
-          
-          return {
-            ...campaign,
-            spend: insights.spend || '0',
-            impressions: insights.impressions || '0',
-            clicks: insights.clicks || '0',
-            reach: insights.reach || '0',
-          }
-        } catch {
-          return {
-            ...campaign,
-            spend: '0',
-            impressions: '0',
-            clicks: '0',
-            reach: '0',
-          }
-        }
-      })
+  let accountTotalSpend = '0'
+  try {
+    const accountInsights = await fbGet<{ data?: Array<{ spend?: string }> }>(
+      `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend${timeRange}&access_token=${accessToken}`,
+      { cacheTtl: 5 * 60 * 1000 },
     )
-    campaignsWithSpend.push(...batchResults)
+    accountTotalSpend = accountInsights.data?.[0]?.spend || '0'
+  } catch {
+    // Non-critical - the per-campaign data still renders
   }
-  
+
+  const campaignsWithSpend = allCampaigns.map((campaign) => {
+    const insights = campaign.insights?.data?.[0] || {}
+    const { insights: _drop, ...rest } = campaign
+    return {
+      ...rest,
+      spend: insights.spend || '0',
+      impressions: insights.impressions || '0',
+      clicks: insights.clicks || '0',
+      reach: insights.reach || '0',
+    }
+  })
+
   // Sort by spend descending
   campaignsWithSpend.sort((a, b) => parseFloat(b.spend as string) - parseFloat(a.spend as string))
   
@@ -201,15 +165,9 @@ async function getAccountSpend(
     timeRange = '&date_preset=maximum'
   }
   
-  const response = await fetch(
-    `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`
+  const data = await fbGet(
+    `${FACEBOOK_GRAPH_URL}/${accountId}/insights?fields=spend,impressions,clicks,reach${timeRange}&access_token=${accessToken}`,
+    { cacheTtl: 5 * 60 * 1000 },
   )
-  
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error?.message || 'Failed to fetch account spend')
-  }
-  
-  const data = await response.json()
   return NextResponse.json(data)
 }

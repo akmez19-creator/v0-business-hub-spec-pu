@@ -1,9 +1,38 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getManageablePages } from '@/lib/facebook/pages'
+import { fbGet } from '@/lib/facebook/graph'
 
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
+
+// Facebook throttling codes (#4 app-level, #17 user-level, #32 page-level,
+// #613 custom, 8000x ads-specific). Writes retry through these with backoff
+// so a boost never dies halfway because the hourly window was momentarily full.
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004])
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function postJson(
+  url: string,
+  payload: Record<string, unknown>,
+): Promise<{ ok: boolean; json: Record<string, unknown> & { error?: { message?: string; code?: number; error_subcode?: number; error_user_title?: string; error_user_msg?: string } } }> {
+  const waits = [2000, 8000, 30000]
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok && !json.error) return { ok: true, json }
+    const code = json.error?.code as number | undefined
+    if (attempt < waits.length && code !== undefined && RATE_LIMIT_CODES.has(code)) {
+      await sleep(waits[attempt])
+      continue
+    }
+    return { ok: false, json }
+  }
+}
 
 // Campaign creation by duplication: deep-copy an existing campaign (Graph
 // API /copies clones the campaign + its ad sets + its ads), then rename the
@@ -51,12 +80,15 @@ export async function GET(request: Request) {
       const pages = await getManageablePages(accessToken)
       const page = pages.find((p) => p.id === pageId)
       const pageToken: string = page?.access_token || accessToken
-      const res = await fetch(
-        `${FACEBOOK_GRAPH_URL}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture&limit=50&access_token=${encodeURIComponent(pageToken)}`,
-      )
-      const json = await res.json()
-      if (!res.ok || json.error) {
-        return NextResponse.json({ error: json.error?.message || 'Failed to list posts' }, { status: 502 })
+      // Cached 2 min: opening the picker repeatedly must not burn quota
+      let json: { data?: Array<{ id: string; message?: string; created_time?: string; permalink_url?: string; full_picture?: string }> }
+      try {
+        json = await fbGet(
+          `${FACEBOOK_GRAPH_URL}/${pageId}/posts?fields=id,message,created_time,permalink_url,full_picture&limit=50&access_token=${encodeURIComponent(pageToken)}`,
+          { cacheTtl: 2 * 60 * 1000 },
+        )
+      } catch (e) {
+        return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to list posts' }, { status: 502 })
       }
       const posts = (json.data || []).map(
         (p: { id: string; message?: string; created_time?: string; permalink_url?: string; full_picture?: string }) => ({
@@ -147,24 +179,20 @@ export async function POST(request: Request) {
       }
 
       // 1. Shallow copy the campaign (objective, budget, special categories)
-      const shellRes = await fetch(`${FACEBOOK_GRAPH_URL}/${campaignId}/copies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deep_copy: false, status_option: 'PAUSED', access_token: accessToken }),
+      const shell = await postJson(`${FACEBOOK_GRAPH_URL}/${campaignId}/copies`, {
+        deep_copy: false,
+        status_option: 'PAUSED',
+        access_token: accessToken,
       })
-      const shellJson = await shellRes.json()
-      const newCampaignId: string | undefined = shellJson.copied_campaign_id || shellJson.id
-      if (!shellRes.ok || shellJson.error || !newCampaignId) {
+      const newCampaignId: string | undefined =
+        (shell.json.copied_campaign_id as string) || (shell.json.id as string)
+      if (!shell.ok || !newCampaignId) {
         return NextResponse.json(
-          { error: fbDetail(shellJson.error) || 'Facebook rejected the campaign copy' },
+          { error: fbDetail(shell.json.error) || 'Facebook rejected the campaign copy' },
           { status: 502 },
         )
       }
-      await fetch(`${FACEBOOK_GRAPH_URL}/${newCampaignId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: commonName, access_token: accessToken }),
-      })
+      await postJson(`${FACEBOOK_GRAPH_URL}/${newCampaignId}`, { name: commonName, access_token: accessToken })
 
       // 2. One boost creative for the whole campaign. Messaging destinations
       // (Messenger/WhatsApp) need the multi-destination asset_feed_spec plus
@@ -191,18 +219,14 @@ export async function POST(request: Request) {
           },
         }
       }
-      const creativeRes = await fetch(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(creativeBody),
-      })
-      const creativeJson = await creativeRes.json()
-      if (!creativeRes.ok || creativeJson.error) {
+      const creative = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, creativeBody)
+      if (!creative.ok) {
         return NextResponse.json(
-          { error: fbDetail(creativeJson.error) || 'Could not create the boost creative', newCampaignId },
+          { error: fbDetail(creative.json.error) || 'Could not create the boost creative', newCampaignId },
           { status: 502 },
         )
       }
+      const creativeId = creative.json.id as string
 
       // 3. Recreate each ad set + one fresh ad inside it
       let adSetCount = 0
@@ -237,35 +261,25 @@ export async function POST(request: Request) {
         if (as.adset_schedule) adsetBody.adset_schedule = as.adset_schedule
         if (as.pacing_type) adsetBody.pacing_type = as.pacing_type
 
-        const asRes = await fetch(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adsets`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(adsetBody),
-        })
-        const asJson = await asRes.json()
-        if (!asRes.ok || asJson.error || !asJson.id) {
+        const asResult = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adsets`, adsetBody)
+        if (!asResult.ok || !asResult.json.id) {
           failures++
-          lastError = fbDetail(asJson.error) || lastError
+          lastError = fbDetail(asResult.json.error) || lastError
           continue
         }
         adSetCount++
 
-        const adRes = await fetch(`${FACEBOOK_GRAPH_URL}/act_${accountId}/ads`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: commonName,
-            adset_id: asJson.id,
-            creative: { creative_id: creativeJson.id },
-            status: 'PAUSED',
-            access_token: accessToken,
-          }),
+        const adResult = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/ads`, {
+          name: commonName,
+          adset_id: asResult.json.id,
+          creative: { creative_id: creativeId },
+          status: 'PAUSED',
+          access_token: accessToken,
         })
-        const adJson = await adRes.json()
-        if (adRes.ok && !adJson.error && adJson.id) adCount++
+        if (adResult.ok && adResult.json.id) adCount++
         else {
           failures++
-          lastError = fbDetail(adJson.error) || lastError
+          lastError = fbDetail(adResult.json.error) || lastError
         }
       }
 
@@ -289,17 +303,13 @@ export async function POST(request: Request) {
 
     // ---- NO-BOOST PATH: plain deep copy + rename --------------------------
     // 1. Deep copy: clones ad sets + ads, starts PAUSED
-    const copyRes = await fetch(`${FACEBOOK_GRAPH_URL}/${campaignId}/copies`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deep_copy: true,
-        status_option: 'PAUSED',
-        access_token: accessToken,
-      }),
+    const copyResult = await postJson(`${FACEBOOK_GRAPH_URL}/${campaignId}/copies`, {
+      deep_copy: true,
+      status_option: 'PAUSED',
+      access_token: accessToken,
     })
-    const copyJson = await copyRes.json()
-    if (!copyRes.ok || copyJson.error) {
+    const copyJson = copyResult.json
+    if (!copyResult.ok) {
       // Surface Facebook's human-readable details - "Invalid parameter" alone
       // hides the actual reason (e.g. objective not copyable, account limits)
       let detail = fbDetail(copyJson.error) || 'Facebook rejected the campaign copy'
@@ -312,7 +322,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: detail }, { status: 502 })
     }
     // /copies returns { copied_campaign_id } (sometimes { id })
-    const newCampaignId: string | undefined = copyJson.copied_campaign_id || copyJson.id
+    const newCampaignId: string | undefined =
+      (copyJson.copied_campaign_id as string | undefined) || (copyJson.id as string | undefined)
     if (!newCampaignId) {
       return NextResponse.json({ error: 'Copy succeeded but no new campaign id was returned' }, { status: 502 })
     }
@@ -329,15 +340,10 @@ export async function POST(request: Request) {
       )
     }
 
-    // 3. Rename everything to the SAME common name
+    // 3. Rename everything to the SAME common name (retries on rate limit)
     const rename = async (id: string) => {
-      const r = await fetch(`${FACEBOOK_GRAPH_URL}/${id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: commonName, access_token: accessToken }),
-      })
-      const j = await r.json()
-      return r.ok && !j.error
+      const r = await postJson(`${FACEBOOK_GRAPH_URL}/${id}`, { name: commonName, access_token: accessToken })
+      return r.ok
     }
 
     let adSetCount = 0

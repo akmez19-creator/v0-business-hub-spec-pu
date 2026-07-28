@@ -73,14 +73,25 @@ export async function POST(request: Request) {
     // Publish to the chosen page; fall back to the first if none was picked
     const page = (pageId && pages.find((p) => p.id === pageId)) || pages[0]
 
-    // Publish to the Page feed - Facebook downloads the video from the URL
-    const fd = new FormData()
-    fd.append('file_url', videoUrl)
-    fd.append('description', description)
-    fd.append('access_token', page.access_token)
-    const upRes = await fetch(`${GRAPH}/${page.id}/videos`, { method: 'POST', body: fd })
-    const upJson = (await upRes.json()) as { id?: string; error?: { message?: string } }
-    if (!upRes.ok || !upJson.id) {
+    // Publish to the Page feed - Facebook downloads the video from the URL.
+    // Uses the PAGE token (separate rate limit from the app token) and
+    // retries with backoff on throttling so posting survives quota pressure.
+    const RATE_LIMIT_CODES = new Set([4, 17, 32, 613])
+    const waits = [3000, 12000, 40000]
+    let upJson: { id?: string; error?: { message?: string; code?: number } } = {}
+    for (let attempt = 0; ; attempt++) {
+      const fd = new FormData()
+      fd.append('file_url', videoUrl)
+      fd.append('description', description)
+      fd.append('access_token', page.access_token)
+      const upRes = await fetch(`${GRAPH}/${page.id}/videos`, { method: 'POST', body: fd })
+      upJson = (await upRes.json().catch(() => ({}))) as typeof upJson
+      if (upRes.ok && upJson.id) break
+      const code = upJson.error?.code
+      if (attempt < waits.length && code !== undefined && RATE_LIMIT_CODES.has(code)) {
+        await new Promise((r) => setTimeout(r, waits[attempt]))
+        continue
+      }
       console.error('fb video publish failed:', upJson)
       return NextResponse.json(
         { success: false, error: upJson.error?.message || 'Facebook rejected the video upload' },
