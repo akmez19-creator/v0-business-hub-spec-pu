@@ -3,6 +3,9 @@ import { createClient } from '@/lib/supabase/server'
 import { getManageablePages } from '@/lib/facebook/pages'
 import { fbGet } from '@/lib/facebook/graph'
 
+// Video-processing polls + backoff retries can exceed the default duration
+export const maxDuration = 300
+
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
 
@@ -32,6 +35,59 @@ async function postJson(
     }
     return { ok: false, json }
   }
+}
+
+// A creative built on a just-published video post fails with Facebook's
+// transient "Something went wrong" (code 1/2) until the video finishes
+// processing. This resolves the REAL post id (video posts sometimes get a
+// feed id different from pageId_videoId) and waits until the object is ready.
+async function resolveBoostPost(
+  boostPostId: string,
+  userToken: string,
+): Promise<{ postId: string; ready: boolean }> {
+  const [pageId, objectId] = boostPostId.split('_')
+  let pageToken = userToken
+  try {
+    const pages = await getManageablePages(userToken)
+    pageToken = pages.find((p) => p.id === pageId)?.access_token || userToken
+  } catch {
+    /* page token is a nice-to-have */
+  }
+  const enc = encodeURIComponent(pageToken)
+
+  // Wait for video processing (poll up to ~50s)
+  for (let i = 0; i < 10; i++) {
+    try {
+      const res = await fetch(`${FACEBOOK_GRAPH_URL}/${objectId}?fields=status&access_token=${enc}`)
+      const json = await res.json()
+      const status: string | undefined = json?.status?.video_status
+      if (!res.ok || json.error || status === undefined) break // not a video - nothing to wait for
+      if (status === 'ready') break
+      if (status === 'error') return { postId: boostPostId, ready: false }
+      await sleep(5000)
+    } catch {
+      break
+    }
+  }
+
+  // Confirm the composite post id exists; if not, find the feed post that
+  // wraps this video (its attachment target id equals the video id)
+  try {
+    const check = await fetch(`${FACEBOOK_GRAPH_URL}/${boostPostId}?fields=id&access_token=${enc}`)
+    const checkJson = await check.json()
+    if (check.ok && checkJson.id) return { postId: boostPostId, ready: true }
+    const feed = await fetch(
+      `${FACEBOOK_GRAPH_URL}/${pageId}/posts?fields=id,attachments{target{id}}&limit=25&access_token=${enc}`,
+    )
+    const feedJson = await feed.json()
+    for (const post of feedJson.data || []) {
+      const targets = (post.attachments?.data || []).map((a: { target?: { id?: string } }) => a.target?.id)
+      if (targets.includes(objectId)) return { postId: post.id, ready: true }
+    }
+  } catch {
+    /* fall through with the original id */
+  }
+  return { postId: boostPostId, ready: true }
 }
 
 // Campaign creation by duplication: deep-copy an existing campaign (Graph
@@ -151,6 +207,16 @@ export async function POST(request: Request) {
     if (boostPostId) {
       const postPageId = boostPostId.split('_')[0]
 
+      // Fresh video posts need processing time + sometimes a different feed id
+      const resolved = await resolveBoostPost(boostPostId, accessToken)
+      if (!resolved.ready) {
+        return NextResponse.json(
+          { error: 'Facebook could not process the video for this post. Re-publish it and try again.' },
+          { status: 502 },
+        )
+      }
+      const storyId = resolved.postId
+
       // Source config: campaign + its ad sets
       const srcRes = await fetch(
         `${FACEBOOK_GRAPH_URL}/${campaignId}?fields=account_id,lifetime_budget,adsets.limit(100){targeting,optimization_goal,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,promoted_object,destination_type,end_time,adset_schedule,pacing_type}&access_token=${accessToken}`,
@@ -200,7 +266,7 @@ export async function POST(request: Request) {
       const isMessaging = srcAdsets.some((a) => /MESSENGER|WHATSAPP|MESSAGING/.test(a.destination_type || ''))
       const creativeBody: Record<string, unknown> = {
         name: `${commonName} - boosted post`,
-        object_story_id: boostPostId,
+        object_story_id: storyId,
         access_token: accessToken,
       }
       if (isMessaging) {
@@ -219,10 +285,25 @@ export async function POST(request: Request) {
           },
         }
       }
-      const creative = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, creativeBody)
+      // Codes 1/2 = Facebook's transient "Something went wrong. Please try
+      // again later" - common right after publishing while the post settles.
+      // Retry those too, on top of postJson's built-in rate-limit retries.
+      let creative = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, creativeBody)
+      for (const wait of [8000, 20000]) {
+        if (creative.ok) break
+        const code = creative.json.error?.code
+        if (code !== 1 && code !== 2) break
+        await sleep(wait)
+        creative = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, creativeBody)
+      }
       if (!creative.ok) {
+        const code = creative.json.error?.code
+        const hint =
+          code === 1 || code === 2
+            ? ' The post may still be settling on Facebook - wait a minute and hit Duplicate again.'
+            : ''
         return NextResponse.json(
-          { error: fbDetail(creative.json.error) || 'Could not create the boost creative', newCampaignId },
+          { error: (fbDetail(creative.json.error) || 'Could not create the boost creative') + hint, newCampaignId },
           { status: 502 },
         )
       }
