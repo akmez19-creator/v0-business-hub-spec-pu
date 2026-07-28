@@ -107,9 +107,9 @@ export async function POST(request: Request) {
 
     const typeLabel =
       postType === 'fb_ad'
-        ? 'a Facebook ad post (short, scroll-stopping, conversion focused)'
+        ? 'a Facebook ad post (scroll-stopping, conversion focused, rich and complete)'
         : postType === 'reel_caption'
-          ? 'an Instagram/Facebook reel caption (punchy, hooks in first line)'
+          ? 'a Facebook/Instagram post caption (detailed and beautiful: strong hook, benefit-rich body, price and delivery highlighted)'
           : 'a product description for a catalog page (clear, benefit-led)'
 
     const langLabel =
@@ -120,14 +120,20 @@ export async function POST(request: Request) {
           : 'English'
 
     const text = await generateCopy(
-      'You write social commerce copy for a Mauritius-based delivery e-commerce brand selling household gadgets. ' +
+      'You are a top-tier social commerce copywriter for a Mauritius-based delivery e-commerce brand selling household gadgets. ' +
         'Prices are in Mauritian Rupees written like "Rs 675". Delivery is offered across the island, cash on delivery. ' +
+        'Your captions are DETAILED and BEAUTIFUL - never thin or generic. Every post must:\n' +
+        '- Open with a scroll-stopping hook that names the deal or the dream outcome\n' +
+        '- Sell with 4-6 benefit lines, each starting with a fitting emoji as a bullet (e.g. "✅", "✨", "🔥", "💪", "📦"), each line a concrete benefit or use case - paint the picture of daily life with the product\n' +
+        '- Include a highlighted price line (e.g. "💰 Only Rs 675 - Cash on Delivery") and a delivery line ("🚚 Fast delivery all over Mauritius")\n' +
+        '- Add one urgency or trust line when stock info is available (e.g. limited stock, X units left, customer favourite)\n' +
+        '- Close with a warm, clear call to action to order via inbox or WhatsApp\n' +
         'OUTPUT FORMAT - follow exactly, it is parsed by the UI:\n' +
-        'HOOK: <one attention line>\n' +
-        'BODY: <2-5 short lines selling the product, one idea per line>\n' +
-        'CTA: <one action line, e.g. order via inbox / WhatsApp>\n' +
-        'HASHTAGS: <5-8 hashtags space separated>\n' +
-        'Plain text only, no markdown. Emojis welcome where natural.',
+        'HOOK: <one attention line with 1-2 emojis>\n' +
+        'BODY: <4-6 emoji-bulleted benefit lines, then the price line, delivery line, and urgency/trust line - one idea per line, blank line between groups>\n' +
+        'CTA: <one warm action line, e.g. order via inbox / WhatsApp>\n' +
+        'HASHTAGS: <6-10 hashtags space separated>\n' +
+        'Plain text only, no markdown. Emojis are required as bullets and accents, but never more than two per line.',
         `Write ${typeLabel} in ${langLabel}, tone: ${tone}.\n` +
         `Product: ${productName}${productPrice ? ` - price ${productPrice}` : ''}.` +
         (inventoryFacts ? `\n\nInventory facts (use these, do not invent specs):\n${inventoryFacts}` : '') +
