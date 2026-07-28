@@ -201,8 +201,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'commonName is too long (max 200 chars)' }, { status: 400 })
     }
 
-    const fbDetail = (err: { error_user_title?: string; error_user_msg?: string; message?: string } | undefined) =>
-      [err?.error_user_title, err?.error_user_msg].filter(Boolean).join(': ') || err?.message || ''
+    const fbDetail = (err: { error_user_title?: string; error_user_msg?: string; message?: string; error_subcode?: number } | undefined) => {
+      // Posts published by a development-mode Meta app CANNOT be used in ads.
+      // Facebook reports this as misleading errors ("Post has no media",
+      // "Page post can't be used", "Invalid destination type") depending on
+      // where validation trips - map them all to the real, actionable cause.
+      if (
+        err?.error_subcode === 1885183 ||
+        err?.error_subcode === 1487472 ||
+        /development mode/i.test(err?.error_user_msg || '')
+      ) {
+        return (
+          'This post was published by your Meta app while it is in Development Mode, so Facebook refuses to run ads on it. ' +
+          'Fix: open developers.facebook.com > your app > switch the app from Development to Live mode. ' +
+          'Posts published after the switch will be boostable.'
+        )
+      }
+      return [err?.error_user_title, err?.error_user_msg].filter(Boolean).join(': ') || err?.message || ''
+    }
 
     // ---- BOOST PATH: rebuild instead of deep copy -------------------------
     // Deep copy drags the source ads' creatives along, and Facebook rejects
@@ -362,6 +378,9 @@ export async function POST(request: Request) {
         if (as.destination_type) adsetBody.destination_type = as.destination_type
         if (as.adset_schedule) adsetBody.adset_schedule = as.adset_schedule
         if (as.pacing_type) adsetBody.pacing_type = as.pacing_type
+        // Facebook requires day_parting pacing whenever a schedule is set,
+        // but doesn't always report pacing_type on the source ad set
+        else if (as.adset_schedule) adsetBody.pacing_type = ['day_parting']
 
         const asResult = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adsets`, adsetBody)
         if (!asResult.ok || !asResult.json.id) {
