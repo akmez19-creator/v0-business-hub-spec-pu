@@ -67,6 +67,8 @@ export function CampaignCreatorTab({
     commonName: string
     renamed: { campaign: number; adSets: number; ads: number }
     boosted?: { post: string; ads: number; error?: string }
+    verified?: { adSets: number; ads: number }
+    adsManagerUrl?: string
     failures: number
   } | null>(null)
 
@@ -320,6 +322,11 @@ export function CampaignCreatorTab({
                   {result.boosted.ads} ad(s) boosting the selected post
                 </Badge>
               )}
+              {result.verified && (
+                <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+                  Verified on Facebook: {result.verified.adSets} ad set(s), {result.verified.ads} ad(s)
+                </Badge>
+              )}
               {result.boosted?.error && (
                 <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">
                   Boost failed: {result.boosted.error.slice(0, 80)}
@@ -335,15 +342,20 @@ export function CampaignCreatorTab({
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              Review it in Facebook Ads Manager, then activate it from the Ads wall when ready.
+              Review it in Facebook Ads Manager, then activate it from the Ads wall when ready. If the Ads tab looks
+              empty there, switch the filter from &quot;Had delivery&quot; to &quot;All ads&quot; {'\u2014'} fresh
+              paused ads are hidden by the default filter.
             </p>
             <Button variant="outline" size="sm" asChild className="self-start">
               <a
-                href={`https://adsmanager.facebook.com/adsmanager/manage/campaigns?selected_campaign_ids=${result.newCampaignId}`}
+                href={
+                  result.adsManagerUrl ||
+                  `https://adsmanager.facebook.com/adsmanager/manage/campaigns?selected_campaign_ids=${result.newCampaignId}`
+                }
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Open in FB Ads Manager <ExternalLink className="ml-1 h-3 w-3" />
+                Open the new ads in FB Ads Manager <ExternalLink className="ml-1 h-3 w-3" />
               </a>
             </Button>
           </div>

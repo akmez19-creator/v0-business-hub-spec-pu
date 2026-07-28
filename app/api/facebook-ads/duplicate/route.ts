@@ -371,12 +371,33 @@ export async function POST(request: Request) {
         )
       }
 
+      // Verify by reading the tree back from Facebook - the success screen
+      // reports CONFIRMED counts, not just what the create calls claimed
+      let verified: { adSets: number; ads: number } | undefined
+      try {
+        const check = await fetch(
+          `${FACEBOOK_GRAPH_URL}/${newCampaignId}?fields=adsets.limit(100){id,ads.limit(10){id}}&access_token=${accessToken}`,
+        )
+        const checkJson = await check.json()
+        if (check.ok && !checkJson.error) {
+          const sets: Array<{ ads?: { data?: unknown[] } }> = checkJson.adsets?.data || []
+          verified = {
+            adSets: sets.length,
+            ads: sets.reduce((n, s) => n + (s.ads?.data?.length || 0), 0),
+          }
+        }
+      } catch {
+        /* verification is best-effort */
+      }
+
       return NextResponse.json({
         success: true,
         newCampaignId,
         commonName,
         renamed: { campaign: 1, adSets: adSetCount, ads: adCount },
         boosted: { post: boostPostId, ads: adCount, error: lastError || undefined },
+        verified,
+        adsManagerUrl: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${accountId}&selected_campaign_ids=${newCampaignId}`,
         failures,
         status: 'PAUSED',
       })
