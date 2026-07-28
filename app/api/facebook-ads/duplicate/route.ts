@@ -70,22 +70,28 @@ async function resolveBoostPost(
     }
   }
 
-  // Confirm the composite post id exists; if not, find the feed post that
-  // wraps this video (its attachment target id equals the video id)
-  try {
-    const check = await fetch(`${FACEBOOK_GRAPH_URL}/${boostPostId}?fields=id&access_token=${enc}`)
-    const checkJson = await check.json()
-    if (check.ok && checkJson.id) return { postId: boostPostId, ready: true }
-    const feed = await fetch(
-      `${FACEBOOK_GRAPH_URL}/${pageId}/posts?fields=id,attachments{target{id}}&limit=25&access_token=${enc}`,
-    )
-    const feedJson = await feed.json()
-    for (const post of feedJson.data || []) {
-      const targets = (post.attachments?.data || []).map((a: { target?: { id?: string } }) => a.target?.id)
-      if (targets.includes(objectId)) return { postId: post.id, ready: true }
+  // ALWAYS prefer the real feed post id over the composite pageId_videoId.
+  // Verified live: creatives built on the composite fail with "Page post
+  // can't be used" (subcode 1487472) or "Post has no media", while the feed
+  // post that wraps the video (attachment target id == video id) works. The
+  // composite resolves as an object, so existence checks are NOT sufficient.
+  // The feed entry can lag a few seconds behind publishing - poll for it.
+  for (let i = 0; i < 6; i++) {
+    try {
+      const feed = await fetch(
+        `${FACEBOOK_GRAPH_URL}/${pageId}/posts?fields=id,attachments{target{id}}&limit=25&access_token=${enc}`,
+      )
+      const feedJson = await feed.json()
+      if (feedJson.error) break
+      for (const post of feedJson.data || []) {
+        if (post.id === boostPostId) return { postId: post.id, ready: true }
+        const targets = (post.attachments?.data || []).map((a: { target?: { id?: string } }) => a.target?.id)
+        if (targets.includes(objectId)) return { postId: post.id, ready: true }
+      }
+      await sleep(5000)
+    } catch {
+      break
     }
-  } catch {
-    /* fall through with the original id */
   }
   return { postId: boostPostId, ready: true }
 }
@@ -295,6 +301,21 @@ export async function POST(request: Request) {
         if (code !== 1 && code !== 2) break
         await sleep(wait)
         creative = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, creativeBody)
+      }
+      // "Post has no media" / "Page post can't be used" (subcode 1487472):
+      // the id points at the raw video object, not the boostable feed post.
+      // The feed entry may have appeared by now - re-resolve once and retry.
+      if (!creative.ok) {
+        const sub = creative.json.error?.error_subcode
+        const msg = `${creative.json.error?.error_user_title || ''} ${creative.json.error?.message || ''}`
+        if (sub === 1487472 || /no media|can't be used|cannot be used/i.test(msg)) {
+          await sleep(8000)
+          const again = await resolveBoostPost(boostPostId, accessToken)
+          if (again.postId !== storyId) {
+            creativeBody.object_story_id = again.postId
+            creative = await postJson(`${FACEBOOK_GRAPH_URL}/act_${accountId}/adcreatives`, creativeBody)
+          }
+        }
       }
       if (!creative.ok) {
         const code = creative.json.error?.code
