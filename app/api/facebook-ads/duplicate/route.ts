@@ -364,9 +364,12 @@ export async function POST(request: Request) {
           billing_event: as.billing_event,
           status: 'PAUSED',
           start_time: startTime,
-          // The post's page replaces the source page so the boosted post and
-          // the promoted page always match (Facebook requires this)
-          promoted_object: { page_id: postPageId },
+          // Copy the FULL promoted_object from the source (whatsapp number,
+          // etc.) - dropping whatsapp_phone_number on a WhatsApp-destination
+          // ad set makes Facebook accept the ad but NEVER deliver it (zero
+          // spend). Only page_id is overridden so the boosted post and the
+          // promoted page always match (Facebook requires this).
+          promoted_object: { ...(as.promoted_object || {}), page_id: postPageId },
           access_token: accessToken,
         }
         if (as.end_time) adsetBody.end_time = as.end_time
