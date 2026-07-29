@@ -9,6 +9,55 @@ toggleBtn.innerHTML = '<span>A</span>';
 toggleBtn.title = 'Open Akmez Quick Order';
 document.body.appendChild(toggleBtn);
 
+// ===== Idle tuck-away: after 4s untouched, slide halfway off the edge =====
+let akmezIdleTimer = null;
+function akmezArmIdle() {
+  toggleBtn.classList.remove('akmez-idle');
+  clearTimeout(akmezIdleTimer);
+  akmezIdleTimer = setTimeout(() => toggleBtn.classList.add('akmez-idle'), 4000);
+}
+toggleBtn.addEventListener('mouseenter', akmezArmIdle);
+toggleBtn.addEventListener('focus', akmezArmIdle);
+akmezArmIdle();
+
+// ===== Drag the launcher up/down the edge; position is remembered =====
+// A real click (< 6px movement) still toggles the panel as before.
+let akmezDragMoved = false;
+(function initToggleDrag() {
+  let startY = 0, startBottom = 0, dragging = false;
+  chrome.storage.local.get(['toggleBottom'], s => {
+    if (typeof s.toggleBottom === 'number') {
+      toggleBtn.style.bottom = Math.min(Math.max(s.toggleBottom, 8), window.innerHeight - 46) + 'px';
+    }
+  });
+  toggleBtn.addEventListener('pointerdown', e => {
+    dragging = true; akmezDragMoved = false;
+    startY = e.clientY;
+    startBottom = parseInt(getComputedStyle(toggleBtn).bottom, 10) || 20;
+    toggleBtn.setPointerCapture(e.pointerId);
+    clearTimeout(akmezIdleTimer);
+    toggleBtn.classList.remove('akmez-idle');
+  });
+  toggleBtn.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dy = startY - e.clientY;
+    if (Math.abs(dy) > 6) akmezDragMoved = true;
+    if (!akmezDragMoved) return;
+    toggleBtn.classList.add('akmez-dragging');
+    const next = Math.min(Math.max(startBottom + dy, 8), window.innerHeight - 46);
+    toggleBtn.style.bottom = next + 'px';
+  });
+  toggleBtn.addEventListener('pointerup', e => {
+    if (!dragging) return;
+    dragging = false;
+    toggleBtn.classList.remove('akmez-dragging');
+    if (akmezDragMoved) {
+      chrome.storage.local.set({ toggleBottom: parseInt(toggleBtn.style.bottom, 10) || 20 });
+    }
+    akmezArmIdle();
+  });
+})();
+
 // Update toggle button based on auth state
 function updateToggleButton() {
   chrome.storage.local.get(['authToken'], stored => {
@@ -80,11 +129,20 @@ document.body.appendChild(widget);
 const style = document.createElement('style');
 style.textContent = `
 #akmez-widget, #akmez-widget *{box-sizing:border-box;}
-#akmez-toggle{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:linear-gradient(135deg,#6b7280,#4b5563);border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483646;box-shadow:0 4px 20px rgba(107,114,128,0.5);font-family:sans-serif;transition:all 0.3s ease;}
-#akmez-toggle:hover{transform:scale(1.1);}
-#akmez-toggle span{color:white;font-size:24px;font-weight:800;}
-#akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 4px 20px rgba(249,115,22,0.5);}
-#akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:14px;height:14px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
+/* Compact launcher: 38px (down from 56px). After a few idle seconds it tucks
+   itself halfway off the right edge at reduced opacity so it never blocks
+   page content - hovering or focusing it brings it back instantly. It is
+   also draggable up/down along the edge (position is remembered). */
+#akmez-toggle{position:fixed;bottom:20px;right:12px;width:38px;height:38px;background:linear-gradient(135deg,#6b7280,#4b5563);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:grab;z-index:2147483646;box-shadow:0 3px 12px rgba(107,114,128,0.45);font-family:sans-serif;transition:transform 0.25s ease,opacity 0.25s ease,box-shadow 0.25s ease;touch-action:none;}
+#akmez-toggle:hover{transform:scale(1.08);}
+#akmez-toggle span{color:white;font-size:16px;font-weight:800;pointer-events:none;}
+#akmez-toggle.logged-in{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 3px 12px rgba(249,115,22,0.45);}
+#akmez-toggle.logged-in::after{content:'';position:absolute;top:-2px;right:-2px;width:10px;height:10px;background:#10b981;border-radius:50%;border:2px solid #1a1a2e;}
+#akmez-toggle.akmez-idle{transform:translateX(60%);opacity:0.4;}
+#akmez-toggle.akmez-idle:hover,#akmez-toggle.akmez-idle:focus-visible{transform:translateX(0) scale(1.08);opacity:1;}
+#akmez-toggle.akmez-dragging{cursor:grabbing;transition:none;opacity:1;}
+/* Never tuck away while the cut-off alert is pulsing - it must stay visible */
+#akmez-toggle.cutoff-alert.akmez-idle{transform:none;opacity:1;}
 /* Compact by default (~400px on a 1080p screen, matching the intended look) and
    scales proportionally with screen resolution via a viewport-relative width:
    21vw = ~403px at 1920px wide, ~538px at 2560px, capped at 560px on 4K, and
@@ -616,6 +674,7 @@ window.addEventListener('resize', () => {
 // Toggle widget. 'flex' (not 'block') keeps the column layout so the body
 // area gets flex:1 + overflow-y:auto and scrolls instead of overflowing
 toggleBtn.addEventListener('click', () => {
+  if (akmezDragMoved) { akmezDragMoved = false; return; } // was a drag, not a click
   widget.style.display = widget.style.display === 'none' ? 'flex' : 'none';
   if (widget.style.display === 'flex') { clampWidget(); loadData(); }
 });
