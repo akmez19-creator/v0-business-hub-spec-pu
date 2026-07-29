@@ -302,6 +302,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true; // Keep channel open for async response
 });
 
+// ===== Keyboard shortcut: toggle the widget on the active tab =====
+// Declared in manifest.json "commands"; user can rebind it at
+// chrome://extensions/shortcuts (default Alt+A).
+if (chrome.commands) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command !== 'toggle-widget') return;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { action: 'toggleWidget' });
+    } catch (e) {
+      // No active tab or content script not injected (e.g. chrome:// pages)
+    }
+  });
+}
+
 // ===== Idle detection: 5 minutes of inactivity = auto clock-out + logout =====
 const IDLE_SECONDS = 300; // 5 minutes
 

@@ -621,6 +621,12 @@ toggleBtn.addEventListener('click', () => {
 });
 document.getElementById('akmez-close').addEventListener('click', () => widget.style.display = 'none');
 
+// Keyboard shortcut (default Alt+A, rebindable at chrome://extensions/shortcuts):
+// the background script relays the command here - same behavior as clicking "A"
+chrome.runtime.onMessage.addListener((request) => {
+  if (request && request.action === 'toggleWidget') toggleBtn.click();
+});
+
 // Settings panel
 document.getElementById('akmez-settings').addEventListener('click', () => renderSettings());
 
