@@ -81,9 +81,12 @@ type PromoLayoutId = (typeof PROMO_LAYOUTS)[number]['id']
 // machine until the user downloads the result.
 export function ReelsStudioTab({
   productName = '',
+  productImage = null,
   onBoostPost,
 }: {
   productName?: string
+  /** Inventory photo for this product - powers the lens video search */
+  productImage?: string | null
   /** Called when the user wants to boost the post they just published */
   onBoostPost?: (boost: { pageId: string; postId: string }) => void
 }) {
@@ -972,7 +975,11 @@ export function ReelsStudioTab({
   return (
     <div className="flex flex-col gap-5">
       {/* ---- Search product videos on TikTok ---- */}
-      <VideoSearchPanel defaultQuery={productName} onUseClip={(file) => addFiles([file])} />
+      <VideoSearchPanel
+        defaultQuery={productName}
+        productImage={productImage}
+        onUseClip={(file) => addFiles([file])}
+      />
 
       {/* ---- Fetch from link ---- */}
       <section className="flex flex-col gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 p-3">

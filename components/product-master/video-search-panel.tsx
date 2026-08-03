@@ -3,7 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Download, ExternalLink, Eye, Heart, Loader2, Play, Plus, Search } from 'lucide-react'
+import {
+  Download,
+  ExternalLink,
+  Eye,
+  Heart,
+  ImageIcon,
+  Loader2,
+  Play,
+  Plus,
+  ScanSearch,
+  Search,
+  Upload,
+} from 'lucide-react'
 
 export type VideoHit = {
   id: string
@@ -16,6 +28,7 @@ export type VideoHit = {
   pageUrl: string
   plays: number
   likes: number
+  score?: number
 }
 
 const inlineUrl = (src: string) =>
@@ -35,6 +48,17 @@ const clock = (s: number) => {
 
 const safeName = (hit: VideoHit) =>
   `tiktok-${(hit.title || 'video').replace(/[^\w\- ]+/g, '').trim().slice(0, 40) || 'video'}.mp4`
+
+// Real reverse-image engines. They accept a public image URL, so these open
+// the actual product photo as a visual search on each platform.
+const lensLinks = (url: string) => [
+  { name: 'Google Lens', href: `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(url)}` },
+  {
+    name: 'Bing Visual',
+    href: `https://www.bing.com/images/search?view=detailv2&iss=sbi&form=SBIVSP&q=imgurl:${encodeURIComponent(url)}`,
+  },
+  { name: 'Yandex', href: `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(url)}` },
+]
 
 // Resolve a fresh watermark-free HD stream for a search hit by handing its
 // TikTok page URL to the existing resolver. Falls back to the search result's
@@ -57,11 +81,15 @@ async function resolveStream(hit: VideoHit): Promise<string> {
 
 export function VideoSearchPanel({
   defaultQuery = '',
+  productImage = null,
   onUseClip,
 }: {
   defaultQuery?: string
+  /** Product photo from inventory - powers the lens search */
+  productImage?: string | null
   onUseClip?: (file: File) => void
 }) {
+  const [mode, setMode] = useState<'text' | 'image'>('text')
   const [query, setQuery] = useState(defaultQuery)
   const [results, setResults] = useState<VideoHit[]>([])
   const [cursor, setCursor] = useState(0)
@@ -74,34 +102,96 @@ export function VideoSearchPanel({
   const [note, setNote] = useState('')
   const lastQuery = useRef('')
 
-  const runSearch = useCallback(async (q: string, next = false) => {
-    const term = q.trim()
-    if (term.length < 2) return
+  // Lens state
+  const [lensImage, setLensImage] = useState<string | null>(productImage)
+  const [lensUpload, setLensUpload] = useState<string | null>(null) // base64 data URL
+  const [detected, setDetected] = useState<{ label: string; queries: string[] } | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setLensImage(productImage)
+  }, [productImage])
+
+  const runSearch = useCallback(
+    async (q: string, next = false) => {
+      const term = q.trim()
+      if (term.length < 2) return
+      setMode('text')
+      setLoading(true)
+      setError('')
+      if (!next) {
+        setResults([])
+        setPlaying(null)
+        setDetected(null)
+      }
+      try {
+        const res = await fetch('/api/product-master/video-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: term, cursor: next ? cursor : 0 }),
+        })
+        const json = await res.json()
+        if (!json.success) throw new Error(json.error || 'Search failed')
+        setResults((prev) => (next ? [...prev, ...json.results] : json.results))
+        setCursor(json.cursor || 0)
+        setHasMore(Boolean(json.hasMore))
+        lastQuery.current = term
+        setSearched(true)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Search failed')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [cursor],
+  )
+
+  // Lens search: send the product photo, get back what it is plus videos of
+  // that same kind of product ranked by how well they match
+  const runLensSearch = useCallback(async () => {
+    if (!lensUpload && !lensImage) return
+    setMode('image')
     setLoading(true)
     setError('')
-    if (!next) {
-      setResults([])
-      setPlaying(null)
-    }
+    setResults([])
+    setPlaying(null)
+    setDetected(null)
+    setHasMore(false)
     try {
-      const res = await fetch('/api/product-master/video-search', {
+      const res = await fetch('/api/product-master/image-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: term, cursor: next ? cursor : 0 }),
+        body: JSON.stringify({
+          ...(lensUpload ? { imageBase64: lensUpload } : { imageUrl: lensImage }),
+          productName: defaultQuery,
+        }),
       })
       const json = await res.json()
-      if (!json.success) throw new Error(json.error || 'Search failed')
-      setResults((prev) => (next ? [...prev, ...json.results] : json.results))
-      setCursor(json.cursor || 0)
-      setHasMore(Boolean(json.hasMore))
-      lastQuery.current = term
+      if (!json.success) throw new Error(json.error || 'Image search failed')
+      setResults(json.results || [])
+      setDetected({ label: json.label || '', queries: json.queries || [] })
       setSearched(true)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed')
+      setError(e instanceof Error ? e.message : 'Image search failed')
     } finally {
       setLoading(false)
     }
-  }, [cursor])
+  }, [lensUpload, lensImage, defaultQuery])
+
+  const onPickFile = (file?: File | null) => {
+    if (!file) return
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Image is too large - use one under 8MB')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setLensUpload(String(reader.result))
+      setLensImage(String(reader.result))
+      setError('')
+    }
+    reader.readAsDataURL(file)
+  }
 
   // Auto-run the first search for the product this studio was opened with
   useEffect(() => {
@@ -153,67 +243,206 @@ export function VideoSearchPanel({
     }
   }
 
+  const publicImage = lensImage && /^https?:\/\//i.test(lensImage) ? lensImage : null
+
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
       <div>
         <p className="flex items-center gap-2 text-sm font-semibold">
           <Search className="h-4 w-4 text-amber-500" />
-          Find product videos on TikTok
+          Find product videos
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Search real TikTok videos for this product, preview them here, then download or drop them straight
-          into your feed to cut and brand.
+          Search by name, or run the product photo through image search to find videos of the exact same
+          product. Preview here, then download or drop straight into your feed.
         </p>
       </div>
 
-      <div className="flex gap-2">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) {
-              e.preventDefault()
-              runSearch(query)
-            }
-          }}
-          placeholder="e.g. orthopedic leg pillow"
-          className="flex-1"
-          aria-label="Search product videos"
-        />
-        <Button onClick={() => runSearch(query)} disabled={loading || query.trim().length < 2}>
-          {loading && results.length === 0 ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Search className="mr-1.5 h-3.5 w-3.5" />
-          )}
-          Search
-        </Button>
+      {/* Mode switch */}
+      <div className="flex w-fit gap-1 rounded-lg border border-border bg-background p-1">
+        <button
+          type="button"
+          onClick={() => setMode('text')}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+            mode === 'text' ? 'bg-amber-500 text-black' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Search className="h-3.5 w-3.5" />
+          By name
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('image')}
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+            mode === 'image' ? 'bg-amber-500 text-black' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <ScanSearch className="h-3.5 w-3.5" />
+          By product photo
+        </button>
       </div>
 
-      {/* Platforms without a public search API - deep-link out instead of
-          pretending we can list their videos here */}
-      {query.trim().length >= 2 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Also browse:</span>
-          {[
-            { name: 'Instagram', href: `https://www.instagram.com/explore/tags/${encodeURIComponent(query.trim().replace(/\s+/g, ''))}/` },
-            { name: 'Temu', href: `https://www.temu.com/search_result.html?search_key=${encodeURIComponent(query.trim())}` },
-            { name: 'YouTube', href: `https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}&sp=EgIYAQ%253D%253D` },
-          ].map((p) => (
-            <a
-              key={p.name}
-              href={p.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {p.name}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          ))}
-          <span className="text-xs text-muted-foreground">
-            {'\u2014'} paste any link you find into the box below
-          </span>
+      {mode === 'text' ? (
+        <>
+          <div className="flex gap-2">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) {
+                  e.preventDefault()
+                  runSearch(query)
+                }
+              }}
+              placeholder="e.g. orthopedic leg pillow"
+              className="flex-1"
+              aria-label="Search product videos"
+            />
+            <Button onClick={() => runSearch(query)} disabled={loading || query.trim().length < 2}>
+              {loading && results.length === 0 ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Search
+            </Button>
+          </div>
+
+          {/* Platforms without a public search API - deep-link out instead of
+              pretending we can list their videos here */}
+          {query.trim().length >= 2 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Also browse:</span>
+              {[
+                { name: 'Instagram', href: `https://www.instagram.com/explore/tags/${encodeURIComponent(query.trim().replace(/\s+/g, ''))}/` },
+                { name: 'Temu', href: `https://www.temu.com/search_result.html?search_key=${encodeURIComponent(query.trim())}` },
+                { name: 'YouTube', href: `https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}&sp=EgIYAQ%253D%253D` },
+              ].map((p) => (
+                <a
+                  key={p.name}
+                  href={p.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {p.name}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ))}
+              <span className="text-xs text-muted-foreground">
+                {'\u2014'} paste any link you find into the box below
+              </span>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+              {lensImage ? (
+                <img
+                  src={lensImage || '/placeholder.svg'}
+                  alt="Product being searched"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex min-w-[220px] flex-1 flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {lensImage
+                  ? 'This photo is read by AI to work out exactly what the product is, then videos of that same product are pulled and ranked by how well they match.'
+                  : 'This product has no photo saved. Upload one to search by image.'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={runLensSearch} disabled={loading || !lensImage}>
+                  {loading ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ScanSearch className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Search by this photo
+                </Button>
+                <Button variant="outline" onClick={() => fileRef.current?.click()}>
+                  <Upload className="mr-1.5 h-3.5 w-3.5" />
+                  Use another photo
+                </Button>
+                {productImage && lensUpload && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setLensUpload(null)
+                      setLensImage(productImage)
+                    }}
+                  >
+                    Reset
+                  </Button>
+                )}
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  onPickFile(e.target.files?.[0])
+                  e.target.value = ''
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Genuine reverse-image search on the big engines, opened with the
+              real product photo */}
+          {publicImage && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Reverse image search:</span>
+              {lensLinks(publicImage).map((l) => (
+                <a
+                  key={l.name}
+                  href={l.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {l.name}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ))}
+            </div>
+          )}
+
+          {detected && (
+            <div className="rounded-lg border border-border bg-background/60 p-2.5">
+              <p className="text-xs">
+                <span className="text-muted-foreground">Identified as</span>{' '}
+                <span className="font-semibold text-amber-400">{detected.label || 'this product'}</span>
+              </p>
+              {detected.queries.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-muted-foreground">Searched:</span>
+                  {detected.queries.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => {
+                        setQuery(q)
+                        runSearch(q)
+                      }}
+                      className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20"
+                      title="Run this as a normal search"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -221,7 +450,7 @@ export function VideoSearchPanel({
       {note && <p className="text-xs text-amber-400">{note}</p>}
 
       {searched && !loading && results.length === 0 && !error && (
-        <p className="text-xs text-muted-foreground">No videos found for that search. Try a shorter term.</p>
+        <p className="text-xs text-muted-foreground">No videos found. Try a shorter term or another photo.</p>
       )}
 
       {results.length > 0 && (
@@ -263,6 +492,11 @@ export function VideoSearchPanel({
                     {hit.duration > 0 && (
                       <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white">
                         {clock(hit.duration)}
+                      </span>
+                    )}
+                    {mode === 'image' && (hit.score ?? 0) > 0 && (
+                      <span className="absolute left-1.5 top-1.5 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-black">
+                        Match
                       </span>
                     )}
                   </>
@@ -332,7 +566,7 @@ export function VideoSearchPanel({
         </div>
       )}
 
-      {hasMore && results.length > 0 && (
+      {mode === 'text' && hasMore && results.length > 0 && (
         <Button
           variant="outline"
           size="sm"

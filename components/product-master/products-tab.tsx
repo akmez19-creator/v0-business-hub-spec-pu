@@ -29,7 +29,7 @@ import { ManagePosts } from '@/components/product-master/manage-posts'
 // A row tool click: which tool, for which product
 export interface ToolRequest {
   tool: 'ai-posts' | 'reels' | 'frames' | 'campaigns'
-  product: { id: string; name: string }
+  product: { id: string; name: string; image?: string | null }
   /** Pre-selected page + post when arriving from "Boost this post" */
   boost?: { pageId: string; postId: string }
 }
@@ -330,7 +330,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                             aria-label={`${label} for ${p.name}`}
                             onClick={(e) => {
                               e.stopPropagation()
-                              onOpenTool({ tool, product: { id: p.id, name: p.name } })
+                              onOpenTool({ tool, product: { id: p.id, name: p.name, image: p.image_url } })
                             }}
                           >
                             <Icon className={`h-3.5 w-3.5 ${color}`} />

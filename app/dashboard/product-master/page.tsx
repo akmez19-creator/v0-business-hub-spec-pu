@@ -119,6 +119,7 @@ export default function ProductMasterPage() {
             {request?.tool === 'reels' && (
               <ReelsStudioTab
                 productName={productName}
+                productImage={request.product.image ?? null}
                 onBoostPost={(boost) =>
                   // Seamless handoff: swap this dialog for the Campaign
                   // Creator pre-filled with the just-published post
