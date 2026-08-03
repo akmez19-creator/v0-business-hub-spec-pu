@@ -4,11 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Check,
   Download,
   ExternalLink,
   Eye,
   Heart,
   ImageIcon,
+  Images,
   Loader2,
   Play,
   Plus,
@@ -29,6 +31,17 @@ export type VideoHit = {
   plays: number
   likes: number
   score?: number
+}
+
+export type ImageHit = {
+  id: string
+  title: string
+  image: string
+  thumbnail: string
+  width: number
+  height: number
+  source: string
+  pageUrl: string
 }
 
 const inlineUrl = (src: string) =>
@@ -104,12 +117,25 @@ export function VideoSearchPanel({
 
   // Lens state
   const [lensImage, setLensImage] = useState<string | null>(productImage)
+  const [lensPreview, setLensPreview] = useState<string | null>(productImage)
   const [lensUpload, setLensUpload] = useState<string | null>(null) // base64 data URL
+  const [lensSource, setLensSource] = useState<string>('')
   const [detected, setDetected] = useState<{ label: string; queries: string[] } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // "Find a better photo" state - a supplier thumbnail with promo text baked in
+  // often gets misread, so a cleaner packshot can be swapped in first
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickQuery, setPickQuery] = useState(defaultQuery)
+  const [pickResults, setPickResults] = useState<ImageHit[]>([])
+  const [pickLoading, setPickLoading] = useState(false)
+  const [pickSearched, setPickSearched] = useState(false)
+
   useEffect(() => {
     setLensImage(productImage)
+    setLensPreview(productImage)
+    setLensUpload(null)
+    setLensSource('')
   }, [productImage])
 
   const runSearch = useCallback(
@@ -178,6 +204,40 @@ export function VideoSearchPanel({
     }
   }, [lensUpload, lensImage, defaultQuery])
 
+  // Pull clean product photos off the web so a poor supplier thumbnail can be
+  // swapped for a proper packshot before the AI reads it
+  const runImageLookup = useCallback(async (q: string) => {
+    const term = q.trim()
+    if (term.length < 2) return
+    setPickLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/product-master/image-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: term }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Image lookup failed')
+      setPickResults(json.results || [])
+      setPickSearched(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Image lookup failed')
+    } finally {
+      setPickLoading(false)
+    }
+  }, [])
+
+  const chooseWebImage = (hit: ImageHit) => {
+    setLensImage(hit.image)
+    // Preview the thumbnail - the full-size original often blocks hotlinking
+    setLensPreview(inlineUrl(hit.thumbnail))
+    setLensUpload(null)
+    setLensSource(hit.source)
+    setPickerOpen(false)
+    setError('')
+  }
+
   const onPickFile = (file?: File | null) => {
     if (!file) return
     if (file.size > 8 * 1024 * 1024) {
@@ -188,6 +248,8 @@ export function VideoSearchPanel({
     reader.onload = () => {
       setLensUpload(String(reader.result))
       setLensImage(String(reader.result))
+      setLensPreview(String(reader.result))
+      setLensSource('')
       setError('')
     }
     reader.readAsDataURL(file)
@@ -339,9 +401,9 @@ export function VideoSearchPanel({
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-start gap-3">
             <div className="h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
-              {lensImage ? (
+              {lensPreview ? (
                 <img
-                  src={lensImage || '/placeholder.svg'}
+                  src={lensPreview || '/placeholder.svg'}
                   alt="Product being searched"
                   className="h-full w-full object-cover"
                 />
@@ -356,8 +418,13 @@ export function VideoSearchPanel({
               <p className="text-xs text-muted-foreground">
                 {lensImage
                   ? 'This photo is read by AI to work out exactly what the product is, then videos of that same product are pulled and ranked by how well they match.'
-                  : 'This product has no photo saved. Upload one to search by image.'}
+                  : 'This product has no photo saved. Pick a clearer one off the web, or upload one.'}
               </p>
+              {lensSource && (
+                <p className="text-[11px] text-amber-400">
+                  Using a photo from {lensSource} instead of the inventory thumbnail
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Button onClick={runLensSearch} disabled={loading || !lensImage}>
                   {loading ? (
@@ -367,16 +434,29 @@ export function VideoSearchPanel({
                   )}
                   Search by this photo
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const next = !pickerOpen
+                    setPickerOpen(next)
+                    if (next && !pickSearched) runImageLookup(pickQuery || defaultQuery)
+                  }}
+                >
+                  <Images className="mr-1.5 h-3.5 w-3.5" />
+                  Find a better photo
+                </Button>
                 <Button variant="outline" onClick={() => fileRef.current?.click()}>
                   <Upload className="mr-1.5 h-3.5 w-3.5" />
-                  Use another photo
+                  Upload
                 </Button>
-                {productImage && lensUpload && (
+                {productImage && (lensUpload || lensSource) && (
                   <Button
                     variant="ghost"
                     onClick={() => {
                       setLensUpload(null)
+                      setLensSource('')
                       setLensImage(productImage)
+                      setLensPreview(productImage)
                     }}
                   >
                     Reset
@@ -395,6 +475,76 @@ export function VideoSearchPanel({
               />
             </div>
           </div>
+
+          {/* Web photo picker - swap a scrappy supplier thumbnail for a clean
+              packshot so the vision pass has a fair shot at the right product */}
+          {pickerOpen && (
+            <div className="rounded-lg border border-border bg-background/60 p-3">
+              <p className="text-xs text-muted-foreground">
+                Pick a clearer photo of this product from the web, then search by it.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <Input
+                  value={pickQuery}
+                  onChange={(e) => setPickQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) {
+                      e.preventDefault()
+                      runImageLookup(pickQuery)
+                    }
+                  }}
+                  placeholder="Describe the product, e.g. 10m nylon clothesline rope"
+                  className="flex-1"
+                  aria-label="Search the web for product photos"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => runImageLookup(pickQuery)}
+                  disabled={pickLoading || pickQuery.trim().length < 2}
+                >
+                  {pickLoading ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Search className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Find
+                </Button>
+              </div>
+
+              {pickSearched && !pickLoading && pickResults.length === 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  No photos found. Try describing the product differently.
+                </p>
+              )}
+
+              {pickResults.length > 0 && (
+                <div className="mt-3 grid max-h-72 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 lg:grid-cols-6">
+                  {pickResults.map((img) => (
+                    <button
+                      key={img.id}
+                      type="button"
+                      onClick={() => chooseWebImage(img)}
+                      title={`${img.title} (${img.source})`}
+                      className="group relative aspect-square overflow-hidden rounded-md border border-border bg-muted transition-colors hover:border-amber-500"
+                    >
+                      <img
+                        src={inlineUrl(img.thumbnail) || '/placeholder.svg'}
+                        alt={img.title}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/55 opacity-0 transition-opacity group-hover:opacity-100">
+                        <span className="flex items-center gap-1 rounded-full bg-amber-500 px-2 py-1 text-[10px] font-bold text-black">
+                          <Check className="h-3 w-3" />
+                          Use this
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Genuine reverse-image search on the big engines, opened with the
               real product photo */}

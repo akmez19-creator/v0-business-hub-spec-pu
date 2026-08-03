@@ -164,7 +164,7 @@ export async function POST(request: Request) {
 // GET ?src=<resolved cdn url>&filename=x.mp4 -> proxy-stream the file so the
 // browser can save it despite CDN CORS. Host-allowlisted to prevent abuse.
 const ALLOWED_HOSTS =
-  /(\.fbcdn\.net|\.tiktokcdn[^/]*\.com|tikwm\.com|\.googlevideo\.com|\.akamaized\.net)$/i
+  /(\.fbcdn\.net|\.tiktokcdn[^/]*\.com|tikwm\.com|\.googlevideo\.com|\.akamaized\.net|\.mm\.bing\.net|duckduckgo\.com)$/i
 
 export async function GET(request: Request) {
   try {
