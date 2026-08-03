@@ -132,14 +132,31 @@ export function ReelsStudioTab({
     return () => ro.disconnect()
   })
 
+  // Alignment guides: while dragging, center lines appear and the element
+  // snaps to them within SNAP_PCT percent (Canva-style smart guides)
+  const SNAP_PCT = 2.5
+  const [guides, setGuides] = useState({ v: false, h: false })
+  const [dragging, setDragging] = useState(false)
+
   const onPreviewPointerMove = (e: React.PointerEvent) => {
     if (!dragTarget.current || !previewBoxRef.current) return
     const rect = previewBoxRef.current.getBoundingClientRect()
-    const x = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100))
-    const y = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100))
+    let x = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100))
+    let y = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100))
+    const snapV = Math.abs(x - 50) <= SNAP_PCT
+    const snapH = Math.abs(y - 50) <= SNAP_PCT
+    if (snapV) x = 50
+    if (snapH) y = 50
+    setGuides({ v: snapV, h: snapH })
     if (dragTarget.current === 'title') setTitlePos({ x, y })
     else if (dragTarget.current === 'price') setPricePos({ x, y })
     else setLogoXY({ x, y })
+  }
+
+  const endPreviewDrag = () => {
+    dragTarget.current = null
+    setDragging(false)
+    setGuides({ v: false, h: false })
   }
 
   // Remove the logo's background. Primary path: AI matting (BiRefNet via
@@ -1101,8 +1118,8 @@ export function ReelsStudioTab({
                 ref={previewBoxRef}
                 className="relative touch-none select-none overflow-hidden rounded-md bg-black"
                 onPointerMove={onPreviewPointerMove}
-                onPointerUp={() => (dragTarget.current = null)}
-                onPointerLeave={() => (dragTarget.current = null)}
+                onPointerUp={endPreviewDrag}
+                onPointerLeave={endPreviewDrag}
               >
                 <video
                   src={preBrand?.url ?? output?.url ?? selectedClip?.url}
@@ -1111,6 +1128,26 @@ export function ReelsStudioTab({
                   playsInline
                   preload="metadata"
                 />
+                {/* Alignment rulers: center guides shown while dragging.
+                    They light up amber when the element is snapped on. */}
+                {dragging && (
+                  <>
+                    <div
+                      aria-hidden
+                      className={`pointer-events-none absolute inset-y-0 left-1/2 w-px ${
+                        guides.v ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'bg-white/40'
+                      }`}
+                      style={{ backgroundImage: guides.v ? undefined : 'repeating-linear-gradient(to bottom, rgba(255,255,255,0.5) 0 6px, transparent 6px 12px)' }}
+                    />
+                    <div
+                      aria-hidden
+                      className={`pointer-events-none absolute inset-x-0 top-1/2 h-px ${
+                        guides.h ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'bg-white/40'
+                      }`}
+                      style={{ backgroundImage: guides.h ? undefined : 'repeating-linear-gradient(to right, rgba(255,255,255,0.5) 0 6px, transparent 6px 12px)' }}
+                    />
+                  </>
+                )}
                 {titleOn &&
                   titleText.trim() &&
                   (() => {
@@ -1128,6 +1165,7 @@ export function ReelsStudioTab({
                           e.preventDefault()
                           ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
                           dragTarget.current = 'title'
+                          setDragging(true)
                         }}
                         className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
                           activeStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
@@ -1172,6 +1210,7 @@ export function ReelsStudioTab({
                           e.preventDefault()
                           ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
                           dragTarget.current = 'price'
+                          setDragging(true)
                         }}
                         className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
                           activePriceStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
@@ -1212,6 +1251,7 @@ export function ReelsStudioTab({
                       e.preventDefault()
                       ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
                       dragTarget.current = 'logo'
+                      setDragging(true)
                     }}
                     className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing"
                     style={{
