@@ -177,6 +177,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const src = searchParams.get('src') || ''
     const filename = (searchParams.get('filename') || 'video.mp4').replace(/[^\w.\- ]+/g, '_').slice(0, 100)
+    // inline=1 streams for <img>/<video> playback instead of forcing a save
+    const inline = searchParams.get('inline') === '1'
 
     let host: string
     try {
@@ -188,20 +190,29 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Host not allowed' }, { status: 403 })
     }
 
-    const upstream = await fetch(src, { headers: { 'User-Agent': UA } })
+    // Forward Range so inline <video> scrubbing works
+    const range = request.headers.get('range')
+    const upstream = await fetch(src, {
+      headers: { 'User-Agent': UA, ...(inline && range ? { Range: range } : {}) },
+    })
     if (!upstream.ok || !upstream.body) {
       return NextResponse.json({ success: false, error: `Upstream error ${upstream.status}` }, { status: 502 })
     }
 
     const headers = new Headers({
-      'Content-Type': upstream.headers.get('content-type') || 'video/mp4',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'no-store',
+      'Content-Type': upstream.headers.get('content-type') || (inline ? 'application/octet-stream' : 'video/mp4'),
+      'Content-Disposition': inline ? 'inline' : `attachment; filename="${filename}"`,
+      'Cache-Control': inline ? 'public, max-age=3600' : 'no-store',
     })
     const len = upstream.headers.get('content-length')
     if (len) headers.set('Content-Length', len)
+    if (inline) {
+      headers.set('Accept-Ranges', 'bytes')
+      const cr = upstream.headers.get('content-range')
+      if (cr) headers.set('Content-Range', cr)
+    }
 
-    return new Response(upstream.body, { headers })
+    return new Response(upstream.body, { headers, status: upstream.status === 206 ? 206 : 200 })
   } catch (error) {
     console.error('video-fetch GET error:', error)
     return NextResponse.json({ success: false, error: 'Proxy failed' }, { status: 500 })

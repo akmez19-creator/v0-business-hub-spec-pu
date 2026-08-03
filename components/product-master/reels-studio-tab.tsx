@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { VideoSearchPanel } from '@/components/product-master/video-search-panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -970,6 +971,9 @@ export function ReelsStudioTab({
 
   return (
     <div className="flex flex-col gap-5">
+      {/* ---- Search product videos on TikTok ---- */}
+      <VideoSearchPanel defaultQuery={productName} onUseClip={(file) => addFiles([file])} />
+
       {/* ---- Fetch from link ---- */}
       <section className="flex flex-col gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 p-3">
         <p className="flex items-center gap-2 text-sm font-semibold">
