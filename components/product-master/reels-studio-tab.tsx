@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -64,6 +64,16 @@ const TITLE_STYLES = [
 ] as const
 type TitleStyleId = (typeof TITLE_STYLES)[number]['id']
 
+// Promo price tag layouts - how the old price and the new price are arranged
+const PROMO_LAYOUTS = [
+  { id: 'wasnow', label: 'Was / Now', hint: 'Was Rs 1,375  Now Rs 999' },
+  { id: 'strike', label: 'Cut price', hint: 'Rs 1̶,̶3̶7̶5̶  Rs 999' },
+  { id: 'stacked', label: 'Stacked', hint: 'old on top, new below' },
+  { id: 'save', label: 'Save %', hint: 'adds a -27% badge' },
+  { id: 'only', label: 'New only', hint: 'just the new price' },
+] as const
+type PromoLayoutId = (typeof PROMO_LAYOUTS)[number]['id']
+
 // Reels Studio: everything runs IN the browser via ffmpeg.wasm - cut a scene
 // out of a clip (trim), brand it (product-name title + logo watermark), or
 // merge the strip into one reel. No server cost, files never leave the
@@ -102,7 +112,9 @@ export function ReelsStudioTab({
   const [titleStyle, setTitleStyle] = useState<TitleStyleId>('sunny')
   const [titleSize, setTitleSize] = useState(8.5) // font size as % of video width
   const [priceOn, setPriceOn] = useState(false)
-  const [priceText, setPriceText] = useState('')
+  const [priceOld, setPriceOld] = useState('')
+  const [priceNew, setPriceNew] = useState('')
+  const [promoLayout, setPromoLayout] = useState<PromoLayoutId>('wasnow')
   const [priceStyle, setPriceStyle] = useState<TitleStyleId>('flash')
   const [priceSize, setPriceSize] = useState(7) // font size as % of video width
   const [logoOn, setLogoOn] = useState(true)
@@ -306,6 +318,183 @@ export function ReelsStudioTab({
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
   const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
+
+  // Plain-text version of the promo tag, used by the AI caption writer
+  const priceText = priceNew.trim() ? (priceOld.trim() ? `${priceNew.trim()} was ${priceOld.trim()}` : priceNew.trim()) : ''
+
+  // ---- Promo price tag ----------------------------------------------------
+  // The tag is composed of styled segments (old price struck out, new price
+  // big, optional discount badge) and rendered ONCE into a tight canvas that
+  // is reused by both the preview and the burn, so they can never disagree.
+  type PromoSeg = { text: string; scale: number; strike?: boolean; dim?: boolean; accent?: boolean }
+
+  const buildPromoLines = (oldP: string, newP: string, layout: PromoLayoutId): PromoSeg[][] => {
+    const o = oldP.trim()
+    const n = newP.trim()
+    if (!o || layout === 'only') return [[{ text: n, scale: 1 }]]
+    switch (layout) {
+      case 'wasnow':
+        return [
+          [
+            { text: `Was ${o}`, scale: 0.58, dim: true },
+            { text: `Now ${n}`, scale: 1 },
+          ],
+        ]
+      case 'strike':
+        return [
+          [
+            { text: o, scale: 0.66, strike: true, dim: true },
+            { text: n, scale: 1 },
+          ],
+        ]
+      case 'stacked':
+        return [[{ text: o, scale: 0.52, strike: true, dim: true }], [{ text: n, scale: 1 }]]
+      case 'save': {
+        const on = Number(o.replace(/[^\d.]/g, ''))
+        const nn = Number(n.replace(/[^\d.]/g, ''))
+        const pct = on > 0 && nn > 0 && nn < on ? Math.round(((on - nn) / on) * 100) : 0
+        return [
+          [
+            { text: o, scale: 0.52, strike: true, dim: true },
+            ...(pct ? [{ text: `-${pct}%`, scale: 0.46, accent: true }] : []),
+          ],
+          [{ text: n, scale: 1 }],
+        ]
+      }
+      default:
+        return [[{ text: n, scale: 1 }]]
+    }
+  }
+
+  // Draws the promo tag into a tight canvas sized exactly to the tag.
+  // refW is the reference width (video width when burning, preview width when
+  // previewing) so both come out proportionally identical.
+  const drawPromoTag = (
+    refW: number,
+    oldP: string,
+    newP: string,
+    layout: PromoLayoutId,
+    st: (typeof TITLE_STYLES)[number],
+    sizePct: number,
+  ) => {
+    const lines = buildPromoLines(oldP, newP, layout)
+    const probe = document.createElement('canvas').getContext('2d')
+    if (!probe) return null
+    const font = (px: number) => `900 ${px}px 'Arial Black', Arial, sans-serif`
+    let base = Math.max(8, Math.round(refW * (sizePct / 100)))
+
+    const measure = () => {
+      const gap = base * 0.34
+      const widths = lines.map((segs) => {
+        let w = 0
+        segs.forEach((s, i) => {
+          probe.font = font(base * s.scale)
+          w += probe.measureText(s.text).width + (s.accent ? base * s.scale * 0.9 : 0) + (i ? gap : 0)
+        })
+        return w
+      })
+      return { gap, widths, maxW: Math.max(...widths) }
+    }
+
+    let m = measure()
+    while (m.maxW + base * 1.5 > refW * 0.92 && base > 6) {
+      base -= 1
+      m = measure()
+    }
+
+    const padX = base * 0.75
+    const padY = base * 0.42
+    const lineGap = base * 0.14
+    const lineHeights = lines.map((segs) => base * Math.max(...segs.map((s) => s.scale)) * 1.14)
+    const bw = Math.ceil(m.maxW + padX * 2)
+    const bh = Math.ceil(lineHeights.reduce((a, b) => a + b, 0) + lineGap * (lines.length - 1) + padY * 2)
+
+    const canvas = document.createElement('canvas')
+    canvas.width = bw
+    canvas.height = bh
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    if (st.bubble) {
+      ctx.beginPath()
+      ctx.roundRect(0, 0, bw, bh, st.shape === 'bar' ? bh * 0.14 : bh / 2)
+      if ('bubble2' in st && st.bubble2) {
+        const grad = ctx.createLinearGradient(0, 0, bw, bh)
+        grad.addColorStop(0, st.bubble)
+        grad.addColorStop(1, st.bubble2)
+        ctx.fillStyle = grad
+      } else {
+        ctx.fillStyle = st.bubble
+      }
+      ctx.fill()
+    }
+
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.lineJoin = 'round'
+
+    let y = padY
+    lines.forEach((segs, li) => {
+      const lh = lineHeights[li]
+      const cy = y + lh / 2
+      let x = (bw - m.widths[li]) / 2
+      segs.forEach((s) => {
+        const fs = base * s.scale
+        ctx.font = font(fs)
+        const tw = ctx.measureText(s.text).width
+
+        // Discount badge: inverted pill so it pops out of the tag
+        if (s.accent) {
+          const padA = fs * 0.45
+          ctx.beginPath()
+          ctx.roundRect(x, cy - fs * 0.78, tw + padA * 2, fs * 1.56, fs * 0.78)
+          ctx.fillStyle = st.bubble ? st.text : '#DC2626'
+          ctx.fill()
+          ctx.fillStyle = st.bubble ?? '#FFFFFF'
+          ctx.fillText(s.text, x + padA, cy)
+          x += tw + padA * 2 + m.gap
+          return
+        }
+
+        ctx.globalAlpha = s.dim ? 0.82 : 1
+        if (st.stroke) {
+          ctx.strokeStyle = st.stroke
+          ctx.lineWidth = Math.max(2, fs * (st.shape === 'none' ? 0.16 : 0.08))
+          ctx.strokeText(s.text, x, cy)
+        }
+        if ('glow' in st && st.glow && !s.dim) {
+          ctx.shadowColor = st.glow
+          ctx.shadowBlur = fs * 0.35
+        }
+        ctx.fillStyle = st.text
+        ctx.fillText(s.text, x, cy)
+        ctx.shadowBlur = 0
+
+        if (s.strike) {
+          ctx.beginPath()
+          ctx.lineWidth = Math.max(2, fs * 0.09)
+          ctx.strokeStyle = st.text
+          ctx.moveTo(x - fs * 0.08, cy)
+          ctx.lineTo(x + tw + fs * 0.08, cy)
+          ctx.stroke()
+        }
+        ctx.globalAlpha = 1
+        x += tw + m.gap
+      })
+      y += lh + lineGap
+    })
+
+    return { canvas, w: bw, h: bh }
+  }
+
+  // Preview image of the tag, rendered at preview scale with the same code
+  // path the burn uses
+  const promoTag = useMemo(() => {
+    if (!priceOn || !priceNew.trim() || !previewW) return null
+    const t = drawPromoTag(previewW, priceOld, priceNew, promoLayout, activePriceStyle, priceSize)
+    return t ? { url: t.canvas.toDataURL('image/png'), w: t.w, h: t.h } : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceOn, priceOld, priceNew, promoLayout, activePriceStyle, priceSize, previewW])
 
   // Mirror of renderBannerPng's sizing math so the PREVIEW banner is pixel-
   // faithful to what gets burned: same Arial Black 900 font, same shrink-to-
@@ -630,6 +819,26 @@ export function ReelsStudioTab({
       }, 'image/png')
     })
 
+  // Burn version of the promo tag: the same tight canvas placed onto a
+  // transparent full-frame canvas at the dragged (clamped) position.
+  const renderPromoTagPng = (vw: number, vh: number, pos: { x: number; y: number }): Promise<Uint8Array> =>
+    new Promise((resolve, reject) => {
+      const tag = drawPromoTag(vw, priceOld, priceNew, promoLayout, activePriceStyle, priceSize)
+      if (!tag) return reject(new Error('no tag'))
+      const frame = document.createElement('canvas')
+      frame.width = vw
+      frame.height = vh
+      const ctx = frame.getContext('2d')
+      if (!ctx) return reject(new Error('no canvas'))
+      const cx = Math.max(tag.w / 2, Math.min(vw - tag.w / 2, (pos.x / 100) * vw))
+      const cy = Math.max(tag.h / 2, Math.min(vh - tag.h / 2, (pos.y / 100) * vh))
+      ctx.drawImage(tag.canvas, Math.round(cx - tag.w / 2), Math.round(cy - tag.h / 2))
+      frame.toBlob(async (blob) => {
+        if (!blob) return reject(new Error('toBlob failed'))
+        resolve(new Uint8Array(await blob.arrayBuffer()))
+      }, 'image/png')
+    })
+
   // Draw the logo (background removed if enabled) at the chosen opacity onto
   // a small transparent canvas - baking opacity into the pixels keeps the
   // ffmpeg graph simple and fast.
@@ -703,7 +912,7 @@ export function ReelsStudioTab({
         idx++
       }
       if (wantsPrice) {
-        await ffmpeg.writeFile('price.png', await renderBannerPng(dims.w, dims.h, priceText, activePriceStyle, priceSize, pricePos))
+        await ffmpeg.writeFile('price.png', await renderPromoTagPng(dims.w, dims.h, pricePos))
         inputs.push('-i', 'price.png')
         chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
         last = `v${idx}`
@@ -1039,16 +1248,44 @@ export function ReelsStudioTab({
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={priceOn} onChange={(e) => setPriceOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
             <Tag className="h-3.5 w-3.5 text-amber-500" />
-            Price tag
+            Promo price tag
           </label>
           {priceOn && (
             <div className="flex flex-col gap-2 pl-6">
-              <Input
-                value={priceText}
-                onChange={(e) => setPriceText(e.target.value)}
-                placeholder="e.g. Rs 499 / BUY 1 GET 1 FREE"
-                className="h-8"
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  value={priceOld}
+                  onChange={(e) => setPriceOld(e.target.value)}
+                  placeholder="Old price e.g. Rs 1,375"
+                  className="h-8 w-44"
+                  aria-label="Old price"
+                />
+                <Input
+                  value={priceNew}
+                  onChange={(e) => setPriceNew(e.target.value)}
+                  placeholder="New price e.g. Rs 999"
+                  className="h-8 w-44"
+                  aria-label="New price"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs text-muted-foreground">Layout</span>
+                {PROMO_LAYOUTS.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    title={l.hint}
+                    onClick={() => setPromoLayout(l.id)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                      promoLayout === l.id
+                        ? 'border-amber-500 bg-amber-500/15 text-amber-400'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="mr-1 text-xs text-muted-foreground">Style</span>
                 {TITLE_STYLES.map((s) => (
@@ -1242,51 +1479,29 @@ export function ReelsStudioTab({
                       </span>
                     )
                   })()}
-                {priceOn &&
-                  priceText.trim() &&
+                {promoTag &&
                   (() => {
-                    const m = measureBanner(priceText.trim(), priceSize, previewW)
                     const ph = previewBoxRef.current?.clientHeight || previewW * (16 / 9)
-                    const cx = previewW ? Math.max(m.bw / 2 / previewW, Math.min(1 - m.bw / 2 / previewW, pricePos.x / 100)) * 100 : pricePos.x
-                    const cy = ph ? Math.max(m.bh / 2 / ph, Math.min(1 - m.bh / 2 / ph, pricePos.y / 100)) * 100 : pricePos.y
+                    const cx = previewW
+                      ? Math.max(promoTag.w / 2 / previewW, Math.min(1 - promoTag.w / 2 / previewW, pricePos.x / 100)) * 100
+                      : pricePos.x
+                    const cy = ph
+                      ? Math.max(promoTag.h / 2 / ph, Math.min(1 - promoTag.h / 2 / ph, pricePos.y / 100)) * 100
+                      : pricePos.y
                     return (
-                      <span
+                      <img
+                        src={promoTag.url || '/placeholder.svg'}
+                        alt="Drag to position the promo price tag"
                         role="button"
-                        aria-label="Drag to position the price"
                         onPointerDown={(e) => {
                           e.preventDefault()
                           ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
                           dragTarget.current = 'price'
                           setDragging(true)
                         }}
-                        className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
-                          activePriceStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
-                        }`}
-                        style={{
-                          left: `${cx}%`,
-                          top: `${cy}%`,
-                          background:
-                            'bubble2' in activePriceStyle && activePriceStyle.bubble2
-                              ? `linear-gradient(135deg, ${activePriceStyle.bubble}, ${activePriceStyle.bubble2})`
-                              : (activePriceStyle.bubble ?? 'transparent'),
-                          color: activePriceStyle.text,
-                          fontFamily: "'Arial Black', Arial, sans-serif",
-                          fontWeight: 900,
-                          lineHeight: 1,
-                          WebkitTextStroke: activePriceStyle.stroke
-                            ? `${Math.max(1, (m.fontSize * (activePriceStyle.shape === 'none' ? 0.16 : 0.08)) / 2)}px ${activePriceStyle.stroke}`
-                            : undefined,
-                          paintOrder: 'stroke fill',
-                          textShadow:
-                            'glow' in activePriceStyle && activePriceStyle.glow
-                              ? `0 0 ${m.fontSize * 0.35}px ${activePriceStyle.glow}`
-                              : undefined,
-                          fontSize: m.fontSize,
-                          padding: `${m.padY}px ${m.padX}px`,
-                        }}
-                      >
-                        {priceText.trim()}
-                      </span>
+                        className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing"
+                        style={{ left: `${cx}%`, top: `${cy}%`, width: promoTag.w, height: promoTag.h }}
+                      />
                     )
                   })()}
                 {logoOn && (
