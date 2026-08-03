@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 export const maxDuration = 30
+// The vqd token is single-use and short-lived. Without this, Next's Data Cache
+// stores the GET responses below and replays a stale token forever - which is
+// what made every lookup fail with "no vqd token".
+export const dynamic = 'force-dynamic'
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
@@ -21,7 +25,11 @@ type ImageHit = {
 // Shopping / marketplace CDNs tend to carry clean packshots on white, which
 // is exactly what the vision pass reads best.
 const SHOP_HOSTS =
-  /(walmartimages|susercontent|alicdn|amazon|ssl-images-amazon|media-amazon|ebayimg|shopify|etsystatic|temu|kwcdn|lazada|aliexpress|target|homedepot|argos|wayfair)/i
+  /(walmartimages|susercontent|alicdn|amazon|ssl-images-amazon|media-amazon|ebayimg|shopify|etsystatic|temu|kwcdn|lazada|slatic|mlstatic|daraz|jumia|noon|flipkart|aliexpress|target|homedepot|argos|wayfair)/i
+
+// Aggregators and pin boards re-host watermarked or cropped copies, so they
+// rank below a real listing photo
+const RESHARE_HOSTS = /(pinimg|pinterest|ytimg|fbcdn|lookaside|blogspot|wordpress|wixstatic)/i
 
 const BROWSER_HEADERS = {
   'User-Agent': UA,
@@ -33,6 +41,7 @@ const BROWSER_HEADERS = {
 async function getVqd(query: string) {
   const res = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`, {
     headers: BROWSER_HEADERS,
+    cache: 'no-store',
   })
   if (!res.ok) return null
   const html = await res.text()
@@ -76,6 +85,7 @@ async function fetchImages(query: string): Promise<RawImage[]> {
           Referer: `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
           'X-Requested-With': 'XMLHttpRequest',
         },
+        cache: 'no-store',
       },
     )
 
@@ -144,6 +154,7 @@ export async function POST(request: Request) {
       if (SHOP_HOSTS.test(host)) score += 3
       if (Math.abs(ratio - 1) < 0.08) score += 2
       if (w >= 800 && h >= 800) score += 1
+      if (RESHARE_HOSTS.test(host)) score -= 2
 
       hits.push({
         id: image,
