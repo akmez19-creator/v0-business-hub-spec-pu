@@ -439,24 +439,24 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                   onCheckedChange={handleSelectAll}
                 />
               </TableHead>
-              <TableHead>RTE</TableHead>
-              <TableHead>Entry Date</TableHead>
-              <TableHead>Agent</TableHead>
-              <TableHead>Delivery Date</TableHead>
-              <TableHead>Index</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Contact</TableHead>
-              <TableHead>Region</TableHead>
-              <TableHead>Qty</TableHead>
-              <TableHead>Products</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Payment</TableHead>
-              <TableHead>SalesType</TableHead>
-              <TableHead>Notes</TableHead>
-              <TableHead>Medium</TableHead>
-              <TableHead>Rider</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Contractor</TableHead>
+              <TableHead className="w-[60px]">RTE</TableHead>
+              <TableHead className="w-[72px]">Entry Date</TableHead>
+              <TableHead className="w-[90px]">Agent</TableHead>
+              <TableHead className="w-[110px]">Delivery Date</TableHead>
+              <TableHead className="w-[52px]">Index</TableHead>
+              <TableHead className="min-w-[140px] max-w-[200px]">Customer</TableHead>
+              <TableHead className="w-[90px]">Contact</TableHead>
+              <TableHead className="min-w-[110px] max-w-[160px]">Region</TableHead>
+              <TableHead className="w-[42px] text-center">Qty</TableHead>
+              <TableHead className="min-w-[130px] max-w-[180px]">Products</TableHead>
+              <TableHead className="w-[85px] text-right">Amount</TableHead>
+              <TableHead className="w-[80px]">Payment</TableHead>
+              <TableHead className="w-[90px]">SalesType</TableHead>
+              <TableHead className="w-[90px]">Notes</TableHead>
+              <TableHead className="w-[64px]">Medium</TableHead>
+              <TableHead className="w-[130px]">Rider</TableHead>
+              <TableHead className="w-[120px]">Status</TableHead>
+              <TableHead className="w-[90px]">Contractor</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
@@ -469,7 +469,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
               </TableRow>
             ) : (
               deliveries.map((delivery) => (
-                <TableRow key={delivery.id}>
+                <TableRow key={delivery.id} className="odd:bg-muted/30 hover:bg-muted/50">
                   <TableCell>
                     <Checkbox
                       checked={selectedIds.includes(delivery.id)}
@@ -494,23 +494,21 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                     {delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{delivery.index_no || '-'}</TableCell>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium text-sm">{delivery.customer_name}</p>
-                    </div>
+                  <TableCell className="max-w-[200px]">
+                    <p className="font-medium text-sm truncate" title={delivery.customer_name}>{delivery.customer_name}</p>
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="text-xs whitespace-nowrap">
                     <div>
                       <p>{delivery.contact_1 || '-'}</p>
                       {delivery.contact_2 && <p className="text-muted-foreground">{delivery.contact_2}</p>}
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs">{delivery.locality || '-'}</TableCell>
-                  <TableCell className="text-center">{delivery.qty || 1}</TableCell>
-                  <TableCell className="max-w-[120px] truncate text-xs" title={delivery.products || ''}>
+                  <TableCell className="max-w-[160px] truncate text-xs" title={delivery.locality || ''}>{delivery.locality || '-'}</TableCell>
+                  <TableCell className="text-center font-medium">{delivery.qty || 1}</TableCell>
+                  <TableCell className="max-w-[180px] truncate text-xs" title={delivery.products || ''}>
                     {delivery.products || '-'}
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">Rs {Number(delivery.amount || 0).toLocaleString()}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">Rs {Number(delivery.amount || 0).toLocaleString()}</TableCell>
               <TableCell className="text-xs">
                 {delivery.payment_method === 'juice' ? 'Juice' :
                  delivery.payment_method === 'cash' ? 'Cash' :
@@ -548,7 +546,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                         <SelectItem value="unassigned">Unassigned</SelectItem>
                         {riders.map((rider) => (
                           <SelectItem key={rider.id} value={rider.id}>
-                            {rider.name || rider.email}
+                            {rider.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -649,7 +647,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
               <SelectContent>
                 {riders.map((rider) => (
                   <SelectItem key={rider.id} value={rider.id}>
-                    {rider.name || rider.email}
+                    {rider.name}
                   </SelectItem>
                 ))}
               </SelectContent>
