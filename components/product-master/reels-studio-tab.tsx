@@ -19,6 +19,7 @@ import {
   Merge,
   Move,
   Megaphone,
+  RefreshCw,
   Scissors,
   Send,
   Stamp,
@@ -234,6 +235,46 @@ export function ReelsStudioTab({
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
   const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
+
+  // Mirror of renderBannerPng's sizing math so the PREVIEW banner is pixel-
+  // faithful to what gets burned: same Arial Black 900 font, same shrink-to-
+  // fit loop (92% max width), same padding ratios (0.42/0.75 of font size).
+  const measureRef = useRef<CanvasRenderingContext2D | null>(null)
+  const measureBanner = (text: string, sizePct: number, boxW: number) => {
+    if (!measureRef.current) measureRef.current = document.createElement('canvas').getContext('2d')
+    const ctx = measureRef.current
+    let fontSize = Math.round(boxW * (sizePct / 100))
+    if (!ctx) return { fontSize, bw: 0, bh: 0, padX: 0, padY: 0 }
+    ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
+    const maxW = boxW * 0.92
+    while (ctx.measureText(text).width > maxW && fontSize > 4) {
+      fontSize -= 1
+      ctx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`
+    }
+    const tw = ctx.measureText(text).width
+    const padX = fontSize * 0.75
+    const padY = fontSize * 0.42
+    return { fontSize, bw: tw + padX * 2, bh: fontSize + padY * 2, padX, padY }
+  }
+
+  // Auto-restyle: every 5 minutes rotate the title + price to the next look,
+  // so repeated posts don't all share the same style. Manual shuffle too.
+  const [autoRestyle, setAutoRestyle] = useState(false)
+  const shuffleStyles = useCallback(() => {
+    setTitleStyle((prev) => {
+      const i = TITLE_STYLES.findIndex((s) => s.id === prev)
+      return TITLE_STYLES[(i + 1) % TITLE_STYLES.length].id
+    })
+    setPriceStyle((prev) => {
+      const i = TITLE_STYLES.findIndex((s) => s.id === prev)
+      return TITLE_STYLES[(i + 2) % TITLE_STYLES.length].id
+    })
+  }, [])
+  useEffect(() => {
+    if (!autoRestyle) return
+    const timer = setInterval(shuffleStyles, 5 * 60 * 1000)
+    return () => clearInterval(timer)
+  }, [autoRestyle, shuffleStyles])
 
   // ---- Fetch-by-link: paste a TikTok/Facebook/YouTube URL and the video is
   // resolved watermark-free in HD and dropped straight into the feed ----
@@ -849,6 +890,23 @@ export function ReelsStudioTab({
               : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
         </p>
 
+        {/* Style shuffle: rotate to a fresh look manually or every 5 minutes */}
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-background/60 p-2.5">
+          <Button type="button" variant="outline" size="sm" onClick={shuffleStyles} className="h-7 gap-1.5 bg-transparent text-xs">
+            <RefreshCw className="h-3 w-3" />
+            Shuffle style
+          </Button>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={autoRestyle}
+              onChange={(e) => setAutoRestyle(e.target.checked)}
+              className="h-3.5 w-3.5 accent-amber-500"
+            />
+            Auto-change style every 5 min
+          </label>
+        </div>
+
         {/* Title banner controls */}
         <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
           <label className="flex items-center gap-2 text-sm font-medium">
@@ -1020,58 +1078,86 @@ export function ReelsStudioTab({
                   playsInline
                   preload="metadata"
                 />
-                {titleOn && titleText.trim() && (
-                  <span
-                    role="button"
-                    aria-label="Drag to position the title"
-                    onPointerDown={(e) => {
-                      e.preventDefault()
-                      ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                      dragTarget.current = 'title'
-                    }}
-                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap font-extrabold active:cursor-grabbing ${
-                      activeStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
-                    }`}
-                    style={{
-                      left: `${titlePos.x}%`,
-                      top: `${titlePos.y}%`,
-                      backgroundColor: activeStyle.bubble ?? 'transparent',
-                      color: activeStyle.text,
-                      WebkitTextStroke: activeStyle.stroke ? `${activeStyle.shape === 'none' ? 1.2 : 0.5}px ${activeStyle.stroke}` : undefined,
-                      fontSize: Math.max(8, previewW * (titleSize / 100) * 0.62),
-                      padding: `${Math.max(2, previewW * (titleSize / 100) * 0.26)}px ${Math.max(5, previewW * (titleSize / 100) * 0.47)}px`,
-                    }}
-                  >
-                    {titleText.trim()}
-                  </span>
-                )}
-                {priceOn && priceText.trim() && (
-                  <span
-                    role="button"
-                    aria-label="Drag to position the price"
-                    onPointerDown={(e) => {
-                      e.preventDefault()
-                      ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                      dragTarget.current = 'price'
-                    }}
-                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap font-extrabold active:cursor-grabbing ${
-                      activePriceStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
-                    }`}
-                    style={{
-                      left: `${pricePos.x}%`,
-                      top: `${pricePos.y}%`,
-                      backgroundColor: activePriceStyle.bubble ?? 'transparent',
-                      color: activePriceStyle.text,
-                      WebkitTextStroke: activePriceStyle.stroke
-                        ? `${activePriceStyle.shape === 'none' ? 1.2 : 0.5}px ${activePriceStyle.stroke}`
-                        : undefined,
-                      fontSize: Math.max(8, previewW * (priceSize / 100) * 0.62),
-                      padding: `${Math.max(2, previewW * (priceSize / 100) * 0.26)}px ${Math.max(5, previewW * (priceSize / 100) * 0.47)}px`,
-                    }}
-                  >
-                    {priceText.trim()}
-                  </span>
-                )}
+                {titleOn &&
+                  titleText.trim() &&
+                  (() => {
+                    const m = measureBanner(titleText.trim(), titleSize, previewW)
+                    // Same clamping as the burn: the banner center cannot get
+                    // closer to an edge than half the banner size
+                    const ph = previewBoxRef.current?.clientHeight || previewW * (16 / 9)
+                    const cx = previewW ? Math.max(m.bw / 2 / previewW, Math.min(1 - m.bw / 2 / previewW, titlePos.x / 100)) * 100 : titlePos.x
+                    const cy = ph ? Math.max(m.bh / 2 / ph, Math.min(1 - m.bh / 2 / ph, titlePos.y / 100)) * 100 : titlePos.y
+                    return (
+                      <span
+                        role="button"
+                        aria-label="Drag to position the title"
+                        onPointerDown={(e) => {
+                          e.preventDefault()
+                          ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          dragTarget.current = 'title'
+                        }}
+                        className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
+                          activeStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
+                        }`}
+                        style={{
+                          left: `${cx}%`,
+                          top: `${cy}%`,
+                          backgroundColor: activeStyle.bubble ?? 'transparent',
+                          color: activeStyle.text,
+                          fontFamily: "'Arial Black', Arial, sans-serif",
+                          fontWeight: 900,
+                          lineHeight: 1,
+                          WebkitTextStroke: activeStyle.stroke
+                            ? `${Math.max(1, (m.fontSize * (activeStyle.shape === 'none' ? 0.16 : 0.08)) / 2)}px ${activeStyle.stroke}`
+                            : undefined,
+                          paintOrder: 'stroke fill',
+                          fontSize: m.fontSize,
+                          padding: `${m.padY}px ${m.padX}px`,
+                        }}
+                      >
+                        {titleText.trim()}
+                      </span>
+                    )
+                  })()}
+                {priceOn &&
+                  priceText.trim() &&
+                  (() => {
+                    const m = measureBanner(priceText.trim(), priceSize, previewW)
+                    const ph = previewBoxRef.current?.clientHeight || previewW * (16 / 9)
+                    const cx = previewW ? Math.max(m.bw / 2 / previewW, Math.min(1 - m.bw / 2 / previewW, pricePos.x / 100)) * 100 : pricePos.x
+                    const cy = ph ? Math.max(m.bh / 2 / ph, Math.min(1 - m.bh / 2 / ph, pricePos.y / 100)) * 100 : pricePos.y
+                    return (
+                      <span
+                        role="button"
+                        aria-label="Drag to position the price"
+                        onPointerDown={(e) => {
+                          e.preventDefault()
+                          ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          dragTarget.current = 'price'
+                        }}
+                        className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
+                          activePriceStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
+                        }`}
+                        style={{
+                          left: `${cx}%`,
+                          top: `${cy}%`,
+                          backgroundColor: activePriceStyle.bubble ?? 'transparent',
+                          color: activePriceStyle.text,
+                          fontFamily: "'Arial Black', Arial, sans-serif",
+                          fontWeight: 900,
+                          lineHeight: 1,
+                          WebkitTextStroke: activePriceStyle.stroke
+                            ? `${Math.max(1, (m.fontSize * (activePriceStyle.shape === 'none' ? 0.16 : 0.08)) / 2)}px ${activePriceStyle.stroke}`
+                            : undefined,
+                          paintOrder: 'stroke fill',
+                          fontSize: m.fontSize,
+                          padding: `${m.padY}px ${m.padX}px`,
+                        }}
+                      >
+                        {priceText.trim()}
+                      </span>
+                    )
+                  })()}
                 {logoOn && (
                   <img
                     src={effectiveLogoSrc || '/placeholder.svg'}
