@@ -128,16 +128,53 @@ export function ReelsStudioTab({
     else setLogoXY({ x, y })
   }
 
-  // Remove the logo's background in the browser: flood-fill from the borders,
-  // clearing pixels that match the corner colors within the tolerance. Runs
-  // whenever the logo, toggle, or tolerance changes.
+  // Remove the logo's background. Primary path: AI matting (BiRefNet via
+  // /api/product-master/remove-bg) for clean, Canva-quality cutouts on any
+  // background. Fallback: the old in-browser flood-fill if the API fails.
+  const [removingBg, setRemovingBg] = useState(false)
   useEffect(() => {
     if (!logoRemoveBg) {
       setProcessedLogo(null)
       return
     }
     let cancelled = false
-    const img = new Image()
+    setRemovingBg(true)
+    ;(async () => {
+      try {
+        // The AI route needs a data URL or http(s) URL - local paths like
+        // /images/... are converted to data URLs first
+        let payload = logoSrc
+        if (payload.startsWith('/')) {
+          const r = await fetch(payload)
+          const blob = await r.blob()
+          payload = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader()
+            fr.onload = () => resolve(fr.result as string)
+            fr.onerror = reject
+            fr.readAsDataURL(blob)
+          })
+        }
+        const res = await fetch('/api/product-master/remove-bg', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: payload }),
+        })
+        const json = await res.json()
+        if (!res.ok || !json.dataUrl) throw new Error(json.error || 'AI removal failed')
+        if (!cancelled) {
+          setProcessedLogo(json.dataUrl)
+          setRemovingBg(false)
+        }
+        return
+      } catch {
+        // fall through to the flood-fill fallback below
+      }
+      if (cancelled) return
+      floodFillFallback()
+    })()
+
+    function floodFillFallback() {
+      const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
       const w = img.naturalWidth
@@ -176,12 +213,19 @@ export function ReelsStudioTab({
         if (y < h - 1) queue.push(i + w)
       }
       ctx.putImageData(data, 0, 0)
-      if (!cancelled) setProcessedLogo(canvas.toDataURL('image/png'))
+      if (!cancelled) {
+        setProcessedLogo(canvas.toDataURL('image/png'))
+        setRemovingBg(false)
+      }
     }
-    img.onerror = () => {
-      if (!cancelled) setProcessedLogo(null)
+      img.onerror = () => {
+        if (!cancelled) {
+          setProcessedLogo(null)
+          setRemovingBg(false)
+        }
+      }
+      img.src = logoSrc
     }
-    img.src = logoSrc
     return () => {
       cancelled = true
     }
@@ -942,13 +986,12 @@ export function ReelsStudioTab({
                     className="h-3.5 w-3.5 accent-amber-500"
                   />
                   <Eraser className="h-3.5 w-3.5 text-amber-500" />
-                  Remove logo background
+                  Remove logo background (AI)
                 </label>
-                {logoRemoveBg && (
-                  <div className="flex items-center gap-3">
-                    <span className="w-28 shrink-0 text-xs text-muted-foreground">Strength: {logoBgTol}%</span>
-                    <Slider min={5} max={80} step={1} value={[logoBgTol]} onValueChange={(v) => setLogoBgTol(v[0])} className="flex-1" />
-                  </div>
+                {logoRemoveBg && removingBg && (
+                  <p className="text-xs text-muted-foreground" aria-live="polite">
+                    Cutting out the background with AI{'\u2026'}
+                  </p>
                 )}
               </div>
             </div>
