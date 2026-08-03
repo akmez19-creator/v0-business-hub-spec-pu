@@ -42,12 +42,25 @@ interface Clip {
 }
 
 // Banner style presets for the product-name title
+// Style library for burned-in banners. The first 5 are the proven combos;
+// the rest are high-contrast ad-tested looks so Shuffle / auto-restyle always
+// lands on something that reads well on video. Optional fields:
+//   bubble2 - gradient end color for the bubble (diagonal gradient)
+//   glow    - soft colored glow behind the text (canvas shadow / CSS shadow)
 const TITLE_STYLES = [
   { id: 'sunny', label: 'Sunny', bubble: '#FFD934', text: '#F97316', stroke: '#C2410C', shape: 'pill' },
   { id: 'clean', label: 'Clean', bubble: '#FFFFFF', text: '#111111', stroke: null, shape: 'pill' },
   { id: 'bold', label: 'Bold', bubble: '#111111', text: '#FFFFFF', stroke: null, shape: 'bar' },
   { id: 'flash', label: 'Flash', bubble: '#DC2626', text: '#FFFFFF', stroke: null, shape: 'pill' },
   { id: 'outline', label: 'Outline', bubble: null, text: '#FFFFFF', stroke: '#000000', shape: 'none' },
+  { id: 'midnight', label: 'Gold', bubble: '#111111', text: '#FBBF24', stroke: null, shape: 'pill', glow: 'rgba(251,191,36,0.55)' },
+  { id: 'lime', label: 'Lime', bubble: '#A3E635', text: '#1A2E05', stroke: null, shape: 'pill' },
+  { id: 'ocean', label: 'Ocean', bubble: '#2563EB', bubble2: '#06B6D4', text: '#FFFFFF', stroke: null, shape: 'pill' },
+  { id: 'sunset', label: 'Sunset', bubble: '#F97316', bubble2: '#EF4444', text: '#FFFFFF', stroke: null, shape: 'pill' },
+  { id: 'candy', label: 'Candy', bubble: '#EC4899', text: '#FFFFFF', stroke: null, shape: 'pill' },
+  { id: 'paper', label: 'Paper', bubble: '#FFFFFF', text: '#111111', stroke: null, shape: 'bar' },
+  { id: 'ghost', label: 'Ghost', bubble: null, text: '#111111', stroke: '#FFFFFF', shape: 'none' },
+  { id: 'emerald', label: 'Emerald', bubble: '#059669', text: '#FFFFFF', stroke: null, shape: 'pill' },
 ] as const
 type TitleStyleId = (typeof TITLE_STYLES)[number]['id']
 
@@ -257,17 +270,19 @@ export function ReelsStudioTab({
     return { fontSize, bw: tw + padX * 2, bh: fontSize + padY * 2, padX, padY }
   }
 
-  // Auto-restyle: every 5 minutes rotate the title + price to the next look,
-  // so repeated posts don't all share the same style. Manual shuffle too.
+  // Auto-restyle: every 5 minutes pick a completely fresh random look for the
+  // title + price (never the current ones, never the same style on both), so
+  // repeated posts don't all share the same style. Manual shuffle too.
   const [autoRestyle, setAutoRestyle] = useState(false)
   const shuffleStyles = useCallback(() => {
-    setTitleStyle((prev) => {
-      const i = TITLE_STYLES.findIndex((s) => s.id === prev)
-      return TITLE_STYLES[(i + 1) % TITLE_STYLES.length].id
-    })
-    setPriceStyle((prev) => {
-      const i = TITLE_STYLES.findIndex((s) => s.id === prev)
-      return TITLE_STYLES[(i + 2) % TITLE_STYLES.length].id
+    const pick = (exclude: string[]) => {
+      const pool = TITLE_STYLES.filter((s) => !exclude.includes(s.id))
+      return pool[Math.floor(Math.random() * pool.length)].id
+    }
+    setTitleStyle((prevTitle) => {
+      const nextTitle = pick([prevTitle])
+      setPriceStyle((prevPrice) => pick([prevPrice, nextTitle]))
+      return nextTitle
     })
   }, [])
   useEffect(() => {
@@ -525,7 +540,14 @@ export function ReelsStudioTab({
       if (st.bubble) {
         ctx.beginPath()
         ctx.roundRect(bx, by, bw, bh, st.shape === 'bar' ? bh * 0.18 : bh / 2)
-        ctx.fillStyle = st.bubble
+        if ('bubble2' in st && st.bubble2) {
+          const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh)
+          grad.addColorStop(0, st.bubble)
+          grad.addColorStop(1, st.bubble2)
+          ctx.fillStyle = grad
+        } else {
+          ctx.fillStyle = st.bubble
+        }
         ctx.fill()
       }
       ctx.textAlign = 'center'
@@ -536,8 +558,13 @@ export function ReelsStudioTab({
         ctx.lineWidth = Math.max(2, fontSize * (st.shape === 'none' ? 0.16 : 0.08))
         ctx.strokeText(text, cx, cy + fontSize * 0.05)
       }
+      if ('glow' in st && st.glow) {
+        ctx.shadowColor = st.glow
+        ctx.shadowBlur = fontSize * 0.35
+      }
       ctx.fillStyle = st.text
       ctx.fillText(text, cx, cy + fontSize * 0.05)
+      ctx.shadowBlur = 0
 
       canvas.toBlob(async (blob) => {
         if (!blob) return reject(new Error('toBlob failed'))
@@ -928,7 +955,10 @@ export function ReelsStudioTab({
                       titleStyle === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
                     } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
                     style={{
-                      backgroundColor: s.bubble ?? 'transparent',
+                      background:
+                        'bubble2' in s && s.bubble2
+                          ? `linear-gradient(135deg, ${s.bubble}, ${s.bubble2})`
+                          : (s.bubble ?? 'transparent'),
                       color: s.text,
                       WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
                       border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
@@ -972,7 +1002,10 @@ export function ReelsStudioTab({
                       priceStyle === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
                     } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
                     style={{
-                      backgroundColor: s.bubble ?? 'transparent',
+                      background:
+                        'bubble2' in s && s.bubble2
+                          ? `linear-gradient(135deg, ${s.bubble}, ${s.bubble2})`
+                          : (s.bubble ?? 'transparent'),
                       color: s.text,
                       WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
                       border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
@@ -1102,7 +1135,10 @@ export function ReelsStudioTab({
                         style={{
                           left: `${cx}%`,
                           top: `${cy}%`,
-                          backgroundColor: activeStyle.bubble ?? 'transparent',
+                          background:
+                            'bubble2' in activeStyle && activeStyle.bubble2
+                              ? `linear-gradient(135deg, ${activeStyle.bubble}, ${activeStyle.bubble2})`
+                              : (activeStyle.bubble ?? 'transparent'),
                           color: activeStyle.text,
                           fontFamily: "'Arial Black', Arial, sans-serif",
                           fontWeight: 900,
@@ -1111,6 +1147,8 @@ export function ReelsStudioTab({
                             ? `${Math.max(1, (m.fontSize * (activeStyle.shape === 'none' ? 0.16 : 0.08)) / 2)}px ${activeStyle.stroke}`
                             : undefined,
                           paintOrder: 'stroke fill',
+                          textShadow:
+                            'glow' in activeStyle && activeStyle.glow ? `0 0 ${m.fontSize * 0.35}px ${activeStyle.glow}` : undefined,
                           fontSize: m.fontSize,
                           padding: `${m.padY}px ${m.padX}px`,
                         }}
@@ -1141,7 +1179,10 @@ export function ReelsStudioTab({
                         style={{
                           left: `${cx}%`,
                           top: `${cy}%`,
-                          backgroundColor: activePriceStyle.bubble ?? 'transparent',
+                          background:
+                            'bubble2' in activePriceStyle && activePriceStyle.bubble2
+                              ? `linear-gradient(135deg, ${activePriceStyle.bubble}, ${activePriceStyle.bubble2})`
+                              : (activePriceStyle.bubble ?? 'transparent'),
                           color: activePriceStyle.text,
                           fontFamily: "'Arial Black', Arial, sans-serif",
                           fontWeight: 900,
@@ -1150,6 +1191,10 @@ export function ReelsStudioTab({
                             ? `${Math.max(1, (m.fontSize * (activePriceStyle.shape === 'none' ? 0.16 : 0.08)) / 2)}px ${activePriceStyle.stroke}`
                             : undefined,
                           paintOrder: 'stroke fill',
+                          textShadow:
+                            'glow' in activePriceStyle && activePriceStyle.glow
+                              ? `0 0 ${m.fontSize * 0.35}px ${activePriceStyle.glow}`
+                              : undefined,
                           fontSize: m.fontSize,
                           padding: `${m.padY}px ${m.padX}px`,
                         }}
