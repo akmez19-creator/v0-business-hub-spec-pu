@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, markRiderPaid, updateDeliveryPrice, updateDeliveryFields } from '@/lib/delivery-actions'
+import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, bulkUpdateDeliveryDate, markRiderPaid, updateDeliveryPrice, updateDeliveryFields } from '@/lib/delivery-actions'
 import type { Delivery, Profile, Rider, DeliveryStatus, SalesType } from '@/lib/types'
 import { STATUS_LABELS, SALES_TYPE_LABELS, SALES_TYPE_COLORS } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -44,7 +44,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { MoreHorizontal, Trash2, UserPlus, CheckCircle, Clock, Package, Banknote, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit } from 'lucide-react'
+import { MoreHorizontal, Trash2, UserPlus, CheckCircle, Clock, Package, Banknote, CalendarDays, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit } from 'lucide-react'
 
 interface Props {
   deliveries: Delivery[]
@@ -62,6 +62,9 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
   const [assignDialogOpen, setAssignDialogOpen] = useState(false)
   const [selectedRider, setSelectedRider] = useState<string>('')
   const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [dateDialogOpen, setDateDialogOpen] = useState(false)
+  const [bulkDate, setBulkDate] = useState('')
+  const [bulkDateSaving, setBulkDateSaving] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)
   const [jumpToPage, setJumpToPage] = useState('')
   const [editPriceDelivery, setEditPriceDelivery] = useState<Delivery | null>(null)
@@ -146,6 +149,19 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
     await deleteDelivery(deliveryId)
     setLoading(null)
     router.refresh()
+  }
+
+  async function handleBulkDate() {
+    if (!bulkDate || selectedIds.length === 0) return
+    setBulkDateSaving(true)
+    const result = await bulkUpdateDeliveryDate(selectedIds, bulkDate)
+    setBulkDateSaving(false)
+    if (!result?.error) {
+      setDateDialogOpen(false)
+      setBulkDate('')
+      setSelectedIds([])
+      router.refresh()
+    }
   }
 
   async function handleBulkAssign() {
@@ -317,6 +333,10 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
           <Button size="sm" variant="outline" onClick={handleMarkPaid}>
             <Banknote className="w-4 h-4 mr-1" />
             Mark Paid
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setDateDialogOpen(true)}>
+            <CalendarDays className="w-4 h-4 mr-1" />
+            Set Delivery Date
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>
             Clear
@@ -641,6 +661,35 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
             </Button>
             <Button onClick={handleBulkAssign} disabled={!selectedRider || bulkAssigning}>
               {bulkAssigning ? 'Assigning...' : 'Assign'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delivery Date Dialog */}
+      <Dialog open={dateDialogOpen} onOpenChange={setDateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Delivery Date</DialogTitle>
+            <DialogDescription>
+              Change the delivery date for {selectedIds.length} selected {selectedIds.length === 1 ? 'delivery' : 'deliveries'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-4">
+            <Label htmlFor="bulk-delivery-date">New delivery date</Label>
+            <Input
+              id="bulk-delivery-date"
+              type="date"
+              value={bulkDate}
+              onChange={(e) => setBulkDate(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkDate} disabled={!bulkDate || bulkDateSaving}>
+              {bulkDateSaving ? 'Updating...' : `Update ${selectedIds.length} ${selectedIds.length === 1 ? 'delivery' : 'deliveries'}`}
             </Button>
           </DialogFooter>
         </DialogContent>

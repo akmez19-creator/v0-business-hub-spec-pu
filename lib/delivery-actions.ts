@@ -389,6 +389,30 @@ export async function bulkAssignDeliveries(deliveryIds: string[], riderId: strin
   return { success: true }
 }
 
+export async function bulkUpdateDeliveryDate(deliveryIds: string[], deliveryDate: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) return { error: 'Not authenticated' }
+  if (deliveryIds.length === 0) return { error: 'No deliveries selected' }
+  if (!deliveryDate || !/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate)) return { error: 'Invalid delivery date' }
+
+  const { error } = await supabase
+    .from('deliveries')
+    .update({
+      delivery_date: deliveryDate,
+      updated_at: new Date().toISOString(),
+    })
+    .in('id', deliveryIds)
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  revalidateAllDeliveryPaths()
+  return { success: true }
+}
+
 // ── Rider Region Defaults ──
 
 export async function getRiderRegionDefaults(contractorId: string) {
