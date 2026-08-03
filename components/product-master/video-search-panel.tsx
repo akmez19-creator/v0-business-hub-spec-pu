@@ -31,6 +31,8 @@ export type VideoHit = {
   plays: number
   likes: number
   score?: number
+  /** Title mentions Temu - a real marketplace demo of the product */
+  temu?: boolean
 }
 
 export type ImageHit = {
@@ -113,7 +115,10 @@ export function VideoSearchPanel({
   const [playing, setPlaying] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [note, setNote] = useState('')
+  // 'all' = whole short-video index, 'temu' = Temu listings and hauls only
+  const [source, setSource] = useState<'all' | 'temu'>('all')
   const lastQuery = useRef('')
+  const lastSource = useRef<'all' | 'temu'>('all')
 
   // Lens state
   const [lensImage, setLensImage] = useState<string | null>(productImage)
@@ -139,7 +144,7 @@ export function VideoSearchPanel({
   }, [productImage])
 
   const runSearch = useCallback(
-    async (q: string, next = false) => {
+    async (q: string, next = false, src: 'all' | 'temu' = source) => {
       const term = q.trim()
       if (term.length < 2) return
       setMode('text')
@@ -154,7 +159,7 @@ export function VideoSearchPanel({
         const res = await fetch('/api/product-master/video-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: term, cursor: next ? cursor : 0 }),
+          body: JSON.stringify({ query: term, cursor: next ? cursor : 0, source: src }),
         })
         const json = await res.json()
         if (!json.success) throw new Error(json.error || 'Search failed')
@@ -162,6 +167,7 @@ export function VideoSearchPanel({
         setCursor(json.cursor || 0)
         setHasMore(Boolean(json.hasMore))
         lastQuery.current = term
+        lastSource.current = src
         setSearched(true)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Search failed')
@@ -169,7 +175,7 @@ export function VideoSearchPanel({
         setLoading(false)
       }
     },
-    [cursor],
+    [cursor, source],
   )
 
   // Lens search: send the product photo, get back what it is plus videos of
@@ -368,6 +374,39 @@ export function VideoSearchPanel({
               )}
               Search
             </Button>
+          </div>
+
+          {/* Where to pull from. Temu mode hunts for the marketplace listings
+              and hauls of this product, which sell far better than generic clips */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Show:</span>
+            {(
+              [
+                { key: 'all', label: 'All videos' },
+                { key: 'temu', label: 'Temu videos' },
+              ] as const
+            ).map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => {
+                  setSource(s.key)
+                  if (query.trim().length >= 2) runSearch(query, false, s.key)
+                }}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  source === s.key
+                    ? 'bg-amber-500 text-black'
+                    : 'border border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+            {source === 'temu' && (
+              <span className="text-xs text-muted-foreground">
+                Temu listing demos and hauls of this product
+              </span>
+            )}
           </div>
 
           {/* Platforms without a public search API - deep-link out instead of
@@ -649,6 +688,11 @@ export function VideoSearchPanel({
                         Match
                       </span>
                     )}
+                    {hit.temu && mode !== 'image' && (
+                      <span className="absolute left-1.5 top-1.5 rounded bg-orange-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        Temu
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -720,7 +764,7 @@ export function VideoSearchPanel({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => runSearch(lastQuery.current, true)}
+          onClick={() => runSearch(lastQuery.current, true, lastSource.current)}
           disabled={loading}
           className="self-center"
         >

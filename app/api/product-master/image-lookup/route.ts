@@ -23,15 +23,77 @@ type ImageHit = {
 const SHOP_HOSTS =
   /(walmartimages|susercontent|alicdn|amazon|ssl-images-amazon|media-amazon|ebayimg|shopify|etsystatic|temu|kwcdn|lazada|aliexpress|target|homedepot|argos|wayfair)/i
 
+const BROWSER_HEADERS = {
+  'User-Agent': UA,
+  'Accept-Language': 'en-US,en;q=0.9',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+}
+
 /** DuckDuckGo image search needs a short-lived vqd token from the HTML page. */
 async function getVqd(query: string) {
   const res = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`, {
-    headers: { 'User-Agent': UA },
+    headers: BROWSER_HEADERS,
   })
   if (!res.ok) return null
   const html = await res.text()
   const m = html.match(/vqd=["']?([\d-]+)["']?/) || html.match(/vqd=([^&"']+)/)
   return m ? m[1] : null
+}
+
+type RawImage = {
+  title?: string
+  image?: string
+  thumbnail?: string
+  width?: number
+  height?: number
+  source?: string
+  url?: string
+}
+
+/**
+ * The vqd token is short-lived and the endpoint rate-limits per IP, so a single
+ * attempt fails intermittently. Retry with a freshly minted token before giving
+ * up, and report the real status so failures are diagnosable.
+ */
+async function fetchImages(query: string): Promise<RawImage[]> {
+  let lastReason = 'unknown'
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 600 * attempt))
+
+    const vqd = await getVqd(query)
+    if (!vqd) {
+      lastReason = 'no vqd token'
+      continue
+    }
+
+    const res = await fetch(
+      `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`,
+      {
+        headers: {
+          ...BROWSER_HEADERS,
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          Referer: `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      },
+    )
+
+    if (!res.ok) {
+      lastReason = `http ${res.status}`
+      continue
+    }
+
+    try {
+      const json = (await res.json()) as { results?: RawImage[] }
+      if (json.results?.length) return json.results
+      lastReason = 'empty result set'
+    } catch {
+      lastReason = 'malformed response'
+    }
+  }
+
+  throw new Error(`Image search is unavailable right now (${lastReason})`)
 }
 
 // POST { query } -> clean product photos from around the web.
@@ -51,31 +113,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Type what the product is first' }, { status: 400 })
     }
 
-    const vqd = await getVqd(query)
-    if (!vqd) throw new Error('Image search is unavailable right now')
-
-    const res = await fetch(
-      `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`,
-      { headers: { 'User-Agent': UA, Referer: 'https://duckduckgo.com/', Accept: 'application/json' } },
-    )
-    if (!res.ok) throw new Error('Image search is unavailable right now')
-
-    const json = (await res.json()) as {
-      results?: Array<{
-        title?: string
-        image?: string
-        thumbnail?: string
-        width?: number
-        height?: number
-        source?: string
-        url?: string
-      }>
-    }
+    const raw = await fetchImages(query)
 
     const seen = new Set<string>()
     const hits: ImageHit[] = []
 
-    for (const r of json.results || []) {
+    for (const r of raw) {
       const image = r.image || ''
       const thumbnail = r.thumbnail || ''
       if (!/^https?:\/\//i.test(image) || !/^https?:\/\//i.test(thumbnail)) continue
@@ -113,6 +156,33 @@ export async function POST(request: Request) {
         pageUrl: r.url || image,
         score,
       })
+    }
+
+    // Some niche products only have small or oddly cropped photos online - show
+    // those rather than an empty grid
+    if (!hits.length) {
+      for (const r of raw) {
+        const image = r.image || ''
+        const thumbnail = r.thumbnail || ''
+        if (!/^https?:\/\//i.test(image) || !/^https?:\/\//i.test(thumbnail)) continue
+        let host = ''
+        try {
+          host = new URL(image).hostname
+        } catch {
+          continue
+        }
+        hits.push({
+          id: image,
+          title: (r.title || 'Product image').slice(0, 120),
+          image,
+          thumbnail,
+          width: Number(r.width || 0),
+          height: Number(r.height || 0),
+          source: r.source || host,
+          pageUrl: r.url || image,
+          score: SHOP_HOSTS.test(host) ? 1 : 0,
+        })
+      }
     }
 
     hits.sort((a, b) => b.score - a.score || b.width * b.height - a.width * a.height)
