@@ -112,7 +112,48 @@ export function ReelsStudioTab({
   const [logoRemoveBg, setLogoRemoveBg] = useState(false)
   const [logoBgTol, setLogoBgTol] = useState(30) // background match tolerance %
   const [processedLogo, setProcessedLogo] = useState<string | null>(null)
+  const [logoSaving, setLogoSaving] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
+
+  // Load the persisted brand logo on mount so every new reel starts with the
+  // last logo the user set (falls back to the bundled default)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/company-settings')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j.reels_logo_url) setLogoSrc(j.reels_logo_url)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Change logo: show it instantly, upload to blob storage, then persist the
+  // URL in company settings so it is reused for all future reels
+  const handleLogoFile = async (f: File) => {
+    const previewUrl = URL.createObjectURL(f)
+    setLogoSrc(previewUrl)
+    setLogoSaving(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', f)
+      const up = await fetch('/api/upload', { method: 'POST', body: fd })
+      const upJson = await up.json()
+      if (!up.ok || !upJson.url) throw new Error(upJson.error || 'Upload failed')
+      setLogoSrc(upJson.url)
+      await fetch('/api/company-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reels_logo_url: upJson.url }),
+      })
+    } catch {
+      // Keep the local preview even if persistence fails
+    } finally {
+      setLogoSaving(false)
+    }
+  }
 
   // Free placement: element centers as % of video width/height, draggable
   // directly on the preview
@@ -1073,9 +1114,15 @@ export function ReelsStudioTab({
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0]
-                    if (f) setLogoSrc(URL.createObjectURL(f))
+                    if (f) handleLogoFile(f)
+                    e.target.value = ''
                   }}
                 />
+                {logoSaving && (
+                  <p className="text-xs text-muted-foreground" aria-live="polite">
+                    Saving logo for all reels{'\u2026'}
+                  </p>
+                )}
               </div>
               <div className="flex flex-1 flex-col gap-2.5">
                 <div className="flex items-center gap-3">
