@@ -22,7 +22,13 @@ type SearchHit = {
   plays: number
   likes: number
   score: number
+  /** Title mentions Temu - a real marketplace demo of the product */
+  temu?: boolean
 }
+
+const TEMU_RE = /\btemu\b/i
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const abs = (u?: string | null) => {
   if (!u) return null
@@ -144,6 +150,7 @@ export async function POST(request: Request) {
     const imageUrl = String(body?.imageUrl || '').trim()
     const imageBase64 = String(body?.imageBase64 || '')
     const productName = String(body?.productName || '').slice(0, 120)
+    const source = String(body?.source || 'all')
 
     // Fetch remote images server-side so private/CDN hosts and signed URLs
     // work the same as a direct upload
@@ -168,10 +175,32 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fan the derived phrases out in parallel and merge
-    const batches = await Promise.all(
-      vision.queries.map((q) => searchOne(q).catch(() => [])),
-    )
+    // The photo now drives the same Temu hunt the name search does. Temu itself
+    // renders listings through a signed internal API and ships no playable
+    // video in its HTML, so it can't be scraped - but Temu sellers and buyers
+    // post the same products as short videos. The advantage over the name
+    // search is that these phrasings are built from what the AI actually saw
+    // in the photo, not from whatever the product is called in inventory.
+    const subject = vision.label || productName
+    const temuMode = source === 'temu' && Boolean(subject)
+
+    let batches: Array<Awaited<ReturnType<typeof searchOne>>>
+    if (temuMode) {
+      const temuQueries = [`temu ${subject}`, `${subject} temu haul`, `${subject} temu review`]
+      // The provider allows ~1 request/second, so these run spaced out rather
+      // than in parallel, which would get two of the three rejected.
+      batches = []
+      for (let i = 0; i < temuQueries.length; i++) {
+        if (i) await sleep(1100)
+        batches.push(await searchOne(temuQueries[i]).catch(() => []))
+      }
+      // The plain vision phrasings still run: a product nobody happened to tag
+      // "temu" would otherwise come back completely empty.
+      const rest = await Promise.all(vision.queries.slice(0, 3).map((q) => searchOne(q).catch(() => [])))
+      batches.push(...rest)
+    } else {
+      batches = await Promise.all(vision.queries.map((q) => searchOne(q).catch(() => [])))
+    }
 
     const keywords = vision.keywords.length > 0 ? vision.keywords : vision.label.toLowerCase().split(/\s+/)
     const seen = new Set<string>()
@@ -199,6 +228,7 @@ export async function POST(request: Request) {
           plays: Number(v.play_count || 0),
           likes: Number(v.digg_count || 0),
           score: hits,
+          temu: TEMU_RE.test(title),
         })
       }
     }
@@ -206,15 +236,21 @@ export async function POST(request: Request) {
     // Relevance first, popularity as the tie-break. Drop the zero-match noise
     // only when there are enough genuine matches to fill the grid.
     const matched = merged.filter((m) => m.score > 0)
-    const ranked = (matched.length >= 8 ? matched : merged).sort(
-      (a, b) => b.score - a.score || b.plays - a.plays,
-    )
+    const pool = matched.length >= 8 ? matched : merged
+    // In Temu mode the marketplace mention is only a tie-break, never the
+    // primary sort - ranking on it first surfaces unrelated Temu hauls.
+    const ranked = temuMode
+      ? [...pool].sort(
+          (a, b) => b.score - a.score || Number(b.temu) - Number(a.temu) || b.plays - a.plays,
+        )
+      : [...pool].sort((a, b) => b.score - a.score || b.plays - a.plays)
 
     return NextResponse.json({
       success: true,
+      source: temuMode ? 'temu' : 'all',
       label: vision.label,
       category: vision.category,
-      queries: vision.queries,
+      queries: temuMode ? [`temu ${subject}`, ...vision.queries.slice(0, 3)] : vision.queries,
       results: ranked.slice(0, 40),
     })
   } catch (error) {

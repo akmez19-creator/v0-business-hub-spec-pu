@@ -111,8 +111,14 @@ const DEFAULT_LOGO = '/images/reels-brand-logo.png'
 const DEFAULT_PAGE_KEY = '__default__'
 // Logo width bounds as a % of video width, shared by the corner resize handle
 // and the burn so the two can never disagree
-const LOGO_MIN = 6
-const LOGO_MAX = 45
+  const LOGO_MIN = 6
+  const LOGO_MAX = 45
+
+  // Meta's Reels safe area for a 1080x1920 frame, as percentages: the top 14%
+  // (~269px) carries the platform header, the bottom 35% (~672px) the caption
+  // and the like/share rail, and 6% down each side. Branding burned outside
+  // this is covered up in the feed even though it looks fine here.
+  const SAFE = { top: 14, bottom: 35, side: 6 }
 
 // Prices are Postgres `numeric`. supabase-js hands them over as real numbers,
 // but raw SQL clients serialize the same column as a string ("475.00"), so
@@ -336,8 +342,14 @@ export function ReelsStudioTab({
       return
     }
 
-    let x = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100))
-    let y = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100))
+    // With snapping on, overlays are held inside the Reels safe area instead of
+    // the raw frame, so nothing lands under the caption or the engagement rail
+    const minX = snapSafe ? SAFE.side : 3
+    const maxX = snapSafe ? 100 - SAFE.side : 97
+    const minY = snapSafe ? SAFE.top : 3
+    const maxY = snapSafe ? 100 - SAFE.bottom : 97
+    let x = Math.min(maxX, Math.max(minX, ((e.clientX - rect.left) / rect.width) * 100))
+    let y = Math.min(maxY, Math.max(minY, ((e.clientY - rect.top) / rect.height) * 100))
     const snapV = Math.abs(x - 50) <= SNAP_PCT
     const snapH = Math.abs(y - 50) <= SNAP_PCT
     if (snapV) x = 50
@@ -671,6 +683,18 @@ export function ReelsStudioTab({
   const [restyled, setRestyled] = useState(false)
   // A brand finished and a fresh style is owed to the *next* post
   const [pendingRestyle, setPendingRestyle] = useState(false)
+
+  // Make-it-yours: real edits to the footage itself, applied in the same pass
+  // as the branding. Overlays alone leave the underlying frames and audio
+  // identical to the source, which is what platforms actually compare.
+  const [speed, setSpeed] = useState(1)
+  const [zoom, setZoom] = useState(0)
+  const [muteAudio, setMuteAudio] = useState(false)
+
+  // Reels safe zones: the platform's own UI covers the top 14% and bottom 35%
+  // of a 9:16 frame, so anything burned in there is hidden in the feed
+  const [showSafe, setShowSafe] = useState(true)
+  const [snapSafe, setSnapSafe] = useState(true)
   const shuffleStyles = useCallback(() => {
     const pick = (exclude: string[]) => {
       const pool = TITLE_STYLES.filter((s) => !exclude.includes(s.id))
@@ -683,6 +707,20 @@ export function ReelsStudioTab({
     })
     setRestyled(true)
   }, [])
+
+  // Turning snapping on has to fix what is already placed, otherwise overlays
+  // dragged into a dead zone earlier just stay there
+  useEffect(() => {
+    if (!snapSafe) return
+    const fit = (p: { x: number; y: number }) => ({
+      x: Math.min(100 - SAFE.side, Math.max(SAFE.side, p.x)),
+      y: Math.min(100 - SAFE.bottom, Math.max(SAFE.top, p.y)),
+    })
+    const same = (a: { x: number; y: number }, b: { x: number; y: number }) => a.x === b.x && a.y === b.y
+    setTitlePos((p) => (same(p, fit(p)) ? p : fit(p)))
+    setPricePos((p) => (same(p, fit(p)) ? p : fit(p)))
+    setLogoXY((p) => (same(p, fit(p)) ? p : fit(p)))
+  }, [snapSafe])
 
   // Never leave the editor open on an element that was just switched off,
   // otherwise its controls edit something invisible
@@ -1056,7 +1094,10 @@ export function ReelsStudioTab({
           : null
     const wantsTitle = titleOn && titleText.trim() !== ''
     const wantsPrice = priceOn && priceText.trim() !== ''
-    if (!source || (!wantsTitle && !wantsPrice && !logoOn)) return
+    // Transformations count as work on their own - a punch-in or a speed change
+    // with no overlays is still a valid render
+    const wantsTransform = zoom > 0 || speed !== 1 || muteAudio
+    if (!source || (!wantsTitle && !wantsPrice && !logoOn && !wantsTransform)) return
     setBusy('brand')
     setProgress(0)
     setError('')
@@ -1078,6 +1119,15 @@ export function ReelsStudioTab({
       const chains: string[] = []
       let last = '0:v'
       let idx = 1
+
+      // Punch-in happens BEFORE the overlays, so the branding is laid onto the
+      // already-cropped picture and keeps the exact size and position shown in
+      // the preview. Cropping after would scale the logo and text up with it.
+      if (zoom > 0) {
+        const f = 1 + zoom / 100
+        chains.push(`[0:v]crop=iw/${f}:ih/${f},scale=${dims.w}:${dims.h},setsar=1[zm]`)
+        last = 'zm'
+      }
 
       if (wantsTitle) {
         await ffmpeg.writeFile('title.png', await renderBannerPng(dims.w, dims.h, titleText, activeStyle, titleSize, titlePos))
@@ -1107,11 +1157,33 @@ export function ReelsStudioTab({
         idx++
       }
 
+      // Speed goes last, on the finished picture, so the overlays ride along
+      // with it rather than drifting out of sync with the footage
+      if (speed !== 1) {
+        chains.push(`[${last}]setpts=PTS/${speed}[sp]`)
+        last = 'sp'
+      }
+
+      // Audio: muting drops the track entirely, and a speed change has to
+      // re-time it or the sound runs ahead of the picture. `0:a?` keeps all of
+      // this safe on clips that have no audio track at all.
+      const audioArgs = muteAudio
+        ? ['-an']
+        : speed !== 1
+          ? ['-map', '0:a?', '-af', `atempo=${speed}`, '-c:a', 'aac']
+          : ['-map', '0:a?', '-c:a', 'copy']
+
+      // Mute-only renders touch no video filter at all, and ffmpeg rejects an
+      // empty -filter_complex, so the graph is omitted entirely in that case
+      const videoArgs = chains.length
+        ? ['-filter_complex', chains.join(';'), '-map', `[${last}]`]
+        : ['-map', '0:v']
+
       await ffmpeg.exec([
         ...inputs,
-        '-filter_complex', chains.join(';'),
-        '-map', `[${last}]`, '-map', '0:a?',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'copy',
+        ...videoArgs,
+        ...audioArgs,
+        '-c:v', 'libx264', '-preset', 'ultrafast',
         'branded.mp4',
       ])
       const data = await ffmpeg.readFile('branded.mp4')
@@ -1397,6 +1469,60 @@ export function ReelsStudioTab({
           )}
         </div>
 
+        {/* Make it yours: edits to the footage itself. Overlays sit on top of
+            untouched frames and audio - these change the actual picture and
+            sound, which is what makes the post genuinely different work. */}
+        <div className="flex flex-col gap-2.5 rounded-md border bg-background/60 p-2.5">
+          <span className="text-xs font-semibold text-foreground">Make it yours</span>
+          <div className="flex items-center gap-3">
+            <span className="w-28 shrink-0 text-[11px] text-muted-foreground">
+              Punch in {zoom}%
+            </span>
+            <Slider min={0} max={20} step={1} value={[zoom]} onValueChange={(v) => setZoom(v[0])} aria-label="Punch in" className="flex-1" />
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="w-28 shrink-0 text-[11px] text-muted-foreground">
+              Speed {speed.toFixed(2)}x
+            </span>
+            <Slider min={0.8} max={1.25} step={0.05} value={[speed]} onValueChange={(v) => setSpeed(v[0])} aria-label="Playback speed" className="flex-1" />
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={muteAudio}
+              onChange={(e) => setMuteAudio(e.target.checked)}
+              className="h-3.5 w-3.5 accent-amber-500"
+            />
+            Mute the original audio
+          </label>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Reused clips reach fewer people than original ones. A punch-in, a speed change and your own
+            audio make the post genuinely yours rather than a copy.
+          </p>
+        </div>
+
+        {/* Safe zones: where the platform's UI will cover the video */}
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-background/60 p-2.5">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showSafe}
+              onChange={(e) => setShowSafe(e.target.checked)}
+              className="h-3.5 w-3.5 accent-emerald-500"
+            />
+            Show Reels safe zones
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={snapSafe}
+              onChange={(e) => setSnapSafe(e.target.checked)}
+              className="h-3.5 w-3.5 accent-emerald-500"
+            />
+            Keep branding inside them
+          </label>
+        </div>
+
         {/* Title banner controls */}
         <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
           <label className="flex items-center gap-2 text-sm font-medium">
@@ -1571,6 +1697,25 @@ export function ReelsStudioTab({
                   playsInline
                   preload="metadata"
                 />
+                {/* Reels dead zones: dimmed bands showing where the platform's
+                    own UI sits on top of the video once it is posted */}
+                {showSafe && (
+                  <div aria-hidden className="pointer-events-none absolute inset-0">
+                    <div className="absolute inset-x-0 top-0 bg-black/45" style={{ height: `${SAFE.top}%` }} />
+                    <div className="absolute inset-x-0 bottom-0 bg-black/45" style={{ height: `${SAFE.bottom}%` }} />
+                    <div className="absolute inset-y-0 left-0 bg-black/45" style={{ width: `${SAFE.side}%` }} />
+                    <div className="absolute inset-y-0 right-0 bg-black/45" style={{ width: `${SAFE.side}%` }} />
+                    <div
+                      className="absolute border border-dashed border-emerald-400/70"
+                      style={{
+                        top: `${SAFE.top}%`,
+                        bottom: `${SAFE.bottom}%`,
+                        left: `${SAFE.side}%`,
+                        right: `${SAFE.side}%`,
+                      }}
+                    />
+                  </div>
+                )}
                 {/* Alignment rulers: center guides shown while dragging.
                     They light up amber when the element is snapped on. */}
                 {dragging && (

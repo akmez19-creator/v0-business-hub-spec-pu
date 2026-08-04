@@ -180,7 +180,9 @@ export function VideoSearchPanel({
 
   // Lens search: send the product photo, get back what it is plus videos of
   // that same kind of product ranked by how well they match
-  const runLensSearch = useCallback(async () => {
+  // src is passed explicitly when the source toggle triggers the re-run, since
+  // the state setter in that same click hasn't committed yet
+  const runLensSearch = useCallback(async (src: 'all' | 'temu' = source) => {
     if (!lensUpload && !lensImage) return
     setMode('image')
     setLoading(true)
@@ -196,19 +198,21 @@ export function VideoSearchPanel({
         body: JSON.stringify({
           ...(lensUpload ? { imageBase64: lensUpload } : { imageUrl: lensImage }),
           productName: defaultQuery,
+          source: src,
         }),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Image search failed')
       setResults(json.results || [])
       setDetected({ label: json.label || '', queries: json.queries || [] })
+      lastSource.current = src
       setSearched(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Image search failed')
     } finally {
       setLoading(false)
     }
-  }, [lensUpload, lensImage, defaultQuery])
+  }, [lensUpload, lensImage, defaultQuery, source])
 
   // Pull clean product photos off the web so a poor supplier thumbnail can be
   // swapped for a proper packshot before the AI reads it
@@ -350,6 +354,47 @@ export function VideoSearchPanel({
         </button>
       </div>
 
+      {/* Where to pull from. Temu mode hunts the marketplace listings and hauls
+          of this product, which sell far better than generic clips. It applies
+          to both tabs: by photo the phrasings are built from what the AI sees
+          in the picture rather than the inventory name. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Show:</span>
+        {(
+          [
+            { key: 'all', label: 'All videos' },
+            { key: 'temu', label: 'Temu videos' },
+          ] as const
+        ).map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => {
+              setSource(s.key)
+              // Re-run whichever search is already on screen, so switching
+              // source never leaves stale results from the other one
+              if (mode === 'image') {
+                if (lensUpload || lensImage) runLensSearch(s.key)
+              } else if (query.trim().length >= 2) {
+                runSearch(query, false, s.key)
+              }
+            }}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              source === s.key
+                ? 'bg-amber-500 text-black'
+                : 'border border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+        {source === 'temu' && (
+          <span className="text-xs text-muted-foreground">
+            Temu listing demos and hauls of this product
+          </span>
+        )}
+      </div>
+
       {mode === 'text' ? (
         <>
           <div className="flex gap-2">
@@ -374,39 +419,6 @@ export function VideoSearchPanel({
               )}
               Search
             </Button>
-          </div>
-
-          {/* Where to pull from. Temu mode hunts for the marketplace listings
-              and hauls of this product, which sell far better than generic clips */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">Show:</span>
-            {(
-              [
-                { key: 'all', label: 'All videos' },
-                { key: 'temu', label: 'Temu videos' },
-              ] as const
-            ).map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => {
-                  setSource(s.key)
-                  if (query.trim().length >= 2) runSearch(query, false, s.key)
-                }}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                  source === s.key
-                    ? 'bg-amber-500 text-black'
-                    : 'border border-border text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-            {source === 'temu' && (
-              <span className="text-xs text-muted-foreground">
-                Temu listing demos and hauls of this product
-              </span>
-            )}
           </div>
 
           {/* Platforms without a public search API - deep-link out instead of
@@ -465,7 +477,7 @@ export function VideoSearchPanel({
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button onClick={runLensSearch} disabled={loading || !lensImage}>
+                <Button onClick={() => runLensSearch()} disabled={loading || !lensImage}>
                   {loading ? (
                     <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   ) : (
@@ -688,7 +700,7 @@ export function VideoSearchPanel({
                         Match
                       </span>
                     )}
-                    {hit.temu && mode !== 'image' && (
+                    {hit.temu && (
                       <span className="absolute left-1.5 top-1.5 rounded bg-orange-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
                         Temu
                       </span>
