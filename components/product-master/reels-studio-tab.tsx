@@ -1474,30 +1474,50 @@ export function ReelsStudioTab({
             sound, which is what makes the post genuinely different work. */}
         <div className="flex flex-col gap-2.5 rounded-md border bg-background/60 p-2.5">
           <span className="text-xs font-semibold text-foreground">Make it yours</span>
-          <div className="flex items-center gap-3">
-            <span className="w-28 shrink-0 text-[11px] text-muted-foreground">
-              Punch in {zoom}%
+
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
+                Zoom in {zoom > 0 ? `${zoom}%` : 'off'}
+              </span>
+              <Slider min={0} max={20} step={1} value={[zoom]} onValueChange={(v) => setZoom(v[0])} aria-label="Zoom in" className="flex-1" />
+            </div>
+            <span className="text-[11px] leading-relaxed text-muted-foreground">
+              Crops a little closer to the product, like standing one step nearer. Trims the outer edge,
+              so keep it low if the product touches the sides.
             </span>
-            <Slider min={0} max={20} step={1} value={[zoom]} onValueChange={(v) => setZoom(v[0])} aria-label="Punch in" className="flex-1" />
           </div>
-          <div className="flex items-center gap-3">
-            <span className="w-28 shrink-0 text-[11px] text-muted-foreground">
-              Speed {speed.toFixed(2)}x
+
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
+                {speed === 1 ? 'Speed: normal' : speed < 1 ? `Slower (${speed.toFixed(2)}x)` : `Faster (${speed.toFixed(2)}x)`}
+              </span>
+              <Slider min={0.8} max={1.25} step={0.05} value={[speed]} onValueChange={(v) => setSpeed(v[0])} aria-label="Playback speed" className="flex-1" />
+            </div>
+            <span className="text-[11px] leading-relaxed text-muted-foreground">
+              Plays the clip a touch slower or faster. Anything up to about 1.1x is hard to notice.
             </span>
-            <Slider min={0.8} max={1.25} step={0.05} value={[speed]} onValueChange={(v) => setSpeed(v[0])} aria-label="Playback speed" className="flex-1" />
           </div>
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={muteAudio}
-              onChange={(e) => setMuteAudio(e.target.checked)}
-              className="h-3.5 w-3.5 accent-amber-500"
-            />
-            Mute the original audio
-          </label>
+
+          <div className="flex flex-col gap-1">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={muteAudio}
+                onChange={(e) => setMuteAudio(e.target.checked)}
+                className="h-3.5 w-3.5 accent-amber-500"
+              />
+              Mute the original audio
+            </label>
+            <span className="text-[11px] leading-relaxed text-muted-foreground">
+              The strongest one. Silence the original, then record your own voice over it when you post.
+            </span>
+          </div>
+
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Reused clips reach fewer people than original ones. A punch-in, a speed change and your own
-            audio make the post genuinely yours rather than a copy.
+            Your logo and price sit on top of the video. These three change the video itself, which is
+            what makes the post count as your own work instead of a copy.
           </p>
         </div>
 
@@ -1690,9 +1710,14 @@ export function ReelsStudioTab({
                 // Pressing bare video (not an overlay) closes the editor
                 onPointerDown={() => setActiveLayer(null)}
               >
+                {/* The zoom is mirrored here so the slider does something you
+                    can see. Only the video scales, never the overlays - which
+                    is exactly what the render does, since the crop is applied
+                    before the branding is drawn on. */}
                 <video
                   src={preBrand?.url ?? output?.url ?? selectedClip?.url}
-                  className="pointer-events-none max-h-80 w-auto"
+                  className="pointer-events-none max-h-80 w-auto transition-transform"
+                  style={zoom > 0 ? { transform: `scale(${1 + zoom / 100})` } : undefined}
                   muted
                   playsInline
                   preload="metadata"
