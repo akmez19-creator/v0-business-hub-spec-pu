@@ -79,6 +79,10 @@ type PromoLayoutId = (typeof PROMO_LAYOUTS)[number]['id']
 const DEFAULT_LOGO = '/images/reels-brand-logo.png'
 // Shared logo row: covers pages that have never had their own logo set
 const DEFAULT_PAGE_KEY = '__default__'
+// Logo width bounds as a % of video width, shared by the corner resize handle
+// and the burn so the two can never disagree
+const LOGO_MIN = 6
+const LOGO_MAX = 45
 
 // Prices are Postgres `numeric`. supabase-js hands them over as real numbers,
 // but raw SQL clients serialize the same column as a string ("475.00"), so
@@ -168,7 +172,9 @@ export function ReelsStudioTab({
   const [logoOpacity, setLogoOpacity] = useState(50) // %
   const [logoSize, setLogoSize] = useState(18) // % of video width
   const [logoSrc, setLogoSrc] = useState(DEFAULT_LOGO)
-  const [logoRemoveBg, setLogoRemoveBg] = useState(false)
+  // Background removal is ON by default - a logo burned onto video almost
+  // always wants to be a clean cutout, so the common case shouldn't need a click
+  const [logoRemoveBg, setLogoRemoveBg] = useState(true)
   const [logoBgTol, setLogoBgTol] = useState(30) // background match tolerance %
   const [processedLogo, setProcessedLogo] = useState<string | null>(null)
   const [logoSaving, setLogoSaving] = useState(false)
@@ -182,6 +188,9 @@ export function ReelsStudioTab({
   const [brandPages, setBrandPages] = useState<{ id: string; name: string }[]>([])
   const [pageLogos, setPageLogos] = useState<Record<string, string>>({})
   const [logoFallback, setLogoFallback] = useState('')
+  // True once the saved logo lookup has settled. The AI cutout waits for this
+  // so it mattes the page's real logo once, not the bundled placeholder first.
+  const [logoResolved, setLogoResolved] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -205,8 +214,12 @@ export function ReelsStudioTab({
         setBrandPageId(first)
         const resolved = (first && logos[first]) || fallback
         if (resolved) setLogoSrc(resolved)
+        setLogoResolved(true)
       })
-      .catch(() => {})
+      .catch(() => {
+        // Lookup failed - unblock the cutout so it works on the bundled logo
+        if (!cancelled) setLogoResolved(true)
+      })
     return () => {
       cancelled = true
     }
@@ -257,7 +270,10 @@ export function ReelsStudioTab({
   const [logoXY, setLogoXY] = useState({ x: 82, y: 88 })
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
-  const dragTarget = useRef<'title' | 'price' | 'logo' | null>(null)
+  const dragTarget = useRef<'title' | 'price' | 'logo' | 'logo-resize' | null>(null)
+  // Tapping the logo on the preview selects it, which reveals its corner
+  // resize handle and the opacity slider right there on the video
+  const [logoSelected, setLogoSelected] = useState(false)
 
   // Keep the preview font/logo scale proportional to the rendered video box
   useEffect(() => {
@@ -277,6 +293,18 @@ export function ReelsStudioTab({
   const onPreviewPointerMove = (e: React.PointerEvent) => {
     if (!dragTarget.current || !previewBoxRef.current) return
     const rect = previewBoxRef.current.getBoundingClientRect()
+
+    // Corner handle: the logo is centered on logoXY, so its half-width is the
+    // horizontal gap between that center and the pointer. Doubling it gives the
+    // new width as a % of the video, which is exactly what logoSize means.
+    if (dragTarget.current === 'logo-resize') {
+      const centerX = rect.left + (logoXY.x / 100) * rect.width
+      const halfW = Math.abs(e.clientX - centerX)
+      const pct = (halfW * 2) / rect.width * 100
+      setLogoSize(Math.round(Math.min(LOGO_MAX, Math.max(LOGO_MIN, pct))))
+      return
+    }
+
     let x = Math.min(97, Math.max(3, ((e.clientX - rect.left) / rect.width) * 100))
     let y = Math.min(97, Math.max(3, ((e.clientY - rect.top) / rect.height) * 100))
     const snapV = Math.abs(x - 50) <= SNAP_PCT
@@ -304,6 +332,9 @@ export function ReelsStudioTab({
       setProcessedLogo(null)
       return
     }
+    // Wait for the saved logo, otherwise every open mattes the placeholder
+    // and then immediately mattes again - two AI calls for one result
+    if (!logoResolved) return
     let cancelled = false
     setRemovingBg(true)
     ;(async () => {
@@ -396,7 +427,7 @@ export function ReelsStudioTab({
     return () => {
       cancelled = true
     }
-  }, [logoSrc, logoRemoveBg, logoBgTol])
+  }, [logoSrc, logoRemoveBg, logoBgTol, logoResolved])
 
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
@@ -1490,30 +1521,25 @@ export function ReelsStudioTab({
                   </p>
                 )}
               </div>
-              <div className="flex flex-1 flex-col gap-2.5">
-                <div className="flex items-center gap-3">
-                  <span className="w-28 shrink-0 text-xs text-muted-foreground">Transparency: {logoOpacity}%</span>
-                  <Slider min={5} max={100} step={1} value={[logoOpacity]} onValueChange={(v) => setLogoOpacity(v[0])} className="flex-1" />
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {logoSize}% width</span>
-                  <Slider min={6} max={45} step={1} value={[logoSize]} onValueChange={(v) => setLogoSize(v[0])} className="flex-1" />
-                </div>
-                <label className="flex items-center gap-2 text-xs font-medium">
-                  <input
-                    type="checkbox"
-                    checked={logoRemoveBg}
-                    onChange={(e) => setLogoRemoveBg(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-amber-500"
-                  />
-                  <Eraser className="h-3.5 w-3.5 text-amber-500" />
-                  Remove logo background (AI)
-                </label>
-                {logoRemoveBg && removingBg && (
-                  <p className="text-xs text-muted-foreground" aria-live="polite">
-                    Cutting out the background with AI{'\u2026'}
-                  </p>
-                )}
+              {/* Size and transparency now live on the video itself, so all
+                  that stays here is the cutout escape hatch */}
+              <div className="flex flex-1 flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setLogoRemoveBg(!logoRemoveBg)}
+                  aria-pressed={logoRemoveBg}
+                  className={`flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                    logoRemoveBg
+                      ? 'border-amber-500 bg-amber-500/15 text-amber-500'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Eraser className="h-3 w-3" />
+                  {removingBg ? 'Cutting out background\u2026' : logoRemoveBg ? 'Background removed' : 'Keep original background'}
+                </button>
+                <p className="text-[11px] text-muted-foreground">
+                  Drag the logo on the video below to move it, pull its corner to resize.
+                </p>
               </div>
             </div>
           )}
@@ -1533,6 +1559,8 @@ export function ReelsStudioTab({
                 onPointerMove={onPreviewPointerMove}
                 onPointerUp={endPreviewDrag}
                 onPointerLeave={endPreviewDrag}
+                // Pressing the bare video (not the logo) dismisses the handles
+                onPointerDown={() => setLogoSelected(false)}
               >
                 <video
                   src={preBrand?.url ?? output?.url ?? selectedClip?.url}
@@ -1634,30 +1662,75 @@ export function ReelsStudioTab({
                     )
                   })()}
                 {logoOn && (
-                  <img
-                    src={effectiveLogoSrc || '/placeholder.svg'}
-                    alt="Drag to position the logo"
-                    role="button"
-                    onPointerDown={(e) => {
-                      e.preventDefault()
-                      ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                      dragTarget.current = 'logo'
-                      setDragging(true)
-                    }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing"
-                    style={{
-                      left: `${logoXY.x}%`,
-                      top: `${logoXY.y}%`,
-                      width: `${logoSize}%`,
-                      opacity: logoOpacity / 100,
-                    }}
-                    draggable={false}
-                  />
+                  <div
+                    className="absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{ left: `${logoXY.x}%`, top: `${logoXY.y}%`, width: `${logoSize}%` }}
+                  >
+                    <img
+                      src={effectiveLogoSrc || '/placeholder.svg'}
+                      alt="Drag to position the logo"
+                      role="button"
+                      onPointerDown={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                        setLogoSelected(true)
+                        dragTarget.current = 'logo'
+                        setDragging(true)
+                      }}
+                      className={`w-full cursor-grab active:cursor-grabbing ${
+                        logoSelected ? 'outline outline-1 outline-amber-400' : ''
+                      }`}
+                      style={{ opacity: logoOpacity / 100 }}
+                      draggable={false}
+                    />
+                    {/* Corner handle: drag outward to scale the logo. */}
+                    {logoSelected && (
+                      <span
+                        role="button"
+                        aria-label="Drag to resize the logo"
+                        title="Drag to resize"
+                        onPointerDown={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          dragTarget.current = 'logo-resize'
+                          setDragging(true)
+                        }}
+                        className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-background bg-amber-400 shadow"
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* Transparency rides along with the selection, pinned inside
+                    the frame so it can never push the panel taller */}
+                {logoOn && logoSelected && (
+                  <div
+                    className="absolute inset-x-2 bottom-2 flex items-center gap-2 rounded-md bg-black/75 px-2.5 py-1.5 backdrop-blur-sm"
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="shrink-0 text-[10px] font-medium text-white/80">
+                      Opacity {logoOpacity}%
+                    </span>
+                    <Slider
+                      min={5}
+                      max={100}
+                      step={1}
+                      value={[logoOpacity]}
+                      onValueChange={(v) => setLogoOpacity(v[0])}
+                      aria-label="Logo transparency"
+                      className="flex-1"
+                    />
+                    <span className="shrink-0 text-[10px] tabular-nums text-white/60">{logoSize}% wide</span>
+                  </div>
                 )}
               </div>
             </div>
             <p className="text-center text-[11px] text-muted-foreground">
-              The exact positions shown here are burned into the video.
+              {logoOn && !logoSelected
+                ? 'Tap the logo to resize or fade it. Positions shown here are burned into the video.'
+                : 'The exact positions shown here are burned into the video.'}
             </p>
           </div>
         )}
