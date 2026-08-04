@@ -556,6 +556,9 @@ export function PosterStudioTab({
           setWarnings([])
         }}
         fields={{
+          // Lets the caption cite real stock, category and description rather
+          // than inventing specs
+          productId,
           sourceImage,
           productName: name,
           headline,
