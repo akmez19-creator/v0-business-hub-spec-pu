@@ -38,6 +38,10 @@ export interface ToolRequest {
     price?: number | string | null
     /** Promo price from Product Master - the highlighted "now" */
     promoPrice?: number | string | null
+    /** Buy-one-get-one flag from inventory */
+    isB1g1?: boolean | null
+    /** Multi-buy tiers from inventory, e.g. {"2": 775} */
+    bundlePrices?: Record<string, number | string> | null
   }
   /** Pre-selected page + post when arriving from "Boost this post" */
   boost?: { pageId: string; postId: string }
@@ -63,6 +67,9 @@ interface OverviewProduct {
   // numeric columns can arrive as strings - always run them through toNum()
   price: number | string | null
   promo_price: number | string | null
+  // Inventory offers - these, not promo_price, are what most products carry
+  is_b1g1: boolean | null
+  bundle_prices: Record<string, number | string> | null
   quantity: number | null
   image_url: string | null
   is_active: boolean
@@ -390,9 +397,11 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                               id: p.id,
                               name: p.name,
                               image: p.image_url,
-                              price: p.price,
-                              promoPrice: p.promo_price,
-                            },
+                                    price: p.price,
+                                    promoPrice: p.promo_price,
+                                    isB1g1: p.is_b1g1,
+                                    bundlePrices: p.bundle_prices,
+                                  },
                           })
                         }}
                       >

@@ -25,10 +25,14 @@ export async function GET() {
     const [{ data: products }, { data: aliases }, { data: pos }, { data: links }, { data: cache }, { data: deliveries }, { data: postRows }] =
       await Promise.all([
         // promo_price rides along so Reels Studio can prefill the "was / now"
-        // tag straight from Product Master
+        // tag straight from Product Master. is_b1g1 and bundle_prices come too:
+        // in practice almost no product carries a promo price, so these offers
+        // are what the promo tag actually has to work with.
         admin
           .from('products')
-          .select('id, name, sku, category, price, promo_price, quantity, image_url, is_active, sold_out')
+          .select(
+            'id, name, sku, category, price, promo_price, quantity, image_url, is_active, sold_out, is_b1g1, bundle_prices',
+          )
           .order('name'),
         admin.from('product_aliases').select('alias_name, product_id'),
         admin

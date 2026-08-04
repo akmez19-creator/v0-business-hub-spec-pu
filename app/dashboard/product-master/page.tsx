@@ -104,6 +104,8 @@ export default function ProductMasterPage() {
                 productImage={request.product.image ?? null}
                 productPrice={request.product.price ?? null}
                 productPromoPrice={request.product.promoPrice ?? null}
+                productIsB1g1={request.product.isB1g1 ?? false}
+                productBundlePrices={request.product.bundlePrices ?? null}
                 onBoostPost={(boost) =>
                   // Seamless handoff: swap this dialog for the Campaign
                   // Creator pre-filled with the just-published post

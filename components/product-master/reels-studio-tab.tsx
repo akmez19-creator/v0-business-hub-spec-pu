@@ -36,6 +36,7 @@ import { ReelPublishPanel } from './reel-publish-panel'
 import { ReelAdPanel } from './reel-ad-panel'
 import { ReelAudioPanel, audioIsCleared, type ReelAudio } from './reel-audio-panel'
 import { saveClipToLibrary, fileFromSavedClip, type SavedClipRow } from '@/lib/product-master/clip-library'
+import { buildOffers, type ProductOffer } from '@/lib/product-master/offers'
 
 interface Clip {
   id: string
@@ -115,8 +116,11 @@ function StyleSwatches({ value, onChange }: { value: TitleStyleId; onChange: (id
   )
 }
 
-// Promo price tag layouts - how the old price and the new price are arranged
+// Promo price tag layouts - how the old price and the new price are arranged.
+// 'offer' renders the inventory deal (B1G1 / bundle) instead of a bare price,
+// which is what most products actually carry.
 const PROMO_LAYOUTS = [
+  { id: 'offer', label: 'Offer', hint: 'the deal from inventory, e.g. BUY 1 GET 1 FREE' },
   { id: 'wasnow', label: 'Was / Now', hint: 'Was Rs 1,375  Now Rs 999' },
   { id: 'strike', label: 'Cut price', hint: 'Rs 1̶,̶3̶7̶5̶  Rs 999' },
   { id: 'stacked', label: 'Stacked', hint: 'old on top, new below' },
@@ -176,6 +180,8 @@ export function ReelsStudioTab({
   productImage = null,
   productPrice = null,
   productPromoPrice = null,
+  productIsB1g1 = false,
+  productBundlePrices = null,
   onBoostPost,
 }: {
   productName?: string
@@ -188,6 +194,10 @@ export function ReelsStudioTab({
   productPrice?: number | string | null
   /** Product Master promo price - becomes the highlighted "now" price */
   productPromoPrice?: number | string | null
+  /** Buy-one-get-one flag from inventory */
+  productIsB1g1?: boolean | null
+  /** Multi-buy tiers from inventory, e.g. {"2": 775} */
+  productBundlePrices?: Record<string, number | string> | null
   /** Called when the user wants to boost the post they just published */
   onBoostPost?: (boost: { pageId: string; postId: string }) => void
 }) {
@@ -227,10 +237,29 @@ export function ReelsStudioTab({
   const promoPrice = toNum(productPromoPrice)
   const hasPromo = promoPrice !== null && promoPrice > 0
   const hasList = listPrice !== null && listPrice > 0
-  const [priceOn, setPriceOn] = useState(hasPromo)
+  // Inventory offers (B1G1 / bundles) for this product, best first. Products
+  // almost never have a promo_price, so these are usually the only real deal
+  // there is to advertise.
+  const offers = useMemo(
+    () =>
+      buildOffers({
+        price: productPrice,
+        promoPrice: productPromoPrice,
+        isB1g1: productIsB1g1,
+        bundlePrices: productBundlePrices,
+      }),
+    [productPrice, productPromoPrice, productIsB1g1, productBundlePrices],
+  )
+  const hasOffer = offers.length > 0
+  const [offerId, setOfferId] = useState<string>(offers[0]?.id ?? '')
+  const activeOffer: ProductOffer | null = offers.find((o) => o.id === offerId) ?? offers[0] ?? null
+
+  // Show the tag whenever there is something worth showing - an offer counts
+  const [priceOn, setPriceOn] = useState(hasPromo || hasOffer)
   const [priceOld, setPriceOld] = useState(hasPromo && hasList ? fmtRs(listPrice) : '')
   const [priceNew, setPriceNew] = useState(hasPromo ? fmtRs(promoPrice) : hasList ? fmtRs(listPrice) : '')
-  const [promoLayout, setPromoLayout] = useState<PromoLayoutId>(hasPromo ? 'wasnow' : 'only')
+  // Lead with the inventory offer when there is one
+  const [promoLayout, setPromoLayout] = useState<PromoLayoutId>(hasOffer ? 'offer' : hasPromo ? 'wasnow' : 'only')
   const [priceStyle, setPriceStyle] = useState<TitleStyleId>('flash')
   const [priceSize, setPriceSize] = useState(7) // font size as % of video width
   const [logoOn, setLogoOn] = useState(true)
@@ -505,8 +534,19 @@ export function ReelsStudioTab({
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
   const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
 
-  // Plain-text version of the promo tag, used by the AI caption writer
-  const priceText = priceNew.trim() ? (priceOld.trim() ? `${priceNew.trim()} was ${priceOld.trim()}` : priceNew.trim()) : ''
+  // Plain-text version of the promo tag, used by the AI caption writer and to
+  // decide whether there is anything to burn. On the offer layout the deal is
+  // the text, so it stands in for a typed price.
+  const priceText =
+    promoLayout === 'offer'
+      ? activeOffer
+        ? [activeOffer.headline, activeOffer.sub].filter(Boolean).join(' - ')
+        : ''
+      : priceNew.trim()
+        ? priceOld.trim()
+          ? `${priceNew.trim()} was ${priceOld.trim()}`
+          : priceNew.trim()
+        : ''
 
   // ---- Promo price tag ----------------------------------------------------
   // The tag is composed of styled segments (old price struck out, new price
@@ -514,9 +554,27 @@ export function ReelsStudioTab({
   // is reused by both the preview and the burn, so they can never disagree.
   type PromoSeg = { text: string; scale: number; strike?: boolean; dim?: boolean; accent?: boolean }
 
-  const buildPromoLines = (oldP: string, newP: string, layout: PromoLayoutId): PromoSeg[][] => {
+  const buildPromoLines = (
+    oldP: string,
+    newP: string,
+    layout: PromoLayoutId,
+    offer?: ProductOffer | null,
+  ): PromoSeg[][] => {
     const o = oldP.trim()
     const n = newP.trim()
+
+    // Offer layout: the deal is the headline. "BUY 1 GET 1 FREE" on top, the
+    // unit price and any saving underneath, so the value is unmistakable.
+    if (layout === 'offer') {
+      if (!offer) return [[{ text: n, scale: 1 }]]
+      const second: PromoSeg[] = []
+      if (offer.was) second.push({ text: offer.was, scale: 0.5, strike: true, dim: true })
+      else if (offer.sub) second.push({ text: offer.sub, scale: 0.5, dim: true })
+      if (offer.savePct > 0) second.push({ text: `-${offer.savePct}%`, scale: 0.44, accent: true })
+      const head: PromoSeg[] = [{ text: offer.headline, scale: 1 }]
+      return second.length ? [head, second] : [head]
+    }
+
     if (!o || layout === 'only') return [[{ text: n, scale: 1 }]]
     switch (layout) {
       case 'wasnow':
@@ -562,8 +620,9 @@ export function ReelsStudioTab({
     layout: PromoLayoutId,
     st: (typeof TITLE_STYLES)[number],
     sizePct: number,
+    offer?: ProductOffer | null,
   ) => {
-    const lines = buildPromoLines(oldP, newP, layout)
+    const lines = buildPromoLines(oldP, newP, layout, offer)
     const probe = document.createElement('canvas').getContext('2d')
     if (!probe) return null
     const font = (px: number) => `900 ${px}px 'Arial Black', Arial, sans-serif`
@@ -676,11 +735,14 @@ export function ReelsStudioTab({
   // Preview image of the tag, rendered at preview scale with the same code
   // path the burn uses
   const promoTag = useMemo(() => {
-    if (!priceOn || !priceNew.trim() || !previewW) return null
-    const t = drawPromoTag(previewW, priceOld, priceNew, promoLayout, activePriceStyle, priceSize)
+    // The offer layout draws itself from the deal, so a typed price is only
+    // required for the price-based layouts
+    const hasContent = promoLayout === 'offer' ? !!activeOffer : !!priceNew.trim()
+    if (!priceOn || !hasContent || !previewW) return null
+    const t = drawPromoTag(previewW, priceOld, priceNew, promoLayout, activePriceStyle, priceSize, activeOffer)
     return t ? { url: t.canvas.toDataURL('image/png'), w: t.w, h: t.h } : null
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [priceOn, priceOld, priceNew, promoLayout, activePriceStyle, priceSize, previewW])
+  }, [priceOn, priceOld, priceNew, promoLayout, activePriceStyle, priceSize, previewW, activeOffer])
 
   // Mirror of renderBannerPng's sizing math so the PREVIEW banner is pixel-
   // faithful to what gets burned: same Arial Black 900 font, same shrink-to-
@@ -1163,7 +1225,7 @@ export function ReelsStudioTab({
   // transparent full-frame canvas at the dragged (clamped) position.
   const renderPromoTagPng = (vw: number, vh: number, pos: { x: number; y: number }): Promise<Uint8Array> =>
     new Promise((resolve, reject) => {
-      const tag = drawPromoTag(vw, priceOld, priceNew, promoLayout, activePriceStyle, priceSize)
+      const tag = drawPromoTag(vw, priceOld, priceNew, promoLayout, activePriceStyle, priceSize, activeOffer)
       if (!tag) return reject(new Error('no tag'))
       const frame = document.createElement('canvas')
       frame.width = vw
@@ -1825,7 +1887,7 @@ export function ReelsStudioTab({
               onClick={() => setActiveLayer('price')}
               className="ml-6 w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
             >
-              <span>{priceNew.trim() ? `${priceOld.trim() ? `${priceOld.trim()} ` : ''}${priceNew.trim()}` : 'No price set'}</span>
+              <span>{priceText.trim() || 'No price set'}</span>
               <span className="text-amber-500"> {'\u00b7'} edit on video</span>
             </button>
           )}
@@ -2164,10 +2226,39 @@ export function ReelsStudioTab({
 
                 {activeLayer === 'price' && (
                   <>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Input value={priceOld} onChange={(e) => setPriceOld(e.target.value)} placeholder="Old price" className="h-8 flex-1" aria-label="Old price" />
-                      <Input value={priceNew} onChange={(e) => setPriceNew(e.target.value)} placeholder="New price" className="h-8 flex-1" aria-label="New price" />
-                    </div>
+                    {/* Offer layout is driven by inventory, so the manual
+                        price fields would have no effect - swap them for the
+                        list of deals this product actually has */}
+                    {promoLayout === 'offer' ? (
+                      offers.length > 0 ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {offers.map((o) => (
+                            <button
+                              key={o.id}
+                              type="button"
+                              onClick={() => setOfferId(o.id)}
+                              className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+                                activeOffer?.id === o.id
+                                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-400'
+                                  : 'border-border text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground">
+                          No B1G1 or bundle set for this product in inventory. Add one in Inventory, or pick another
+                          layout to type a price.
+                        </p>
+                      )
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input value={priceOld} onChange={(e) => setPriceOld(e.target.value)} placeholder="Old price" className="h-8 flex-1" aria-label="Old price" />
+                        <Input value={priceNew} onChange={(e) => setPriceNew(e.target.value)} placeholder="New price" className="h-8 flex-1" aria-label="New price" />
+                      </div>
+                    )}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {PROMO_LAYOUTS.map((l) => (
                         <button
