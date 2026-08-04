@@ -24,7 +24,6 @@ import {
   Merge,
   Move,
   Megaphone,
-  Pencil,
   RefreshCw,
   Scissors,
   Send,
@@ -218,6 +217,19 @@ const LAYOUT_PRESETS = [
   { id: 'bottom', label: 'Bottom', title: { x: 50, y: 50 }, price: { x: 50, y: 62 }, logo: { x: 82, y: 20 } },
 ] as const
 type LayoutPresetId = (typeof LAYOUT_PRESETS)[number]['id']
+
+// Push a blob at the browser as a file download
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Revoking immediately can cancel the download in some browsers
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
 
 // Prices are Postgres `numeric`. supabase-js hands them over as real numbers,
 // but raw SQL clients serialize the same column as a string ("475.00"), so
@@ -758,17 +770,53 @@ export function ReelsStudioTab({
 
     const lines = buildPromoLines(oldP, newP, layout, offer).flatMap(wrapSegs)
 
+    // Measure the INK, not the em box. Advance widths carry side bearings and
+    // the 'middle' baseline anchors to the em square (which reserves descender
+    // room uppercase text never uses), so laying the box out from those metrics
+    // left the text visibly off-centre. actualBoundingBox* is the real drawn
+    // extent, so padding comes out equal on all four sides.
     const measure = () => {
       const gap = base * 0.34
-      const widths = lines.map((segs) => {
-        let w = 0
+      const info = lines.map((segs) => {
+        let adv = 0 // pen position across the line
+        let inkL = Infinity
+        let inkR = -Infinity
+        let asc = 0
+        let desc = 0
         segs.forEach((s, i) => {
-          probe.font = font(base * s.scale)
-          w += probe.measureText(s.text).width + (s.accent ? base * s.scale * 0.9 : 0) + (i ? gap : 0)
+          const fs = base * s.scale
+          probe.font = font(fs)
+          const mm = probe.measureText(s.text)
+          if (i) adv += gap
+          // An outline straddles the glyph edge, so half of it sits outside
+          // the ink box and would otherwise be clipped by the canvas
+          const sp = st.stroke ? Math.max(2, fs * (st.shape === 'none' ? 0.16 : 0.08)) / 2 : 0
+          if (s.accent) {
+            // For a badge the pill is the visual edge, not the glyphs. It is
+            // measured from the shared baseline (like every other segment) so
+            // the pill cannot end up defining the very centre it hangs off.
+            const g = (mm.actualBoundingBoxAscent - mm.actualBoundingBoxDescent) / 2
+            const w = mm.width + fs * 0.45 * 2
+            inkL = Math.min(inkL, adv)
+            inkR = Math.max(inkR, adv + w)
+            asc = Math.max(asc, g + fs * 0.78)
+            desc = Math.max(desc, fs * 0.78 - g)
+            adv += w
+          } else {
+            inkL = Math.min(inkL, adv - mm.actualBoundingBoxLeft - sp)
+            inkR = Math.max(inkR, adv + mm.actualBoundingBoxRight + sp)
+            asc = Math.max(asc, mm.actualBoundingBoxAscent + sp)
+            desc = Math.max(desc, mm.actualBoundingBoxDescent + sp)
+            adv += mm.width
+          }
         })
-        return w
+        if (!Number.isFinite(inkL)) {
+          inkL = 0
+          inkR = adv
+        }
+        return { inkL, inkW: inkR - inkL, asc, desc, h: asc + desc }
       })
-      return { gap, widths, maxW: Math.max(...widths) }
+      return { gap, info, maxW: Math.max(...info.map((l) => l.inkW)) }
     }
 
     let m = measure()
@@ -779,10 +827,10 @@ export function ReelsStudioTab({
 
     const padX = base * 0.75
     const padY = base * 0.42
-    const lineGap = base * 0.14
-    const lineHeights = lines.map((segs) => base * Math.max(...segs.map((s) => s.scale)) * 1.14)
+    const lineGap = base * 0.34
+    // Box hugs the ink, so padY/padX end up identical above/below and left/right
     const bw = Math.ceil(m.maxW + padX * 2)
-    const bh = Math.ceil(lineHeights.reduce((a, b) => a + b, 0) + lineGap * (lines.length - 1) + padY * 2)
+    const bh = Math.ceil(m.info.reduce((a, l) => a + l.h, 0) + lineGap * (lines.length - 1) + padY * 2)
 
     const canvas = document.createElement('canvas')
     canvas.width = bw
@@ -807,28 +855,35 @@ export function ReelsStudioTab({
     }
 
     ctx.textAlign = 'left'
-    ctx.textBaseline = 'middle'
+    ctx.textBaseline = 'alphabetic'
     ctx.lineJoin = 'round'
 
     let y = padY
     lines.forEach((segs, li) => {
-      const lh = lineHeights[li]
-      const cy = y + lh / 2
-      let x = (bw - m.widths[li]) / 2
+      const L = m.info[li]
+      // Every segment on the line shares one baseline, placed so the line's
+      // ink top lands exactly on the cursor
+      const baseY = y + L.asc
+      // Shift by inkL so it is the ink - not the pen origin - that gets centred
+      let x = (bw - L.inkW) / 2 - L.inkL
       segs.forEach((s) => {
         const fs = base * s.scale
         ctx.font = font(fs)
-        const tw = ctx.measureText(s.text).width
+        const mm = ctx.measureText(s.text)
+        const tw = mm.width
 
         // Discount badge: inverted pill so it pops out of the tag
         if (s.accent) {
           const padA = fs * 0.45
+          // Pill wraps the label's ink centre, and the label keeps the line's
+          // shared baseline so it sits level with the price beside it
+          const pillCy = baseY - (mm.actualBoundingBoxAscent - mm.actualBoundingBoxDescent) / 2
           ctx.beginPath()
-          ctx.roundRect(x, cy - fs * 0.78, tw + padA * 2, fs * 1.56, fs * 0.78)
+          ctx.roundRect(x, pillCy - fs * 0.78, tw + padA * 2, fs * 1.56, fs * 0.78)
           ctx.fillStyle = st.bubble ? st.text : '#DC2626'
           ctx.fill()
           ctx.fillStyle = st.bubble ?? '#FFFFFF'
-          ctx.fillText(s.text, x + padA, cy)
+          ctx.fillText(s.text, x + padA, baseY)
           x += tw + padA * 2 + m.gap
           return
         }
@@ -837,28 +892,31 @@ export function ReelsStudioTab({
         if (st.stroke) {
           ctx.strokeStyle = st.stroke
           ctx.lineWidth = Math.max(2, fs * (st.shape === 'none' ? 0.16 : 0.08))
-          ctx.strokeText(s.text, x, cy)
+          ctx.strokeText(s.text, x, baseY)
         }
         if ('glow' in st && st.glow && !s.dim) {
           ctx.shadowColor = st.glow
           ctx.shadowBlur = fs * 0.35
         }
         ctx.fillStyle = st.text
-        ctx.fillText(s.text, x, cy)
+        ctx.fillText(s.text, x, baseY)
         ctx.shadowBlur = 0
 
         if (s.strike) {
+          // Half the cap height above the baseline - the optical middle of the
+          // digits, which a 'middle'-anchored line missed
+          const sy = baseY - mm.actualBoundingBoxAscent / 2
           ctx.beginPath()
           ctx.lineWidth = Math.max(2, fs * 0.09)
           ctx.strokeStyle = st.text
-          ctx.moveTo(x - fs * 0.08, cy)
-          ctx.lineTo(x + tw + fs * 0.08, cy)
+          ctx.moveTo(x - fs * 0.08, sy)
+          ctx.lineTo(x + tw + fs * 0.08, sy)
           ctx.stroke()
         }
         ctx.globalAlpha = 1
         x += tw + m.gap
       })
-      y += lh + lineGap
+      y += L.h + lineGap
     })
 
     return { canvas, w: bw, h: bh }
@@ -1175,16 +1233,31 @@ export function ReelsStudioTab({
     setPreBrand(null)
   }
 
-  // "Edit" on a clip tile: select it and bring the trim controls into view.
-  // The panel is often below the fold once several clips are in the feed, so
-  // selecting alone looks like nothing happened.
-  const trimSectionRef = useRef<HTMLElement>(null)
-  const editClip = (c: Clip) => {
-    selectClip(c)
-    // Let the panel render for the newly selected clip before scrolling to it
-    requestAnimationFrame(() => {
-      trimSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+  // Download a single clip straight from its tile with the branding that is
+  // currently set up. It renders through the same graph as Apply but writes
+  // none of the studio's state, so grabbing one clip never disturbs whatever
+  // is already staged in Steps 2 and 3.
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const downloadClip = async (c: Clip) => {
+    if (busy || downloadingId) return
+    if (hasBranding && !ffmpegReady) return
+    setError('')
+    setDownloadingId(c.id)
+    setBusy('brand')
+    setProgress(0)
+    try {
+      // Nothing switched on means there is nothing to burn, so hand over the
+      // original file rather than re-encoding it for no reason
+      const blob = hasBranding ? await renderBrandedBlob(c.file) : c.file
+      const stem = c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')
+      saveBlob(blob, `${hasBranding ? 'branded-' : ''}${stem}.mp4`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not render that clip')
+    } finally {
+      setDownloadingId(null)
+      setBusy(null)
+      setProgress(0)
+    }
   }
 
   const move = (id: string, dir: -1 | 1) =>
@@ -1415,33 +1488,28 @@ export function ReelsStudioTab({
   // Non-destructive: the first brand snapshots the clean source, and every
   // re-apply renders from that snapshot - so changing settings and applying
   // again EDITS the branding instead of stacking on top of it.
-  const brandVideo = async () => {
+  // Does the current setup actually change the picture? Hoisted out of
+  // brandVideo so the per-clip download agrees on what "branded" means.
+  const wantsTitle = titleOn && titleText.trim() !== ''
+  const wantsPrice = priceOn && priceText.trim() !== ''
+  // Transformations count as work on their own - a punch-in or a speed change
+  // with no overlays is still a valid render
+  const wantsTransform = zoom > 0 || speed !== 1 || muteAudio
+  const hasBranding = wantsTitle || wantsPrice || logoOn || wantsTransform
+
+  // Burn the current branding onto any source and hand back the mp4. Writes no
+  // state, so the Apply button and the per-clip download go through one graph
+  // instead of two that can drift apart.
+  const renderBrandedBlob = async (data: Blob | File): Promise<Blob> => {
     const ffmpeg = ffmpegRef.current
-    if (!ffmpeg) return
-    const source: { data: Blob | File; name: string; wasOutput: boolean } | null = preBrand
-      ? { data: preBrand.blob, name: preBrand.name, wasOutput: preBrand.wasOutput }
-      : output
-        ? { data: output.blob, name: output.name, wasOutput: true }
-        : selectedClip
-          ? { data: selectedClip.file, name: selectedClip.name, wasOutput: false }
-          : null
-    const wantsTitle = titleOn && titleText.trim() !== ''
-    const wantsPrice = priceOn && priceText.trim() !== ''
-    // Transformations count as work on their own - a punch-in or a speed change
-    // with no overlays is still a valid render
-    const wantsTransform = zoom > 0 || speed !== 1 || muteAudio
-    if (!source || (!wantsTitle && !wantsPrice && !logoOn && !wantsTransform)) return
     // A track of unknown origin is never burned in. This is the copyright gate:
     // the button is already disabled, so reaching here means something slipped
     // through, and silently dropping the audio is safer than publishing it.
     const newAudio = muteAudio && audio && audioIsCleared(audio) ? audio : null
-    setBusy('brand')
-    setProgress(0)
-    setError('')
-    try {
+    {
       const { fetchFile } = await import('@ffmpeg/util')
       // Probe actual dimensions of the source we are branding
-      const probeUrl = URL.createObjectURL(source.data)
+      const probeUrl = URL.createObjectURL(data)
       const dims = await new Promise<{ w: number; h: number }>((res, rej) => {
         const v = document.createElement('video')
         v.preload = 'metadata'
@@ -1451,7 +1519,7 @@ export function ReelsStudioTab({
       })
       URL.revokeObjectURL(probeUrl)
 
-      await ffmpeg.writeFile('brand-in.mp4', await fetchFile(source.data))
+      await ffmpeg.writeFile('brand-in.mp4', await fetchFile(data))
       const inputs = ['-i', 'brand-in.mp4']
       const chains: string[] = []
       let last = '0:v'
@@ -1541,8 +1609,27 @@ export function ReelsStudioTab({
         '-c:v', 'libx264', '-preset', 'ultrafast',
         'branded.mp4',
       ])
-      const data = await ffmpeg.readFile('branded.mp4')
-      const blob = new Blob([data], { type: 'video/mp4' })
+      const outData = await ffmpeg.readFile('branded.mp4')
+      return new Blob([outData], { type: 'video/mp4' })
+    }
+  }
+
+  // BRAND: burn the title + price + logo onto the clean (un-branded) source.
+  const brandVideo = async () => {
+    if (!ffmpegRef.current) return
+    const source: { data: Blob | File; name: string; wasOutput: boolean } | null = preBrand
+      ? { data: preBrand.blob, name: preBrand.name, wasOutput: preBrand.wasOutput }
+      : output
+        ? { data: output.blob, name: output.name, wasOutput: true }
+        : selectedClip
+          ? { data: selectedClip.file, name: selectedClip.name, wasOutput: false }
+          : null
+    if (!source || !hasBranding) return
+    setBusy('brand')
+    setProgress(0)
+    setError('')
+    try {
+      const blob = await renderBrandedBlob(source.data)
       // Snapshot the clean source (first brand only) so branding stays editable
       if (!preBrand) {
         const cleanBlob = source.data instanceof Blob ? source.data : new Blob([source.data], { type: 'video/mp4' })
@@ -1722,9 +1809,16 @@ export function ReelsStudioTab({
                 )}
               </div>
               <div className="absolute right-1 top-1 hidden gap-0.5 group-hover:flex">
-                <Button variant="secondary" size="icon" className="h-6 w-6" title="Edit this clip" onClick={(e) => { e.stopPropagation(); editClip(c) }}>
-                  <Pencil className="h-3 w-3" />
-                  <span className="sr-only">Edit this clip</span>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="h-6 w-6"
+                  disabled={busy !== null || (hasBranding && !ffmpegReady)}
+                  title={hasBranding ? 'Download this clip with the current branding' : 'Download this clip'}
+                  onClick={(e) => { e.stopPropagation(); downloadClip(c) }}
+                >
+                  {downloadingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                  <span className="sr-only">Download this clip</span>
                 </Button>
                 <Button variant="secondary" size="icon" className="h-6 w-6" title="Move earlier" onClick={(e) => { e.stopPropagation(); move(c.id, -1) }}>
                   <ArrowUp className="h-3 w-3" />
@@ -1774,7 +1868,7 @@ export function ReelsStudioTab({
       </section>
 
       {/* ---- Step 2: cut or merge ---- */}
-      <section ref={trimSectionRef} className="flex flex-col gap-2">
+      <section className="flex flex-col gap-2">
         <p className="flex items-center gap-2 text-sm font-semibold">
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-bold text-sky-500">2</span>
           Cut a scene or merge the feed
