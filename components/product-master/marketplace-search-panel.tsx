@@ -131,6 +131,8 @@ export function MarketplaceSearchPanel({
   const rotateCursor = useRef(0)
   const [jobs, setJobs] = useState<Record<string, 'queued' | 'working' | 'done' | 'failed'>>({})
   const queue = useRef<Promise<void>>(Promise.resolve())
+  /** Listing ids whose video is already saved in the clip library (feature 9) */
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
 
   // The platform list comes from the server so there is only ever one copy of it
   useEffect(() => {
@@ -153,6 +155,43 @@ export function MarketplaceSearchPanel({
   useEffect(() => {
     setQuery(defaultQuery)
   }, [defaultQuery])
+
+  // Feature 9: flag listings whose video is already in the clip library.
+  // Only listings that actually have a video can have been saved, so the
+  // request stays small. Fire-and-forget - a failure just means no badges.
+  useEffect(() => {
+    const withVideo = results.filter((r) => r.video && r.id)
+    if (!withVideo.length) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/product-master/clips/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            // Same `listing:` prefix the save writes, or nothing matches
+            sourceIds: withVideo.map((r) => `listing:${r.id}`),
+            sourceUrls: withVideo.map((r) => r.pageUrl).filter(Boolean),
+          }),
+        })
+        const json = await res.json()
+        if (cancelled || !json?.success) return
+        const ids = new Set<string>(json.savedIds ?? [])
+        const urls = new Set<string>(json.savedUrls ?? [])
+        const saved = new Set<string>()
+        for (const r of withVideo) {
+          if (ids.has(`listing:${r.id}`)) saved.add(r.id)
+          else if (r.pageUrl && urls.has(r.pageUrl)) saved.add(r.id)
+        }
+        setSavedIds(saved)
+      } catch {
+        // Badging is an enhancement, never a blocker
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [results])
 
   // Switching product resets the source photo, and image search becomes the
   // default whenever we have one - it consistently returns the actual product
@@ -232,7 +271,10 @@ export function MarketplaceSearchPanel({
           // Namespaced so a listing id can never collide with a video id
           onUseClip(new File([blob], name, { type: blob.type || 'video/mp4' }), {
             sourceId: hit.id ? `listing:${hit.id}` : null,
-            sourceUrl: (hit.video as string) || null,
+            // pageUrl, not hit.video: the video url is a CDN link that can be
+            // re-signed between searches, so it would never match on a
+            // re-find. The listing page url is stable.
+            sourceUrl: hit.pageUrl || null,
           })
           setJobs((j) => ({ ...j, [hit.id]: 'done' }))
           onClipSettled?.(hit.id, true)
@@ -652,8 +694,20 @@ export function MarketplaceSearchPanel({
           {results.map((hit) => {
             const job = jobs[hit.id]
             return (
-              <div key={hit.id} className="flex flex-col overflow-hidden rounded-lg border border-border bg-background">
-                <div className="relative aspect-square bg-black">
+            <div
+              key={hit.id}
+              className={`flex flex-col overflow-hidden rounded-lg border bg-background ${
+                savedIds.has(hit.id) ? 'border-emerald-500/60' : 'border-border'
+              }`}
+            >
+              <div className="relative aspect-square bg-black">
+                {/* Feature 9: this listing's video is already in the library */}
+                {savedIds.has(hit.id) && (
+                  <span className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    <Check className="h-3 w-3" />
+                    In library
+                  </span>
+                )}
                   {playing === hit.id && hit.video ? (
                     <video
                       src={inlineUrl(hit.video)}

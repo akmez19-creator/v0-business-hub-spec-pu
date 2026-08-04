@@ -135,6 +135,10 @@ export function VideoSearchPanel({
   // Feature 9: which of these results are ALREADY in the clip library, so the
   // same video is not downloaded and saved a second time.
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+  // Default to hiding clips already in the library: the point of the check is
+  // to stop you re-watching and re-downloading footage you own. The toggle
+  // exists because "show me everything" is still a legitimate thing to want.
+  const [hideSaved, setHideSaved] = useState(true)
 
   // Lens state
   const [lensImage, setLensImage] = useState<string | null>(productImage)
@@ -415,6 +419,10 @@ export function VideoSearchPanel({
   /** One click to take every result on screen that has not been added yet */
   const useAll = () => {
     const pending = results.filter((h) => {
+      // Never bulk-download something already in the library - that is the
+      // exact waste the dedupe check exists to prevent, and "Use all" is the
+      // easiest way to trigger it by accident.
+      if (savedIds.has(h.id)) return false
       const s = jobs[h.id]
       return s !== 'queued' && s !== 'working' && s !== 'done'
     })
@@ -434,6 +442,11 @@ export function VideoSearchPanel({
 
   const queuedCount = Object.values(jobs).filter((s) => s === 'queued' || s === 'working').length
   const doneCount = Object.values(jobs).filter((s) => s === 'done').length
+
+  // What the grid actually renders. Kept as a separate value so the raw
+  // `results` still drives paging and the "N hidden" count stays truthful.
+  const visibleResults = hideSaved ? results.filter((r) => !savedIds.has(r.id)) : results
+  const hiddenCount = results.length - visibleResults.length
 
   const publicImage = lensImage && /^https?:\/\//i.test(lensImage) ? lensImage : null
 
@@ -783,8 +796,18 @@ export function VideoSearchPanel({
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="secondary" className="h-7 px-2.5 text-[11px]" onClick={useAll}>
             <Plus className="mr-1 h-3 w-3" />
-            Use all {results.length}
+            Use all {visibleResults.length}
           </Button>
+          {hiddenCount > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2.5 text-[11px] text-muted-foreground"
+              onClick={() => setHideSaved((v) => !v)}
+            >
+              {hideSaved ? `Show ${hiddenCount} already in library` : 'Hide clips in library'}
+            </Button>
+          )}
           {queuedCount > 0 && (
             <span className="flex items-center gap-1.5 text-[11px] text-amber-400" aria-live="polite">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -800,9 +823,9 @@ export function VideoSearchPanel({
         </div>
       )}
 
-      {results.length > 0 && (
+      {visibleResults.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {results.map((hit) => (
+          {visibleResults.map((hit) => (
             <div
               key={hit.id}
               className={`flex flex-col overflow-hidden rounded-lg border bg-card ${
@@ -945,6 +968,16 @@ export function VideoSearchPanel({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Every hit is already saved. Without this the grid would simply be
+          empty and read as "the search found nothing", which is the opposite
+          of what happened. */}
+      {results.length > 0 && visibleResults.length === 0 && (
+        <p className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[11px] text-muted-foreground">
+          All {results.length} {results.length === 1 ? 'result is' : 'results are'} already in your
+          library.
+        </p>
       )}
 
       {mode === 'text' && hasMore && results.length > 0 && (
