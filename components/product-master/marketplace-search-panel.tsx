@@ -17,6 +17,7 @@ import {
   Video,
   X,
 } from 'lucide-react'
+import { ClipPreview } from './clip-preview'
 
 export type MarketplaceHit = {
   id: string
@@ -65,6 +66,18 @@ const DEFAULT_PLATFORMS = ['alibaba']
  */
 const MAX_REFS = 3
 
+/**
+ * How many clips loop at once. Decoding every video in a 40-result grid
+ * stalls the whole page, so slots are rationed and rotated.
+ */
+const MAX_CONCURRENT_PREVIEWS = 6
+
+/**
+ * How long a clip keeps its slot before passing it on. Deliberately longer
+ * than MIN_PREVIEW_MS so a clip is never cut short by the rotation itself.
+ */
+const PREVIEW_HOLD_MS = 4500
+
 export function MarketplaceSearchPanel({
   defaultQuery = '',
   productImage = null,
@@ -108,6 +121,13 @@ export function MarketplaceSearchPanel({
   const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
   const [playing, setPlaying] = useState<string | null>(null)
+  /** Muted clips loop in the grid so videos can be told apart without clicking */
+  const [autoPreview, setAutoPreview] = useState(true)
+  /** Tiles currently in the viewport, reported by each preview */
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set())
+  /** The subset of visible tiles holding a playback slot right now */
+  const [previewIds, setPreviewIds] = useState<string[]>([])
+  const rotateCursor = useRef(0)
   const [jobs, setJobs] = useState<Record<string, 'queued' | 'working' | 'done' | 'failed'>>({})
   const queue = useRef<Promise<void>>(Promise.resolve())
 
@@ -243,6 +263,57 @@ export function MarketplaceSearchPanel({
       setUploading(false)
     }
   }, [])
+
+  /**
+   * Stable so the previews' IntersectionObservers are not torn down and
+   * rebuilt on every render of this panel.
+   */
+  const reportVisibility = useCallback((id: string, visible: boolean) => {
+    setVisibleIds((prev) => {
+      if (prev.has(id) === visible) return prev
+      const next = new Set(prev)
+      if (visible) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [])
+
+  /**
+   * Hands playback slots to visible clips, rotating when there are more of
+   * them than we are willing to decode at once. The hold is longer than the
+   * previews' own minimum, so every clip that starts is legible before it
+   * gives up its slot.
+   */
+  useEffect(() => {
+    if (!autoPreview) {
+      setPreviewIds([])
+      return
+    }
+
+    const order = results.filter((r) => r.video && visibleIds.has(r.id)).map((r) => r.id)
+    if (!order.length) {
+      setPreviewIds([])
+      return
+    }
+
+    // Everything on screen fits, so nothing needs to take turns
+    if (order.length <= MAX_CONCURRENT_PREVIEWS) {
+      setPreviewIds(order)
+      return
+    }
+
+    const advance = () => {
+      const start = rotateCursor.current % order.length
+      const window: string[] = []
+      for (let i = 0; i < MAX_CONCURRENT_PREVIEWS; i++) window.push(order[(start + i) % order.length])
+      rotateCursor.current = start + MAX_CONCURRENT_PREVIEWS
+      setPreviewIds(window)
+    }
+
+    advance()
+    const timer = setInterval(advance, PREVIEW_HOLD_MS)
+    return () => clearInterval(timer)
+  }, [autoPreview, results, visibleIds])
 
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
@@ -534,6 +605,19 @@ export function MarketplaceSearchPanel({
       {/* "0 with video" used to show even when video was never looked up,
           which read as "this product has no videos" when nothing had been
           checked at all. Only claim a count once it was actually measured. */}
+      {results.length > 0 && videoCount > 0 && (
+        <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={autoPreview}
+            onChange={(e) => setAutoPreview(e.target.checked)}
+            className="h-3.5 w-3.5 accent-amber-500"
+          />
+          Play clips in the grid
+          <span className="text-[10px] opacity-70">(muted, hover to hold one)</span>
+        </label>
+      )}
+
       {results.length > 0 && (
         <p className="text-xs text-muted-foreground">
           {results.length} {results.length === 1 ? 'listing' : 'listings'}
@@ -573,6 +657,16 @@ export function MarketplaceSearchPanel({
                       playsInline
                       className="h-full w-full object-contain"
                     />
+                  ) : hit.video ? (
+                    <ClipPreview
+                      id={hit.id}
+                      src={inlineUrl(hit.video)}
+                      poster={hit.image ? inlineUrl(hit.image) : undefined}
+                      title={hit.title}
+                      active={previewIds.includes(hit.id)}
+                      onVisibility={reportVisibility}
+                      onOpen={() => setPlaying(hit.id)}
+                    />
                   ) : hit.image ? (
                     <img
                       src={inlineUrl(hit.image) || '/placeholder.svg'}
@@ -590,18 +684,8 @@ export function MarketplaceSearchPanel({
                     {hit.platformLabel}
                   </span>
 
-                  {hit.video && playing !== hit.id && (
-                    <button
-                      type="button"
-                      onClick={() => setPlaying(hit.id)}
-                      className="absolute inset-0 flex items-center justify-center bg-black/30 transition-colors hover:bg-black/50"
-                      aria-label={`Play ${hit.title}`}
-                    >
-                      <span className="rounded-full bg-amber-500 p-2">
-                        <Video className="h-4 w-4 text-black" />
-                      </span>
-                    </button>
-                  )}
+                  {/* The centred play badge used to hide the frame it was
+                      asking about. Previews now play in place instead. */}
                 </div>
 
                 <div className="flex flex-1 flex-col gap-1.5 p-2">
