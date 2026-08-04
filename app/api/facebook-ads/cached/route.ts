@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { extractConversions } from '@/lib/ads-conversions'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -7,6 +8,56 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
 const CACHE_TTL_SECONDS = 15 * 60 // 15 minutes
+
+type FbCampaignRow = {
+  id: string
+  name: string
+  status: string
+  objective?: string
+  created_time?: string
+  lifetime_budget?: string
+  daily_budget?: string
+  budget_remaining?: string
+  start_time?: string
+  stop_time?: string
+  insights?: { data?: Array<{ spend?: string; actions?: Array<{ action_type: string; value: string }> }> }
+}
+
+/**
+ * Shape one Facebook campaign into the row the dashboard consumes.
+ *
+ * This lives in one place on purpose: the first page of campaigns and the
+ * pagination loop used to build this object separately, so a field added to
+ * one copy silently went missing from the other.
+ */
+function toCachedCampaign(
+  campaign: FbCampaignRow,
+  ads: { id: string; postId: string | null }[],
+  account: { id: string; name?: string },
+) {
+  const insights = campaign.insights?.data?.[0]
+  const conv = extractConversions(insights?.actions)
+  return {
+    id: campaign.id,
+    name: campaign.name,
+    status: campaign.status,
+    objective: campaign.objective,
+    created_time: campaign.created_time,
+    lifetime_budget: campaign.lifetime_budget || null,
+    daily_budget: campaign.daily_budget || null,
+    budget_remaining: campaign.budget_remaining || null,
+    start_time: campaign.start_time || null,
+    stop_time: campaign.stop_time || null,
+    spend: insights?.spend || '0',
+    // Conversion counts behind the cost-per-message metric
+    messages: conv.messages,
+    results: conv.results,
+    resultKind: conv.resultKind,
+    ads,
+    accountId: account.id,
+    accountName: account.name || account.id,
+  }
+}
 
 interface CacheData {
   accounts: unknown[]
@@ -96,7 +147,10 @@ export async function GET(request: Request) {
         // Also fetch all ads for the account so we can show each campaign's ad IDs.
         const [spendResponse, campaignsResponse, adsResponse] = await Promise.all([
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/insights?fields=spend&date_preset=today&access_token=${accessToken}`),
-          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,lifetime_budget,daily_budget,budget_remaining,start_time,stop_time,insights.date_preset(today){spend}&access_token=${accessToken}&limit=500`),
+          // `actions` carries today's conversion counts (messaging conversations
+          // started, leads, purchases). It rides on the existing insights
+          // expansion, so it adds no extra Facebook API call.
+          fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/campaigns?fields=id,name,status,objective,created_time,lifetime_budget,daily_budget,budget_remaining,start_time,stop_time,insights.date_preset(today){spend,actions}&access_token=${accessToken}&limit=500`),
           fetch(`${FACEBOOK_GRAPH_URL}/${account.id}/ads?fields=id,campaign_id,creative{effective_object_story_id}&access_token=${accessToken}&limit=500`)
         ])
         
@@ -131,23 +185,7 @@ export async function GET(request: Request) {
         const campaigns = campaignsData.data || []
         
         for (const campaign of campaigns) {
-          const spend = campaign.insights?.data?.[0]?.spend || '0'
-          allCampaigns.push({
-            id: campaign.id,
-            name: campaign.name,
-            status: campaign.status,
-            objective: campaign.objective,
-            created_time: campaign.created_time,
-            lifetime_budget: campaign.lifetime_budget || null,
-            daily_budget: campaign.daily_budget || null,
-            budget_remaining: campaign.budget_remaining || null,
-            start_time: campaign.start_time || null,
-            stop_time: campaign.stop_time || null,
-            spend,
-            ads: adsByCampaign[campaign.id] || [],
-            accountId: account.id,
-            accountName: account.name || account.id
-          })
+          allCampaigns.push(toCachedCampaign(campaign, adsByCampaign[campaign.id] || [], account))
         }
         
         // Handle pagination if needed
@@ -155,24 +193,8 @@ export async function GET(request: Request) {
         while (nextUrl) {
           const nextResponse = await fetch(nextUrl)
           const nextData = await nextResponse.json()
-          for (const campaign of (nextData.data || [])) {
-            const spend = campaign.insights?.data?.[0]?.spend || '0'
-            allCampaigns.push({
-              id: campaign.id,
-              name: campaign.name,
-              status: campaign.status,
-              objective: campaign.objective,
-              created_time: campaign.created_time,
-              lifetime_budget: campaign.lifetime_budget || null,
-              daily_budget: campaign.daily_budget || null,
-              budget_remaining: campaign.budget_remaining || null,
-              start_time: campaign.start_time || null,
-              stop_time: campaign.stop_time || null,
-              spend,
-              ads: adsByCampaign[campaign.id] || [],
-              accountId: account.id,
-              accountName: account.name || account.id
-            })
+          for (const campaign of (nextData.data || []) as FbCampaignRow[]) {
+            allCampaigns.push(toCachedCampaign(campaign, adsByCampaign[campaign.id] || [], account))
           }
           nextUrl = nextData.paging?.next
         }
