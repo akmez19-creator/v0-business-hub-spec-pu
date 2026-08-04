@@ -49,6 +49,8 @@ interface Clip {
   dbId?: string
   /** Where this clip stands in the save-to-library pipeline */
   save?: 'saving' | 'saved' | 'failed'
+  /** Why the save failed, surfaced on the tile so the reason is visible */
+  saveError?: string
 }
 
 /** A clip that is still being downloaded, shown in the feed as a placeholder
@@ -900,10 +902,16 @@ export function ReelsStudioTab({
           .then((row) =>
             setClips((prev) => prev.map((c) => (c.id === id ? { ...c, dbId: row.id, save: 'saved' } : c))),
           )
-          .catch(() =>
+          .catch((err) =>
             // Marked on the tile rather than thrown: the clip still works in
             // this session, it just will not survive a reload
-            setClips((prev) => prev.map((c) => (c.id === id ? { ...c, save: 'failed' } : c))),
+            setClips((prev) =>
+              prev.map((c) =>
+                c.id === id
+                  ? { ...c, save: 'failed', saveError: err instanceof Error ? err.message : undefined }
+                  : c,
+              ),
+            ),
           )
       }
       probe.onloadedmetadata = () =>
@@ -1489,9 +1497,12 @@ export function ReelsStudioTab({
                   </span>
                 )}
                 {c.save === 'failed' && (
-                  <span title="Not saved - this clip will be lost on reload" className="shrink-0 text-destructive">
+                  <span
+                    title={c.saveError || 'Not saved - this clip will be lost on reload'}
+                    className="shrink-0 text-destructive"
+                  >
                     <CircleAlert className="h-3 w-3" />
-                    <span className="sr-only">Not saved, this clip will be lost on reload</span>
+                    <span className="sr-only">{c.saveError || 'Not saved, this clip will be lost on reload'}</span>
                   </span>
                 )}
               </div>

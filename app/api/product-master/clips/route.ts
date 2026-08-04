@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
-import { del } from '@vercel/blob'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 
-// Saved source clips for the Reels Studio feed. The video itself lives in Blob
-// storage (uploaded straight from the browser); this route only handles the
-// small metadata row that makes a clip survive a page reload.
+// Saved source clips for the Reels Studio feed. The video itself lives in the
+// Supabase Storage "reels" bucket (uploaded straight from the browser); this
+// route only handles the metadata row that makes a clip survive a reload.
 
 export async function GET(request: Request) {
   try {
@@ -42,7 +41,7 @@ export async function GET(request: Request) {
   }
 }
 
-// Called after the browser has finished streaming the file to Blob storage
+// Called after the browser has finished uploading the file to Supabase Storage
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
@@ -52,10 +51,10 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
 
     const body = await request.json()
-    const { blobUrl, blobPathname, name, productId, productName, duration, width, height, sizeBytes, source } = body
+    const { fileUrl, storagePath, name, productId, productName, duration, width, height, sizeBytes, source } = body
 
-    if (!blobUrl || !name) {
-      return NextResponse.json({ success: false, error: 'Missing blobUrl or name' }, { status: 400 })
+    if (!fileUrl || !name) {
+      return NextResponse.json({ success: false, error: 'Missing fileUrl or name' }, { status: 400 })
     }
 
     const admin = createAdminClient()
@@ -65,8 +64,8 @@ export async function POST(request: Request) {
         product_id: productId || null,
         product_name: productName || '',
         name,
-        blob_url: blobUrl,
-        blob_pathname: blobPathname || null,
+        file_url: fileUrl,
+        storage_path: storagePath || null,
         duration: Number(duration) || 0,
         width: Number(width) || 0,
         height: Number(height) || 0,
@@ -100,19 +99,16 @@ export async function DELETE(request: Request) {
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 })
 
     const admin = createAdminClient()
-    const { data: row } = await admin.from('product_clips').select('blob_url').eq('id', id).single()
+    const { data: row } = await admin.from('product_clips').select('storage_path').eq('id', id).single()
 
     const { error } = await admin.from('product_clips').delete().eq('id', id)
     if (error) throw error
 
     // Drop the file too, so removing a clip does not leave the video behind
-    // as billable storage nobody can reach
-    if (row?.blob_url) {
-      try {
-        await del(row.blob_url)
-      } catch {
-        // Row is already gone; a stranded blob is not worth failing the request
-      }
+    // as storage nobody can reach
+    if (row?.storage_path) {
+      // Row is already gone; a stranded object is not worth failing the request
+      await admin.storage.from('reels').remove([row.storage_path])
     }
 
     return NextResponse.json({ success: true })
