@@ -19,10 +19,8 @@ export type MarketplaceId =
   | 'shopee'
   | 'amazon'
   | 'alibaba'
-  | 'taobao'
   | 'lazada'
   | 'dhgate'
-  | 'tiktok-shop'
 
 export type MarketplacePlatform = {
   id: MarketplaceId
@@ -31,19 +29,40 @@ export type MarketplacePlatform = {
   path: string
   /** Shown in the UI so the cost/benefit of each source is visible up front */
   note: string
+  /** Platform-specific query params (e.g. 1688 accepts page_size) */
+  extraParams?: Record<string, string>
 }
 
-export const TMAPI_BASE = 'https://api.tmapi.top'
+/**
+ * TMAPI serves its API over plain HTTP, not HTTPS.
+ *
+ * This is not a preference - https://api.tmapi.top fails the TLS handshake
+ * because the certificate presented for that host is a shared Tencent CDN
+ * cert (*.myqcloud.com, *.4399.com, ...) that does not list api.tmapi.top.
+ * Node surfaces that as a bare "fetch failed", which is what every
+ * marketplace was reporting. The vendor's own docs specify http://, and
+ * http:// returns valid JSON. Switching this back to https:// will break
+ * every marketplace search again.
+ */
+export const TMAPI_BASE = 'http://api.tmapi.top'
 
+/**
+ * Every path below was verified against the live API with a real token.
+ *
+ * Taobao and TikTok Shop used to be listed here and were removed on purpose:
+ * TMAPI has no keyword-search endpoint for either (Taobao offers only
+ * item-detail/shop lookups, and TikTok Shop is not a TMAPI product at all).
+ * Both returned "no Route matched with those values" on every request, so
+ * listing them only produced guaranteed failures in the UI.
+ */
 export const PLATFORMS: MarketplacePlatform[] = [
+  // 1688 is the one confirmed returning live results on the current plan
+  { id: 'alibaba', label: '1688', path: '/1688/search/items', note: 'Supplier source, richest photos, Chinese titles', extraParams: { page_size: '20' } },
   { id: 'aliexpress', label: 'AliExpress', path: '/aliexpress/search/items', note: 'English titles, most listings have video' },
   { id: 'shopee', label: 'Shopee', path: '/shopee/search/items', note: 'Asia, lots of short listing videos' },
   { id: 'amazon', label: 'Amazon', path: '/amazon/search/items', note: 'High-quality photos, fewer videos' },
-  { id: 'alibaba', label: '1688', path: '/ali/search/items', note: 'Supplier source, richest video, Chinese titles' },
-  { id: 'taobao', label: 'Taobao', path: '/taobao/search/items', note: 'Chinese titles, strong video coverage' },
   { id: 'lazada', label: 'Lazada', path: '/lazada/search/items', note: 'Southeast Asia, decent video coverage' },
   { id: 'dhgate', label: 'DHgate', path: '/dhgate/search/items', note: 'Wholesale, English titles' },
-  { id: 'tiktok-shop', label: 'TikTok Shop', path: '/tiktok-shop/search/items', note: 'Shop listings (not the TikTok feed)' },
 ]
 
 export const PLATFORM_BY_ID = new Map(PLATFORMS.map((p) => [p.id, p]))
@@ -174,5 +193,15 @@ export function apiError(json: unknown): string | null {
   if (code !== undefined && code !== null && String(code) !== '0' && String(code) !== '200') {
     return str(pick(root, ['msg', 'message', 'error', 'error_message'])) || `TMAPI error ${String(code)}`
   }
+
+  // Gateway-level failures ("Insufficient API balance", "No API key found in
+  // request") come back as a bare {"message": "..."} with no code field at
+  // all. The check above misses those, so they used to read as a successful
+  // search with zero results - hiding a billing problem behind "no results".
+  if (code === undefined || code === null) {
+    const message = str(pick(root, ['message', 'error', 'error_message']))
+    if (message && root.data === undefined) return message
+  }
+
   return null
 }

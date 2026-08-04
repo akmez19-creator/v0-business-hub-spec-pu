@@ -29,6 +29,7 @@ async function searchPlatform(
   token: string,
 ): Promise<{ hits: MarketplaceHit[]; error: string | null }> {
   const qs = new URLSearchParams({ keyword, page: String(page), apiToken: token })
+  for (const [k, v] of Object.entries(platform.extraParams ?? {})) qs.set(k, v)
   try {
     // A slow marketplace must not hold up the whole fan-out. Without this the
     // route would sit until the platform gave up and the user would watch a
@@ -45,6 +46,10 @@ async function searchPlatform(
       if (res.status === 404) return { hits: [], error: 'Endpoint not found - path may need correcting' }
       if (res.status === 401 || res.status === 403) return { hits: [], error: 'Token rejected' }
       if (res.status === 429) return { hits: [], error: 'Rate limited' }
+      // 439 is TMAPI's own non-standard "out of credit" status. Reporting it
+      // as a raw number tells the user nothing actionable, and the cause is
+      // billing rather than anything wrong with the app.
+      if (res.status === 439) return { hits: [], error: 'No API credit for this marketplace' }
       return { hits: [], error: `HTTP ${res.status}` }
     }
 

@@ -39,8 +39,13 @@ const compact = (n: number) => {
   return String(n)
 }
 
-/** Marketplaces ticked by default - the best video coverage with English titles. */
-const DEFAULT_PLATFORMS = ['aliexpress', 'shopee']
+/**
+ * 1688 is ticked by default because it is the only marketplace the current
+ * TMAPI plan actually has credit for - every other one answers with "No API
+ * credit for this marketplace" until it is topped up per platform. Defaulting
+ * to AliExpress/Shopee meant the first search always returned a row of errors.
+ */
+const DEFAULT_PLATFORMS = ['alibaba']
 
 export function MarketplaceSearchPanel({
   defaultQuery = '',
