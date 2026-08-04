@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { generateImage } from 'ai'
+import { generateImage, generateText } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createClient } from '@/lib/supabase/server'
 import {
   DEFAULT_POSTER_MODEL,
@@ -69,7 +70,77 @@ async function loadSourceImage(src: string): Promise<Uint8Array> {
   return bytes
 }
 
+/**
+ * Generate with Gemini using Google directly rather than the AI Gateway.
+ *
+ * Gemini's image models are not `generateImage` models - they are ordinary
+ * chat models that emit an image when asked for the IMAGE response modality,
+ * so the picture arrives in `files` rather than as a return value.
+ *
+ * Going direct is deliberate: it bills the Google account instead of Gateway
+ * credit, so Poster Studio keeps working when the Gateway balance is spent.
+ */
+async function generateWithGemini(
+  modelId: string,
+  prompt: string,
+  imageBytes: Uint8Array,
+): Promise<{ dataUrl: string; warnings: string[] }> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY
+  if (!apiKey) {
+    throw new Error(
+      'GOOGLE_AI_API_KEY is not set, so the Gemini models cannot be used. Pick a non-Gemini model, or add the key.',
+    )
+  }
+
+  const google = createGoogleGenerativeAI({ apiKey })
+
+  const result = await generateText({
+    model: google(modelId),
+    providerOptions: {
+      google: {
+        // Without IMAGE here the model replies with a written description of
+        // the poster instead of the poster itself
+        responseModalities: ['TEXT', 'IMAGE'],
+        // 4:5 portrait, matching the other models and the social feed format
+        imageConfig: { aspectRatio: '4:5' },
+      },
+    },
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          // The real product photo, so this is an edit of the actual item
+          // rather than an invention that merely resembles it
+          { type: 'file', mediaType: 'image/jpeg', data: imageBytes },
+        ],
+      },
+    ],
+  })
+
+  const file = result.files?.find((f) => f.mediaType?.startsWith('image/'))
+  if (!file) {
+    // Usually a safety refusal, where the model explains itself in text
+    const said = result.text?.trim()
+    throw new Error(
+      said
+        ? `Gemini returned no image. It said: ${said.slice(0, 200)}`
+        : 'Gemini returned no image. Try rewording, or pick another model.',
+    )
+  }
+
+  return {
+    dataUrl: `data:${file.mediaType || 'image/png'};base64,${file.base64}`,
+    warnings: [],
+  }
+}
+
 export async function POST(request: Request) {
+  // Held outside the try so the catch can name the right billing account.
+  // Blaming AI Gateway for a Google quota error sends the user to the wrong
+  // dashboard entirely.
+  let activeProvider: 'gateway' | 'google' = 'gateway'
+
   try {
     const supabase = await createClient()
     const {
@@ -82,6 +153,7 @@ export async function POST(request: Request) {
     const modelId = String(body?.model || DEFAULT_POSTER_MODEL)
     const model = MODEL_BY_ID.get(modelId)
     if (!model) return NextResponse.json({ success: false, error: 'Unknown model' }, { status: 400 })
+    activeProvider = model.provider
 
     const fields: PosterFields = {
       productName: String(body?.productName || ''),
@@ -111,14 +183,27 @@ export async function POST(request: Request) {
       imageBytes = await loadSourceImage(sourceImage)
     }
 
-    const { image, warnings } = await generateImage({
-      model: modelId,
-      // Passing the photo alongside the text is what makes this an EDIT of the
-      // real product rather than a fresh invention that merely resembles it
-      prompt: { text: prompt, images: [imageBytes] },
-      // 4:5 portrait is the standard feed format and matches the reference poster
-      aspectRatio: '4:5',
-    })
+    // Gemini bills Google directly and returns its image differently, so it
+    // takes its own path rather than going through the Gateway
+    let posterDataUrl: string
+    let posterWarnings: string[]
+
+    if (model.provider === 'google') {
+      const out = await generateWithGemini(modelId, prompt, imageBytes)
+      posterDataUrl = out.dataUrl
+      posterWarnings = out.warnings
+    } else {
+      const { image, warnings } = await generateImage({
+        model: modelId,
+        // Passing the photo alongside the text is what makes this an EDIT of the
+        // real product rather than a fresh invention that merely resembles it
+        prompt: { text: prompt, images: [imageBytes] },
+        // 4:5 portrait is the standard feed format and matches the reference poster
+        aspectRatio: '4:5',
+      })
+      posterDataUrl = `data:${image.mediaType || 'image/png'};base64,${image.base64}`
+      posterWarnings = warnings?.map((w) => ('message' in w ? w.message : String(w.type))) ?? []
+    }
 
     return NextResponse.json({
       success: true,
@@ -126,8 +211,8 @@ export async function POST(request: Request) {
       modelLabel: model.label,
       // base64 straight back to the browser - posters are download-only, so
       // there is nothing to persist
-      image: `data:${image.mediaType || 'image/png'};base64,${image.base64}`,
-      warnings: warnings?.map((w) => ('message' in w ? w.message : String(w.type))) ?? [],
+      image: posterDataUrl,
+      warnings: posterWarnings,
     })
   } catch (error) {
     const raw = error instanceof Error ? error.message : 'Poster generation failed'
@@ -136,8 +221,23 @@ export async function POST(request: Request) {
     // Provider errors are opaque; translate the common ones into something
     // that tells the user what to actually do next
     let msg = raw
-    if (/aspect|ratio|size/i.test(raw)) msg = `${raw} - try a different model.`
-    else if (/quota|billing|credit|insufficient/i.test(raw)) msg = 'AI Gateway credit exhausted for this model.'
+    if (/quota|billing|credit|insufficient|exceeded|rate.?limit|429/i.test(raw)) {
+      if (activeProvider === 'google') {
+        // Google reports "limit: 0" for image models on the free tier - the
+        // allowance is zero rather than merely used up, so waiting will not
+        // help and only enabling billing will
+        msg = /limit: 0/i.test(raw)
+          ? 'Your Google API key is on the free tier, which allows zero image generations. Enable billing on the key\u2019s Google Cloud project at aistudio.google.com/apikey to use Gemini, or pick a non-Gemini model.'
+          : 'Google API quota reached for this model. Wait a minute and retry, or pick another model.'
+      } else {
+        msg = 'AI Gateway credit exhausted for this model. Try a Gemini model, which bills Google instead.'
+      }
+    } else if (/aspect|ratio|size/i.test(raw)) msg = `${raw} - try a different model.`
+    else if (/api key|permission|unauthenticated|401|403/i.test(raw))
+      msg =
+        activeProvider === 'google'
+          ? 'Google rejected the API key. Check GOOGLE_AI_API_KEY is valid and has the Generative Language API enabled.'
+          : raw
     else if (/not found|unsupported|invalid model/i.test(raw)) msg = `${raw} - this model may not accept image input.`
     else if (/moderation|safety|policy/i.test(raw)) msg = 'The model refused this image or wording. Try rephrasing.'
 
@@ -149,7 +249,7 @@ export async function POST(request: Request) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    models: POSTER_MODELS.map((m) => ({ id: m.id, label: m.label, note: m.note })),
+    models: POSTER_MODELS.map((m) => ({ id: m.id, label: m.label, note: m.note, provider: m.provider })),
     defaultModel: DEFAULT_POSTER_MODEL,
   })
 }

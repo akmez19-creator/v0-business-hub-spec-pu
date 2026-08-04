@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Download, ImageIcon, Loader2, Plus, Sparkles, Upload, X } from 'lucide-react'
 import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
 
-type ModelInfo = { id: string; label: string; note: string }
+type ModelInfo = { id: string; label: string; note: string; provider?: 'gateway' | 'google' }
 
 const inlineUrl = (src: string) => `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(src)}`
 
@@ -205,22 +205,45 @@ export function PosterStudioTab({
       {/* ---- Model ---- */}
       <section className="flex flex-col gap-2">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">AI model</h4>
-        <div className="flex flex-wrap gap-2">
-          {models.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => setModel(m.id)}
-              title={m.note}
-              aria-pressed={model === m.id}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                model === m.id ? 'bg-amber-500 text-black' : 'border border-border text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+
+        {/* Split by billing account. When one balance runs out the other still
+            works, so which pool a model draws from is the useful distinction
+            to surface - not a cosmetic grouping. */}
+        {(
+          [
+            { key: 'google', title: 'Google Gemini', hint: 'billed to your Google API key' },
+            { key: 'gateway', title: 'Vercel AI Gateway', hint: 'billed to Gateway credit' },
+          ] as const
+        ).map((group) => {
+          const inGroup = models.filter((m) => (m.provider ?? 'gateway') === group.key)
+          if (!inGroup.length) return null
+          return (
+            <div key={group.key} className="flex flex-col gap-1.5">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                {group.title} <span className="normal-case opacity-70">({group.hint})</span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {inGroup.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setModel(m.id)}
+                    title={m.note}
+                    aria-pressed={model === m.id}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                      model === m.id
+                        ? 'bg-amber-500 text-black'
+                        : 'border border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+
         {models.find((m) => m.id === model) && (
           <p className="text-[11px] text-muted-foreground">{models.find((m) => m.id === model)?.note}</p>
         )}

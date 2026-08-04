@@ -1,10 +1,19 @@
 /**
  * Image models offered by Poster Studio.
  *
- * All of these run through the Vercel AI Gateway, which is already connected,
- * so none of them needs a new API key. IDs were taken from the live gateway
- * model list rather than from memory - stale image model IDs are a common
- * source of silent 404s.
+ * Two different billing routes are represented here, which is the whole point
+ * of the `provider` field:
+ *
+ * - 'gateway' models bill against Vercel AI Gateway credit.
+ * - 'google' models call Google directly with GOOGLE_AI_API_KEY and bill
+ *   against the Google account instead.
+ *
+ * Keeping both means an exhausted balance on one side does not take Poster
+ * Studio down entirely - the other route is still available.
+ *
+ * IDs were taken from each provider's live model list rather than from memory;
+ * stale image model IDs are a common source of silent 404s. The Gemini IDs
+ * below were confirmed present on this project's key.
  */
 
 export type PosterModel = {
@@ -14,48 +23,82 @@ export type PosterModel = {
   note: string
   /** Whether the model accepts a source photo to edit */
   supportsImageInput: boolean
+  /** Which credit pool and code path this model uses */
+  provider: 'gateway' | 'google'
 }
 
 export const POSTER_MODELS: PosterModel[] = [
+  {
+    id: 'gemini-3-pro-image',
+    label: 'Gemini Nano Banana Pro',
+    note: 'Google\u2019s best text renderer \u2014 the strongest choice for exact prices and spelling. Billed to Google, not AI Gateway.',
+    supportsImageInput: true,
+    provider: 'google',
+  },
+  {
+    id: 'gemini-3.1-flash-image',
+    label: 'Gemini 3.1 Flash Image',
+    note: 'Faster, cheaper Gemini. Good posters, slightly weaker dense text. Billed to Google.',
+    supportsImageInput: true,
+    provider: 'google',
+  },
+  {
+    id: 'gemini-2.5-flash-image',
+    label: 'Gemini 2.5 Flash Image',
+    note: 'Original Nano Banana. Cheapest Gemini option. Billed to Google.',
+    supportsImageInput: true,
+    provider: 'google',
+  },
   {
     id: 'openai/gpt-image-2',
     label: 'ChatGPT (GPT Image 2)',
     note: 'Closest to generating posters in ChatGPT. Best at readable text.',
     supportsImageInput: true,
+    provider: 'gateway',
   },
   {
     id: 'openai/gpt-image-1.5',
     label: 'ChatGPT (GPT Image 1.5)',
     note: 'Previous ChatGPT image model. Use if GPT Image 2 output looks off.',
     supportsImageInput: true,
+    provider: 'gateway',
   },
   {
     id: 'bytedance/seedream-5.0-pro',
     label: 'Seedream 5 Pro',
     note: 'Strong at bold promo layouts and keeping the product identical.',
     supportsImageInput: true,
+    provider: 'gateway',
   },
   {
     id: 'bytedance/seedream-4.5',
     label: 'Seedream 4.5',
     note: 'Cheaper Seedream. Good product fidelity, slightly weaker text.',
     supportsImageInput: true,
+    provider: 'gateway',
   },
   {
     id: 'bfl/flux-kontext-max',
     label: 'FLUX Kontext Max',
     note: 'Best at preserving your exact product photo. Weakest at dense text.',
     supportsImageInput: true,
+    provider: 'gateway',
   },
   {
     id: 'recraft/recraft-v4.1-pro',
     label: 'Recraft v4.1 Pro',
     note: 'Built for marketing posters and reliable typography.',
     supportsImageInput: true,
+    provider: 'gateway',
   },
 ]
 
-export const DEFAULT_POSTER_MODEL = 'openai/gpt-image-2'
+/**
+ * Nano Banana Pro leads because poster text accuracy is the thing users
+ * actually complain about, and it is the best of these at rendering exact
+ * prices and spelling.
+ */
+export const DEFAULT_POSTER_MODEL = 'gemini-3-pro-image'
 
 export const MODEL_BY_ID = new Map(POSTER_MODELS.map((m) => [m.id, m]))
 
