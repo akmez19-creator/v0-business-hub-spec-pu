@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   AlertTriangle,
+  Camera,
   Check,
   ExternalLink,
   ImageIcon,
@@ -12,6 +13,7 @@ import {
   Plus,
   Search,
   Sparkles,
+  Upload,
   Video,
 } from 'lucide-react'
 
@@ -28,7 +30,15 @@ export type MarketplaceHit = {
   pageUrl: string | null
 }
 
-type PlatformInfo = { id: string; label: string; note: string }
+type PlatformInfo = {
+  id: string
+  label: string
+  note: string
+  /** Whether this marketplace supports reverse-image search */
+  imageSearch?: boolean
+  /** Whether listing videos can be looked up for this marketplace */
+  video?: boolean
+}
 type PlatformResult = { id: string; label: string; count: number; error: string | null }
 
 const inlineUrl = (src: string) => `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(src)}`
@@ -49,12 +59,15 @@ const DEFAULT_PLATFORMS = ['alibaba']
 
 export function MarketplaceSearchPanel({
   defaultQuery = '',
+  productImage = null,
   onUseClip,
   onClipPending,
   onClipSettled,
   onMakePoster,
 }: {
   defaultQuery?: string
+  /** The product's own photo, used as the default reverse-image search source */
+  productImage?: string | null
   onUseClip?: (file: File) => void
   onClipPending?: (job: { id: string; title: string; thumb?: string }) => void
   onClipSettled?: (id: string, ok: boolean) => void
@@ -68,6 +81,12 @@ export function MarketplaceSearchPanel({
   const [results, setResults] = useState<MarketplaceHit[]>([])
   const [perPlatform, setPerPlatform] = useState<PlatformResult[]>([])
   const [videoOnly, setVideoOnly] = useState(false)
+  // 'image' finds the same physical product even when the seller's wording is
+  // nothing like ours, which is the usual case on 1688 where titles are
+  // Chinese. Keyword stays available for when there is no photo.
+  const [mode, setMode] = useState<'keyword' | 'image'>('keyword')
+  const [searchImage, setSearchImage] = useState<string | null>(productImage)
+  const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
@@ -97,9 +116,18 @@ export function MarketplaceSearchPanel({
     setQuery(defaultQuery)
   }, [defaultQuery])
 
+  // Switching product resets the source photo, and image search becomes the
+  // default whenever we have one - it consistently returns the actual product
+  // where an English keyword returns whatever loosely matches the words.
+  useEffect(() => {
+    setSearchImage(productImage)
+    setMode(productImage ? 'image' : 'keyword')
+  }, [productImage])
+
   const runSearch = useCallback(async () => {
     const term = query.trim()
-    if (term.length < 2 || !selected.length) return
+    const byImage = mode === 'image' && Boolean(searchImage)
+    if ((!byImage && term.length < 2) || !selected.length) return
     setLoading(true)
     setError('')
     setResults([])
@@ -108,7 +136,13 @@ export function MarketplaceSearchPanel({
       const res = await fetch('/api/product-master/marketplace-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: term, platforms: selected, page: 1, videoOnly }),
+        body: JSON.stringify({
+          query: term,
+          platforms: selected,
+          page: 1,
+          videoOnly,
+          imageUrl: byImage ? searchImage : undefined,
+        }),
       })
       const json = await res.json()
       if (!json.success) {
@@ -123,7 +157,7 @@ export function MarketplaceSearchPanel({
     } finally {
       setLoading(false)
     }
-  }, [query, selected, videoOnly])
+  }, [query, selected, videoOnly, mode, searchImage])
 
   /**
    * Pull a listing video into the feed. Runs through a promise chain so ten
@@ -155,11 +189,39 @@ export function MarketplaceSearchPanel({
     [jobs, onClipPending, onClipSettled, onUseClip],
   )
 
+  /**
+   * Upload a photo to search with. It has to reach a public URL first because
+   * TMAPI fetches the image server-side by URL - a local blob: or data: URL
+   * would be meaningless to it.
+   */
+  const uploadSearchImage = useCallback(async (file: File) => {
+    setUploading(true)
+    setError('')
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      // Reuses the existing blob upload route, which answers with { url }
+      const res = await fetch('/api/upload', { method: 'POST', body: form })
+      const json = await res.json()
+      if (!json?.url) throw new Error(json?.error || 'Upload failed')
+      setSearchImage(json.url)
+      setMode('image')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }, [])
+
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
 
   const videoCount = results.filter((r) => r.video).length
   const failedPlatforms = perPlatform.filter((p) => p.error)
+  // Only offer photo/video controls when a ticked marketplace can honour them,
+  // rather than letting the user spend a paid call to find out it cannot
+  const imageCapable = platforms.some((p) => selected.includes(p.id) && p.imageSearch)
+  const videoCapable = platforms.some((p) => selected.includes(p.id) && p.video)
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
@@ -212,34 +274,129 @@ export function MarketplaceSearchPanel({
         </p>
       </div>
 
-      <div className="flex gap-2">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) {
-              e.preventDefault()
-              runSearch()
-            }
-          }}
-          placeholder="e.g. u-shaped massage pillow"
-          className="flex-1"
-          aria-label="Search marketplace listings"
-        />
-        <Button onClick={runSearch} disabled={loading || query.trim().length < 2 || !selected.length}>
-          {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Search className="mr-1.5 h-3.5 w-3.5" />}
-          Search
-        </Button>
+      {/* Photo vs keyword. Image search is the better default because 1688
+          titles are Chinese - an English keyword matches words, a photo
+          matches the actual product. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setMode('image')}
+          disabled={!imageCapable}
+          aria-pressed={mode === 'image'}
+          title={imageCapable ? 'Find the same product by photo' : 'Only 1688 supports image search'}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            mode === 'image' ? 'bg-amber-500 text-black' : 'border border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Camera className="h-3.5 w-3.5" />
+          Search by photo
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('keyword')}
+          aria-pressed={mode === 'keyword'}
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+            mode === 'keyword' ? 'bg-amber-500 text-black' : 'border border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Search className="h-3.5 w-3.5" />
+          Search by words
+        </button>
       </div>
 
-      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+      {mode === 'image' ? (
+        <div className="flex items-center gap-3">
+          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-black">
+            {searchImage ? (
+              <img
+                src={searchImage || '/placeholder.svg'}
+                alt="Photo being searched"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <ImageIcon className="h-5 w-5 text-muted-foreground" />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-1 flex-col gap-2">
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {searchImage
+                ? 'Finds the same physical product, even when the seller\u2019s title is in Chinese.'
+                : 'No product photo yet \u2014 upload one to search by image.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">
+                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                {searchImage ? 'Use another photo' : 'Upload a photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) uploadSearchImage(f)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {productImage && searchImage !== productImage && (
+                <button
+                  type="button"
+                  onClick={() => setSearchImage(productImage)}
+                  className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Back to product photo
+                </button>
+              )}
+            </div>
+          </div>
+          <Button onClick={runSearch} disabled={loading || !searchImage || !selected.length}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Camera className="mr-1.5 h-3.5 w-3.5" />}
+            Search
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !(e.nativeEvent as KeyboardEvent).isComposing && e.keyCode !== 229) {
+                e.preventDefault()
+                runSearch()
+              }
+            }}
+            placeholder="e.g. u-shaped massage pillow"
+            className="flex-1"
+            aria-label="Search marketplace listings"
+          />
+          <Button onClick={runSearch} disabled={loading || query.trim().length < 2 || !selected.length}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Search className="mr-1.5 h-3.5 w-3.5" />}
+            Search
+          </Button>
+        </div>
+      )}
+
+      {/* Video lives on the item-detail record, not on search results, so this
+          filter costs one extra lookup per listing. Saying so up front stops
+          it looking like the search is just slow. */}
+      <label
+        className={`flex w-fit items-center gap-2 text-xs text-muted-foreground ${
+          videoCapable ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+        }`}
+        title={videoCapable ? 'Checks each listing for a seller video' : 'Only 1688 can return listing videos'}
+      >
         <input
           type="checkbox"
           checked={videoOnly}
+          disabled={!videoCapable}
           onChange={(e) => setVideoOnly(e.target.checked)}
           className="h-3.5 w-3.5 accent-amber-500"
         />
         Only listings with a video
+        <span className="text-[10px] text-muted-foreground/70">(slower {'\u2014'} checks each listing)</span>
       </label>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

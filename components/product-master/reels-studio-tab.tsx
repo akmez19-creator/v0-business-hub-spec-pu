@@ -2051,8 +2051,9 @@ export function ReelsStudioTab({
           listings. Fewer clips than the TikTok feed, but guaranteed to show
           this exact product rather than something that resembles it. */}
       <MarketplaceSearchPanel
-        defaultQuery={productName}
-        onUseClip={(file) => addFiles([file], { source: 'search' })}
+                  defaultQuery={productName}
+                  productImage={productImage}
+                  onUseClip={(file) => addFiles([file], { source: 'search' })}
         onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
         onClipSettled={(id, ok) => {
           if (ok) return setPending((p) => p.filter((x) => x.id !== id))

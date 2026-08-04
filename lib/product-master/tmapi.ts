@@ -31,6 +31,19 @@ export type MarketplacePlatform = {
   note: string
   /** Platform-specific query params (e.g. 1688 accepts page_size) */
   extraParams?: Record<string, string>
+  /** Reverse-image search path, when the platform offers one */
+  imagePath?: string
+  /**
+   * Converts an arbitrary image URL into one the image search will accept.
+   * 1688 only recognises Alibaba-hosted images, so our own Supabase product
+   * photos have to be uploaded through this first.
+   */
+  convertPath?: string
+  /**
+   * Single-item lookup. Needed because search results never carry video_url -
+   * the listing video only exists on the detail record.
+   */
+  detailPath?: string
 }
 
 /**
@@ -57,7 +70,16 @@ export const TMAPI_BASE = 'http://api.tmapi.top'
  */
 export const PLATFORMS: MarketplacePlatform[] = [
   // 1688 is the one confirmed returning live results on the current plan
-  { id: 'alibaba', label: '1688', path: '/1688/search/items', note: 'Supplier source, richest photos, Chinese titles', extraParams: { page_size: '20' } },
+  {
+    id: 'alibaba',
+    label: '1688',
+    path: '/1688/search/items',
+    note: 'Supplier source, richest photos, Chinese titles. Only source with image search and video.',
+    extraParams: { page_size: '20' },
+    imagePath: '/1688/search/image',
+    convertPath: '/1688/tools/image/convert_url',
+    detailPath: '/1688/item_detail',
+  },
   { id: 'aliexpress', label: 'AliExpress', path: '/aliexpress/search/items', note: 'English titles, most listings have video' },
   { id: 'shopee', label: 'Shopee', path: '/shopee/search/items', note: 'Asia, lots of short listing videos' },
   { id: 'amazon', label: 'Amazon', path: '/amazon/search/items', note: 'High-quality photos, fewer videos' },
@@ -187,6 +209,98 @@ export function extractList(json: unknown): Raw[] {
  * HTTP 200, so the body has to be inspected - checking res.ok is not enough.
  * Returns null when the payload looks fine.
  */
+/**
+ * Turn any image URL into one 1688's reverse-image search will accept.
+ *
+ * The image search endpoint only recognises Alibaba-hosted images, so passing
+ * a Supabase (or any other) URL straight to it returns nothing useful. This
+ * uploads the image to Alibaba and hands back their reference, which is a
+ * short relative path like /search/imgextra5/123.jpg rather than a full URL -
+ * pass it through to img_url exactly as given.
+ */
+export async function convertImageUrl(
+  platform: MarketplacePlatform,
+  imageUrl: string,
+  token: string,
+): Promise<{ url: string | null; error: string | null }> {
+  if (!platform.convertPath) return { url: null, error: 'This marketplace has no image search' }
+  try {
+    const res = await fetch(`${TMAPI_BASE}${platform.convertPath}?apiToken=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ url: imageUrl, search_api_endpoint: '/search/image' }),
+      signal: AbortSignal.timeout(25_000),
+      cache: 'no-store',
+    })
+    if (res.status === 439) return { url: null, error: 'No API credit for image search' }
+    if (!res.ok) return { url: null, error: `Image upload failed (HTTP ${res.status})` }
+
+    const json = await res.json().catch(() => null)
+    const failed = apiError(json)
+    if (failed) return { url: null, error: failed }
+
+    const data = ((json ?? {}) as Raw).data as Raw | undefined
+    const converted = str(pick(data ?? {}, ['image_url', 'url', 'img_url']))
+    if (!converted) return { url: null, error: 'Alibaba did not accept this image' }
+    return { url: converted, error: null }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Image upload failed'
+    return { url: null, error: /timeout|abort/i.test(msg) ? 'Image upload timed out' : msg }
+  }
+}
+
+/**
+ * Fill in video_url for listings that have one.
+ *
+ * Search responses never include video - only the per-item detail record does,
+ * which is why "Only listings with a video" used to return nothing at all.
+ * That makes video an extra paid call per listing, so this is only worth
+ * running when the user actually asked to filter by video. Roughly half of
+ * 1688 listings turn out to have a clip.
+ */
+export async function attachVideos(
+  hits: MarketplaceHit[],
+  token: string,
+  limit = 20,
+): Promise<MarketplaceHit[]> {
+  const targets = hits.slice(0, limit)
+  const CONCURRENCY = 5
+  const out = [...hits]
+
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    const batch = targets.slice(i, i + CONCURRENCY)
+    await Promise.all(
+      batch.map(async (hit) => {
+        const platform = PLATFORM_BY_ID.get(hit.platform)
+        if (!platform?.detailPath || hit.video) return
+        // The composite id is "<platform>:<itemId>"
+        const itemId = hit.id.slice(hit.id.indexOf(':') + 1)
+        try {
+          const res = await fetch(
+            `${TMAPI_BASE}${platform.detailPath}?item_id=${encodeURIComponent(itemId)}&apiToken=${encodeURIComponent(token)}`,
+            { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20_000), cache: 'no-store' },
+          )
+          if (!res.ok) return
+          const json = await res.json().catch(() => null)
+          if (!json || apiError(json)) return
+
+          const data = ((json ?? {}) as Raw).data as Raw | undefined
+          const video = url(pick(data ?? {}, ['video_url', 'video', 'main_video']))
+          if (!video) return
+
+          const idx = out.findIndex((h) => h.id === hit.id)
+          if (idx !== -1) out[idx] = { ...out[idx], video }
+        } catch {
+          // A detail lookup failing just means no video for that tile - it must
+          // never take down the whole search
+        }
+      }),
+    )
+  }
+
+  return out
+}
+
 export function apiError(json: unknown): string | null {
   const root = (json ?? {}) as Raw
   const code = root.code ?? root.status

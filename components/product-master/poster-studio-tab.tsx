@@ -354,6 +354,7 @@ export function PosterStudioTab({
         </h4>
         <MarketplaceSearchPanel
           defaultQuery={productName}
+          productImage={productImage}
           onMakePoster={({ image, title }) => {
             setSourceImage(image)
             setSourceLabel(`From listing: ${title.slice(0, 50)}`)

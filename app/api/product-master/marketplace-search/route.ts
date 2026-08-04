@@ -5,6 +5,8 @@ import {
   PLATFORMS,
   TMAPI_BASE,
   apiError,
+  attachVideos,
+  convertImageUrl,
   extractList,
   normalizeHit,
   type MarketplaceHit,
@@ -27,14 +29,27 @@ async function searchPlatform(
   keyword: string,
   page: number,
   token: string,
+  imageRef?: string | null,
 ): Promise<{ hits: MarketplaceHit[]; error: string | null }> {
-  const qs = new URLSearchParams({ keyword, page: String(page), apiToken: token })
+  // Image mode swaps both the path and the query param - everything after the
+  // request (unwrapping, normalising, error handling) is identical.
+  const byImage = Boolean(imageRef)
+  if (byImage && !platform.imagePath) {
+    return { hits: [], error: `${platform.label} has no image search` }
+  }
+
+  const path = byImage ? (platform.imagePath as string) : platform.path
+  const qs = new URLSearchParams(
+    byImage
+      ? { img_url: imageRef as string, page: String(page), apiToken: token }
+      : { keyword, page: String(page), apiToken: token },
+  )
   for (const [k, v] of Object.entries(platform.extraParams ?? {})) qs.set(k, v)
   try {
     // A slow marketplace must not hold up the whole fan-out. Without this the
     // route would sit until the platform gave up and the user would watch a
     // spinner with no idea which source was stalling.
-    const res = await fetch(`${TMAPI_BASE}${platform.path}?${qs}`, {
+    const res = await fetch(`${TMAPI_BASE}${path}?${qs}`, {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(20_000),
       cache: 'no-store',
@@ -93,8 +108,10 @@ export async function POST(request: Request) {
     const query = String(body?.query || '').trim()
     const page = Math.max(1, Number(body?.page || 1) || 1)
     const videoOnly = Boolean(body?.videoOnly)
+    const imageUrl = String(body?.imageUrl || '').trim()
+    const byImage = Boolean(imageUrl)
 
-    if (query.length < 2) {
+    if (!byImage && query.length < 2) {
       return NextResponse.json({ success: false, error: 'Type at least 2 characters' }, { status: 400 })
     }
 
@@ -107,9 +124,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Pick at least one marketplace' }, { status: 400 })
     }
 
+    // Image search needs an Alibaba-hosted image. Convert once up front and
+    // reuse it, rather than paying for one upload per selected marketplace.
+    let imageRef: string | null = null
+    if (byImage) {
+      const capable = selected.filter((p) => p.imagePath && p.convertPath)
+      if (!capable.length) {
+        return NextResponse.json(
+          { success: false, error: 'Image search is only available on 1688. Tick it to search by photo.' },
+          { status: 400 },
+        )
+      }
+      const converted = await convertImageUrl(capable[0], imageUrl, token)
+      if (!converted.url) {
+        return NextResponse.json(
+          { success: false, error: converted.error || 'Could not prepare that image' },
+          { status: 502 },
+        )
+      }
+      imageRef = converted.url
+    }
+
     // Fan out in parallel: these are independent vendors, so one being slow or
     // down should cost us nothing on the others.
-    const settled = await Promise.all(selected.map((p) => searchPlatform(p, query, page, token)))
+    const settled = await Promise.all(
+      selected.map((p) => searchPlatform(p, query, page, token, imageRef)),
+    )
 
     const platformResults: PlatformResult[] = selected.map((p, i) => ({
       id: p.id,
@@ -133,8 +173,13 @@ export async function POST(request: Request) {
       }
     }
 
-    const results = videoOnly ? merged.filter((h) => h.video) : merged
-    const withVideo = merged.filter((h) => h.video).length
+    // Listing videos live on the item-detail record, never on the search
+    // response, so "video only" can only be honoured after enriching. Each
+    // lookup is a paid call, so this runs only when the filter is actually on.
+    const enriched = videoOnly ? await attachVideos(merged, token) : merged
+
+    const results = videoOnly ? enriched.filter((h) => h.video) : enriched
+    const withVideo = enriched.filter((h) => h.video).length
 
     // Every source failing is an outage worth surfacing, not an empty result
     const allFailed = platformResults.every((p) => p.error)
@@ -166,7 +211,15 @@ export async function POST(request: Request) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    platforms: PLATFORMS.map((p) => ({ id: p.id, label: p.label, note: p.note })),
+    // imageSearch/video let the UI disable controls a marketplace cannot honour
+    // instead of offering them and failing after the user has paid for a call
+    platforms: PLATFORMS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      note: p.note,
+      imageSearch: Boolean(p.imagePath && p.convertPath),
+      video: Boolean(p.detailPath),
+    })),
     configured: Boolean(process.env.TMAPI_TOKEN),
   })
 }

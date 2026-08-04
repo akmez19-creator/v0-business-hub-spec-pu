@@ -167,7 +167,7 @@ export async function POST(request: Request) {
 // served from them - without these entries every marketplace thumbnail and clip
 // would be refused by our own proxy with a 403.
 const ALLOWED_HOSTS =
-  /(\.fbcdn\.net|\.tiktokcdn[^/]*\.com|tikwm\.com|\.googlevideo\.com|\.akamaized\.net|\.mm\.bing\.net|duckduckgo\.com|\.alicdn\.com|\.aliexpress-media\.com|\.susercontent\.com|\.shopeemobile\.com|\.shopee\.[a-z.]+|\.media-amazon\.com|\.ssl-images-amazon\.com|\.lazcdn\.com|\.slatic\.net|\.dhresource\.com|\.byteimg\.com|\.tbcdn\.cn|\.taobaocdn\.com)$/i
+  /(\.fbcdn\.net|\.tiktokcdn[^/]*\.com|tikwm\.com|\.googlevideo\.com|\.akamaized\.net|\.mm\.bing\.net|duckduckgo\.com|\.alicdn\.com|\.aliexpress-media\.com|\.susercontent\.com|\.shopeemobile\.com|\.shopee\.[a-z.]+|\.media-amazon\.com|\.ssl-images-amazon\.com|\.lazcdn\.com|\.slatic\.net|\.dhresource\.com|\.byteimg\.com|\.tbcdn\.cn|\.taobaocdn\.com|\.video\.taobao\.com)$/i
 
 export async function GET(request: Request) {
   try {
