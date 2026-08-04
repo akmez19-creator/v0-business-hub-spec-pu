@@ -66,6 +66,8 @@ export function PosterStudioTab({
   const wasNum = Number(priceWas.replace(/[^\d.]/g, ''))
   const pricesInverted = nowNum > 0 && wasNum > 0 && wasNum <= nowNum
   const savings = nowNum > 0 && wasNum > nowNum ? Math.round(wasNum - nowNum) : null
+  // What the discount would become if the two fields were the other way round
+  const swapSavings = pricesInverted ? Math.round(nowNum - wasNum) : 0
 
   // Preview loading strategy. Product photos live on our own Supabase storage
   // and load fine directly, but that host is not on the media proxy's
@@ -350,22 +352,31 @@ export function PosterStudioTab({
         {/* Catch swapped prices before they reach the model, since a crossed-out
             price below the asking price makes the poster look like a mistake */}
         {pricesInverted && (
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
-            <p className="text-[11px] text-amber-300">
-              The was price (Rs {wasNum}) is not higher than the now price (Rs {nowNum}), so no discount will be
-              shown. Did you mean to swap them?
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
+            <p className="text-[11px] leading-relaxed text-amber-300">
+              The was price (Rs {wasNum}) is not above the now price (Rs {nowNum}), so the poster will show Rs{' '}
+              {nowNum} on its own with no promo panel.
+              {swapSavings > 0 && (
+                <>
+                  {' '}
+                  Swapping them advertises{' '}
+                  <span className="font-semibold">Rs {swapSavings} off</span> instead.
+                </>
+              )}
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[10px]"
-              onClick={() => {
-                setPriceNow(priceWas)
-                setPriceWas(priceNow)
-              }}
-            >
-              Swap
-            </Button>
+            {swapSavings > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 shrink-0 px-2 text-[10px]"
+                onClick={() => {
+                  setPriceNow(priceWas)
+                  setPriceWas(priceNow)
+                }}
+              >
+                Swap prices
+              </Button>
+            )}
           </div>
         )}
         {/* An empty now-price is the case that used to produce invented figures,

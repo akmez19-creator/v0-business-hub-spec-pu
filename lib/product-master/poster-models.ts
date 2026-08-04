@@ -227,10 +227,17 @@ export function buildPosterPrompt(f: PosterFields): string {
 
       'UPPER CENTRE: the product name in very large heavy condensed uppercase black type, on a white or light panel so it stays readable.',
 
+      /*
+       * Phrased positively on purpose. An earlier version piled up negations
+       * here ("NO old price, NO crossed-out figure, NO savings badge...") to
+       * stop invented discounts, and the model resolved that thicket of "no"
+       * next to "price" by omitting the price block altogether. State what to
+       * draw; the single short guard below handles what not to.
+       */
       hasPrice
         ? showWas
-          ? 'LEFT MIDDLE: the price block, the loudest element on the whole poster. A small "SPECIAL PROMO" cap label at the top, then the old price struck through with a red diagonal line, then the words "NOW ONLY", then the new price in gigantic bold white numerals inside a bright red rounded panel, then a small yellow starburst savings badge. Use only the exact figures given below.'
-          : 'LEFT MIDDLE: the price block, the loudest element on the whole poster. A small "SPECIAL PROMO" cap label at the top, then the single price in gigantic bold white numerals inside a bright red rounded panel. Show ONE price only: there is NO old price, NO crossed-out figure, NO savings badge and NO discount percentage on this poster.'
+          ? 'LEFT MIDDLE: the price block, the loudest element on the whole poster, occupying roughly one third of the poster width. A small "SPECIAL PROMO" cap label at the top, then the old price struck through with a red diagonal line, then the words "NOW ONLY", then the new price in gigantic bold white numerals inside a bright red rounded panel, then a small yellow starburst savings badge. Use the exact figures given below.'
+          : 'LEFT MIDDLE: the price block, the loudest element on the whole poster, occupying roughly one third of the poster width. A small "SPECIAL PROMO" cap label at the top, then one single price in gigantic bold white numerals inside a bright red rounded panel with a thick white outline and a heavy drop shadow. Exactly one price figure appears here, and it is the exact figure given below.'
         : null,
 
       hasPrice
@@ -276,8 +283,8 @@ export function buildPosterPrompt(f: PosterFields): string {
   if (hasPrice) {
     L.push(
       '',
-      'PRICE BLOCK (this must appear - it is the single most important part of the poster):',
-      `- ${showWas ? 'New price' : 'Price'}, gigantic: "${money(cur, f.priceNow)}"`,
+      'PRICE BLOCK - MANDATORY. The poster is incomplete without a visible price:',
+      `- ${showWas ? 'New price' : 'Price'}, gigantic, white numerals on a red panel: "${money(cur, f.priceNow)}"`,
     )
     if (showWas) {
       L.push(
@@ -287,10 +294,10 @@ export function buildPosterPrompt(f: PosterFields): string {
       if (percent !== null && percent >= 10) {
         L.push(`- A small round corner sticker reading "-${percent}%".`)
       }
+      L.push('- These two figures are the only prices on the poster.')
     } else {
-      L.push(
-        `- This product is NOT discounted. Render exactly one price ("${money(cur, f.priceNow)}") and nothing else numeric: no second price, no crossed-out figure, no "WAS", no "YOU SAVE", no percentage off.`,
-      )
+      // One positive guard replaces the old five-clause negative list
+      L.push(`- "${money(cur, f.priceNow)}" is the only price on the poster: show it once, large and clear.`)
     }
   } else {
     L.push(
@@ -325,7 +332,7 @@ export function buildPosterPrompt(f: PosterFields): string {
     '- Do not add a discount, a crossed-out price or a savings badge unless one is explicitly specified above.',
     '- Spelling must be exact and every price digit must match exactly.',
     hasPrice
-      ? '- Do not omit any listed element, especially the price block.'
+      ? `- Do not omit any listed element. Before finishing, check that the price "${money(cur, f.priceNow)}" is actually visible, large and legible on the poster.`
       : '- Do not omit any listed element.',
     '- All text must be large, high-contrast and legible on a phone screen.',
     '- No watermarks, no signatures, no stock-photo logos, no lorem ipsum.',
