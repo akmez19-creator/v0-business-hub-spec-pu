@@ -98,11 +98,18 @@ export function VideoSearchPanel({
   defaultQuery = '',
   productImage = null,
   onUseClip,
+  onClipPending,
+  onClipSettled,
 }: {
   defaultQuery?: string
   /** Product photo from inventory - powers the lens search */
   productImage?: string | null
   onUseClip?: (file: File) => void
+  /** Fired the moment a clip is queued, so the feed can show it downloading
+   *  instead of sitting empty until the bytes land */
+  onClipPending?: (job: { id: string; title: string; thumb?: string }) => void
+  /** Fired when that job finishes, whichever way it went */
+  onClipSettled?: (id: string, ok: boolean) => void
 }) {
   const [mode, setMode] = useState<'text' | 'image'>('text')
   const [query, setQuery] = useState(defaultQuery)
@@ -303,9 +310,11 @@ export function VideoSearchPanel({
   const MAX_PARALLEL = 3
   const queueRef = useRef<VideoHit[]>([])
   const activeRef = useRef(0)
-  // Kept in a ref so a queued job never calls a stale version of the callback
+  // Kept in refs so a queued job never calls a stale version of a callback
   const useClipRef = useRef(onUseClip)
   useClipRef.current = onUseClip
+  const settledRef = useRef(onClipSettled)
+  settledRef.current = onClipSettled
 
   const runOne = async (hit: VideoHit) => {
     setJobs((p) => ({ ...p, [hit.id]: 'working' }))
@@ -320,10 +329,13 @@ export function VideoSearchPanel({
       if (blob.size < 10_000) throw new Error('Downloaded file looks empty - try again')
       useClipRef.current?.(new File([blob], name, { type: 'video/mp4' }))
       setJobs((p) => ({ ...p, [hit.id]: 'done' }))
+      // Clear the feed placeholder only now the real clip has replaced it
+      settledRef.current?.(hit.id, true)
     } catch (e) {
       // Marked on the card itself, so one failure out of ten is obvious
       // without a shared banner that the next job would overwrite
       setJobs((p) => ({ ...p, [hit.id]: 'failed' }))
+      settledRef.current?.(hit.id, false)
       setError(e instanceof Error ? e.message : 'Could not add this video')
     }
   }
@@ -346,6 +358,7 @@ export function VideoSearchPanel({
     if (state === 'queued' || state === 'working' || state === 'done') return
     setError('')
     setJobs((p) => ({ ...p, [hit.id]: 'queued' }))
+    onClipPending?.({ id: hit.id, title: hit.title || 'Video', thumb: hit.cover ? inlineUrl(hit.cover) : undefined })
     queueRef.current.push(hit)
     pump()
   }
@@ -363,6 +376,9 @@ export function VideoSearchPanel({
       for (const h of pending) next[h.id] = 'queued'
       return next
     })
+    for (const h of pending) {
+      onClipPending?.({ id: h.id, title: h.title || 'Video', thumb: h.cover ? inlineUrl(h.cover) : undefined })
+    }
     queueRef.current.push(...pending)
     pump()
   }

@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input'
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  CircleAlert,
   Clapperboard,
   Download,
   Eraser,
@@ -33,6 +35,7 @@ import {
 import { ReelPublishPanel } from './reel-publish-panel'
 import { ReelAdPanel } from './reel-ad-panel'
 import { ReelAudioPanel, audioIsCleared, type ReelAudio } from './reel-audio-panel'
+import { saveClipToLibrary, fileFromSavedClip, type SavedClipRow } from '@/lib/product-master/clip-library'
 
 interface Clip {
   id: string
@@ -42,6 +45,20 @@ interface Clip {
   duration: number
   width: number
   height: number
+  /** Row id once the clip has been saved to the library */
+  dbId?: string
+  /** Where this clip stands in the save-to-library pipeline */
+  save?: 'saving' | 'saved' | 'failed'
+}
+
+/** A clip that is still being downloaded, shown in the feed as a placeholder
+ *  so the work is visible from the moment it is requested rather than only
+ *  once the file has fully arrived. */
+interface PendingClip {
+  id: string
+  title: string
+  thumb?: string
+  failed?: boolean
 }
 
 // Banner style presets for the product-name title
@@ -153,12 +170,15 @@ function fmtRs(v: number | string | null | undefined): string {
 // machine until the user downloads the result.
 export function ReelsStudioTab({
   productName = '',
+  productId = null,
   productImage = null,
   productPrice = null,
   productPromoPrice = null,
   onBoostPost,
 }: {
   productName?: string
+  /** Product Master row id - attributes saved clips to the right product */
+  productId?: string | null
   /** Inventory photo for this product - powers the lens video search */
   productImage?: string | null
   /** Product Master list price - becomes the struck-out "was" price.
@@ -170,6 +190,9 @@ export function ReelsStudioTab({
   onBoostPost?: (boost: { pageId: string; postId: string }) => void
 }) {
   const [clips, setClips] = useState<Clip[]>([])
+  // Clips being downloaded right now. Kept separate from `clips` because they
+  // have no file yet and must not be selectable, movable or mergeable.
+  const [pending, setPending] = useState<PendingClip[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [range, setRange] = useState<[number, number]>([0, 0])
   const [busy, setBusy] = useState<'cut' | 'merge' | 'brand' | 'load' | null>(null)
@@ -770,6 +793,10 @@ export function ReelsStudioTab({
     setFetching(true)
     setFetchError('')
     setFetchInfo('Resolving video\u2026')
+    // Show the work in the feed straight away rather than leaving the drop
+    // zone looking empty for the whole download
+    const pendingId = `pending-${Date.now()}-${clipSeq++}`
+    setPending((p) => [...p, { id: pendingId, title: 'Fetching from link' }])
     try {
       const res = await fetch('/api/product-master/video-fetch', {
         method: 'POST',
@@ -788,13 +815,17 @@ export function ReelsStudioTab({
       if (blob.size < 10_000) throw new Error('Downloaded file looks empty - try again')
 
       const file = new File([blob], safeName, { type: 'video/mp4' })
-      addFiles([file])
+      setPending((p) => p.filter((x) => x.id !== pendingId))
+      addFiles([file], { source: 'link' })
       setLink('')
       setFetchInfo(`Added: ${safeName}`)
       setTimeout(() => setFetchInfo(''), 4000)
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : 'Could not fetch this video')
       setFetchInfo('')
+      // Leave a failed marker briefly so the feed explains what happened
+      setPending((p) => p.map((x) => (x.id === pendingId ? { ...x, failed: true } : x)))
+      setTimeout(() => setPending((p) => p.filter((x) => x.id !== pendingId)), 5000)
     } finally {
       setFetching(false)
     }
@@ -833,7 +864,14 @@ export function ReelsStudioTab({
     }
   }, [])
 
-  const addFiles = useCallback((files: FileList | File[]) => {
+  // Props change identity on every parent render, so they are read through a
+  // ref - otherwise addFiles would be rebuilt constantly and the drop handler
+  // could capture a stale product
+  const productRef = useRef({ id: productId, name: productName })
+  productRef.current = { id: productId, name: productName }
+
+  const addFiles = useCallback((files: FileList | File[], opts?: { persist?: boolean; source?: string }) => {
+    const persist = opts?.persist !== false
     const vids = Array.from(files).filter((f) => f.type.startsWith('video/'))
     for (const file of vids) {
       const url = URL.createObjectURL(file)
@@ -842,8 +880,32 @@ export function ReelsStudioTab({
       const id = `${Date.now()}-${clipSeq++}-${file.name}`
       const probe = document.createElement('video')
       probe.preload = 'metadata'
-      const add = (duration: number, width: number, height: number) =>
-        setClips((prev) => [...prev, { id, name: file.name, url, file, duration, width, height }])
+      const add = (duration: number, width: number, height: number) => {
+        setClips((prev) => [
+          ...prev,
+          { id, name: file.name, url, file, duration, width, height, save: persist ? 'saving' : undefined },
+        ])
+        if (!persist) return
+        // The clip is usable immediately; the upload runs behind it so the
+        // user is never blocked waiting on the network
+        saveClipToLibrary({
+          file,
+          productId: productRef.current.id,
+          productName: productRef.current.name,
+          duration,
+          width,
+          height,
+          source: opts?.source ?? 'upload',
+        })
+          .then((row) =>
+            setClips((prev) => prev.map((c) => (c.id === id ? { ...c, dbId: row.id, save: 'saved' } : c))),
+          )
+          .catch(() =>
+            // Marked on the tile rather than thrown: the clip still works in
+            // this session, it just will not survive a reload
+            setClips((prev) => prev.map((c) => (c.id === id ? { ...c, save: 'failed' } : c))),
+          )
+      }
       probe.onloadedmetadata = () =>
         add(probe.duration || 0, probe.videoWidth || 1080, probe.videoHeight || 1920)
       // Without this a clip whose metadata will not parse vanishes silently.
@@ -852,6 +914,55 @@ export function ReelsStudioTab({
       probe.src = url
     }
   }, [])
+
+  // Restore this product's saved clips when the studio opens, so work carries
+  // across sessions instead of resetting every time the dialog is closed
+  const [restoring, setRestoring] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    const params = new URLSearchParams()
+    if (productId) params.set('productId', productId)
+    else if (productName) params.set('productName', productName)
+
+    fetch(`/api/product-master/clips?${params}`)
+      .then((r) => r.json())
+      .then(async (json) => {
+        if (cancelled || !json.success || !json.clips?.length) return
+        for (const row of json.clips as SavedClipRow[]) {
+          try {
+            const file = await fileFromSavedClip(row)
+            if (cancelled) return
+            setClips((prev) =>
+              // Guard against a double-mount in dev replaying the same rows
+              prev.some((c) => c.dbId === row.id)
+                ? prev
+                : [
+                    ...prev,
+                    {
+                      id: `db-${row.id}`,
+                      name: row.name,
+                      url: URL.createObjectURL(file),
+                      file,
+                      duration: Number(row.duration) || 0,
+                      width: row.width || 1080,
+                      height: row.height || 1920,
+                      dbId: row.id,
+                      save: 'saved' as const,
+                    },
+                  ],
+            )
+          } catch {
+            // A blob that no longer resolves should not block the rest
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => !cancelled && setRestoring(false))
+
+    return () => {
+      cancelled = true
+    }
+  }, [productId, productName])
 
   const selectedClip = clips.find((c) => c.id === selected) || null
 
@@ -873,8 +984,14 @@ export function ReelsStudioTab({
     })
 
   const remove = (id: string) => {
+    const clip = clips.find((c) => c.id === id)
     setClips((prev) => prev.filter((c) => c.id !== id))
     if (selected === id) setSelected(null)
+    // Removing from the feed also drops the stored copy, otherwise a deleted
+    // clip reappears the next time the studio is opened
+    if (clip?.dbId) {
+      fetch(`/api/product-master/clips?id=${clip.dbId}`, { method: 'DELETE' }).catch(() => {})
+    }
   }
 
   const fmt = (s: number) => {
@@ -1249,7 +1366,13 @@ export function ReelsStudioTab({
       <VideoSearchPanel
         defaultQuery={productName}
         productImage={productImage}
-        onUseClip={(file) => addFiles([file])}
+        onUseClip={(file) => addFiles([file], { source: 'search' })}
+        onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
+        onClipSettled={(id, ok) => {
+          if (ok) return setPending((p) => p.filter((x) => x.id !== id))
+          setPending((p) => p.map((x) => (x.id === id ? { ...x, failed: true } : x)))
+          setTimeout(() => setPending((p) => p.filter((x) => x.id !== id)), 5000)
+        }}
       />
 
       {/* ---- Fetch from link ---- */}
@@ -1318,12 +1441,20 @@ export function ReelsStudioTab({
             addFiles(e.dataTransfer.files)
           }}
           className={`flex gap-3 overflow-x-auto rounded-lg border border-dashed p-3 ${
-            clips.length === 0 ? 'min-h-28 items-center justify-center' : ''
+            clips.length === 0 && pending.length === 0 ? 'min-h-28 items-center justify-center' : ''
           }`}
         >
-          {clips.length === 0 && (
+          {clips.length === 0 && pending.length === 0 && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Film className="h-4 w-4" /> Drag and drop videos here, or click Add videos
+              {restoring ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading your saved clips{'\u2026'}
+                </>
+              ) : (
+                <>
+                  <Film className="h-4 w-4" /> Drag and drop videos here, or click Add videos
+                </>
+              )}
             </p>
           )}
           {clips.map((c, i) => (
@@ -1343,6 +1474,26 @@ export function ReelsStudioTab({
               </span>
               <div className="flex items-center justify-between gap-1 px-1.5 py-1">
                 <span className="truncate text-[10px]">{c.name}</span>
+                {/* Where this clip stands in the library, so the user knows
+                    whether closing the studio would lose it */}
+                {c.save === 'saving' && (
+                  <span title="Saving to your library" className="shrink-0 text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="sr-only">Saving to your library</span>
+                  </span>
+                )}
+                {c.save === 'saved' && (
+                  <span title="Saved to your library" className="shrink-0 text-emerald-500">
+                    <Check className="h-3 w-3" />
+                    <span className="sr-only">Saved to your library</span>
+                  </span>
+                )}
+                {c.save === 'failed' && (
+                  <span title="Not saved - this clip will be lost on reload" className="shrink-0 text-destructive">
+                    <CircleAlert className="h-3 w-3" />
+                    <span className="sr-only">Not saved, this clip will be lost on reload</span>
+                  </span>
+                )}
               </div>
               <div className="absolute right-1 top-1 hidden gap-0.5 group-hover:flex">
                 <Button variant="secondary" size="icon" className="h-6 w-6" title="Move earlier" onClick={(e) => { e.stopPropagation(); move(c.id, -1) }}>
@@ -1354,6 +1505,38 @@ export function ReelsStudioTab({
                 <Button variant="destructive" size="icon" className="h-6 w-6" title="Remove" onClick={(e) => { e.stopPropagation(); remove(c.id) }}>
                   <Trash2 className="h-3 w-3" />
                 </Button>
+              </div>
+            </div>
+          ))}
+
+          {/* Clips still downloading. Shown as real tiles so a batch of ten
+              looks like ten arriving, not an empty feed that fills at random. */}
+          {pending.map((p) => (
+            <div
+              key={p.id}
+              aria-live="polite"
+              className={`relative w-36 shrink-0 overflow-hidden rounded-md border border-dashed ${
+                p.failed ? 'border-destructive/50' : 'border-sky-500/40'
+              }`}
+            >
+              <div className="relative flex h-20 w-36 items-center justify-center bg-black">
+                {p.thumb && (
+                  <img
+                    src={p.thumb || '/placeholder.svg'}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover opacity-30"
+                  />
+                )}
+                {p.failed ? (
+                  <CircleAlert className="relative h-5 w-5 text-destructive" />
+                ) : (
+                  <Loader2 className="relative h-5 w-5 animate-spin text-sky-400" />
+                )}
+              </div>
+              <div className="px-1.5 py-1">
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {p.failed ? 'Failed' : 'Processing'} {'\u00b7'} {p.title}
+                </p>
               </div>
             </div>
           ))}

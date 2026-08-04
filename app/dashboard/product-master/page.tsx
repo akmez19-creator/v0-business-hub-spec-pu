@@ -100,6 +100,7 @@ export default function ProductMasterPage() {
             {request?.tool === 'reels' && (
               <ReelsStudioTab
                 productName={productName}
+                productId={request.product.id}
                 productImage={request.product.image ?? null}
                 productPrice={request.product.price ?? null}
                 productPromoPrice={request.product.promoPrice ?? null}
