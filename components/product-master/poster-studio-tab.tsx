@@ -368,9 +368,21 @@ export function PosterStudioTab({
             </Button>
           </div>
         )}
+        {/* An empty now-price is the case that used to produce invented figures,
+            so surface it before the user spends a generation on it */}
+        {!priceNow.trim() && (
+          <p className="rounded-md border border-border bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
+            No now price set, so the poster will be generated without any price panel.
+          </p>
+        )}
         {savings !== null && (
           <p className="text-[11px] text-muted-foreground">
             Poster will show <span className="font-semibold text-foreground">YOU SAVE Rs {savings}</span>
+          </p>
+        )}
+        {priceNow.trim() && savings === null && !pricesInverted && (
+          <p className="text-[11px] text-muted-foreground">
+            Single price, no discount shown. Add a higher was price to advertise a saving.
           </p>
         )}
 

@@ -168,6 +168,20 @@ export function priceCheck(f: Pick<PosterFields, 'priceNow' | 'priceWas'>): {
 }
 
 /**
+ * Formats a price for the prompt.
+ *
+ * The field is often pre-filled from a record that already carries the
+ * currency, so blindly prefixing produced "Rs Rs 149" on the poster. Strip any
+ * currency the user already typed, then apply exactly one.
+ */
+function money(currency: string, raw: string): string {
+  const bare = String(raw)
+    .replace(/(rs\.?|mur|₨|\$|€|£)/gi, '')
+    .trim()
+  return `${currency} ${bare}`.trim()
+}
+
+/**
  * Builds the poster instruction.
  *
  * The product photo is passed to the model separately as an image input; this
@@ -182,8 +196,9 @@ export function buildPosterPrompt(f: PosterFields): string {
   const features = f.features.filter((x) => x.trim())
   const badges = f.badges.filter((x) => x.trim())
 
+  const hasPrice = Boolean(f.priceNow.trim())
   // Only advertise an old price when it is actually higher than the new one
-  const showWas = savings !== null
+  const showWas = hasPrice && savings !== null
   const L: string[] = []
 
   L.push(
@@ -196,29 +211,53 @@ export function buildPosterPrompt(f: PosterFields): string {
   )
 
   if (layout === 'packed') {
+    /*
+     * The zone list must describe ONLY the zones we can actually supply text
+     * for. It used to be a fixed list while the figures below it were
+     * conditional, so a product with no promo price still instructed the model
+     * to draw a "was / now / you save" panel with no numbers given - and it
+     * invented plausible ones. Every zone here is now gated on real data.
+     */
+    const zones: (string | null)[] = [
+      'TOP-LEFT CORNER: the main headline inside an explosive red and yellow starburst badge, tilted slightly, with a thin ribbon banner beneath it reading "LIMITED TIME OFFER!".',
+
+      badges.length
+        ? 'TOP-RIGHT CORNER: small stacked glossy badges for the delivery and service promises, each a rounded rectangle with a tiny icon (delivery van, plane, shield) and short bold uppercase text. Use only the badge wording listed below.'
+        : null,
+
+      'UPPER CENTRE: the product name in very large heavy condensed uppercase black type, on a white or light panel so it stays readable.',
+
+      hasPrice
+        ? showWas
+          ? 'LEFT MIDDLE: the price block, the loudest element on the whole poster. A small "SPECIAL PROMO" cap label at the top, then the old price struck through with a red diagonal line, then the words "NOW ONLY", then the new price in gigantic bold white numerals inside a bright red rounded panel, then a small yellow starburst savings badge. Use only the exact figures given below.'
+          : 'LEFT MIDDLE: the price block, the loudest element on the whole poster. A small "SPECIAL PROMO" cap label at the top, then the single price in gigantic bold white numerals inside a bright red rounded panel. Show ONE price only: there is NO old price, NO crossed-out figure, NO savings badge and NO discount percentage on this poster.'
+        : null,
+
+      hasPrice
+        ? 'RIGHT MIDDLE: the cut-out product photo, large, with a soft drop shadow, overlapping the price block slightly so the composition feels layered. It must not cover the product name.'
+        : 'CENTRE: the cut-out product photo, large, with a soft drop shadow. It must not cover the product name.',
+
+      features.length
+        ? 'MIDDLE-LOWER: a vertical list of feature rows, one row per feature listed below. Each row is a small circular gold-rimmed icon on the left, then the feature text as a short bold uppercase title.'
+        : null,
+
+      f.lifestyleShots !== false
+        ? 'LOWER: a horizontal strip of three smaller rounded photographs showing the SAME product being used in three realistic everyday situations. Each photo may carry a small dark caption bar with two or three plain words naming the situation, and those captions must never contain a price, a number, a percentage or a claim.'
+        : null,
+
+      'BOTTOM BAR: a full-width dark strip containing the urgency line on the left in bold yellow and white type, and a large glossy orange rounded call-to-action button on the right with a shopping-cart icon.',
+    ]
+
+    const numbered = zones.filter((z): z is string => z !== null).map((z, i) => `${i + 1}. ${z}`)
+
     L.push(
       '',
       'CRITICAL LAYOUT REQUIREMENT:',
-      'This is an information-dense sales sheet, NOT a minimal poster. Every zone listed below must be present and filled. Use the FULL canvas edge to edge with no large empty background areas. Think of a printed supermarket promo leaflet: many stacked panels, each doing a job.',
+      'This is an information-dense sales sheet, NOT a minimal poster. Every zone listed below must be present and filled, and no zone that is NOT listed may be added. Use the FULL canvas edge to edge with no large empty background areas. Think of a printed supermarket promo leaflet: many stacked panels, each doing a job.',
       '',
       'ZONES, top to bottom:',
       '',
-      '1. TOP-LEFT CORNER: the main headline inside an explosive red and yellow starburst badge, tilted slightly, with a thin ribbon banner beneath it reading "LIMITED TIME OFFER!".',
-      '2. TOP-RIGHT CORNER: small stacked glossy badges for the delivery and service promises, each a rounded rectangle with a tiny icon (delivery van, plane, shield) and short bold uppercase text.',
-      '3. UPPER CENTRE: the product name in very large heavy condensed uppercase black type, on a white or light panel so it stays readable.',
-      '4. LEFT MIDDLE: the price block, the loudest element on the whole poster. A small "SPECIAL PROMO" cap label at the top, then the old price struck through with a red diagonal line, then the words "NOW ONLY", then the new price in gigantic bold white numerals inside a bright red rounded panel, then a small yellow starburst savings badge.',
-      '5. RIGHT MIDDLE: the cut-out product photo, large, with a soft drop shadow, overlapping the price block slightly so the composition feels layered.',
-      '6. MIDDLE-LOWER: a vertical list of feature rows. Each row is a small circular gold-rimmed icon on the left, then a short bold uppercase title, then one line of smaller grey supporting text under the title.',
-    )
-
-    if (f.lifestyleShots !== false) {
-      L.push(
-        '7. LOWER: a horizontal strip of three smaller rounded photographs showing the SAME product being used in three realistic everyday situations. Each photo has a small dark caption bar along its bottom edge with two or three words on it.',
-      )
-    }
-
-    L.push(
-      '8. BOTTOM BAR: a full-width dark strip containing the urgency line on the left in bold yellow and white type, and a large glossy orange rounded call-to-action button on the right with a shopping-cart icon.',
+      ...numbered,
       '',
       'STYLE: vivid red, orange and yellow promotional palette on white and dark navy panels. Glossy 3D badges, starbursts, ribbons, confetti, strong drop shadows, thick black outlines on headline type. Heavy condensed uppercase sans-serif throughout. High saturation, high contrast, loud and commercial.',
     )
@@ -234,21 +273,30 @@ export function buildPosterPrompt(f: PosterFields): string {
   if (f.productName.trim()) L.push(`- Product name: "${f.productName.trim()}"`)
   if (f.tagline?.trim()) L.push(`- Small tagline under the product name: "${f.tagline.trim()}"`)
 
-  if (f.priceNow.trim()) {
+  if (hasPrice) {
     L.push(
       '',
       'PRICE BLOCK (this must appear - it is the single most important part of the poster):',
-      `- New price, gigantic: "${cur} ${f.priceNow.trim()}"`,
+      `- ${showWas ? 'New price' : 'Price'}, gigantic: "${money(cur, f.priceNow)}"`,
     )
     if (showWas) {
       L.push(
-        `- Old price above it, smaller, struck through with a red line, labelled "WAS": "${cur} ${f.priceWas.trim()}"`,
+        `- Old price above it, smaller, struck through with a red line, labelled "WAS": "${money(cur, f.priceWas)}"`,
         `- Savings badge: "YOU SAVE ${cur} ${savings}!"`,
       )
       if (percent !== null && percent >= 10) {
         L.push(`- A small round corner sticker reading "-${percent}%".`)
       }
+    } else {
+      L.push(
+        `- This product is NOT discounted. Render exactly one price ("${money(cur, f.priceNow)}") and nothing else numeric: no second price, no crossed-out figure, no "WAS", no "YOU SAVE", no percentage off.`,
+      )
     }
+  } else {
+    L.push(
+      '',
+      'PRICE: no price has been supplied for this poster. Do NOT render any price, any currency amount, any "WAS"/"NOW ONLY" panel, any savings badge or any discount percentage anywhere in the image. Leave price out entirely.',
+    )
   }
 
   if (features.length) {
@@ -273,8 +321,12 @@ export function buildPosterPrompt(f: PosterFields): string {
     '',
     'RULES:',
     '- Render ONLY the text listed above. Do not invent extra words, prices, percentages, phone numbers, claims or placeholder text.',
+    '- NEVER invent a number. Every digit, price, amount, saving and percentage in the image must appear verbatim in this brief. If a figure is not written above, it must not appear in the poster.',
+    '- Do not add a discount, a crossed-out price or a savings badge unless one is explicitly specified above.',
     '- Spelling must be exact and every price digit must match exactly.',
-    '- Do not omit any listed element, especially the price block.',
+    hasPrice
+      ? '- Do not omit any listed element, especially the price block.'
+      : '- Do not omit any listed element.',
     '- All text must be large, high-contrast and legible on a phone screen.',
     '- No watermarks, no signatures, no stock-photo logos, no lorem ipsum.',
   )
