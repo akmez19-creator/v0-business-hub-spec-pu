@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { fbGet, fbGetAll } from '@/lib/facebook/graph'
+import { extractConversions } from '@/lib/ads-conversions'
 
 const FACEBOOK_API_VERSION = 'v21.0'
 const FACEBOOK_GRAPH_URL = `https://graph.facebook.com/${FACEBOOK_API_VERSION}`
@@ -85,11 +86,15 @@ async function getCampaignsWithSpend(
   // Insights are requested through FIELD EXPANSION on the campaigns listing,
   // so one page of 500 campaigns costs ONE call instead of 500 per-campaign
   // insights calls. This is what was exhausting the app's hourly quota.
+  // `actions` carries the conversion counts (messaging conversations started,
+  // leads, purchases) used for the cost-per-result metric. It rides along on
+  // the same expansion, so it costs no extra API calls.
+  const insightFields = 'spend,impressions,clicks,reach,actions'
   let insightsExpansion: string
   if (since && until) {
-    insightsExpansion = `insights.time_range({"since":"${since}","until":"${until}"}){spend,impressions,clicks,reach}`
+    insightsExpansion = `insights.time_range({"since":"${since}","until":"${until}"}){${insightFields}}`
   } else {
-    insightsExpansion = `insights.date_preset(${datePreset === 'lifetime' ? 'maximum' : datePreset}){spend,impressions,clicks,reach}`
+    insightsExpansion = `insights.date_preset(${datePreset === 'lifetime' ? 'maximum' : datePreset}){${insightFields}}`
   }
 
   const firstUrl =
@@ -101,7 +106,15 @@ async function getCampaignsWithSpend(
     id: string; name: string; status: string; objective: string; created_time: string
     lifetime_budget?: string; daily_budget?: string; budget_remaining?: string
     start_time?: string; stop_time?: string
-    insights?: { data?: Array<{ spend?: string; impressions?: string; clicks?: string; reach?: string }> }
+    insights?: {
+      data?: Array<{
+        spend?: string
+        impressions?: string
+        clicks?: string
+        reach?: string
+        actions?: Array<{ action_type: string; value: string }>
+      }>
+    }
   }
   const allCampaigns = await fbGetAll<CampaignRow>(firstUrl, { cacheTtl: 5 * 60 * 1000 })
 
@@ -126,12 +139,17 @@ async function getCampaignsWithSpend(
   const campaignsWithSpend = allCampaigns.map((campaign) => {
     const insights = campaign.insights?.data?.[0] || {}
     const { insights: _drop, ...rest } = campaign
+    const conv = extractConversions(insights.actions)
     return {
       ...rest,
       spend: insights.spend || '0',
       impressions: insights.impressions || '0',
       clicks: insights.clicks || '0',
       reach: insights.reach || '0',
+      // Conversion counts for the cost-per-result metric
+      messages: conv.messages,
+      results: conv.results,
+      resultKind: conv.resultKind,
     }
   })
 

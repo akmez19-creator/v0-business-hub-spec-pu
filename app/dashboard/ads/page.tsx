@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { TvDashboard } from '@/components/ads/tv-dashboard'
+import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
 import { Tv } from 'lucide-react'
 import {
   Table,
@@ -97,6 +98,11 @@ interface Campaign {
   impressions: string
   clicks: string
   reach: string
+  // Conversions from Facebook insights actions (general conversion rule:
+  // messages, else leads, else purchases). Drives cost-per-result in Rs.
+  messages?: number
+  results?: number
+  resultKind?: ResultKind
   adIds?: string[]
   ads?: { id: string; postId: string | null }[]
   accountId?: string
@@ -958,6 +964,33 @@ export default function AdsManagerPage() {
     )
   }
 
+  // Cost of one conversion for a single ad, in Rs. This is the number that
+  // makes ads comparable - a big spender can still be the cheapest per message.
+  const renderCostPerResult = (campaign: Campaign) => {
+    const spendUsd = parseFloat(campaign.spend || '0')
+    const results = campaign.results ?? 0
+    const cpr = costPerResultRs(spendUsd, results, USD_TO_RS)
+    const label = RESULT_LABEL[campaign.resultKind ?? 'none']
+    if (cpr === null) {
+      if (spendUsd <= 0) return null
+      return (
+        <p className="mt-0.5 text-xs font-medium text-red-500" title="Spending with no messages yet">
+          no {RESULT_LABEL.msg} yet
+        </p>
+      )
+    }
+    const tone = cpr <= 50 ? 'text-emerald-600' : cpr <= 75 ? 'text-amber-600' : 'text-red-500'
+    return (
+      <p
+        className={`mt-0.5 text-xs font-semibold ${tone}`}
+        title={`${results} ${label}${results !== 1 ? 's' : ''} \u00b7 ${formatSpend(campaign.spend)} spent`}
+      >
+        Rs {cpr.toLocaleString('en-US', { maximumFractionDigits: 0 })}/{label}
+        <span className="ml-1 font-normal text-muted-foreground">({results})</span>
+      </p>
+    )
+  }
+
   // TV dashboard: product groups enriched with client count + cost-per-client (Rs)
   // so the TV view can color-code each product into a CAC efficiency zone.
   const tvGroups = productGroups.map((g) => ({
@@ -970,6 +1003,14 @@ export default function AdsManagerPage() {
     clients: productClientStats[g.productName]?.clientCount ?? 0,
     cac: groupCac(g),
     campaigns: g.campaigns,
+    // Conversions rolled up from this product's campaigns, so the group can
+    // show what one message costs across all of its ads.
+    totalResults: g.campaigns.reduce((sum, c) => sum + (c.results ?? 0), 0),
+    costPerResult: costPerResultRs(
+      g.totalSpend,
+      g.campaigns.reduce((sum, c) => sum + (c.results ?? 0), 0),
+      USD_TO_RS,
+    ),
     recommendation: groupRecommendation(g),
     todayEdit: (() => {
       const e = todaysEdit(g)
@@ -1706,6 +1747,7 @@ export default function AdsManagerPage() {
                                 {parseFloat(campaign.spend) > 0 && (
                                   <p className="text-xs text-muted-foreground/70">{formatUsd(campaign.spend)}</p>
                                 )}
+                                {renderCostPerResult(campaign)}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -1779,6 +1821,7 @@ export default function AdsManagerPage() {
                         {parseFloat(campaign.spend) > 0 && (
                           <p className="text-xs text-muted-foreground/70">{formatUsd(campaign.spend)}</p>
                         )}
+                        {renderCostPerResult(campaign)}
                       </div>
                     </TableCell>
                   </TableRow>

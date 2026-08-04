@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CalendarDays, DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook, Cat } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
+import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
 import { TvRulesCat } from '@/components/ads/tv-rules-cat'
 
 // Minimal structural shape of a campaign needed for the TV view.
@@ -13,6 +14,10 @@ export interface TvCampaign {
   status: string
   spend: string
   accountName?: string
+  // Conversions for this ad (messages, else leads, else purchases)
+  messages?: number
+  results?: number
+  resultKind?: ResultKind
 }
 
 // A product group enriched with client count + cost-per-client (in Rs).
@@ -26,6 +31,9 @@ export interface TvGroup {
   isUnlinked: boolean
   clients: number
   cac: number | null // Rs per client (null when not computable)
+  // Conversions across every campaign of this product
+  totalResults?: number
+  costPerResult?: number | null // Rs per message/lead (null = no results yet)
   campaigns: TvCampaign[]
   // Budget action recommendation (HOLD/INCREASE/WATCH/DECREASE), null = n/a
   recommendation?: Recommendation | null
@@ -119,6 +127,23 @@ const formatRs = (rs: number) => `Rs ${rs.toLocaleString('en-US', { maximumFract
 
 // USD -> Rs conversion used across the wall (spend cells, ticker thresholds)
 const USD_TO_RS = 57.5
+
+/**
+ * Order a product's ads cheapest-result-first, which is the order that answers
+ * "which one do I scale and which do I kill". Ads with no result yet sink to
+ * the bottom, the biggest spender among them first (that is the worst waste).
+ */
+function rankByCostPerResult(list: TvCampaign[]): TvCampaign[] {
+  const cost = (c: TvCampaign) => costPerResultRs(parseFloat(c.spend || '0'), c.results ?? 0, USD_TO_RS)
+  return [...list].sort((a, b) => {
+    const ca = cost(a)
+    const cb = cost(b)
+    if (ca !== null && cb !== null) return ca - cb
+    if (ca !== null) return -1
+    if (cb !== null) return 1
+    return parseFloat(b.spend || '0') - parseFloat(a.spend || '0')
+  })
+}
 
 // Shared dense grid template used by both the header and every row.
 // Last column: budget action badge (increase / decrease / hold).
@@ -537,8 +562,26 @@ export function TvDashboard({
           this and what was done to it" without leaving TV mode */}
       {expanded && (
         <div className="border-b border-blue-500/30 bg-blue-500/5 px-2 py-1.5">
+          {/* Product-level cost per message, so the ads below can be judged
+              against their own product average rather than in a vacuum. */}
+          {(g.totalResults ?? 0) > 0 && (
+            <div className="mb-1 flex items-center justify-between gap-2 border-b border-blue-500/20 pb-1">
+              <span className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                Cheapest first {'\u00b7'} {g.totalResults} {RESULT_LABEL[g.campaigns.find((c) => c.resultKind && c.resultKind !== 'none')?.resultKind ?? 'msg']}
+                {(g.totalResults ?? 0) !== 1 ? 's' : ''} total
+              </span>
+              {g.costPerResult != null && (
+                <span
+                  className={`rounded px-1.5 py-0 text-[10px] font-black tabular-nums ${ZONE_STYLES[zoneFor(g.costPerResult)].bg} ${ZONE_STYLES[zoneFor(g.costPerResult)].text}`}
+                  title={`Product average: ${formatSpend(g.totalSpend.toString())} across ${g.totalResults} results`}
+                >
+                  avg {formatRs(g.costPerResult)}
+                </span>
+              )}
+            </div>
+          )}
           <div className="space-y-0.5">
-            {g.campaigns.map((c) => {
+            {rankByCostPerResult(g.campaigns).map((c) => {
               // Live status = optimistic override if we flipped it just now
               const status = statusOverrides[c.id] ?? c.status
               const isOn = status === 'ACTIVE'
@@ -552,9 +595,50 @@ export function TvDashboard({
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    <span className={`${isTight ? 'text-[10px]' : 'text-[11px]'} font-bold tabular-nums text-amber-500`}>
-                      {formatSpend(c.spend)}
-                    </span>
+                    {/* Cost per result is the headline number here: spend alone
+                        cannot tell you which ad is cheap, only which is big.
+                        Zone-colored on the same Rs scale as cost-per-client. */}
+                    {(() => {
+                      const spendUsd = parseFloat(c.spend || '0')
+                      const results = c.results ?? 0
+                      const cpr = costPerResultRs(spendUsd, results, USD_TO_RS)
+                      const label = RESULT_LABEL[c.resultKind ?? 'none']
+                      const size = isTight ? 'text-[10px]' : 'text-[11px]'
+                      if (cpr === null) {
+                        // Spending with nothing to show for it - the loudest
+                        // signal on the panel; zero spend just stays quiet.
+                        return (
+                          <span
+                            className={`rounded px-1 py-0 ${size} font-black tabular-nums ${
+                              spendUsd > 0 ? 'bg-red-500/20 text-red-400' : 'text-muted-foreground'
+                            }`}
+                            title={
+                              spendUsd > 0
+                                ? `${formatSpend(c.spend)} spent, no message yet`
+                                : 'No spend yet'
+                            }
+                          >
+                            {spendUsd > 0 ? `${formatSpend(c.spend)} \u00b7 0 msg` : formatSpend(c.spend)}
+                          </span>
+                        )
+                      }
+                      const cz = ZONE_STYLES[zoneFor(cpr)]
+                      return (
+                        <span
+                          className="flex items-center gap-1"
+                          title={`${formatSpend(c.spend)} spent \u00b7 ${results} ${label}${results !== 1 ? 's' : ''} \u00b7 ${formatRs(cpr)} per ${label}`}
+                        >
+                          <span className={`${size} tabular-nums text-muted-foreground`}>
+                            {formatSpend(c.spend)} {'\u00b7'} {results} {label}
+                          </span>
+                          <span
+                            className={`rounded px-1 py-0 ${size} font-black tabular-nums ${cz.bg} ${cz.text}`}
+                          >
+                            {formatRs(cpr)}/{label}
+                          </span>
+                        </span>
+                      )
+                    })()}
                     {/* Budget boost: add 20% / 50% of the remaining budget.
                         Shows the applied result inline once done. */}
                     {boostedNotes[c.id] ? (
