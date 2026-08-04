@@ -12,6 +12,10 @@ export interface SavedClipRow {
   height: number
   size_bytes: number
   source: string
+  /** Stable id from the origin platform, used to detect re-saves */
+  source_id: string | null
+  /** Original page/download URL the clip came from */
+  source_url: string | null
   created_at: string
 }
 
@@ -34,9 +38,23 @@ export async function saveClipToLibrary(opts: {
   width: number
   height: number
   source?: string
+  /** Stable id from the origin platform, so the same clip is not saved twice */
+  sourceId?: string | null
+  /** Original page/download URL */
+  sourceUrl?: string | null
   signal?: AbortSignal
 }): Promise<SavedClipRow> {
-  const { file, productId, productName, duration, width, height, source = 'upload' } = opts
+  const {
+    file,
+    productId,
+    productName,
+    duration,
+    width,
+    height,
+    source = 'upload',
+    sourceId = null,
+    sourceUrl = null,
+  } = opts
 
   // Strip characters that make an object path awkward to work with later
   const safe = file.name.replace(/[^\w.\-]+/g, '-').slice(-80)
@@ -75,6 +93,8 @@ export async function saveClipToLibrary(opts: {
       height,
       sizeBytes: file.size,
       source,
+      sourceId,
+      sourceUrl,
     }),
     signal: opts.signal,
   })

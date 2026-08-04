@@ -411,7 +411,12 @@ export function TvDashboard({
   // zone. These escalate to breaking news: decrease again, or turn OFF when
   // the cost has blown past Rs 150/client.
   const STALL_HOURS = 2
-  const TURN_OFF_CAC = 150
+  // NOTE: this is the STALLED-EDIT escalation threshold - a product whose
+  // cost-per-client has blown past Rs 150 despite a budget edit. It is NOT the
+  // Rs 150 kill rule (lib/ads/kill-rule.ts), which is per-ad and fires on
+  // Rs 150 spent with ZERO clients. Same number, deliberately different tests:
+  // this one escalates ads that ARE converting but too expensively.
+  const STALL_TURN_OFF_CAC = 150
   const stalledInfo = (g: TvGroup): { hoursAgo: number; turnOff: boolean } | null => {
     if (!g.todayEdit || isGroupOff(g)) return null
     const base = editBaselines[g.key]
@@ -420,7 +425,7 @@ export function TvDashboard({
     if (hoursAgo < STALL_HOURS) return null
     const improving = g.cac < base.cac
     if (improving || g.cac <= YELLOW_MAX) return null
-    return { hoursAgo, turnOff: g.cac > TURN_OFF_CAC }
+    return { hoursAgo, turnOff: g.cac > STALL_TURN_OFF_CAC }
   }
 
   const renderRow = (g: TvGroup, rank: number, striped: boolean) => {

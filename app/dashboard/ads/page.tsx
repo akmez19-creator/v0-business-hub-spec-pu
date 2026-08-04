@@ -18,7 +18,10 @@ import {
 } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { TvDashboard } from '@/components/ads/tv-dashboard'
+import { AdAttributionPanel } from '@/components/ads/ad-attribution-panel'
+import { AdTestPanel } from '@/components/ads/ad-test-panel'
 import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
+import { USD_TO_RS } from '@/lib/ads/currency'
 import { Tv } from 'lucide-react'
 import {
   Table,
@@ -688,9 +691,9 @@ export default function AdsManagerPage() {
     return `${style.bg} ${style.text} border-0`
   }
 
-  // USD to Rs conversion rate (including VAT)
-  const USD_TO_RS = 57.5
-  
+  // USD to Rs conversion rate (including VAT) now lives in lib/ads/currency so
+  // the Rs 150 kill rule cannot drift from the figure displayed beside it.
+
   const formatSpend = (amount: string) => {
     // Facebook returns spend in USD cents (divide by 100) or USD
     const usdValue = parseFloat(amount)
@@ -1489,6 +1492,19 @@ export default function AdsManagerPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Per-ad client attribution + the Rs 150 kill queue. Needs a single
+          account: ad-level insights are fetched per ad account. */}
+      {selectedAccount !== 'all' && (
+        <AdAttributionPanel
+          accountId={selectedAccount}
+          since={dateRange?.from ? dateRange.from.toISOString().slice(0, 10) : null}
+          until={dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : null}
+        />
+      )}
+
+      {/* 3-variant testing harness */}
+      <AdTestPanel />
 
       {/* Account Spend Breakdown */}
       {selectedAccount === 'all' && accountSpendList.length > 0 && (
