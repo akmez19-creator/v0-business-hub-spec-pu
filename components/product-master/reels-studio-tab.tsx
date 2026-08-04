@@ -481,6 +481,16 @@ export function ReelsStudioTab({
           if (saved.logo) setLogoXY(saved.logo)
           if (saved.preset) setLayoutPreset(saved.preset)
           setLockLayout(saved.locked === true)
+          // The watermark's look travels with the layout. Absent on defaults
+          // saved before this existed, so keep the studio's values in that case.
+          const wm = saved.watermark
+          if (wm && typeof wm === 'object') {
+            setLogoOn(wm.on !== false)
+            if (typeof wm.size === 'number') setLogoSize(wm.size)
+            if (typeof wm.opacity === 'number') setLogoOpacity(wm.opacity)
+            setLogoRemoveBg(wm.removeBg !== false)
+            if (typeof wm.bgTol === 'number') setLogoBgTol(wm.bgTol)
+          }
         }
       })
       .catch(() => {
@@ -510,6 +520,16 @@ export function ReelsStudioTab({
             title: titlePos,
             price: pricePos,
             logo: logoXY,
+            // Size/opacity/cutout, but not the image itself - that is already
+            // saved per Page by /api/page-logos, so storing it here too would
+            // give one watermark two sources of truth
+            watermark: {
+              on: logoOn,
+              size: logoSize,
+              opacity: logoOpacity,
+              removeBg: logoRemoveBg,
+              bgTol: logoBgTol,
+            },
           },
         }),
       }).catch(() => {
@@ -517,7 +537,19 @@ export function ReelsStudioTab({
       })
     }, 600)
     return () => clearTimeout(t)
-  }, [layoutLoaded, layoutPreset, lockLayout, titlePos, pricePos, logoXY])
+  }, [
+    layoutLoaded,
+    layoutPreset,
+    lockLayout,
+    titlePos,
+    pricePos,
+    logoXY,
+    logoOn,
+    logoSize,
+    logoOpacity,
+    logoRemoveBg,
+    logoBgTol,
+  ])
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
   const dragTarget = useRef<'title' | 'price' | 'logo' | 'logo-resize' | null>(null)
