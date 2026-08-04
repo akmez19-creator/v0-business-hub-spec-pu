@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Download, ImageIcon, Loader2, Plus, Sparkles, Upload, X } from 'lucide-react'
 import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
 
-type ModelInfo = { id: string; label: string; note: string; provider?: 'gateway' | 'google' }
+type ModelInfo = { id: string; label: string; note: string; provider?: 'gateway' | 'google' | 'openai' }
 
 const inlineUrl = (src: string) => `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(src)}`
 
@@ -250,11 +250,19 @@ export function PosterStudioTab({
             to surface - not a cosmetic grouping. */}
         {(
           [
+            { key: 'openai', title: 'ChatGPT', hint: 'billed to your OpenAI API key' },
             { key: 'google', title: 'Google Gemini', hint: 'billed to your Google API key' },
             { key: 'gateway', title: 'Vercel AI Gateway', hint: 'billed to Gateway credit' },
+            // Catch-all: a model whose provider matches no group above would
+            // otherwise vanish from the picker with no error anywhere
+            { key: 'other', title: 'Other', hint: 'billing varies' },
           ] as const
         ).map((group) => {
-          const inGroup = models.filter((m) => (m.provider ?? 'gateway') === group.key)
+          const known = ['openai', 'google', 'gateway']
+          const inGroup = models.filter((m) => {
+            const p = m.provider ?? 'gateway'
+            return group.key === 'other' ? !known.includes(p) : p === group.key
+          })
           if (!inGroup.length) return null
           return (
             <div key={group.key} className="flex flex-col gap-1.5">
@@ -341,11 +349,24 @@ export function PosterStudioTab({
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-muted-foreground">Now price (Rs)</span>
-            <Input value={priceNow} onChange={(e) => setPriceNow(e.target.value)} inputMode="numeric" placeholder="1299" />
+            {/* "e.g." prefix on purpose: a bare "1299" in a dark-theme input
+                reads as a filled value, and users generated price-less posters
+                believing they had entered one */}
+            <Input
+              value={priceNow}
+              onChange={(e) => setPriceNow(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 1299"
+            />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-muted-foreground">Was price (Rs)</span>
-            <Input value={priceWas} onChange={(e) => setPriceWas(e.target.value)} inputMode="numeric" placeholder="1875" />
+            <Input
+              value={priceWas}
+              onChange={(e) => setPriceWas(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 1875"
+            />
           </label>
         </div>
 
