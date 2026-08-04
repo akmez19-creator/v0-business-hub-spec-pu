@@ -20,6 +20,30 @@ export const maxDuration = 300
  * provider-side error. Fetching here means a bad image URL fails with a clear
  * message instead.
  */
+/**
+ * Pull the real photo out of an SVG wrapper.
+ *
+ * Over half of the product images in this catalogue are SVG files that do
+ * nothing but wrap a single base64 JPEG/PNG in an <image> tag. Image models
+ * reject SVG outright, so sending one through fails with an opaque provider
+ * error. The embedded raster is the actual photo, so extract and use that.
+ * Returns null when the SVG is genuine vector art with nothing to extract.
+ */
+function extractEmbeddedRaster(bytes: Uint8Array): Uint8Array | null {
+  // Only look at the head - these files are mostly one huge base64 blob and
+  // decoding the whole thing as text just to find the header wastes memory.
+  const head = Buffer.from(bytes.slice(0, 4096)).toString('utf8')
+  if (!head.includes('<svg')) return null
+
+  const text = Buffer.from(bytes).toString('utf8')
+  const m = text.match(/data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\s]+)/)
+  if (!m) return null
+
+  const b64 = m[2].replace(/\s/g, '')
+  if (!b64) return null
+  return Uint8Array.from(Buffer.from(b64, 'base64'))
+}
+
 async function loadSourceImage(src: string): Promise<Uint8Array> {
   const res = await fetch(src, {
     headers: {
@@ -31,7 +55,18 @@ async function loadSourceImage(src: string): Promise<Uint8Array> {
   if (!res.ok) throw new Error(`Could not load the product photo (${res.status})`)
   const type = res.headers.get('content-type') || ''
   if (type && !type.startsWith('image/')) throw new Error('That link is not an image')
-  return new Uint8Array(await res.arrayBuffer())
+
+  const bytes = new Uint8Array(await res.arrayBuffer())
+
+  if (type.includes('svg') || src.toLowerCase().includes('.svg')) {
+    const raster = extractEmbeddedRaster(bytes)
+    if (raster) return raster
+    throw new Error(
+      'This product photo is a vector (SVG) image, which the AI models cannot read. Upload a JPG or PNG instead.',
+    )
+  }
+
+  return bytes
 }
 
 export async function POST(request: Request) {

@@ -51,6 +51,14 @@ export function PosterStudioTab({
   const [badges, setBadges] = useState<string[]>(['FREE DELIVERY ANYWHERE IN MAURITIUS'])
   const [extra, setExtra] = useState('')
 
+  // Preview loading strategy. Product photos live on our own Supabase storage
+  // and load fine directly, but that host is not on the media proxy's
+  // allowlist - routing them through it returns 403 and shows a broken image.
+  // Marketplace CDNs are the opposite: they often refuse hotlinking and need
+  // the proxy. So try direct first and fall back to the proxy on error, which
+  // works for both without hardcoding which hosts are which.
+  const [proxyPreview, setProxyPreview] = useState(false)
+
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState<string[]>([])
@@ -78,6 +86,12 @@ export function PosterStudioTab({
     setSourceImage(productImage ?? null)
     setSourceLabel(productImage ? 'Product photo' : '')
   }, [productName, productImage])
+
+  // A new photo deserves a fresh direct attempt - otherwise one proxied
+  // marketplace image would force every later photo through the proxy too.
+  useEffect(() => {
+    setProxyPreview(false)
+  }, [sourceImage])
 
   const onUpload = (file: File) => {
     const reader = new FileReader()
@@ -148,9 +162,18 @@ export function PosterStudioTab({
           <div className="h-28 w-28 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
             {sourceImage ? (
               <img
-                src={sourceImage.startsWith('data:') ? sourceImage : inlineUrl(sourceImage)}
+                src={
+                  sourceImage.startsWith('data:')
+                    ? sourceImage
+                    : proxyPreview
+                      ? inlineUrl(sourceImage)
+                      : sourceImage
+                }
                 alt="Poster source"
                 className="h-full w-full object-cover"
+                onError={() => {
+                  if (!proxyPreview && !sourceImage.startsWith('data:')) setProxyPreview(true)
+                }}
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center">
