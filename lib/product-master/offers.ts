@@ -17,10 +17,22 @@ export interface ProductOffer {
   headline: string
   /** Supporting line, usually the per-unit price it replaces */
   sub?: string
+  /**
+   * How `sub` should read on the tag. 'pay' is the amount the customer
+   * actually hands over (B1G1 still costs one unit), so it has to be the
+   * loudest thing after the headline. 'note' is incidental detail.
+   */
+  subKind?: 'pay' | 'note'
   /** Struck-out reference price, when the offer implies a saving */
   was?: string
   /** Percentage saved vs buying singly, 0 when not meaningful */
   savePct: number
+  /**
+   * True when the headline already spells out the discount ("BUY 1 GET 1
+   * FREE" is self-evidently -50%), so the badge would just be noise
+   * competing with the price.
+   */
+  savingInHeadline?: boolean
 }
 
 /** Inventory stores numerics inconsistently - "775" and 775 both occur. */
@@ -69,8 +81,12 @@ export function buildOffers(opts: {
       id: 'b1g1',
       label: 'B1G1',
       headline: 'BUY 1 GET 1 FREE',
+      // Rs 475 is what they pay, not a price being replaced - it must not be
+      // dimmed or struck through
       sub: unit > 0 ? fmtRs(unit) : undefined,
+      subKind: 'pay',
       savePct: 50,
+      savingInHeadline: true,
     })
   }
 
@@ -89,7 +105,10 @@ export function buildOffers(opts: {
       id: `bundle-${t.qty}`,
       label: `${t.qty} for ${fmtRs(t.total)}`,
       headline: `${t.qty} FOR ${fmtRs(t.total)}`,
+      // The bundle total is already in the headline, so the unit price here
+      // is context rather than the amount paid
       sub: unit > 0 ? `${fmtRs(unit)} each` : undefined,
+      subKind: 'note',
       was: straight > t.total ? fmtRs(straight) : undefined,
       savePct,
     })

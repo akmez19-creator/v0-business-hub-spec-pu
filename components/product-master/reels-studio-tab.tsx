@@ -568,9 +568,20 @@ export function ReelsStudioTab({
     if (layout === 'offer') {
       if (!offer) return [[{ text: n, scale: 1 }]]
       const second: PromoSeg[] = []
-      if (offer.was) second.push({ text: offer.was, scale: 0.5, strike: true, dim: true })
-      else if (offer.sub) second.push({ text: offer.sub, scale: 0.5, dim: true })
-      if (offer.savePct > 0) second.push({ text: `-${offer.savePct}%`, scale: 0.44, accent: true })
+      if (offer.subKind === 'pay' && offer.sub) {
+        // The price actually paid - full brightness and nearly headline size,
+        // because a washed-out 50%-scale price is the thing people squint at
+        second.push({ text: offer.sub, scale: 0.72 })
+      } else if (offer.was) {
+        second.push({ text: offer.was, scale: 0.52, strike: true, dim: true })
+      } else if (offer.sub) {
+        second.push({ text: offer.sub, scale: 0.52, dim: true })
+      }
+      // Skip the badge when the headline already states the discount, so it
+      // does not crowd the price
+      if (offer.savePct > 0 && !offer.savingInHeadline) {
+        second.push({ text: `-${offer.savePct}%`, scale: 0.46, accent: true })
+      }
       const head: PromoSeg[] = [{ text: offer.headline, scale: 1 }]
       return second.length ? [head, second] : [head]
     }
@@ -622,11 +633,39 @@ export function ReelsStudioTab({
     sizePct: number,
     offer?: ProductOffer | null,
   ) => {
-    const lines = buildPromoLines(oldP, newP, layout, offer)
     const probe = document.createElement('canvas').getContext('2d')
     if (!probe) return null
     const font = (px: number) => `900 ${px}px 'Arial Black', Arial, sans-serif`
     let base = Math.max(8, Math.round(refW * (sizePct / 100)))
+
+    // Widest a line may be before the tag has to give
+    const limit = refW * 0.92 - base * 1.5
+
+    // A long headline like "BUY 1 GET 1 FREE" used to drive the shrink loop
+    // below until the whole tag collapsed, which pinned the size slider at
+    // roughly 7% - every larger setting produced an identical tag. Wrapping
+    // the words instead keeps the requested size honest.
+    const wrapSegs = (segs: PromoSeg[]): PromoSeg[][] => {
+      if (segs.length !== 1 || segs[0].accent) return [segs]
+      const seg = segs[0]
+      probe.font = font(base * seg.scale)
+      if (probe.measureText(seg.text).width <= limit) return [segs]
+      const words = seg.text.split(/\s+/).filter(Boolean)
+      if (words.length < 2) return [segs] // one long word: let it shrink
+      const rows: string[] = []
+      let cur = ''
+      for (const w of words) {
+        const next = cur ? `${cur} ${w}` : w
+        if (cur && probe.measureText(next).width > limit) {
+          rows.push(cur)
+          cur = w
+        } else cur = next
+      }
+      if (cur) rows.push(cur)
+      return rows.map((text) => [{ ...seg, text }])
+    }
+
+    const lines = buildPromoLines(oldP, newP, layout, offer).flatMap(wrapSegs)
 
     const measure = () => {
       const gap = base * 0.34
@@ -662,7 +701,9 @@ export function ReelsStudioTab({
 
     if (st.bubble) {
       ctx.beginPath()
-      ctx.roundRect(0, 0, bw, bh, st.shape === 'bar' ? bh * 0.14 : bh / 2)
+      // Half-height corners read as a pill on one line, but once a headline
+      // wraps they balloon the tag into an oval - cap them near one line
+      ctx.roundRect(0, 0, bw, bh, st.shape === 'bar' ? bh * 0.14 : Math.min(bh / 2, base))
       if ('bubble2' in st && st.bubble2) {
         const grad = ctx.createLinearGradient(0, 0, bw, bh)
         grad.addColorStop(0, st.bubble)
