@@ -89,7 +89,8 @@ export function MarketplaceSearchPanel({
   defaultQuery?: string
   /** The product's own photo, used as the default reverse-image search source */
   productImage?: string | null
-  onUseClip?: (file: File) => void
+  /** origin carries the listing's own id so the library can spot a re-save */
+  onUseClip?: (file: File, origin?: { sourceId?: string | null; sourceUrl?: string | null }) => void
   onClipPending?: (job: { id: string; title: string; thumb?: string }) => void
   onClipSettled?: (id: string, ok: boolean) => void
   /** Send a listing photo to Poster Studio */
@@ -228,7 +229,11 @@ export function MarketplaceSearchPanel({
           if (!res.ok) throw new Error('Could not fetch clip')
           const blob = await res.blob()
           const name = `${hit.title.replace(/[^\w\- ]+/g, '').trim().slice(0, 40) || 'listing'}.mp4`
-          onUseClip(new File([blob], name, { type: blob.type || 'video/mp4' }))
+          // Namespaced so a listing id can never collide with a video id
+          onUseClip(new File([blob], name, { type: blob.type || 'video/mp4' }), {
+            sourceId: hit.id ? `listing:${hit.id}` : null,
+            sourceUrl: (hit.video as string) || null,
+          })
           setJobs((j) => ({ ...j, [hit.id]: 'done' }))
           onClipSettled?.(hit.id, true)
         } catch {

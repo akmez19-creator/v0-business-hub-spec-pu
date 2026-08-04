@@ -104,7 +104,8 @@ export function VideoSearchPanel({
   defaultQuery?: string
   /** Product photo from inventory - powers the lens search */
   productImage?: string | null
-  onUseClip?: (file: File) => void
+  /** origin carries the platform's own id so the library can spot a re-save */
+  onUseClip?: (file: File, origin?: { sourceId?: string | null; sourceUrl?: string | null }) => void
   /** Fired the moment a clip is queued, so the feed can show it downloading
    *  instead of sitting empty until the bytes land */
   onClipPending?: (job: { id: string; title: string; thumb?: string }) => void
@@ -131,6 +132,9 @@ export function VideoSearchPanel({
   const [source, setSource] = useState<'all' | 'temu'>('all')
   const lastQuery = useRef('')
   const lastSource = useRef<'all' | 'temu'>('all')
+  // Feature 9: which of these results are ALREADY in the clip library, so the
+  // same video is not downloaded and saved a second time.
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
 
   // Lens state
   const [lensImage, setLensImage] = useState<string | null>(productImage)
@@ -154,6 +158,43 @@ export function VideoSearchPanel({
     setLensUpload(null)
     setLensSource('')
   }, [productImage])
+
+  // Ask the server which of the current results are already saved. Runs on
+  // every result change (including "load more"), and is deliberately
+  // fire-and-forget: a failed check just means no badges, never a broken grid.
+  useEffect(() => {
+    if (!results.length) return
+    let cancelled = false
+    // Must use the SAME `video:` prefix runOne writes, or nothing ever matches
+    const ids = results.filter((r) => r.id).map((r) => `video:${r.id}`)
+    const urls = results.map((r) => r.pageUrl).filter(Boolean)
+    ;(async () => {
+      try {
+        const res = await fetch('/api/product-master/clips/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceIds: ids, sourceUrls: urls }),
+        })
+        const json = await res.json()
+        if (cancelled || !json?.success) return
+        // Both sets come back in storage form; the grid keys on the raw hit
+        // id, so strip the prefix and fold url matches into the same set.
+        const savedPrefixed = new Set<string>(json.savedIds ?? [])
+        const savedUrls = new Set<string>(json.savedUrls ?? [])
+        const saved = new Set<string>()
+        for (const r of results) {
+          if (savedPrefixed.has(`video:${r.id}`)) saved.add(r.id)
+          else if (r.pageUrl && savedUrls.has(r.pageUrl)) saved.add(r.id)
+        }
+        setSavedIds(saved)
+      } catch {
+        // Badging is an enhancement; ignore failures
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [results])
 
   const runSearch = useCallback(
     async (q: string, next = false, src: 'all' | 'temu' = source) => {
@@ -327,7 +368,15 @@ export function VideoSearchPanel({
       if (!res.ok) throw new Error('Could not download this video - try again')
       const blob = await res.blob()
       if (blob.size < 10_000) throw new Error('Downloaded file looks empty - try again')
-      useClipRef.current?.(new File([blob], name, { type: 'video/mp4' }))
+      // hit.id is the platform's own video id, so the library can recognise
+      // this exact clip if it shows up in a future search
+      useClipRef.current?.(new File([blob], name, { type: 'video/mp4' }), {
+        sourceId: hit.id ? `video:${hit.id}` : null,
+        // The page url, NOT `stream`: stream urls are short-lived signed CDN
+        // links that differ on every search, so storing one would never match
+        // again and the dedupe check would silently always miss.
+        sourceUrl: hit.pageUrl || null,
+      })
       setJobs((p) => ({ ...p, [hit.id]: 'done' }))
       // Clear the feed placeholder only now the real clip has replaced it
       settledRef.current?.(hit.id, true)
@@ -754,7 +803,12 @@ export function VideoSearchPanel({
       {results.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {results.map((hit) => (
-            <div key={hit.id} className="flex flex-col overflow-hidden rounded-lg border border-border bg-card">
+            <div
+              key={hit.id}
+              className={`flex flex-col overflow-hidden rounded-lg border bg-card ${
+                savedIds.has(hit.id) ? 'border-emerald-500/60' : 'border-border'
+              }`}
+            >
               <div className="relative aspect-[9/16] bg-black">
                 {playing === hit.id && hit.play ? (
                   <video
@@ -803,6 +857,14 @@ export function VideoSearchPanel({
                       </span>
                     )}
                   </>
+                )}
+                {/* Feature 9: already downloaded once - saving again would just
+                    duplicate the row and re-upload the same video */}
+                {savedIds.has(hit.id) && (
+                  <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    <Check className="h-3 w-3" />
+                    In library
+                  </span>
                 )}
               </div>
 

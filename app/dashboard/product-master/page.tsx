@@ -136,6 +136,7 @@ export default function ProductMasterPage() {
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {request?.tool === 'poster' && (
               <PosterStudioTab
+                productId={request.product.id}
                 productName={productName}
                 productImage={request.product.image ?? null}
                 productPrice={request.product.price ?? null}

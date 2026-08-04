@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { VideoSearchPanel } from '@/components/product-master/video-search-panel'
-import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
+import { SourceFinderPanel } from '@/components/product-master/source-finder-panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -1327,7 +1326,12 @@ export function ReelsStudioTab({
   const productRef = useRef({ id: productId, name: productName })
   productRef.current = { id: productId, name: productName }
 
-  const addFiles = useCallback((files: FileList | File[], opts?: { persist?: boolean; source?: string }) => {
+  const addFiles = useCallback((
+    files: FileList | File[],
+    // sourceId/sourceUrl identify where a searched clip came from, so the same
+    // clip found again in a later search is recognised instead of re-saved
+    opts?: { persist?: boolean; source?: string; sourceId?: string | null; sourceUrl?: string | null },
+  ) => {
     const persist = opts?.persist !== false
     const vids = Array.from(files).filter((f) => f.type.startsWith('video/'))
     for (const file of vids) {
@@ -1353,6 +1357,8 @@ export function ReelsStudioTab({
           width,
           height,
           source: opts?.source ?? 'upload',
+          sourceId: opts?.sourceId ?? null,
+          sourceUrl: opts?.sourceUrl ?? null,
         })
           .then((row) =>
             setClips((prev) => prev.map((c) => (c.id === id ? { ...c, dbId: row.id, save: 'saved' } : c))),
@@ -2033,27 +2039,17 @@ export function ReelsStudioTab({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* ---- Search product videos on TikTok ---- */}
-      <VideoSearchPanel
+      {/* ---- Find a product video: video search + marketplace listings ---- */}
+      <SourceFinderPanel
         defaultQuery={productName}
         productImage={productImage}
-        onUseClip={(file) => addFiles([file], { source: 'search' })}
-        onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
-        onClipSettled={(id, ok) => {
-          if (ok) return setPending((p) => p.filter((x) => x.id !== id))
-          setPending((p) => p.map((x) => (x.id === id ? { ...x, failed: true } : x)))
-          setTimeout(() => setPending((p) => p.filter((x) => x.id !== id)), 5000)
-        }}
-      />
-
-      {/* ---- Marketplace listing videos ----
-          A second, independent source: seller videos attached to real product
-          listings. Fewer clips than the TikTok feed, but guaranteed to show
-          this exact product rather than something that resembles it. */}
-      <MarketplaceSearchPanel
-                  defaultQuery={productName}
-                  productImage={productImage}
-                  onUseClip={(file) => addFiles([file], { source: 'search' })}
+        onUseClip={(file, origin) =>
+          addFiles([file], {
+            source: 'search',
+            sourceId: origin?.sourceId ?? null,
+            sourceUrl: origin?.sourceUrl ?? null,
+          })
+        }
         onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
         onClipSettled={(id, ok) => {
           if (ok) return setPending((p) => p.filter((x) => x.id !== id))

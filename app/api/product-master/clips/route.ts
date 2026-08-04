@@ -51,13 +51,45 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
 
     const body = await request.json()
-    const { fileUrl, storagePath, name, productId, productName, duration, width, height, sizeBytes, source } = body
+    const {
+      fileUrl,
+      storagePath,
+      name,
+      productId,
+      productName,
+      duration,
+      width,
+      height,
+      sizeBytes,
+      source,
+      sourceId,
+      sourceUrl,
+    } = body
 
     if (!fileUrl || !name) {
       return NextResponse.json({ success: false, error: 'Missing fileUrl or name' }, { status: 400 })
     }
 
     const admin = createAdminClient()
+
+    // Feature 9: the same clip surfacing again in a later search must not
+    // become a second library row. source_id is the origin platform's own id,
+    // so it is stable across searches even when the CDN url is re-signed.
+    if (sourceId) {
+      // limit(1) rather than maybeSingle(): maybeSingle throws when more than
+      // one row matches, so any duplicates that slipped in before this check
+      // existed would turn every later save of that clip into a 500 - the
+      // exact case this is meant to handle gracefully.
+      const { data: existing } = await admin
+        .from('product_clips')
+        .select('*')
+        .eq('source_id', sourceId)
+        .limit(1)
+      if (existing?.length) {
+        return NextResponse.json({ success: true, clip: existing[0], duplicate: true })
+      }
+    }
+
     const { data, error } = await admin
       .from('product_clips')
       .insert({
@@ -71,10 +103,27 @@ export async function POST(request: Request) {
         height: Number(height) || 0,
         size_bytes: Number(sizeBytes) || 0,
         source: source || 'upload',
+        source_id: sourceId || null,
+        source_url: sourceUrl || null,
         created_by: user.id,
       })
       .select()
       .single()
+
+    // 23505 = unique violation. Two saves of the same clip can race past the
+    // check above; once the unique index on source_id is in place the loser
+    // lands here, and returning the row that won is the correct outcome
+    // rather than surfacing an error for a clip that is in fact saved.
+    if (error?.code === '23505' && sourceId) {
+      const { data: winner } = await admin
+        .from('product_clips')
+        .select('*')
+        .eq('source_id', sourceId)
+        .limit(1)
+      if (winner?.length) {
+        return NextResponse.json({ success: true, clip: winner[0], duplicate: true })
+      }
+    }
 
     if (error) throw error
     return NextResponse.json({ success: true, clip: data })

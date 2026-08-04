@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Download, ImageIcon, Loader2, Plus, Sparkles, Upload, X } from 'lucide-react'
 import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
+import { OneClickPostPanel } from '@/components/product-master/one-click-post-panel'
+import { BestImagePicker } from '@/components/product-master/best-image-picker'
 
 type ModelInfo = { id: string; label: string; note: string; provider?: 'gateway' | 'google' | 'openai' }
 
@@ -25,11 +27,14 @@ const money = (v: number | string | null | undefined) => {
 }
 
 export function PosterStudioTab({
+  productId,
   productName,
   productImage,
   productPrice,
   productPromoPrice,
 }: {
+  /** Lets image scores be cached against the product rather than recomputed */
+  productId?: string | null
   productName: string
   productImage?: string | null
   productPrice?: number | string | null
@@ -42,6 +47,18 @@ export function PosterStudioTab({
   // it came from so it is never a mystery which photo is being used.
   const [sourceImage, setSourceImage] = useState<string | null>(productImage ?? null)
   const [sourceLabel, setSourceLabel] = useState(productImage ? 'Product photo' : '')
+
+  /**
+   * Feature 7: every photo that enters the studio joins one candidate pool -
+   * the inventory photo, anything uploaded, anything pulled off a listing - so
+   * a new image is judged by exactly the same scoring as the rest instead of
+   * bypassing it just because it arrived by a different route.
+   */
+  const [candidates, setCandidates] = useState<string[]>(productImage ? [productImage] : [])
+  const addCandidate = useCallback((url: string) => {
+    if (!url) return
+    setCandidates((prev) => (prev.includes(url) ? prev : [...prev, url]))
+  }, [])
 
   const [headline, setHeadline] = useState('BIG PROMO!')
   const [name, setName] = useState(productName)
@@ -103,6 +120,9 @@ export function PosterStudioTab({
     setName(productName)
     setSourceImage(productImage ?? null)
     setSourceLabel(productImage ? 'Product photo' : '')
+    // Switching product resets the pool - candidates from the previous product
+    // would otherwise be offered as photos of this one
+    setCandidates(productImage ? [productImage] : [])
   }, [productName, productImage])
 
   // A new photo deserves a fresh direct attempt - otherwise one proxied
@@ -116,6 +136,7 @@ export function PosterStudioTab({
     reader.onload = () => {
       setSourceImage(String(reader.result))
       setSourceLabel(`Uploaded: ${file.name}`)
+      addCandidate(String(reader.result))
     }
     reader.readAsDataURL(file)
   }
@@ -512,6 +533,46 @@ export function PosterStudioTab({
         {busy && <span className="text-[11px] text-muted-foreground">This usually takes 20-60 seconds</span>}
       </div>
 
+      {/* Feature 7: score the candidate photos and promote the best one.
+          Only worth showing once there is an actual choice to make. */}
+      {candidates.length > 1 && (
+        <BestImagePicker
+          productId={productId}
+          images={candidates}
+          selected={sourceImage}
+          onSelect={(url) => {
+            setSourceImage(url)
+            setSourceLabel('Best-scoring photo')
+          }}
+        />
+      )}
+
+      {/* Feature 6: poster AND caption in one press, from both providers */}
+      <OneClickPostPanel
+        disabled={!sourceImage}
+        onUsePoster={(dataUrl) => {
+          setPoster(dataUrl)
+          setPosterModel('one-click')
+          setWarnings([])
+        }}
+        fields={{
+          sourceImage,
+          productName: name,
+          headline,
+          priceNow,
+          priceWas,
+          currency: 'Rs',
+          features: features.filter((f) => f.trim()),
+          badges: badges.filter((b) => b.trim()),
+          extra,
+          layout,
+          tagline,
+          cta,
+          urgency,
+          lifestyleShots,
+        }}
+      />
+
       {error && <p className="text-xs text-destructive">{error}</p>}
       {warnings.length > 0 && (
         <p className="text-xs text-amber-400">{warnings.join(' \u2014 ')}</p>
@@ -548,6 +609,7 @@ export function PosterStudioTab({
           onMakePoster={({ image, title }) => {
             setSourceImage(image)
             setSourceLabel(`From listing: ${title.slice(0, 50)}`)
+            addCandidate(image)
             // Jump back to the top controls so the newly chosen photo is
             // visible rather than leaving the user scrolled in the results
             window.scrollTo({ top: 0, behavior: 'smooth' })
