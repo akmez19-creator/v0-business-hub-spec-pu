@@ -1,15 +1,18 @@
 /**
  * Image models offered by Poster Studio.
  *
- * Two different billing routes are represented here, which is the whole point
+ * Three different billing routes are represented here, which is the whole point
  * of the `provider` field:
  *
  * - 'gateway' models bill against Vercel AI Gateway credit.
  * - 'google' models call Google directly with GOOGLE_AI_API_KEY and bill
  *   against the Google account instead.
+ * - 'openai' models call OpenAI directly with OPENAI_API_KEY, so they bill the
+ *   user's own ChatGPT/OpenAI account and keep working when Gateway credit is
+ *   spent. Swapping in a fresh key is then the only thing needed to top up.
  *
- * Keeping both means an exhausted balance on one side does not take Poster
- * Studio down entirely - the other route is still available.
+ * Keeping all three means an exhausted balance on one side does not take Poster
+ * Studio down entirely - the other routes are still available.
  *
  * IDs were taken from each provider's live model list rather than from memory;
  * stale image model IDs are a common source of silent 404s. The Gemini IDs
@@ -24,7 +27,7 @@ export type PosterModel = {
   /** Whether the model accepts a source photo to edit */
   supportsImageInput: boolean
   /** Which credit pool and code path this model uses */
-  provider: 'gateway' | 'google'
+  provider: 'gateway' | 'google' | 'openai'
 }
 
 export const POSTER_MODELS: PosterModel[] = [
@@ -49,19 +52,21 @@ export const POSTER_MODELS: PosterModel[] = [
     supportsImageInput: true,
     provider: 'google',
   },
+  // Bare IDs, not "openai/..." - these go straight to api.openai.com rather
+  // than through the Gateway, so they take OpenAI's own model names
   {
-    id: 'openai/gpt-image-2',
+    id: 'gpt-image-2',
     label: 'ChatGPT (GPT Image 2)',
-    note: 'Closest to generating posters in ChatGPT. Best at readable text.',
+    note: 'Closest to generating posters in ChatGPT. Best at readable text. Billed to your OpenAI key.',
     supportsImageInput: true,
-    provider: 'gateway',
+    provider: 'openai',
   },
   {
-    id: 'openai/gpt-image-1.5',
+    id: 'gpt-image-1.5',
     label: 'ChatGPT (GPT Image 1.5)',
-    note: 'Previous ChatGPT image model. Use if GPT Image 2 output looks off.',
+    note: 'Previous ChatGPT image model. Use if GPT Image 2 output looks off. Billed to your OpenAI key.',
     supportsImageInput: true,
-    provider: 'gateway',
+    provider: 'openai',
   },
   {
     id: 'bytedance/seedream-5.0-pro',

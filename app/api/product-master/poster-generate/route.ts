@@ -137,11 +137,90 @@ async function generateWithGemini(
   }
 }
 
+/** Sniff the real format from magic bytes - OpenAI rejects a wrong MIME type. */
+function sniffImageType(bytes: Uint8Array): { mime: string; ext: string } {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return { mime: 'image/png', ext: 'png' }
+  if (bytes[0] === 0x47 && bytes[1] === 0x49) return { mime: 'image/gif', ext: 'gif' }
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return { mime: 'image/webp', ext: 'webp' }
+  return { mime: 'image/jpeg', ext: 'jpg' }
+}
+
+/**
+ * Generate with OpenAI directly rather than through the AI Gateway.
+ *
+ * Billing is the reason: this bills the user's own OPENAI_API_KEY, so Poster
+ * Studio keeps working when Gateway credit is spent and topping up is just a
+ * matter of pasting in a fresh key.
+ *
+ * The images/edits endpoint is used rather than images/generations because the
+ * poster must be built around the real product photo. `input_fidelity: high`
+ * is what stops the model quietly redrawing the product into a lookalike.
+ */
+async function generateWithOpenAI(
+  modelId: string,
+  prompt: string,
+  imageBytes: Uint8Array,
+  aspectRatio: string,
+): Promise<{ dataUrl: string; warnings: string[] }> {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error(
+      'OPENAI_API_KEY is not set, so the ChatGPT models cannot be used. Add the key, or pick a Gemini model.',
+    )
+  }
+
+  // gpt-image only offers square and two 2:3-ish rectangles, so both poster
+  // shapes map onto the tall one
+  const size = aspectRatio === '1:1' ? '1024x1024' : '1024x1536'
+  const { mime, ext } = sniffImageType(imageBytes)
+
+  const form = new FormData()
+  form.append('model', modelId)
+  form.append('prompt', prompt)
+  form.append('size', size)
+  form.append('quality', 'high')
+  // Preserves the product's exact appearance instead of reinterpreting it.
+  // Verified against the live API: gpt-image-1.5 accepts this, gpt-image-2
+  // rejects the whole request with invalid_input_fidelity_model.
+  if (modelId !== 'gpt-image-2') form.append('input_fidelity', 'high')
+  form.append('image', new Blob([new Uint8Array(imageBytes)], { type: mime }), `product.${ext}`)
+
+  const send = (body: FormData) =>
+    fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body,
+      signal: AbortSignal.timeout(280_000),
+    })
+
+  let res = await send(form)
+  let json = await res.json().catch(() => null)
+
+  // Which models accept input_fidelity shifts as OpenAI ships new ones, and
+  // that single optional flag failing should not cost the user a poster
+  if (!res.ok && /input_fidelity/i.test(json?.error?.message || json?.error?.param || '')) {
+    const retry = new FormData()
+    for (const [k, v] of form.entries()) if (k !== 'input_fidelity') retry.append(k, v)
+    res = await send(retry)
+    json = await res.json().catch(() => null)
+  }
+
+  if (!res.ok) {
+    const detail = json?.error?.message || `OpenAI returned ${res.status}`
+    throw new Error(detail)
+  }
+
+  const b64 = json?.data?.[0]?.b64_json
+  if (!b64) throw new Error('OpenAI returned no image. Try rewording, or pick another model.')
+
+  return { dataUrl: `data:image/png;base64,${b64}`, warnings: [] }
+}
+
 export async function POST(request: Request) {
   // Held outside the try so the catch can name the right billing account.
   // Blaming AI Gateway for a Google quota error sends the user to the wrong
   // dashboard entirely.
-  let activeProvider: 'gateway' | 'google' = 'gateway'
+  let activeProvider: 'gateway' | 'google' | 'openai' = 'gateway'
 
   try {
     const supabase = await createClient()
@@ -201,6 +280,10 @@ export async function POST(request: Request) {
       const out = await generateWithGemini(modelId, prompt, imageBytes, aspect)
       posterDataUrl = out.dataUrl
       posterWarnings = out.warnings
+    } else if (model.provider === 'openai') {
+      const out = await generateWithOpenAI(modelId, prompt, imageBytes, aspect)
+      posterDataUrl = out.dataUrl
+      posterWarnings = out.warnings
     } else {
       const { image, warnings } = await generateImage({
         model: modelId,
@@ -237,6 +320,10 @@ export async function POST(request: Request) {
         msg = /limit: 0/i.test(raw)
           ? 'Your Google API key is on the free tier, which allows zero image generations. Enable billing on the key\u2019s Google Cloud project at aistudio.google.com/apikey to use Gemini, or pick a non-Gemini model.'
           : 'Google API quota reached for this model. Wait a minute and retry, or pick another model.'
+      } else if (activeProvider === 'openai') {
+        msg = /rate.?limit|429/i.test(raw)
+          ? 'OpenAI rate limit hit. Wait a moment and retry, or pick another model.'
+          : 'Your OpenAI account is out of credit. Top up at platform.openai.com/settings/organization/billing, paste a new OPENAI_API_KEY, or pick a Gemini model.'
       } else {
         msg = 'AI Gateway credit exhausted for this model. Try a Gemini model, which bills Google instead.'
       }
@@ -245,7 +332,13 @@ export async function POST(request: Request) {
       msg =
         activeProvider === 'google'
           ? 'Google rejected the API key. Check GOOGLE_AI_API_KEY is valid and has the Generative Language API enabled.'
-          : raw
+          : activeProvider === 'openai'
+            ? 'OpenAI rejected the API key. Paste a current OPENAI_API_KEY into the project settings, or pick a Gemini model.'
+            : raw
+    else if (activeProvider === 'openai' && /must be verified|organization/i.test(raw))
+      // gpt-image needs a verified org, and OpenAI's raw wording does not say where to go
+      msg =
+        'Your OpenAI organisation is not verified for image models. Verify it at platform.openai.com/settings/organization/general, or pick a Gemini model.'
     else if (/not found|unsupported|invalid model/i.test(raw)) msg = `${raw} - this model may not accept image input.`
     else if (/moderation|safety|policy/i.test(raw)) msg = 'The model refused this image or wording. Try rephrasing.'
 
