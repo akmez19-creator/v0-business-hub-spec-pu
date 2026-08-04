@@ -246,6 +246,32 @@ const BUILTIN_LAYOUT = {
   watermark: { on: true, size: 18, opacity: 50, removeBg: true, bgTol: 30 },
 }
 
+// Windows and macOS both choke on these in a file or folder name. Also collapses
+// runs of whitespace, so "Rain  Coat " cannot become an awkward filename.
+function sanitizeName(s: string) {
+  return s
+    .replace(/[/\\:*?"<>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * What a downloaded clip is called. Named after the product and its position in
+ * the feed rather than the source file, so a download reads "Rain Coat Pro 3.mp4"
+ * instead of "tiktok-Quick setup Jus....mp4".
+ *
+ * The number is the clip's place in the feed, which is also what keeps the order
+ * intact under the alphabetical sort every file browser applies.
+ */
+function clipFileName(productName: string, index: number, total: number) {
+  const base = sanitizeName(productName) || 'Reel'
+  // A lone clip needs no counter; multiples are padded so 10 does not sort
+  // before 2
+  if (total <= 1) return `${base}.mp4`
+  const width = String(total).length
+  return `${base} ${String(index + 1).padStart(width, '0')}.mp4`
+}
+
 // Push a blob at the browser as a file download
 function saveBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
@@ -1434,8 +1460,9 @@ export function ReelsStudioTab({
       // Nothing to burn and already the right shape means there is no reason to
       // re-encode - hand over the original file untouched
       const blob = mustRender(c) ? await renderBrandedBlob(c.file) : c.file
-      const stem = c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')
-      saveBlob(blob, `${hasBranding ? 'branded-' : ''}${stem}.mp4`)
+      // Numbered by its place in the feed, so downloading clips one at a time
+      // still produces the same names as the batch and never collides
+      saveBlob(blob, clipFileName(productName, clips.indexOf(c), clips.length))
 
       // A saved file is a finished post, so roll the next look now - that is
       // what keeps a batch of downloads from all looking identical. Done after
@@ -1484,9 +1511,6 @@ export function ReelsStudioTab({
 
   const readyClips = clips.filter((c) => c.review === 'ready')
 
-  // Windows and macOS both choke on these in a file or folder name
-  const safeName = (s: string) => s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
-
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
   // Render every Ready clip and hand back one zip containing a single folder
   // named after the product, so unzipping gives exactly the folder you asked
@@ -1500,7 +1524,7 @@ export function ReelsStudioTab({
     setError('')
     setBatch({ done: 0, total: list.length })
     setBusy('brand')
-    const folder = safeName(productName) || 'Reels'
+    const folder = sanitizeName(productName) || 'Reels'
       const failed: string[] = []
       let added = 0
     try {
@@ -1540,10 +1564,9 @@ export function ReelsStudioTab({
         setBatch({ done: i, total: list.length })
         try {
           const blob = mustRender(c) ? await renderBrandedBlob(c.file, stylePlan[i]) : c.file
-          const stem = safeName(c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, ''))
-          // Numbered by feed order so the sequence survives the alphabetical
-          // sort every OS file browser applies
-          dir.file(`${i + 1}-${stem}.mp4`, blob)
+          // Numbered by feed position, not batch position, so a clip keeps the
+          // same name whether it is downloaded on its own or as part of a batch
+          dir.file(clipFileName(productName, clips.indexOf(c), clips.length), blob)
           added++
         } catch {
           failed.push(c.name)
@@ -2153,7 +2176,7 @@ export function ReelsStudioTab({
                   readyClips.length === 0 ||
                   (readyClips.some(mustRender) && !ffmpegReady)
                 }
-                title={`Download every clip you marked Ready as one ${safeName(productName) || 'Reels'} folder`}
+                title={`Download every clip you marked Ready as one ${sanitizeName(productName) || 'Reels'} folder`}
               >
                 {batch ? (
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
