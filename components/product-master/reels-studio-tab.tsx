@@ -19,9 +19,12 @@ import {
   ImageIcon,
   Link2,
   Loader2,
+  Lock,
+  LockOpen,
   Merge,
   Move,
   Megaphone,
+  Pencil,
   RefreshCw,
   Scissors,
   Send,
@@ -116,6 +119,64 @@ function StyleSwatches({ value, onChange }: { value: TitleStyleId; onChange: (id
   )
 }
 
+// Fixed-placement control. Rendered twice - once beside the clip feed and
+// once under the preview - against the same state, so setting the spot in
+// either place moves the other. Kept as one component so the two copies can
+// never drift apart.
+function PlacementControls({
+  value,
+  onPick,
+  locked,
+  onToggleLock,
+  className = '',
+}: {
+  value: LayoutPresetId | 'custom'
+  onPick: (id: LayoutPresetId) => void
+  locked: boolean
+  onToggleLock: () => void
+  className?: string
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      <span className="text-[11px] font-medium text-muted-foreground">Banner spot</span>
+      {LAYOUT_PRESETS.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          onClick={() => onPick(p.id)}
+          aria-pressed={value === p.id}
+          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+            value === p.id
+              ? 'border-sky-500 bg-sky-500/15 text-sky-400'
+              : 'border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {p.label}
+        </button>
+      ))}
+      {value === 'custom' && (
+        <span className="rounded-full border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
+          Custom
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onToggleLock}
+        aria-pressed={locked}
+        title={locked ? 'Unlock to drag the banners again' : 'Lock the banners so dragging cannot move them'}
+        className={`flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+          locked
+            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-400'
+            : 'border-border text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        {locked ? <Lock className="h-3 w-3" /> : <LockOpen className="h-3 w-3" />}
+        {locked ? 'Locked' : 'Lock'}
+      </button>
+    </div>
+  )
+}
+
 // Promo price tag layouts - how the old price and the new price are arranged.
 // 'offer' renders the inventory deal (B1G1 / bundle) instead of a bare price,
 // which is what most products actually carry.
@@ -146,6 +207,17 @@ let clipSeq = 0
   // and the like/share rail, and 6% down each side. Branding burned outside
   // this is covered up in the feed even though it looks fine here.
   const SAFE = { top: 14, bottom: 35, side: 6 }
+
+// Fixed spots for the whole banner group. Every y here sits inside SAFE
+// (14%..65%), so picking a preset can never park branding under the platform's
+// own header or caption rail. The logo moves to the opposite end of the frame
+// from the text so the two never stack on top of each other.
+const LAYOUT_PRESETS = [
+  { id: 'top', label: 'Top', title: { x: 50, y: 20 }, price: { x: 50, y: 32 }, logo: { x: 82, y: 60 } },
+  { id: 'middle', label: 'Middle', title: { x: 50, y: 34 }, price: { x: 50, y: 46 }, logo: { x: 82, y: 62 } },
+  { id: 'bottom', label: 'Bottom', title: { x: 50, y: 50 }, price: { x: 50, y: 62 }, logo: { x: 82, y: 20 } },
+] as const
+type LayoutPresetId = (typeof LAYOUT_PRESETS)[number]['id']
 
 // Prices are Postgres `numeric`. supabase-js hands them over as real numbers,
 // but raw SQL clients serialize the same column as a string ("475.00"), so
@@ -362,6 +434,19 @@ export function ReelsStudioTab({
   const [titlePos, setTitlePos] = useState({ x: 50, y: 10 })
   const [pricePos, setPricePos] = useState({ x: 50, y: 22 })
   const [logoXY, setLogoXY] = useState({ x: 82, y: 88 })
+  // Fixed placement. `layoutPreset` is the spot every banner snaps to;
+  // 'custom' means the user has since dragged something off it. `lockLayout`
+  // makes the overlays un-draggable so a stray press can't nudge a set layout.
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId | 'custom'>('custom')
+  const [lockLayout, setLockLayout] = useState(false)
+  const applyLayoutPreset = useCallback((id: LayoutPresetId) => {
+    const p = LAYOUT_PRESETS.find((l) => l.id === id)
+    if (!p) return
+    setTitlePos({ ...p.title })
+    setPricePos({ ...p.price })
+    setLogoXY({ ...p.logo })
+    setLayoutPreset(id)
+  }, [])
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
   const dragTarget = useRef<'title' | 'price' | 'logo' | 'logo-resize' | null>(null)
@@ -400,6 +485,10 @@ export function ReelsStudioTab({
       return
     }
 
+    // Locked layout: the resize handle above still works (lock is about where
+    // the banners sit, not how big they are), but nothing may move
+    if (lockLayout) return
+
     // With snapping on, overlays are held inside the Reels safe area instead of
     // the raw frame, so nothing lands under the caption or the engagement rail
     const minX = snapSafe ? SAFE.side : 3
@@ -413,6 +502,8 @@ export function ReelsStudioTab({
     if (snapV) x = 50
     if (snapH) y = 50
     setGuides({ v: snapV, h: snapH })
+    // Dragging by hand means the group no longer matches a preset
+    setLayoutPreset('custom')
     if (dragTarget.current === 'title') setTitlePos({ x, y })
     else if (dragTarget.current === 'price') setPricePos({ x, y })
     else setLogoXY({ x, y })
@@ -1084,6 +1175,18 @@ export function ReelsStudioTab({
     setPreBrand(null)
   }
 
+  // "Edit" on a clip tile: select it and bring the trim controls into view.
+  // The panel is often below the fold once several clips are in the feed, so
+  // selecting alone looks like nothing happened.
+  const trimSectionRef = useRef<HTMLElement>(null)
+  const editClip = (c: Clip) => {
+    selectClip(c)
+    // Let the panel render for the newly selected clip before scrolling to it
+    requestAnimationFrame(() => {
+      trimSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
   const move = (id: string, dir: -1 | 1) =>
     setClips((prev) => {
       const i = prev.findIndex((c) => c.id === id)
@@ -1545,6 +1648,15 @@ export function ReelsStudioTab({
             />
           </div>
         </div>
+        {/* The same placement state as the one under the preview, surfaced up
+            here so the spot can be fixed before any branding is touched */}
+        <PlacementControls
+          value={layoutPreset}
+          onPick={applyLayoutPreset}
+          locked={lockLayout}
+          onToggleLock={() => setLockLayout((v) => !v)}
+          className="rounded-lg border bg-background/60 px-2.5 py-1.5"
+        />
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -1610,6 +1722,10 @@ export function ReelsStudioTab({
                 )}
               </div>
               <div className="absolute right-1 top-1 hidden gap-0.5 group-hover:flex">
+                <Button variant="secondary" size="icon" className="h-6 w-6" title="Edit this clip" onClick={(e) => { e.stopPropagation(); editClip(c) }}>
+                  <Pencil className="h-3 w-3" />
+                  <span className="sr-only">Edit this clip</span>
+                </Button>
                 <Button variant="secondary" size="icon" className="h-6 w-6" title="Move earlier" onClick={(e) => { e.stopPropagation(); move(c.id, -1) }}>
                   <ArrowUp className="h-3 w-3" />
                 </Button>
@@ -1658,7 +1774,7 @@ export function ReelsStudioTab({
       </section>
 
       {/* ---- Step 2: cut or merge ---- */}
-      <section className="flex flex-col gap-2">
+      <section ref={trimSectionRef} className="flex flex-col gap-2">
         <p className="flex items-center gap-2 text-sm font-semibold">
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-bold text-sky-500">2</span>
           Cut a scene or merge the feed
@@ -2048,10 +2164,21 @@ export function ReelsStudioTab({
         {/* Drag-to-place preview: position the title, price, and logo anywhere */}
         {brandSource && (titleOn || priceOn || logoOn) && (
           <div className="flex flex-col gap-1.5 rounded-md border bg-background/60 p-2.5">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <Move className="h-3.5 w-3.5 text-amber-500" />
-              Drag to place on the video
-            </p>
+              <p className="flex items-center gap-2 text-sm font-medium">
+                {lockLayout ? (
+                  <Lock className="h-3.5 w-3.5 text-emerald-500" />
+                ) : (
+                  <Move className="h-3.5 w-3.5 text-amber-500" />
+                )}
+                {lockLayout ? 'Banners are locked in place' : 'Drag to place on the video'}
+              </p>
+              {/* Same state as the copy beside the clip feed - either one moves both */}
+              <PlacementControls
+                value={layoutPreset}
+                onPick={applyLayoutPreset}
+                locked={lockLayout}
+                onToggleLock={() => setLockLayout((v) => !v)}
+              />
             <div className="flex justify-center">
               <div
                 ref={previewBoxRef}
@@ -2130,8 +2257,10 @@ export function ReelsStudioTab({
                           e.preventDefault()
                           e.stopPropagation()
                           ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                          setActiveLayer('title')
-                          dragTarget.current = 'title'
+                            setActiveLayer('title')
+                            // Still selectable while locked, just not movable
+                            if (lockLayout) return
+                            dragTarget.current = 'title'
                           setDragging(true)
                         }}
                         className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
@@ -2180,8 +2309,9 @@ export function ReelsStudioTab({
                           e.preventDefault()
                           e.stopPropagation()
                           ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                          setActiveLayer('price')
-                          dragTarget.current = 'price'
+                        setActiveLayer('price')
+                        if (lockLayout) return
+                        dragTarget.current = 'price'
                           setDragging(true)
                         }}
                         className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing ${
@@ -2204,8 +2334,9 @@ export function ReelsStudioTab({
                         e.preventDefault()
                         e.stopPropagation()
                         ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                        setActiveLayer('logo')
-                        dragTarget.current = 'logo'
+                      setActiveLayer('logo')
+                      if (lockLayout) return
+                      dragTarget.current = 'logo'
                         setDragging(true)
                       }}
                       className={`w-full cursor-grab active:cursor-grabbing ${
