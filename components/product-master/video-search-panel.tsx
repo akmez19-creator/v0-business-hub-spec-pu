@@ -113,7 +113,12 @@ export function VideoSearchPanel({
   const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
   const [playing, setPlaying] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
+  // Per-clip job state. A single shared "busy" id meant a second click wiped
+  // the first clip's spinner while it was still downloading, so ten clicks
+  // looked like one. Each clip now owns its own status and the clicks queue.
+  const [jobs, setJobs] = useState<Record<string, 'queued' | 'working' | 'done' | 'failed'>>({})
+  // Plain browser download is a separate, near-instant action
+  const [dlId, setDlId] = useState<string | null>(null)
   const [note, setNote] = useState('')
   // 'all' = whole short-video index, 'temu' = Temu listings and hauls only
   const [source, setSource] = useState<'all' | 'temu'>('all')
@@ -272,7 +277,7 @@ export function VideoSearchPanel({
   }, [defaultQuery])
 
   const download = async (hit: VideoHit) => {
-    setBusyId(hit.id)
+    setDlId(hit.id)
     setNote('')
     try {
       const stream = await resolveStream(hit)
@@ -288,14 +293,22 @@ export function VideoSearchPanel({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
     } finally {
-      setBusyId(null)
+      setDlId(null)
     }
   }
 
-  const useInStudio = async (hit: VideoHit) => {
-    if (!onUseClip) return
-    setBusyId(hit.id)
-    setNote('')
+  // Downloading ten videos at once would stall them all behind the browser's
+  // per-host connection limit and hammer the proxy, so a small pool works
+  // through the queue. Clicking is always instant - only the work is paced.
+  const MAX_PARALLEL = 3
+  const queueRef = useRef<VideoHit[]>([])
+  const activeRef = useRef(0)
+  // Kept in a ref so a queued job never calls a stale version of the callback
+  const useClipRef = useRef(onUseClip)
+  useClipRef.current = onUseClip
+
+  const runOne = async (hit: VideoHit) => {
+    setJobs((p) => ({ ...p, [hit.id]: 'working' }))
     try {
       const stream = await resolveStream(hit)
       const name = safeName(hit)
@@ -305,15 +318,57 @@ export function VideoSearchPanel({
       if (!res.ok) throw new Error('Could not download this video - try again')
       const blob = await res.blob()
       if (blob.size < 10_000) throw new Error('Downloaded file looks empty - try again')
-      onUseClip(new File([blob], name, { type: 'video/mp4' }))
-      setNote(`Added to your feed: ${name}`)
-      setTimeout(() => setNote(''), 4000)
+      useClipRef.current?.(new File([blob], name, { type: 'video/mp4' }))
+      setJobs((p) => ({ ...p, [hit.id]: 'done' }))
     } catch (e) {
+      // Marked on the card itself, so one failure out of ten is obvious
+      // without a shared banner that the next job would overwrite
+      setJobs((p) => ({ ...p, [hit.id]: 'failed' }))
       setError(e instanceof Error ? e.message : 'Could not add this video')
-    } finally {
-      setBusyId(null)
     }
   }
+
+  const pump = () => {
+    while (activeRef.current < MAX_PARALLEL && queueRef.current.length > 0) {
+      const hit = queueRef.current.shift()!
+      activeRef.current++
+      void runOne(hit).finally(() => {
+        activeRef.current--
+        pump()
+      })
+    }
+  }
+
+  const useInStudio = (hit: VideoHit) => {
+    if (!onUseClip) return
+    // Already added, in flight, or waiting - ignore the repeat click
+    const state = jobs[hit.id]
+    if (state === 'queued' || state === 'working' || state === 'done') return
+    setError('')
+    setJobs((p) => ({ ...p, [hit.id]: 'queued' }))
+    queueRef.current.push(hit)
+    pump()
+  }
+
+  /** One click to take every result on screen that has not been added yet */
+  const useAll = () => {
+    const pending = results.filter((h) => {
+      const s = jobs[h.id]
+      return s !== 'queued' && s !== 'working' && s !== 'done'
+    })
+    if (pending.length === 0) return
+    setError('')
+    setJobs((p) => {
+      const next = { ...p }
+      for (const h of pending) next[h.id] = 'queued'
+      return next
+    })
+    queueRef.current.push(...pending)
+    pump()
+  }
+
+  const queuedCount = Object.values(jobs).filter((s) => s === 'queued' || s === 'working').length
+  const doneCount = Object.values(jobs).filter((s) => s === 'done').length
 
   const publicImage = lensImage && /^https?:\/\//i.test(lensImage) ? lensImage : null
 
@@ -654,6 +709,29 @@ export function VideoSearchPanel({
         <p className="text-xs text-muted-foreground">No videos found. Try a shorter term or another photo.</p>
       )}
 
+      {/* Bulk bar: taking a batch of clips is the normal case, so it should
+          not cost one click and one wait per clip */}
+      {results.length > 0 && onUseClip && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="secondary" className="h-7 px-2.5 text-[11px]" onClick={useAll}>
+            <Plus className="mr-1 h-3 w-3" />
+            Use all {results.length}
+          </Button>
+          {queuedCount > 0 && (
+            <span className="flex items-center gap-1.5 text-[11px] text-amber-400" aria-live="polite">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Adding {queuedCount} {queuedCount === 1 ? 'clip' : 'clips'}
+            </span>
+          )}
+          {doneCount > 0 && (
+            <span className="flex items-center gap-1.5 text-[11px] text-emerald-500">
+              <Check className="h-3 w-3" />
+              {doneCount} in your feed
+            </span>
+          )}
+        </div>
+      )}
+
       {results.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {results.map((hit) => (
@@ -740,13 +818,29 @@ export function VideoSearchPanel({
                   {onUseClip && (
                     <Button
                       size="sm"
-                      variant="secondary"
-                      className="h-7 flex-1 px-2 text-[11px]"
+                      variant={jobs[hit.id] === 'done' ? 'default' : 'secondary'}
+                      className={`h-7 flex-1 px-2 text-[11px] ${
+                        jobs[hit.id] === 'done' ? 'bg-emerald-600 text-white hover:bg-emerald-600' : ''
+                      }`}
                       onClick={() => useInStudio(hit)}
-                      disabled={busyId === hit.id}
+                      disabled={
+                        jobs[hit.id] === 'queued' || jobs[hit.id] === 'working' || jobs[hit.id] === 'done'
+                      }
                     >
-                      {busyId === hit.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                      {jobs[hit.id] === 'working' ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          Adding
+                        </>
+                      ) : jobs[hit.id] === 'queued' ? (
+                        'Waiting'
+                      ) : jobs[hit.id] === 'done' ? (
+                        <>
+                          <Check className="mr-1 h-3 w-3" />
+                          Added
+                        </>
+                      ) : jobs[hit.id] === 'failed' ? (
+                        'Retry'
                       ) : (
                         <>
                           <Plus className="mr-1 h-3 w-3" />
@@ -760,7 +854,7 @@ export function VideoSearchPanel({
                     variant="outline"
                     className="h-7 px-2 text-[11px]"
                     onClick={() => download(hit)}
-                    disabled={busyId === hit.id}
+                    disabled={dlId === hit.id}
                     aria-label={`Download ${hit.title}`}
                   >
                     <Download className="h-3 w-3" />

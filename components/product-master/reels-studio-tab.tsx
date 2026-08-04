@@ -110,6 +110,9 @@ type PromoLayoutId = (typeof PROMO_LAYOUTS)[number]['id']
 const DEFAULT_LOGO = '/images/reels-brand-logo.png'
 // Shared logo row: covers pages that have never had their own logo set
 const DEFAULT_PAGE_KEY = '__default__'
+
+/** Guarantees a unique clip id even when several land in the same millisecond */
+let clipSeq = 0
 // Logo width bounds as a % of video width, shared by the corner resize handle
 // and the burn so the two can never disagree
   const LOGO_MIN = 6
@@ -834,22 +837,18 @@ export function ReelsStudioTab({
     const vids = Array.from(files).filter((f) => f.type.startsWith('video/'))
     for (const file of vids) {
       const url = URL.createObjectURL(file)
+      // A counter, not just a timestamp: several clips can now arrive in the
+      // same millisecond, and duplicate ids break selection and removal
+      const id = `${Date.now()}-${clipSeq++}-${file.name}`
       const probe = document.createElement('video')
       probe.preload = 'metadata'
-      probe.onloadedmetadata = () => {
-        setClips((prev) => [
-          ...prev,
-          {
-            id: `${Date.now()}-${file.name}`,
-            name: file.name,
-            url,
-            file,
-            duration: probe.duration || 0,
-            width: probe.videoWidth || 1080,
-            height: probe.videoHeight || 1920,
-          },
-        ])
-      }
+      const add = (duration: number, width: number, height: number) =>
+        setClips((prev) => [...prev, { id, name: file.name, url, file, duration, width, height }])
+      probe.onloadedmetadata = () =>
+        add(probe.duration || 0, probe.videoWidth || 1080, probe.videoHeight || 1920)
+      // Without this a clip whose metadata will not parse vanishes silently.
+      // Better to add it with assumed dimensions than to lose it.
+      probe.onerror = () => add(0, 1080, 1920)
       probe.src = url
     }
   }, [])
