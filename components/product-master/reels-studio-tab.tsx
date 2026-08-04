@@ -28,6 +28,7 @@ import {
   Trash2,
   Type,
   Upload,
+  X,
 } from 'lucide-react'
 import { ReelPublishPanel } from './reel-publish-panel'
 import { ReelAdPanel } from './reel-ad-panel'
@@ -64,6 +65,35 @@ const TITLE_STYLES = [
   { id: 'emerald', label: 'Emerald', bubble: '#059669', text: '#FFFFFF', stroke: null, shape: 'pill' },
 ] as const
 type TitleStyleId = (typeof TITLE_STYLES)[number]['id']
+
+// The style picker is now shown for whichever element is selected, so it lives
+// in one component instead of being duplicated in the title and price blocks.
+function StyleSwatches({ value, onChange }: { value: TitleStyleId; onChange: (id: TitleStyleId) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {TITLE_STYLES.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => onChange(s.id)}
+          aria-pressed={value === s.id}
+          className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold transition-shadow ${
+            value === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
+          } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
+          style={{
+            background:
+              'bubble2' in s && s.bubble2 ? `linear-gradient(135deg, ${s.bubble}, ${s.bubble2})` : (s.bubble ?? 'transparent'),
+            color: s.text,
+            WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
+            border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
+          }}
+        >
+          {s.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 // Promo price tag layouts - how the old price and the new price are arranged
 const PROMO_LAYOUTS = [
@@ -271,9 +301,10 @@ export function ReelsStudioTab({
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
   const dragTarget = useRef<'title' | 'price' | 'logo' | 'logo-resize' | null>(null)
-  // Tapping the logo on the preview selects it, which reveals its corner
-  // resize handle and the opacity slider right there on the video
-  const [logoSelected, setLogoSelected] = useState(false)
+  // Tapping any overlay on the preview selects it, which reveals that one
+  // element's full controls in the editor docked under the video. Nothing is
+  // selected by default, so the panel starts quiet.
+  const [activeLayer, setActiveLayer] = useState<'title' | 'price' | 'logo' | null>(null)
 
   // Keep the preview font/logo scale proportional to the rendered video box
   useEffect(() => {
@@ -631,10 +662,15 @@ export function ReelsStudioTab({
     return { fontSize, bw: tw + padX * 2, bh: fontSize + padY * 2, padX, padY }
   }
 
-  // Auto-restyle: every 5 minutes pick a completely fresh random look for the
-  // title + price (never the current ones, never the same style on both), so
-  // repeated posts don't all share the same style. Manual shuffle too.
-  const [autoRestyle, setAutoRestyle] = useState(false)
+  // Auto-restyle: after each post is branded, roll a fresh look for the title +
+  // price (never the current ones, never the same style on both) so consecutive
+  // posts never look identical. A wall-clock timer did this before, which fired
+  // whether or not you were posting; keying it to the post is what was wanted.
+  const [autoRestyle, setAutoRestyle] = useState(true)
+  // Set right after a shuffle so the panel can explain why the colours moved
+  const [restyled, setRestyled] = useState(false)
+  // A brand finished and a fresh style is owed to the *next* post
+  const [pendingRestyle, setPendingRestyle] = useState(false)
   const shuffleStyles = useCallback(() => {
     const pick = (exclude: string[]) => {
       const pool = TITLE_STYLES.filter((s) => !exclude.includes(s.id))
@@ -645,12 +681,37 @@ export function ReelsStudioTab({
       setPriceStyle((prevPrice) => pick([prevPrice, nextTitle]))
       return nextTitle
     })
+    setRestyled(true)
   }, [])
+
+  // Never leave the editor open on an element that was just switched off,
+  // otherwise its controls edit something invisible
   useEffect(() => {
-    if (!autoRestyle) return
-    const timer = setInterval(shuffleStyles, 5 * 60 * 1000)
-    return () => clearInterval(timer)
-  }, [autoRestyle, shuffleStyles])
+    if (
+      (activeLayer === 'title' && !titleOn) ||
+      (activeLayer === 'price' && !priceOn) ||
+      (activeLayer === 'logo' && !logoOn)
+    ) {
+      setActiveLayer(null)
+    }
+  }, [activeLayer, titleOn, priceOn, logoOn])
+
+  // "New style applied" is a transient confirmation, not a state - retire it
+  useEffect(() => {
+    if (!restyled) return
+    const t = setTimeout(() => setRestyled(false), 4000)
+    return () => clearTimeout(t)
+  }, [restyled])
+
+  // Cash in the queued restyle once the branded post is cleared away - that is
+  // the moment "the next post" actually begins (new clip, cut, merge, or
+  // branding removed), so the styles change between posts and never during one.
+  useEffect(() => {
+    if (!pendingRestyle || preBrand) return
+    setPendingRestyle(false)
+    shuffleStyles()
+  }, [pendingRestyle, preBrand, shuffleStyles])
+
 
   // ---- Fetch-by-link: paste a TikTok/Facebook/YouTube URL and the video is
   // resolved watermark-free in HD and dropped straight into the feed ----
@@ -1065,6 +1126,10 @@ export function ReelsStudioTab({
         name: `branded-${source.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')}.mp4`,
         blob,
       })
+      // Queue a restyle rather than shuffling now: this post is still on screen
+      // and still re-brandable, so changing its colours here would fight the
+      // user. The new look lands when they move on to the next clip.
+      if (autoRestyle) setPendingRestyle(true)
     } catch (e) {
       setError('Branding failed. Try a shorter clip, or re-fetch the video and try again.')
     } finally {
@@ -1305,7 +1370,7 @@ export function ReelsStudioTab({
               : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
         </p>
 
-        {/* Style shuffle: rotate to a fresh look manually or every 5 minutes */}
+        {/* Style shuffle: rotate to a fresh look now, or once per post */}
         <div className="flex flex-wrap items-center gap-3 rounded-md border bg-background/60 p-2.5">
           <Button type="button" variant="outline" size="sm" onClick={shuffleStyles} className="h-7 gap-1.5 bg-transparent text-xs">
             <RefreshCw className="h-3 w-3" />
@@ -1318,8 +1383,18 @@ export function ReelsStudioTab({
               onChange={(e) => setAutoRestyle(e.target.checked)}
               className="h-3.5 w-3.5 accent-amber-500"
             />
-            Auto-change style every 5 min
+            New style for every post
           </label>
+          {pendingRestyle && (
+            <span className="text-[11px] text-muted-foreground" aria-live="polite">
+              Fresh style queued for your next post
+            </span>
+          )}
+          {restyled && !pendingRestyle && (
+            <span className="text-[11px] text-amber-500" aria-live="polite">
+              New style applied
+            </span>
+          )}
         </div>
 
         {/* Title banner controls */}
@@ -1329,38 +1404,16 @@ export function ReelsStudioTab({
             <Type className="h-3.5 w-3.5 text-amber-500" />
             Product name title
           </label>
+          {/* Editing happens on the video - this row only summarises it */}
           {titleOn && (
-            <div className="flex flex-col gap-2 pl-6">
-              <Input value={titleText} onChange={(e) => setTitleText(e.target.value)} placeholder="Title shown on the video" className="h-8" />
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-xs text-muted-foreground">Style</span>
-                {TITLE_STYLES.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setTitleStyle(s.id)}
-                    className={`rounded-full px-3 py-1 text-xs font-extrabold transition-shadow ${
-                      titleStyle === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
-                    } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
-                    style={{
-                      background:
-                        'bubble2' in s && s.bubble2
-                          ? `linear-gradient(135deg, ${s.bubble}, ${s.bubble2})`
-                          : (s.bubble ?? 'transparent'),
-                      color: s.text,
-                      WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
-                      border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
-                    }}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {titleSize.toFixed(1)}%</span>
-                <Slider min={3} max={16} step={0.5} value={[titleSize]} onValueChange={(v) => setTitleSize(v[0])} className="flex-1" />
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => setActiveLayer('title')}
+              className="ml-6 w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <span className="truncate">{titleText.trim() || 'No title text'}</span>
+              <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+            </button>
           )}
         </div>
 
@@ -1372,70 +1425,14 @@ export function ReelsStudioTab({
             Promo price tag
           </label>
           {priceOn && (
-            <div className="flex flex-col gap-2 pl-6">
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  value={priceOld}
-                  onChange={(e) => setPriceOld(e.target.value)}
-                  placeholder="Old price e.g. Rs 1,375"
-                  className="h-8 w-44"
-                  aria-label="Old price"
-                />
-                <Input
-                  value={priceNew}
-                  onChange={(e) => setPriceNew(e.target.value)}
-                  placeholder="New price e.g. Rs 999"
-                  className="h-8 w-44"
-                  aria-label="New price"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-xs text-muted-foreground">Layout</span>
-                {PROMO_LAYOUTS.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    title={l.hint}
-                    onClick={() => setPromoLayout(l.id)}
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
-                      promoLayout === l.id
-                        ? 'border-amber-500 bg-amber-500/15 text-amber-400'
-                        : 'border-border text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {l.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-xs text-muted-foreground">Style</span>
-                {TITLE_STYLES.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setPriceStyle(s.id)}
-                    className={`rounded-full px-3 py-1 text-xs font-extrabold transition-shadow ${
-                      priceStyle === s.id ? 'ring-2 ring-amber-500 ring-offset-1 ring-offset-background' : 'opacity-80 hover:opacity-100'
-                    } ${s.shape === 'bar' ? 'rounded-md' : ''}`}
-                    style={{
-                      background:
-                        'bubble2' in s && s.bubble2
-                          ? `linear-gradient(135deg, ${s.bubble}, ${s.bubble2})`
-                          : (s.bubble ?? 'transparent'),
-                      color: s.text,
-                      WebkitTextStroke: s.stroke ? `${s.shape === 'none' ? 1 : 0.5}px ${s.stroke}` : undefined,
-                      border: s.bubble ? 'none' : '1px dashed rgba(255,255,255,0.3)',
-                    }}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="w-28 shrink-0 text-xs text-muted-foreground">Size: {priceSize.toFixed(1)}%</span>
-                <Slider min={3} max={16} step={0.5} value={[priceSize]} onValueChange={(v) => setPriceSize(v[0])} className="flex-1" />
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => setActiveLayer('price')}
+              className="ml-6 w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <span>{priceNew.trim() ? `${priceOld.trim() ? `${priceOld.trim()} ` : ''}${priceNew.trim()}` : 'No price set'}</span>
+              <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+            </button>
           )}
         </div>
 
@@ -1537,9 +1534,14 @@ export function ReelsStudioTab({
                   <Eraser className="h-3 w-3" />
                   {removingBg ? 'Cutting out background\u2026' : logoRemoveBg ? 'Background removed' : 'Keep original background'}
                 </button>
-                <p className="text-[11px] text-muted-foreground">
-                  Drag the logo on the video below to move it, pull its corner to resize.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveLayer('logo')}
+                  className="w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  {logoSize}% wide, {logoOpacity}% opacity
+                  <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+                </button>
               </div>
             </div>
           )}
@@ -1559,8 +1561,8 @@ export function ReelsStudioTab({
                 onPointerMove={onPreviewPointerMove}
                 onPointerUp={endPreviewDrag}
                 onPointerLeave={endPreviewDrag}
-                // Pressing the bare video (not the logo) dismisses the handles
-                onPointerDown={() => setLogoSelected(false)}
+                // Pressing bare video (not an overlay) closes the editor
+                onPointerDown={() => setActiveLayer(null)}
               >
                 <video
                   src={preBrand?.url ?? output?.url ?? selectedClip?.url}
@@ -1601,16 +1603,18 @@ export function ReelsStudioTab({
                     return (
                       <span
                         role="button"
-                        aria-label="Drag to position the title"
+                        aria-label="Drag to move the title, tap to edit it"
                         onPointerDown={(e) => {
                           e.preventDefault()
-                          ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          e.stopPropagation()
+                          ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          setActiveLayer('title')
                           dragTarget.current = 'title'
                           setDragging(true)
                         }}
                         className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab whitespace-nowrap active:cursor-grabbing ${
                           activeStyle.shape === 'bar' ? 'rounded-md' : 'rounded-full'
-                        }`}
+                        } ${activeLayer === 'title' ? 'outline outline-1 outline-offset-2 outline-amber-400' : ''}`}
                         style={{
                           left: `${cx}%`,
                           top: `${cy}%`,
@@ -1648,15 +1652,19 @@ export function ReelsStudioTab({
                     return (
                       <img
                         src={promoTag.url || '/placeholder.svg'}
-                        alt="Drag to position the promo price tag"
+                        alt="Drag to move the price tag, tap to edit it"
                         role="button"
                         onPointerDown={(e) => {
                           e.preventDefault()
-                          ;(e.currentTarget.parentElement as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          e.stopPropagation()
+                          ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          setActiveLayer('price')
                           dragTarget.current = 'price'
                           setDragging(true)
                         }}
-                        className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing"
+                        className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing ${
+                          activeLayer === 'price' ? 'outline outline-1 outline-offset-2 outline-amber-400' : ''
+                        }`}
                         style={{ left: `${cx}%`, top: `${cy}%`, width: promoTag.w, height: promoTag.h }}
                       />
                     )
@@ -1674,18 +1682,18 @@ export function ReelsStudioTab({
                         e.preventDefault()
                         e.stopPropagation()
                         ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
-                        setLogoSelected(true)
+                        setActiveLayer('logo')
                         dragTarget.current = 'logo'
                         setDragging(true)
                       }}
                       className={`w-full cursor-grab active:cursor-grabbing ${
-                        logoSelected ? 'outline outline-1 outline-amber-400' : ''
+                        activeLayer === 'logo' ? 'outline outline-1 outline-amber-400' : ''
                       }`}
                       style={{ opacity: logoOpacity / 100 }}
                       draggable={false}
                     />
                     {/* Corner handle: drag outward to scale the logo. */}
-                    {logoSelected && (
+                    {activeLayer === 'logo' && (
                       <span
                         role="button"
                         aria-label="Drag to resize the logo"
@@ -1703,34 +1711,87 @@ export function ReelsStudioTab({
                   </div>
                 )}
 
-                {/* Transparency rides along with the selection, pinned inside
-                    the frame so it can never push the panel taller */}
-                {logoOn && logoSelected && (
-                  <div
-                    className="absolute inset-x-2 bottom-2 flex items-center gap-2 rounded-md bg-black/75 px-2.5 py-1.5 backdrop-blur-sm"
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
-                    <span className="shrink-0 text-[10px] font-medium text-white/80">
-                      Opacity {logoOpacity}%
-                    </span>
-                    <Slider
-                      min={5}
-                      max={100}
-                      step={1}
-                      value={[logoOpacity]}
-                      onValueChange={(v) => setLogoOpacity(v[0])}
-                      aria-label="Logo transparency"
-                      className="flex-1"
-                    />
-                    <span className="shrink-0 text-[10px] tabular-nums text-white/60">{logoSize}% wide</span>
-                  </div>
-                )}
               </div>
             </div>
+            {/* Contextual editor: only the tapped element's controls appear,
+                docked under the frame so the video stays unobstructed */}
+            {activeLayer && (
+              <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-background/80 p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-500">
+                    {activeLayer === 'title' ? <Type className="h-3.5 w-3.5" /> : activeLayer === 'price' ? <Tag className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
+                    {activeLayer === 'title' ? 'Title' : activeLayer === 'price' ? 'Price tag' : 'Logo'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveLayer(null)}
+                    className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Close editor"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {activeLayer === 'title' && (
+                  <>
+                    <Input value={titleText} onChange={(e) => setTitleText(e.target.value)} placeholder="Title shown on the video" className="h-8" />
+                    <StyleSwatches value={titleStyle} onChange={setTitleStyle} />
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-[11px] text-muted-foreground">Size {titleSize.toFixed(1)}%</span>
+                      <Slider min={3} max={16} step={0.5} value={[titleSize]} onValueChange={(v) => setTitleSize(v[0])} className="flex-1" />
+                    </div>
+                  </>
+                )}
+
+                {activeLayer === 'price' && (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input value={priceOld} onChange={(e) => setPriceOld(e.target.value)} placeholder="Old price" className="h-8 flex-1" aria-label="Old price" />
+                      <Input value={priceNew} onChange={(e) => setPriceNew(e.target.value)} placeholder="New price" className="h-8 flex-1" aria-label="New price" />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {PROMO_LAYOUTS.map((l) => (
+                        <button
+                          key={l.id}
+                          type="button"
+                          title={l.hint}
+                          onClick={() => setPromoLayout(l.id)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+                            promoLayout === l.id
+                              ? 'border-amber-500 bg-amber-500/15 text-amber-400'
+                              : 'border-border text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {l.label}
+                        </button>
+                      ))}
+                    </div>
+                    <StyleSwatches value={priceStyle} onChange={setPriceStyle} />
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-[11px] text-muted-foreground">Size {priceSize.toFixed(1)}%</span>
+                      <Slider min={3} max={16} step={0.5} value={[priceSize]} onValueChange={(v) => setPriceSize(v[0])} className="flex-1" />
+                    </div>
+                  </>
+                )}
+
+                {activeLayer === 'logo' && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-[11px] text-muted-foreground">Opacity {logoOpacity}%</span>
+                      <Slider min={5} max={100} step={1} value={[logoOpacity]} onValueChange={(v) => setLogoOpacity(v[0])} aria-label="Logo transparency" className="flex-1" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-[11px] text-muted-foreground">Size {logoSize}%</span>
+                      <Slider min={LOGO_MIN} max={LOGO_MAX} step={1} value={[logoSize]} onValueChange={(v) => setLogoSize(v[0])} aria-label="Logo size" className="flex-1" />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <p className="text-center text-[11px] text-muted-foreground">
-              {logoOn && !logoSelected
-                ? 'Tap the logo to resize or fade it. Positions shown here are burned into the video.'
-                : 'The exact positions shown here are burned into the video.'}
+              {activeLayer
+                ? 'The exact positions shown here are burned into the video.'
+                : 'Tap the title, price tag or logo on the video to edit it. Drag to move.'}
             </p>
           </div>
         )}
