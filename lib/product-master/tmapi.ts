@@ -241,29 +241,63 @@ export async function convertImageUrl(
   token: string,
 ): Promise<{ url: string | null; error: string | null }> {
   if (!platform.convertPath) return { url: null, error: 'This marketplace has no image search' }
-  try {
-    const res = await fetch(`${TMAPI_BASE}${platform.convertPath}?apiToken=${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ url: imageUrl, search_api_endpoint: '/search/image' }),
-      signal: AbortSignal.timeout(25_000),
-      cache: 'no-store',
-    })
-    if (res.status === 439) return { url: null, error: 'No API credit for image search' }
-    if (!res.ok) return { url: null, error: `Image upload failed (HTTP ${res.status})` }
 
-    const json = await res.json().catch(() => null)
-    const failed = apiError(json)
-    if (failed) return { url: null, error: failed }
+  // Alibaba fetches the image from OUR url, from China. That pull intermittently
+  // times out on a perfectly good public URL - verified by the same Supabase
+  // link failing with 422 "Image URL request timed out" and then succeeding on
+  // the very next identical call. So a 422 is retried rather than reported;
+  // only a genuinely rejected image (denied, unreadable) is surfaced.
+  const MAX_ATTEMPTS = 3
+  let lastError = 'Image upload failed'
 
-    const data = ((json ?? {}) as Raw).data as Raw | undefined
-    const converted = str(pick(data ?? {}, ['image_url', 'url', 'img_url']))
-    if (!converted) return { url: null, error: 'Alibaba did not accept this image' }
-    return { url: converted, error: null }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Image upload failed'
-    return { url: null, error: /timeout|abort/i.test(msg) ? 'Image upload timed out' : msg }
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(`${TMAPI_BASE}${platform.convertPath}?apiToken=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ url: imageUrl, search_api_endpoint: '/search/image' }),
+        signal: AbortSignal.timeout(25_000),
+        cache: 'no-store',
+      })
+      if (res.status === 439) return { url: null, error: 'No API credit for image search' }
+
+      // Parse the body even on a non-2xx: TMAPI puts the ONLY useful detail in
+      // `msg` ("Image URL request timed out" vs "Access to the image has been
+      // denied"), and reporting a bare "HTTP 422" throws that away.
+      const json = (await res.json().catch(() => null)) as Raw | null
+      const apiMsg = str(pick(json ?? {}, ['msg', 'message'])) || ''
+
+      if (!res.ok) {
+        lastError = apiMsg || `Image upload failed (HTTP ${res.status})`
+        // Their fetch of our URL timed out - worth another go.
+        if (/timed?\s*out|timeout/i.test(apiMsg) && attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 600 * attempt))
+          continue
+        }
+        if (/denied|forbidden/i.test(apiMsg)) {
+          return { url: null, error: 'Alibaba could not access this image. Try a different photo.' }
+        }
+        return { url: null, error: lastError }
+      }
+
+      const failed = apiError(json)
+      if (failed) return { url: null, error: failed }
+
+      const data = ((json ?? {}) as Raw).data as Raw | undefined
+      const converted = str(pick(data ?? {}, ['image_url', 'url', 'img_url']))
+      if (!converted) return { url: null, error: 'Alibaba did not accept this image' }
+      return { url: converted, error: null }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Image upload failed'
+      lastError = /timeout|abort/i.test(msg) ? 'Image upload timed out' : msg
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 600 * attempt))
+        continue
+      }
+    }
   }
+
+  return { url: null, error: lastError }
 }
 
 /**
