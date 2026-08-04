@@ -60,7 +60,7 @@ interface OverviewProduct {
   name: string
   sku: string | null
   category: string | null
-  // numeric columns arrive as strings - always run them through toNum()
+  // numeric columns can arrive as strings - always run them through toNum()
   price: number | string | null
   promo_price: number | string | null
   quantity: number | null
@@ -80,8 +80,9 @@ interface OverviewProduct {
 
 const LOW_STOCK = 10
 
-// Postgres `numeric` comes back as a string ("475.00"), so prices must be
-// coerced before they are formatted, compared, or sent to Studio.
+// Prices are Postgres `numeric`. supabase-js returns them as real numbers, but
+// raw SQL clients serialize the same column as a string ("475.00"), so coerce
+// before formatting or comparing instead of trusting typeof.
 function toNum(v: number | string | null | undefined): number | null {
   if (v === null || v === undefined || v === '') return null
   const n = typeof v === 'number' ? v : Number(v)
@@ -142,14 +143,13 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
     }
   }
 
-  // Manual, user-initiated sold-out toggle with optimistic update
   // Save the promo price for one product. Blank clears it, which puts the
   // product back to plain list-price branding in Studio.
   const savePromoPrice = async (product: OverviewProduct, raw: string) => {
     const trimmed = raw.trim()
     const next = trimmed === '' ? null : Number(trimmed)
     if (next !== null && (!Number.isFinite(next) || next < 0)) return
-    // Compare as numbers - the stored value arrives as a string
+    // Compare as numbers so a string-shaped stored value still matches
     if (toNum(product.promo_price) === next) return
 
     setSavingPromo(product.id)
@@ -183,6 +183,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
     }
   }
 
+  // Manual, user-initiated sold-out toggle with optimistic update
   const toggleSoldOut = async (product: OverviewProduct) => {
     setTogglingSoldOut(product.id)
     const next = !product.soldOut
