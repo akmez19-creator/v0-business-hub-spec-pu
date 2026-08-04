@@ -1251,6 +1251,18 @@ export function ReelsStudioTab({
       const blob = hasBranding ? await renderBrandedBlob(c.file) : c.file
       const stem = c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')
       saveBlob(blob, `${hasBranding ? 'branded-' : ''}${stem}.mp4`)
+
+      // A saved file is a finished post, so roll the next look now - that is
+      // what keeps a batch of downloads from all looking identical. Done after
+      // the render, never before, so this file still matches the preview the
+      // user was looking at when they clicked; the new style is for the next
+      // one. Skipped when nothing is burned in, since there is no style to
+      // vary. If a branded post is still staged in Steps 2-3 we queue instead,
+      // because shuffling now would recolour a post the user can still re-Apply.
+      if (autoRestyle && hasBranding) {
+        if (preBrand) setPendingRestyle(true)
+        else shuffleStyles()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not render that clip')
     } finally {
@@ -1814,7 +1826,13 @@ export function ReelsStudioTab({
                   size="icon"
                   className="h-6 w-6"
                   disabled={busy !== null || (hasBranding && !ffmpegReady)}
-                  title={hasBranding ? 'Download this clip with the current branding' : 'Download this clip'}
+                  title={
+                    hasBranding
+                      ? autoRestyle
+                        ? 'Download this clip with the current branding, then switch to a new style'
+                        : 'Download this clip with the current branding'
+                      : 'Download this clip'
+                  }
                   onClick={(e) => { e.stopPropagation(); downloadClip(c) }}
                 >
                   {downloadingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
@@ -1999,7 +2017,7 @@ export function ReelsStudioTab({
               onChange={(e) => setAutoRestyle(e.target.checked)}
               className="h-3.5 w-3.5 accent-amber-500"
             />
-            New style for every post
+            New style for every post &amp; download
           </label>
           {pendingRestyle && (
             <span className="text-[11px] text-muted-foreground" aria-live="polite">
