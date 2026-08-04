@@ -48,6 +48,16 @@ export function useClipRelevance(productName: string) {
     seen.current = new Set()
     queue.current = []
     setStates({})
+
+    // Cards already sitting on screen will not fire the observer again on
+    // their own, because intersection has not *changed*. Toggling the
+    // observation forces a fresh initial callback, so results that were
+    // rendered before the search term landed still get scanned.
+    if (!productName.trim() || !observer.current) return
+    for (const el of targets.current.keys()) {
+      observer.current.unobserve(el)
+      observer.current.observe(el)
+    }
   }, [productName])
 
   const pump = useCallback(() => {
@@ -95,13 +105,18 @@ export function useClipRelevance(productName: string) {
     }
   }, [])
 
+  /** Returns whether the clip was actually accepted for scanning. */
   const enqueue = useCallback(
-    (target: ClipTarget) => {
-      if (!target.url || seen.current.has(target.id)) return
-      if (!productRef.current.trim()) return
+    (target: ClipTarget): boolean => {
+      if (!target.url || seen.current.has(target.id)) return false
+      // The product name can still be empty on the render where cards first
+      // mount (the search term lands a tick later). Report failure so the
+      // caller keeps watching instead of discarding the clip forever.
+      if (!productRef.current.trim()) return false
       seen.current.add(target.id)
       queue.current.push(target)
       pump()
+      return true
     },
     [pump],
   )
@@ -112,9 +127,10 @@ export function useClipRelevance(productName: string) {
         for (const entry of entries) {
           if (!entry.isIntersecting) continue
           const target = targets.current.get(entry.target)
-          if (target) {
-            enqueue(target)
-            // One scan per clip is enough; stop watching immediately.
+          // Only stop watching once the clip was actually accepted.
+          // Unobserving on a rejected enqueue is what silently killed every
+          // scan when the product name had not landed yet.
+          if (target && enqueue(target)) {
             observer.current?.unobserve(entry.target)
           }
         }
@@ -129,7 +145,16 @@ export function useClipRelevance(productName: string) {
   /** Ref callback for a result card. */
   const watch = useCallback(
     (target: ClipTarget) => (el: HTMLElement | null) => {
-      if (!el || !target.url) return
+      if (!el) return
+      if (!target.url) return
+      // Drop any element previously registered for this same clip so the map
+      // does not accumulate detached nodes as the grid re-renders.
+      for (const [known, t] of targets.current) {
+        if (t.id === target.id && known !== el) {
+          targets.current.delete(known)
+          observer.current?.unobserve(known)
+        }
+      }
       targets.current.set(el, target)
       observer.current?.observe(el)
     },

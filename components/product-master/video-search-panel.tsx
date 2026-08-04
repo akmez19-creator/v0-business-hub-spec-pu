@@ -134,6 +134,8 @@ export function VideoSearchPanel({
   // 'all' = whole short-video index, 'temu' = Temu listings and hauls only
   const [source, setSource] = useState<'all' | 'temu'>('all')
   const lastQuery = useRef('')
+  /** The term the current results came from. Drives the relevance scan. */
+  const [searchedTerm, setSearchedTerm] = useState('')
   const lastSource = useRef<'all' | 'temu'>('all')
   // Feature 9: which of these results are ALREADY in the clip library, so the
   // same video is not downloaded and saved a second time.
@@ -166,7 +168,7 @@ export function VideoSearchPanel({
 
   // Judge each clip against the product this studio was opened with, falling
   // back to whatever was typed. Scans run lazily as cards scroll into view.
-  const scanTarget = defaultQuery.trim() || lastQuery.current || ''
+  const scanTarget = defaultQuery.trim() || searchedTerm.trim()
   const { states: scanStates, watch: watchClip } = useClipRelevance(scanTarget)
 
   useEffect(() => {
@@ -238,6 +240,10 @@ export function VideoSearchPanel({
         setHasMore(Boolean(json.hasMore))
         lastQuery.current = term
         lastSource.current = src
+        // Must be STATE, not just the ref above: the relevance scan reads this
+        // during render, and a ref assignment does not re-render, so the scan
+        // would see an empty product name and skip every clip.
+        setSearchedTerm(term)
         setSearched(true)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Search failed')
@@ -956,6 +962,16 @@ export function VideoSearchPanel({
                   <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Checking
+                  </span>
+                )}
+                {/* Surfaced rather than swallowed: a silent failure is
+                    indistinguishable from "the feature never ran". */}
+                {scan?.status === 'error' && (
+                  <span
+                    title={scan.message}
+                    className="absolute bottom-1.5 left-1.5 rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground"
+                  >
+                    Check failed
                   </span>
                 )}
                 {scan?.status === 'done' && (
