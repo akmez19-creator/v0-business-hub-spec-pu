@@ -51,6 +51,22 @@ export function PosterStudioTab({
   const [badges, setBadges] = useState<string[]>(['FREE DELIVERY ANYWHERE IN MAURITIUS'])
   const [extra, setExtra] = useState('')
 
+  // Packed is the default because a sparse hero shot was the main complaint -
+  // the dense sales-sheet layout is what actually converts
+  const [layout, setLayout] = useState<'packed' | 'hero'>('packed')
+  const [tagline, setTagline] = useState('')
+  const [cta, setCta] = useState('ORDER NOW!')
+  const [urgency, setUrgency] = useState("DON'T MISS OUT! STOCK IS LIMITED")
+  const [lifestyleShots, setLifestyleShots] = useState(true)
+
+  // The two price fields are easy to fill the wrong way round. A struck-out
+  // "was" price lower than the asking price would produce a nonsensical
+  // poster, so warn here rather than silently printing it.
+  const nowNum = Number(priceNow.replace(/[^\d.]/g, ''))
+  const wasNum = Number(priceWas.replace(/[^\d.]/g, ''))
+  const pricesInverted = nowNum > 0 && wasNum > 0 && wasNum <= nowNum
+  const savings = nowNum > 0 && wasNum > nowNum ? Math.round(wasNum - nowNum) : null
+
   // Preview loading strategy. Product photos live on our own Supabase storage
   // and load fine directly, but that host is not on the media proxy's
   // allowlist - routing them through it returns 403 and shows a broken image.
@@ -122,6 +138,11 @@ export function PosterStudioTab({
           features: features.filter((f) => f.trim()),
           badges: badges.filter((b) => b.trim()),
           extra,
+          layout,
+          tagline,
+          cta,
+          urgency,
+          lifestyleShots,
         }),
       })
       const json = await res.json()
@@ -134,7 +155,23 @@ export function PosterStudioTab({
     } finally {
       setBusy(false)
     }
-  }, [badges, busy, extra, features, headline, model, name, priceNow, priceWas, sourceImage])
+  }, [
+    badges,
+    busy,
+    cta,
+    extra,
+    features,
+    headline,
+    layout,
+    lifestyleShots,
+    model,
+    name,
+    priceNow,
+    priceWas,
+    sourceImage,
+    tagline,
+    urgency,
+  ])
 
   const download = () => {
     if (!poster) return
@@ -249,6 +286,45 @@ export function PosterStudioTab({
         )}
       </section>
 
+      {/* ---- Layout ---- */}
+      <section className="flex flex-col gap-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Layout</h4>
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              { key: 'packed', label: 'Packed sales sheet', hint: 'Price block, feature rows, photo strip and order button. Busy, like a printed promo leaflet.' },
+              { key: 'hero', label: 'Simple hero', hint: 'One big product shot with a headline and price. Much less text.' },
+            ] as const
+          ).map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setLayout(o.key)}
+              title={o.hint}
+              aria-pressed={layout === o.key}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                layout === o.key
+                  ? 'bg-amber-500 text-black'
+                  : 'border border-border text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {layout === 'packed' && (
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={lifestyleShots}
+              onChange={(e) => setLifestyleShots(e.target.checked)}
+              className="h-3.5 w-3.5 accent-amber-500"
+            />
+            Add a row of in-use photos along the bottom
+          </label>
+        )}
+      </section>
+
       {/* ---- Poster text ---- */}
       <section className="flex flex-col gap-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Poster text</h4>
@@ -270,6 +346,53 @@ export function PosterStudioTab({
             <Input value={priceWas} onChange={(e) => setPriceWas(e.target.value)} inputMode="numeric" placeholder="1875" />
           </label>
         </div>
+
+        {/* Catch swapped prices before they reach the model, since a crossed-out
+            price below the asking price makes the poster look like a mistake */}
+        {pricesInverted && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
+            <p className="text-[11px] text-amber-300">
+              The was price (Rs {wasNum}) is not higher than the now price (Rs {nowNum}), so no discount will be
+              shown. Did you mean to swap them?
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => {
+                setPriceNow(priceWas)
+                setPriceWas(priceNow)
+              }}
+            >
+              Swap
+            </Button>
+          </div>
+        )}
+        {savings !== null && (
+          <p className="text-[11px] text-muted-foreground">
+            Poster will show <span className="font-semibold text-foreground">YOU SAVE Rs {savings}</span>
+          </p>
+        )}
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted-foreground">Tagline (optional)</span>
+            <Input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Your ideal partner for health" />
+          </label>
+          {layout === 'packed' && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">Button text</span>
+              <Input value={cta} onChange={(e) => setCta(e.target.value)} placeholder="ORDER NOW!" />
+            </label>
+          )}
+        </div>
+
+        {layout === 'packed' && (
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted-foreground">Bottom urgency line</span>
+            <Input value={urgency} onChange={(e) => setUrgency(e.target.value)} placeholder="DON'T MISS OUT! STOCK IS LIMITED" />
+          </label>
+        )}
 
         {/* Features */}
         <div className="flex flex-col gap-1.5">
@@ -331,7 +454,7 @@ export function PosterStudioTab({
             value={extra}
             onChange={(e) => setExtra(e.target.value)}
             rows={2}
-            placeholder="e.g. show three lifestyle photos along the bottom"
+            placeholder="e.g. add a 2 year warranty seal, use a blue colour scheme"
           />
         </label>
       </section>

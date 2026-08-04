@@ -7,6 +7,7 @@ import {
   MODEL_BY_ID,
   POSTER_MODELS,
   buildPosterPrompt,
+  posterAspectRatio,
   type PosterFields,
 } from '@/lib/product-master/poster-models'
 
@@ -84,6 +85,7 @@ async function generateWithGemini(
   modelId: string,
   prompt: string,
   imageBytes: Uint8Array,
+  aspectRatio: string,
 ): Promise<{ dataUrl: string; warnings: string[] }> {
   const apiKey = process.env.GOOGLE_AI_API_KEY
   if (!apiKey) {
@@ -101,8 +103,8 @@ async function generateWithGemini(
         // Without IMAGE here the model replies with a written description of
         // the poster instead of the poster itself
         responseModalities: ['TEXT', 'IMAGE'],
-        // 4:5 portrait, matching the other models and the social feed format
-        imageConfig: { aspectRatio: '4:5' },
+        // Taller for packed sales sheets, standard 4:5 for a simple hero shot
+        imageConfig: { aspectRatio },
       },
     },
     messages: [
@@ -164,6 +166,11 @@ export async function POST(request: Request) {
       badges: Array.isArray(body?.badges) ? body.badges.map(String) : [],
       headline: String(body?.headline || ''),
       extra: String(body?.extra || ''),
+      tagline: String(body?.tagline || ''),
+      cta: String(body?.cta || ''),
+      urgency: String(body?.urgency || ''),
+      lifestyleShots: body?.lifestyleShots !== false,
+      layout: body?.layout === 'hero' ? 'hero' : 'packed',
     }
 
     const sourceImage = String(body?.sourceImage || '').trim()
@@ -172,6 +179,8 @@ export async function POST(request: Request) {
     }
 
     const prompt = buildPosterPrompt(fields)
+    // A packed sales sheet needs a taller canvas than a single hero shot
+    const aspect = posterAspectRatio(fields.layout)
 
     // Data URLs arrive already-decoded from an upload; everything else is a
     // remote marketplace photo that has to be fetched
@@ -189,7 +198,7 @@ export async function POST(request: Request) {
     let posterWarnings: string[]
 
     if (model.provider === 'google') {
-      const out = await generateWithGemini(modelId, prompt, imageBytes)
+      const out = await generateWithGemini(modelId, prompt, imageBytes, aspect)
       posterDataUrl = out.dataUrl
       posterWarnings = out.warnings
     } else {
@@ -198,8 +207,7 @@ export async function POST(request: Request) {
         // Passing the photo alongside the text is what makes this an EDIT of the
         // real product rather than a fresh invention that merely resembles it
         prompt: { text: prompt, images: [imageBytes] },
-        // 4:5 portrait is the standard feed format and matches the reference poster
-        aspectRatio: '4:5',
+        aspectRatio: aspect,
       })
       posterDataUrl = `data:${image.mediaType || 'image/png'};base64,${image.base64}`
       posterWarnings = warnings?.map((w) => ('message' in w ? w.message : String(w.type))) ?? []
