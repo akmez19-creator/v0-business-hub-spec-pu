@@ -604,6 +604,9 @@ export function TvDashboard({
                       const cpr = costPerResultRs(spendUsd, results, USD_TO_RS)
                       const label = RESULT_LABEL[c.resultKind ?? 'none']
                       const size = isTight ? 'text-[10px]' : 'text-[11px]'
+                      // Whole rupees only: these rows share their width with six
+                      // action buttons, and paise never change a decision.
+                      const spendRs = `Rs ${Math.round(spendUsd * USD_TO_RS).toLocaleString('en-IN')}`
                       if (cpr === null) {
                         // Spending with nothing to show for it - the loudest
                         // signal on the panel; zero spend just stays quiet.
@@ -612,13 +615,9 @@ export function TvDashboard({
                             className={`rounded px-1 py-0 ${size} font-black tabular-nums ${
                               spendUsd > 0 ? 'bg-red-500/20 text-red-400' : 'text-muted-foreground'
                             }`}
-                            title={
-                              spendUsd > 0
-                                ? `${formatSpend(c.spend)} spent, no message yet`
-                                : 'No spend yet'
-                            }
+                            title={spendUsd > 0 ? `${spendRs} spent, no ${label} yet` : 'No spend yet'}
                           >
-                            {spendUsd > 0 ? `${formatSpend(c.spend)} \u00b7 0 msg` : formatSpend(c.spend)}
+                            {spendUsd > 0 ? `${spendRs} \u00b7 0 ${label}` : spendRs}
                           </span>
                         )
                       }
@@ -626,10 +625,12 @@ export function TvDashboard({
                       return (
                         <span
                           className="flex items-center gap-1"
-                          title={`${formatSpend(c.spend)} spent \u00b7 ${results} ${label}${results !== 1 ? 's' : ''} \u00b7 ${formatRs(cpr)} per ${label}`}
+                          title={`${spendRs} spent \u00b7 ${results} ${label}${results !== 1 ? 's' : ''} \u00b7 ${formatRs(cpr)} per ${label}`}
                         >
+                          {/* Spend and volume stay quiet context; the per-message
+                              cost is what ranks these ads against each other. */}
                           <span className={`${size} tabular-nums text-muted-foreground`}>
-                            {formatSpend(c.spend)} {'\u00b7'} {results} {label}
+                            {spendRs} {'\u00b7'} {results}
                           </span>
                           <span
                             className={`rounded px-1 py-0 ${size} font-black tabular-nums ${cz.bg} ${cz.text}`}
