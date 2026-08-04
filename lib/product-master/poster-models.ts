@@ -212,7 +212,16 @@ export function buildPosterPrompt(f: PosterFields): string {
       : 'Create a bold promotional poster in portrait format for social media.',
     '',
     'THE PRODUCT PHOTO:',
-    'The supplied image is the EXACT product being sold. Cut it out cleanly from its background and place it in the layout. Reproduce it faithfully: identical shape, colour, material, texture and details. Do not redesign, restyle, recolour or substitute it.',
+    'The supplied image is the EXACT product being sold. Cut it out cleanly from its background and place it in the layout. Reproduce the OBJECT ITSELF faithfully: identical shape, colour, material, texture and construction. Do not redesign, restyle, recolour or substitute it.',
+    /*
+     * Supplier photos are overwhelmingly Chinese marketplace listings whose
+     * packaging carries Chinese sales copy. "Reproduce it faithfully" used to
+     * be unqualified, so the model treated that copy as part of the product and
+     * reprinted it onto the poster. Fidelity now explicitly covers the object
+     * and explicitly excludes the writing on it.
+     */
+    'TEXT ON THE PRODUCT IS NOT PART OF THE PRODUCT. The source photo may carry Chinese, Japanese, Korean, Arabic or other foreign writing on the item, its packaging, its label, its tag or as overlaid marketing graphics. Treat all of that as packaging clutter to be discarded: leave those surfaces clean and plain. The finished poster contains no Chinese characters and no foreign-language text of any kind.',
+    'EVERY word in the finished poster is in ENGLISH, and is one of the exact strings supplied below.',
   )
 
   if (layout === 'packed') {
@@ -245,16 +254,18 @@ export function buildPosterPrompt(f: PosterFields): string {
           : 'LEFT MIDDLE: the price block, the loudest element on the whole poster, occupying roughly one third of the poster width. A small "SPECIAL PROMO" cap label at the top, then one single price in gigantic bold white numerals inside a bright red rounded panel with a thick white outline and a heavy drop shadow. Exactly one price figure appears here, and it is the exact figure given below.'
         : null,
 
+      // The product is the thing being sold: earlier posters left it small in a
+      // sea of red while badges and starbursts took the space
       hasPrice
-        ? 'RIGHT MIDDLE: the cut-out product photo, large, with a soft drop shadow, overlapping the price block slightly so the composition feels layered. It must not cover the product name.'
-        : 'CENTRE: the cut-out product photo, large, with a soft drop shadow. It must not cover the product name.',
+        ? 'RIGHT MIDDLE: the cut-out product photo, rendered LARGE as the visual hero of the poster - it is the biggest single object in the composition and fills most of the middle band, sharp and brightly lit, with a soft drop shadow. It overlaps the price block slightly so the composition feels layered. It must not cover the product name.'
+        : 'CENTRE: the cut-out product photo, rendered LARGE as the visual hero of the poster, filling most of the middle band, sharp and brightly lit, with a soft drop shadow. It must not cover the product name.',
 
       features.length
-        ? 'MIDDLE-LOWER: a vertical list of feature rows, one row per feature listed below. Each row is a small circular gold-rimmed icon on the left, then the feature text as a short bold uppercase title.'
+        ? 'MIDDLE-LOWER: a horizontal row of feature blocks, one per feature listed below, evenly spaced across the full width. Each block is a clean line-art icon in a gold circle with the feature text centred beneath it in short bold uppercase, stacked in one or two tight lines.'
         : null,
 
       f.lifestyleShots !== false
-        ? 'LOWER: a horizontal strip of three smaller rounded photographs showing the SAME product being used in three realistic everyday situations. Each photo may carry a small dark caption bar with two or three plain words naming the situation, and those captions must never contain a price, a number, a percentage or a claim.'
+        ? 'LOWER: a small bold "PERFECT FOR:" tab label, then directly beneath it a horizontal strip of three rounded photographs showing the SAME product being used in three realistic everyday situations. Each photo carries a small dark caption bar naming the situation in two or three plain English words, and those captions must never contain a price, a number, a percentage or a claim.'
         : null,
 
       'BOTTOM BAR: a full-width dark strip containing the urgency line on the left in bold yellow and white type, and a large glossy orange rounded call-to-action button on the right with a shopping-cart icon.',
@@ -332,6 +343,8 @@ export function buildPosterPrompt(f: PosterFields): string {
   L.push(
     '',
     'RULES:',
+    '- ENGLISH ONLY. Every character in the poster is from the Latin alphabet. Chinese, Japanese, Korean and other non-Latin characters must not appear anywhere - not on the product, not on its packaging or label, not in a badge, not in the small print.',
+    '- Any foreign text visible in the source photo is removed and those surfaces are left clean and plain.',
     '- Render ONLY the text listed above. Do not invent extra words, prices, percentages, phone numbers, claims or placeholder text.',
     '- NEVER invent a number. Every digit, price, amount, saving and percentage in the image must appear verbatim in this brief. If a figure is not written above, it must not appear in the poster.',
     '- Do not add a discount, a crossed-out price or a savings badge unless one is explicitly specified above.',
@@ -341,6 +354,7 @@ export function buildPosterPrompt(f: PosterFields): string {
       : '- Do not omit any listed element.',
     '- All text must be large, high-contrast and legible on a phone screen.',
     '- No watermarks, no signatures, no stock-photo logos, no lorem ipsum.',
+    '- FINAL CHECK before finishing: read every word in the image. If any character is not English, remove it and leave that surface blank.',
   )
 
   return L.join('\n')
