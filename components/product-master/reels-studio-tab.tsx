@@ -54,6 +54,12 @@ interface Clip {
   save?: 'saving' | 'saved' | 'failed'
   /** Why the save failed, surfaced on the tile so the reason is visible */
   saveError?: string
+  /**
+   * Your verdict after watching it, for the quick-post lane. Deliberately
+   * separate from `save` - that tracks the upload to the library, this tracks
+   * whether you consider the clip publishable. Undefined until you decide.
+   */
+  review?: 'ready' | 'edit'
 }
 
 /** A clip that is still being downloaded, shown in the feed as a placeholder
@@ -196,6 +202,16 @@ const DEFAULT_PAGE_KEY = '__default__'
 
 /** Guarantees a unique clip id even when several land in the same millisecond */
 let clipSeq = 0
+
+// The Reels frame. Anything not already this shape is letterboxed into it
+// before branding, so a landscape source cannot be published as a wide video.
+const REEL_W = 1080
+const REEL_H = 1920
+/** 9:16 within rounding tolerance - i.e. safe to publish without letterboxing */
+function isReelAspect(w: number, h: number) {
+  if (!w || !h) return false
+  return Math.abs(w / h - REEL_W / REEL_H) < 0.01
+}
 // Logo width bounds as a % of video width, shared by the corner resize handle
 // and the burn so the two can never disagree
   const LOGO_MIN = 6
@@ -217,6 +233,18 @@ const LAYOUT_PRESETS = [
   { id: 'bottom', label: 'Bottom', title: { x: 50, y: 50 }, price: { x: 50, y: 62 }, logo: { x: 82, y: 20 } },
 ] as const
 type LayoutPresetId = (typeof LAYOUT_PRESETS)[number]['id']
+
+// The look the studio starts with, and the last fallback when neither the
+// selected Page nor the company default has anything saved. Module scope so it
+// is genuinely constant rather than rebuilt on every render.
+const BUILTIN_LAYOUT = {
+  preset: 'custom' as LayoutPresetId | 'custom',
+  locked: false,
+  title: { x: 50, y: 10 },
+  price: { x: 50, y: 22 },
+  logo: { x: 82, y: 88 },
+  watermark: { on: true, size: 18, opacity: 50, removeBg: true, bgTol: 30 },
+}
 
 // Push a blob at the browser as a file download
 function saveBlob(blob: Blob, name: string) {
@@ -384,14 +412,22 @@ export function ReelsStudioTab({
         if (cancelled) return
         const logos = (logoJson?.logos ?? {}) as Record<string, string>
         const fallback = String(logoJson?.fallback || '')
+        const layouts = (logoJson?.layouts ?? {}) as Record<string, any>
         const pages = (pageJson?.pages ?? []) as { id: string; name: string }[]
         setPageLogos(logos)
         setLogoFallback(fallback)
+        setPageLayouts(layouts)
         setBrandPages(pages)
         const first = pages[0]?.id ?? ''
         setBrandPageId(first)
         const resolved = (first && logos[first]) || fallback
         if (resolved) setLogoSrc(resolved)
+        // Opening straight onto the first Page should show that Page's own
+        // look, not the company baseline the other effect is loading
+        if (first && layouts[first]) {
+          skipLayoutSave.current = true
+          applyLayout(layouts[first])
+        }
         setLogoResolved(true)
       })
       .catch(() => {
@@ -403,10 +439,15 @@ export function ReelsStudioTab({
     }
   }, [])
 
-  // Switch the page the logo belongs to and show that page's saved logo
+  // Switch Page and load that Page's whole look - logo, banner spot and
+  // watermark - so posts stay on-brand without re-setting anything by hand.
+  // Falls back to the company default, then the built-in layout, so a Page that
+  // has never been customised follows the baseline instead of being stranded.
   const selectBrandPage = (id: string) => {
     setBrandPageId(id)
     setLogoSrc(pageLogos[id] || logoFallback || DEFAULT_LOGO)
+    skipLayoutSave.current = true
+    applyLayout(pageLayouts[id] ?? globalLayout.current)
   }
 
   // Change logo: show it instantly, upload to blob storage, then save it
@@ -460,12 +501,45 @@ export function ReelsStudioTab({
     setLayoutPreset(id)
   }, [])
 
+  // Push a saved look onto the controls. Restores the exact spots rather than
+  // just the preset name, so a hand-placed "custom" layout returns where it was
+  // left instead of snapping back to a preset.
+  const applyLayout = useCallback((saved: Record<string, any> | null | undefined) => {
+    const l = saved && typeof saved === 'object' ? saved : BUILTIN_LAYOUT
+    if (l.title) setTitlePos(l.title)
+    if (l.price) setPricePos(l.price)
+    if (l.logo) setLogoXY(l.logo)
+    setLayoutPreset(l.preset ?? 'custom')
+    setLockLayout(l.locked === true)
+    // The watermark's look travels with the layout. Absent on rows saved before
+    // it was part of the default, so those keep the studio's current values.
+    const wm = l.watermark
+    if (wm && typeof wm === 'object') {
+      setLogoOn(wm.on !== false)
+      if (typeof wm.size === 'number') setLogoSize(wm.size)
+      if (typeof wm.opacity === 'number') setLogoOpacity(wm.opacity)
+      setLogoRemoveBg(wm.removeBg !== false)
+      if (typeof wm.bgTol === 'number') setLogoBgTol(wm.bgTol)
+    }
+  }, [])
+
   // The banner placement is a saved default, not a per-session choice: it is
   // stored server-side next to the brand logo, so it comes back after a reload,
   // a full exit, or a sign-in on another machine. Until the saved value has
   // loaded we must not write, or the empty starting layout would immediately
   // overwrite whatever is on the server.
+  //
+  // Two tiers: each Page can have its own look, and company_settings holds the
+  // baseline for Pages that have never been given one.
   const [layoutLoaded, setLayoutLoaded] = useState(false)
+  const globalLayout = useRef<Record<string, any> | null>(null)
+  const [pageLayouts, setPageLayouts] = useState<Record<string, any>>({})
+  // Switching Page loads that Page's look, which would otherwise look exactly
+  // like an edit and get written straight back - creating a row for a Page the
+  // user never customised, and freezing it at today's global default. One
+  // cycle of the autosave is skipped instead.
+  const skipLayoutSave = useRef(false)
+
   useEffect(() => {
     let cancelled = false
     fetch('/api/company-settings')
@@ -474,23 +548,8 @@ export function ReelsStudioTab({
         if (cancelled) return
         const saved = json?.reels_banner_layout
         if (saved && typeof saved === 'object') {
-          // Restore the exact spots, not just the preset name, so a hand-placed
-          // "custom" layout returns where the user left it
-          if (saved.title) setTitlePos(saved.title)
-          if (saved.price) setPricePos(saved.price)
-          if (saved.logo) setLogoXY(saved.logo)
-          if (saved.preset) setLayoutPreset(saved.preset)
-          setLockLayout(saved.locked === true)
-          // The watermark's look travels with the layout. Absent on defaults
-          // saved before this existed, so keep the studio's values in that case.
-          const wm = saved.watermark
-          if (wm && typeof wm === 'object') {
-            setLogoOn(wm.on !== false)
-            if (typeof wm.size === 'number') setLogoSize(wm.size)
-            if (typeof wm.opacity === 'number') setLogoOpacity(wm.opacity)
-            setLogoRemoveBg(wm.removeBg !== false)
-            if (typeof wm.bgTol === 'number') setLogoBgTol(wm.bgTol)
-          }
+          globalLayout.current = saved
+          applyLayout(saved)
         }
       })
       .catch(() => {
@@ -502,39 +561,63 @@ export function ReelsStudioTab({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [applyLayout])
 
-  // Save the placement whenever it settles. Debounced because dragging fires
-  // this on every pointer move, and skipped entirely until the initial load has
-  // finished so we never clobber the stored default with the starting one.
+  // Save the look whenever it settles. Debounced because dragging fires this on
+  // every pointer move, and skipped until the initial load has finished so we
+  // never clobber the stored default with the starting one.
+  //
+  // Writes to the selected Page when there is one, so each Page keeps its own
+  // look; otherwise it updates the company-wide baseline.
   useEffect(() => {
     if (!layoutLoaded) return
+    if (skipLayoutSave.current) {
+      skipLayoutSave.current = false
+      return
+    }
+    const layout = {
+      preset: layoutPreset,
+      locked: lockLayout,
+      title: titlePos,
+      price: pricePos,
+      logo: logoXY,
+      // Size/opacity/cutout, but not the image itself - that is already saved
+      // per Page as logo_url, so storing it here too would give one watermark
+      // two sources of truth
+      watermark: {
+        on: logoOn,
+        size: logoSize,
+        opacity: logoOpacity,
+        removeBg: logoRemoveBg,
+        bgTol: logoBgTol,
+      },
+    }
     const t = setTimeout(() => {
-      fetch('/api/company-settings', {
+      const target = brandPageId
+        ? {
+            url: '/api/page-logos',
+            body: {
+              pageId: brandPageId,
+              pageName: brandPages.find((p) => p.id === brandPageId)?.name,
+              bannerLayout: layout,
+            },
+          }
+        : { url: '/api/company-settings', body: { reels_banner_layout: layout } }
+
+      fetch(target.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reels_banner_layout: {
-            preset: layoutPreset,
-            locked: lockLayout,
-            title: titlePos,
-            price: pricePos,
-            logo: logoXY,
-            // Size/opacity/cutout, but not the image itself - that is already
-            // saved per Page by /api/page-logos, so storing it here too would
-            // give one watermark two sources of truth
-            watermark: {
-              on: logoOn,
-              size: logoSize,
-              opacity: logoOpacity,
-              removeBg: logoRemoveBg,
-              bgTol: logoBgTol,
-            },
-          },
-        }),
-      }).catch(() => {
-        // Non-blocking: the layout still works this session if the save fails
+        body: JSON.stringify(target.body),
       })
+        .then(() => {
+          // Keep the in-memory copy in step so switching away and back does not
+          // re-fetch a stale look
+          if (brandPageId) setPageLayouts((m) => ({ ...m, [brandPageId]: layout }))
+          else globalLayout.current = layout
+        })
+        .catch(() => {
+          // Non-blocking: the layout still works this session if the save fails
+        })
     }, 600)
     return () => clearTimeout(t)
   }, [
@@ -549,6 +632,8 @@ export function ReelsStudioTab({
     logoOpacity,
     logoRemoveBg,
     logoBgTol,
+    brandPageId,
+    brandPages,
   ])
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
@@ -1316,6 +1401,9 @@ export function ReelsStudioTab({
   }, [productId, productName])
 
   const selectedClip = clips.find((c) => c.id === selected) || null
+  // Step 2 already owns the only preview player, so "Edit" and tile taps scroll
+  // to it rather than opening a second video somewhere else
+  const editorRef = useRef<HTMLElement>(null)
 
   const selectClip = (c: Clip) => {
     setSelected(c.id)
@@ -1329,17 +1417,23 @@ export function ReelsStudioTab({
   // none of the studio's state, so grabbing one clip never disturbs whatever
   // is already staged in Steps 2 and 3.
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+  // A clip that is not 9:16 has to go through ffmpeg even with no branding
+  // switched on, or it downloads at its own shape and is published wrong
+  const needsAspectFix = (c: Clip) => !isReelAspect(c.width, c.height)
+  const mustRender = (c: Clip) => hasBranding || needsAspectFix(c)
+
   const downloadClip = async (c: Clip) => {
     if (busy || downloadingId) return
-    if (hasBranding && !ffmpegReady) return
+    if (mustRender(c) && !ffmpegReady) return
     setError('')
     setDownloadingId(c.id)
     setBusy('brand')
     setProgress(0)
     try {
-      // Nothing switched on means there is nothing to burn, so hand over the
-      // original file rather than re-encoding it for no reason
-      const blob = hasBranding ? await renderBrandedBlob(c.file) : c.file
+      // Nothing to burn and already the right shape means there is no reason to
+      // re-encode - hand over the original file untouched
+      const blob = mustRender(c) ? await renderBrandedBlob(c.file) : c.file
       const stem = c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, '')
       saveBlob(blob, `${hasBranding ? 'branded-' : ''}${stem}.mp4`)
 
@@ -1358,6 +1452,93 @@ export function ReelsStudioTab({
       setError(e instanceof Error ? e.message : 'Could not render that clip')
     } finally {
       setDownloadingId(null)
+      setBusy(null)
+      setProgress(0)
+    }
+  }
+
+  // ---- Quick post lane -----------------------------------------------------
+  // Watch a clip, mark it yourself, download it branded. The checks below never
+  // block a download - they are advisories so nothing is a surprise, and the
+  // Ready decision stays yours.
+  const [quickPost, setQuickPost] = useState(false)
+
+  const advisoriesFor = (c: Clip): string[] => {
+    const notes: string[] = []
+    // duration 0 is what ingest records when the browser could not read the
+    // file's metadata, so neither the length nor the shape can be trusted
+    if (!c.duration) notes.push('Metadata unreadable')
+    else if (c.duration < 3) notes.push(`Only ${Math.round(c.duration)}s \u2014 short for Reels`)
+    if (c.duration && needsAspectFix(c)) notes.push('Portrait fix will be applied')
+    return notes
+  }
+
+  const setReview = (id: string, review: Clip['review']) =>
+    setClips((prev) => prev.map((c) => (c.id === id ? { ...c, review } : c)))
+
+  // Send a clip that needs work into the normal editor, already loaded
+  const editClip = (c: Clip) => {
+    selectClip(c)
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+
+  const readyClips = clips.filter((c) => c.review === 'ready')
+
+  // Windows and macOS both choke on these in a file or folder name
+  const safeName = (s: string) => s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
+
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
+  // Render every Ready clip and hand back one zip containing a single folder
+  // named after the product, so unzipping gives exactly the folder you asked
+  // for rather than loose files scattered into Downloads.
+  const downloadAllReady = async () => {
+    if (busy || downloadingId || batch) return
+    const list = readyClips
+    if (!list.length) return
+    if (list.some(mustRender) && !ffmpegReady) return
+
+    setError('')
+    setBatch({ done: 0, total: list.length })
+    setBusy('brand')
+    const folder = safeName(productName) || 'Reels'
+      const failed: string[] = []
+      let added = 0
+    try {
+      const JSZip = (await import('jszip')).default
+      const zip = new JSZip()
+      const dir = zip.folder(folder)!
+
+      // One at a time: ffmpeg.wasm is a single instance here, so renders cannot
+      // overlap. A clip that fails is collected and reported at the end rather
+      // than throwing away the clips that already rendered.
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i]
+        setBatch({ done: i, total: list.length })
+        try {
+          const blob = mustRender(c) ? await renderBrandedBlob(c.file) : c.file
+          const stem = safeName(c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, ''))
+          // Numbered by feed order so the sequence survives the alphabetical
+          // sort every OS file browser applies
+          dir.file(`${i + 1}-${stem}.mp4`, blob)
+          added++
+        } catch {
+          failed.push(c.name)
+        }
+        // Roll a new look between posts, so a four-clip batch comes out as four
+        // visually distinct posts rather than four copies of one design
+        if (autoRestyle && hasBranding && i < list.length - 1) shuffleStyles()
+      }
+
+      if (added === 0) throw new Error('Every clip failed to render')
+      setBatch({ done: list.length, total: list.length })
+      saveBlob(await zip.generateAsync({ type: 'blob' }), `${folder}.zip`)
+      if (failed.length) {
+        setError(`Downloaded ${list.length - failed.length} of ${list.length}. Failed: ${failed.join(', ')}`)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not build the download')
+    } finally {
+      setBatch(null)
       setBusy(null)
       setProgress(0)
     }
@@ -1622,44 +1803,61 @@ export function ReelsStudioTab({
       })
       URL.revokeObjectURL(probeUrl)
 
+      // Reels are 9:16. A landscape or square source would otherwise be branded
+      // at its own shape and published wrong, so it is letterboxed into a
+      // 1080x1920 frame first - the same scale+pad filter the merge path uses.
+      // Sources that are already 9:16 are left alone rather than re-scaled, so
+      // a 720x1280 clip keeps its own resolution instead of being upscaled.
+      const isReelShape = isReelAspect(dims.w, dims.h)
+      const out = isReelShape ? dims : { w: REEL_W, h: REEL_H }
+
       await ffmpeg.writeFile('brand-in.mp4', await fetchFile(data))
       const inputs = ['-i', 'brand-in.mp4']
       const chains: string[] = []
       let last = '0:v'
       let idx = 1
 
+      if (!isReelShape) {
+        chains.push(
+          `[0:v]scale=${REEL_W}:${REEL_H}:force_original_aspect_ratio=decrease,pad=${REEL_W}:${REEL_H}:(ow-iw)/2:(oh-ih)/2,setsar=1[nm]`,
+        )
+        last = 'nm'
+      }
+
       // Punch-in happens BEFORE the overlays, so the branding is laid onto the
       // already-cropped picture and keeps the exact size and position shown in
       // the preview. Cropping after would scale the logo and text up with it.
+      // Chains from `last`, so it crops the reel-shaped frame when one was made
+      // rather than reaching back past it to the raw source.
       if (zoom > 0) {
         const f = 1 + zoom / 100
-        chains.push(`[0:v]crop=iw/${f}:ih/${f},scale=${dims.w}:${dims.h},setsar=1[zm]`)
+        chains.push(`[${last}]crop=iw/${f}:ih/${f},scale=${out.w}:${out.h},setsar=1[zm]`)
         last = 'zm'
       }
 
       if (wantsTitle) {
-        await ffmpeg.writeFile('title.png', await renderBannerPng(dims.w, dims.h, titleText, activeStyle, titleSize, titlePos))
+        await ffmpeg.writeFile('title.png', await renderBannerPng(out.w, out.h, titleText, activeStyle, titleSize, titlePos))
         inputs.push('-i', 'title.png')
         chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
         last = `v${idx}`
         idx++
       }
       if (wantsPrice) {
-        await ffmpeg.writeFile('price.png', await renderPromoTagPng(dims.w, dims.h, pricePos))
+        await ffmpeg.writeFile('price.png', await renderPromoTagPng(out.w, out.h, pricePos))
         inputs.push('-i', 'price.png')
         chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
         last = `v${idx}`
         idx++
       }
       if (logoOn) {
-        const { png, w: lw, h: lh } = await renderLogoPng(dims.w)
+        const { png, w: lw, h: lh } = await renderLogoPng(out.w)
         await ffmpeg.writeFile('logo.png', png)
         inputs.push('-i', 'logo.png')
         // Center the logo on the dragged position, clamped inside the frame
         // (computed here as plain numbers - commas inside overlay expressions
         // break ffmpeg's filter parser)
-        const x = Math.round(Math.min(Math.max((logoXY.x / 100) * dims.w - lw / 2, 0), dims.w - lw))
-        const y = Math.round(Math.min(Math.max((logoXY.y / 100) * dims.h - lh / 2, 0), dims.h - lh))
+        const x = Math.round(Math.min(Math.max((logoXY.x / 100) * out.w - lw / 2, 0), out.w - lw))
+        const y = Math.round(Math.min(Math.max((logoXY.y / 100) * out.h - lh / 2, 0), out.h - lh))
         chains.push(`[${last}][${idx}:v]overlay=${x}:${y}[v${idx}]`)
         last = `v${idx}`
         idx++
@@ -1838,6 +2036,91 @@ export function ReelsStudioTab({
             />
           </div>
         </div>
+        {/* Which Page these posts are for. Picking one loads that Page's whole
+            saved look - logo, banner spot and watermark - so it belongs here at
+            the top rather than buried in the branding step. */}
+        {brandPages.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background/60 px-2.5 py-1.5">
+            <span className="mr-0.5 text-xs font-medium text-muted-foreground">Page</span>
+            {brandPages.map((p) => {
+              const active = p.id === brandPageId
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => selectBrandPage(p.id)}
+                  aria-pressed={active}
+                  title={
+                    pageLayouts[p.id]
+                      ? `${p.name} has its own saved look`
+                      : `${p.name} uses the shared default look`
+                  }
+                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
+                    active
+                      ? 'border-amber-500 bg-amber-500/15 text-amber-500'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      pageLogos[p.id] || pageLayouts[p.id] ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                    }`}
+                  />
+                  {p.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Quick post: skip Steps 2-4 entirely. Watch each clip, decide for
+            yourself, download it branded - one at a time or the whole feed. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background/60 px-2.5 py-1.5">
+          <label className="flex items-center gap-2 text-xs font-medium">
+            <input
+              type="checkbox"
+              checked={quickPost}
+              onChange={(e) => setQuickPost(e.target.checked)}
+              className="h-3.5 w-3.5 accent-sky-500"
+            />
+            Quick post
+            <span className="font-normal text-muted-foreground">
+              {'\u2014'} review each clip and download, no editing
+            </span>
+          </label>
+          {quickPost && (
+            <div className="flex items-center gap-2">
+              {batch ? (
+                <span className="text-xs text-muted-foreground" aria-live="polite">
+                  Rendering {Math.min(batch.done + 1, batch.total)} of {batch.total}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  {readyClips.length} of {clips.length} ready
+                </span>
+              )}
+              <Button
+                size="sm"
+                onClick={downloadAllReady}
+                disabled={
+                  busy !== null ||
+                  batch !== null ||
+                  readyClips.length === 0 ||
+                  (readyClips.some(mustRender) && !ffmpegReady)
+                }
+                title={`Download every clip you marked Ready as one ${safeName(productName) || 'Reels'} folder`}
+              >
+                {batch ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Download all ready
+              </Button>
+            </div>
+          )}
+        </div>
+
         {/* The same placement state as the one under the preview, surfaced up
             here so the spot can be fixed before any branding is touched */}
         <PlacementControls
@@ -1873,10 +2156,19 @@ export function ReelsStudioTab({
           {clips.map((c, i) => (
             <div
               key={c.id}
-              className={`group relative w-36 shrink-0 cursor-pointer overflow-hidden rounded-md border transition-shadow ${
+              className={`group relative w-36 shrink-0 cursor-pointer self-start overflow-hidden rounded-md border transition-shadow ${
                 selected === c.id ? 'ring-2 ring-sky-500' : 'hover:ring-1 hover:ring-muted-foreground/30'
+              } ${
+                // A coloured left edge, never a tick: the tick on this tile
+                // already means "saved to your library", and reusing it for
+                // "approved" would make the two impossible to tell apart
+                quickPost && c.review === 'ready'
+                  ? 'border-l-4 border-l-emerald-500'
+                  : quickPost && c.review === 'edit'
+                    ? 'border-l-4 border-l-amber-500'
+                    : ''
               }`}
-              onClick={() => selectClip(c)}
+              onClick={() => (quickPost ? editClip(c) : selectClip(c))}
             >
               <video src={c.url} className="h-20 w-36 bg-black object-cover" muted playsInline />
               <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white">
@@ -1911,18 +2203,75 @@ export function ReelsStudioTab({
                   </span>
                 )}
               </div>
+
+              {/* Your verdict, taken after watching. Text pills rather than an
+                  icon so they cannot be read as the library tick above. */}
+              {quickPost && (
+                <div
+                  className="flex flex-col gap-1 border-t px-1.5 py-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      aria-pressed={c.review === 'ready'}
+                      onClick={() => setReview(c.id, c.review === 'ready' ? undefined : 'ready')}
+                      className={`flex-1 rounded border px-1 py-0.5 text-[10px] font-medium transition ${
+                        c.review === 'ready'
+                          ? 'border-emerald-500 bg-emerald-500/15 text-emerald-500'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Ready
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={c.review === 'edit'}
+                      onClick={() => setReview(c.id, c.review === 'edit' ? undefined : 'edit')}
+                      className={`flex-1 rounded border px-1 py-0.5 text-[10px] font-medium transition ${
+                        c.review === 'edit'
+                          ? 'border-amber-500 bg-amber-500/15 text-amber-500'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Needs edit
+                    </button>
+                  </div>
+
+                  {c.review === 'edit' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 w-full bg-transparent text-[10px]"
+                      onClick={() => editClip(c)}
+                    >
+                      <Scissors className="mr-1 h-3 w-3" /> Edit in Step 2
+                    </Button>
+                  )}
+
+                  {/* Advisory only - the download stays enabled either way. You
+                      are the validator; this just means nothing is a surprise. */}
+                  {advisoriesFor(c).map((note) => (
+                    <p key={note} className="text-[10px] leading-tight text-muted-foreground">
+                      {note}
+                    </p>
+                  ))}
+                </div>
+              )}
               <div className="absolute right-1 top-1 hidden gap-0.5 group-hover:flex">
                 <Button
                   variant="secondary"
                   size="icon"
                   className="h-6 w-6"
-                  disabled={busy !== null || (hasBranding && !ffmpegReady)}
+                  disabled={busy !== null || (mustRender(c) && !ffmpegReady)}
                   title={
                     hasBranding
                       ? autoRestyle
                         ? 'Download this clip with the current branding, then switch to a new style'
                         : 'Download this clip with the current branding'
-                      : 'Download this clip'
+                      : needsAspectFix(c)
+                        ? 'Download this clip, resized to the 1080x1920 Reels frame'
+                        : 'Download this clip'
                   }
                   onClick={(e) => { e.stopPropagation(); downloadClip(c) }}
                 >
@@ -1977,7 +2326,7 @@ export function ReelsStudioTab({
       </section>
 
       {/* ---- Step 2: cut or merge ---- */}
-      <section className="flex flex-col gap-2">
+      <section ref={editorRef} className="flex flex-col gap-2">
         <p className="flex items-center gap-2 text-sm font-semibold">
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-bold text-sky-500">2</span>
           Cut a scene or merge the feed
@@ -2261,41 +2610,16 @@ export function ReelsStudioTab({
             Logo watermark
           </label>
 
-          {/* Which page this logo belongs to. Each page remembers its own, so
-              switching here swaps the watermark instead of re-uploading. */}
+          {/* The Page picker now lives in Step 1, where it drives the whole
+              look rather than just this one image */}
           {logoOn && brandPages.length > 0 && (
-            <div className="flex flex-col gap-1.5 pl-6">
-              <span className="text-xs text-muted-foreground">
-                Saved for page
-                {!pageLogos[brandPageId] && <span className="ml-1 opacity-70">(using shared logo)</span>}
+            <p className="pl-6 text-xs text-muted-foreground">
+              Saving for{' '}
+              <span className="font-medium text-foreground">
+                {brandPages.find((p) => p.id === brandPageId)?.name ?? 'all pages'}
               </span>
-              <div className="flex flex-wrap gap-1.5">
-                {brandPages.map((p) => {
-                  const active = p.id === brandPageId
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => selectBrandPage(p.id)}
-                      aria-pressed={active}
-                      title={pageLogos[p.id] ? `${p.name} has its own saved logo` : `${p.name} uses the shared logo`}
-                      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
-                        active
-                          ? 'border-amber-500 bg-amber-500/15 text-amber-500'
-                          : 'border-border text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <span
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                          pageLogos[p.id] ? 'bg-emerald-500' : 'bg-muted-foreground/40'
-                        }`}
-                      />
-                      {p.name}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+              {!pageLogos[brandPageId] && <span className="ml-1 opacity-70">(using shared logo)</span>}
+            </p>
           )}
 
           {logoOn && (
