@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
-import { AlertTriangle, CheckCircle2, ExternalLink, Mic, Music, Square, Trash2, Upload, VolumeX } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, Mic, Music, Square, Trash2, Upload, VolumeX } from 'lucide-react'
 
 /** Where a track came from. This is the whole basis of the copyright check:
  *  no service can tell you an arbitrary file is safe to post, but the source
@@ -14,19 +14,63 @@ export type ReelAudio = {
   blob: Blob
   /** Filename with a real extension - ffmpeg picks its demuxer from this */
   name: string
-  kind: 'voice' | 'track'
+  kind: 'voice' | 'track' | 'music'
   origin: AudioOrigin
   volume: number
+  /** Style label, shown instead of a meaningless generated filename */
+  label?: string
 }
 
 /** A track may only be burned in when we know where it came from. A voiceover
- *  the user recorded here is theirs by definition and never needs clearing. */
+ *  and a track generated here are both clear by definition: one is the user's
+ *  own voice, the other is a brand new recording that never existed before. */
 export function audioIsCleared(a: ReelAudio | null): boolean {
   if (!a) return true
-  return a.kind === 'voice' || a.origin !== 'unknown'
+  return a.kind === 'voice' || a.kind === 'music' || a.origin !== 'unknown'
 }
 
 const MAX_SECONDS = 180
+
+/** Styles that suit a product reel. The prompts ask for instrumentals on
+ *  purpose: vocals fight with a voiceover and date the video quickly. */
+const MUSIC_STYLES: { key: string; label: string; prompt: string }[] = [
+  {
+    key: 'upbeat',
+    label: 'Upbeat pop',
+    prompt:
+      'Bright upbeat pop instrumental, catchy plucked synth, punchy drums, positive and energetic, seamless loop, no vocals',
+  },
+  {
+    key: 'tropical',
+    label: 'Tropical',
+    prompt:
+      'Sunny tropical house instrumental, marimba and steel drums, relaxed island groove, warm and inviting, no vocals',
+  },
+  {
+    key: 'lofi',
+    label: 'Chill lo-fi',
+    prompt:
+      'Calm lo-fi hip hop instrumental, soft piano, mellow beat, warm vinyl texture, relaxed and unhurried, no vocals',
+  },
+  {
+    key: 'afro',
+    label: 'Afrobeat',
+    prompt:
+      'Modern afrobeats instrumental, log drums, syncopated percussion, confident and danceable groove, no vocals',
+  },
+  {
+    key: 'clean',
+    label: 'Clean corporate',
+    prompt:
+      'Clean minimal corporate instrumental, light marimba and soft synth pads, neutral and professional, unobtrusive background bed, no vocals',
+  },
+  {
+    key: 'cinematic',
+    label: 'Cinematic',
+    prompt:
+      'Cinematic instrumental with a slow confident build, warm strings and subtle percussion, premium and aspirational, no vocals',
+  },
+]
 
 export function ReelAudioPanel({
   audio,
@@ -35,11 +79,14 @@ export function ReelAudioPanel({
   audio: ReelAudio | null
   onChange: (a: ReelAudio | null) => void
 }) {
-  const [tab, setTab] = useState<'silent' | 'voice' | 'track'>('silent')
+  const [tab, setTab] = useState<'silent' | 'music' | 'voice' | 'track'>('silent')
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [micError, setMicError] = useState('')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  // Which style is currently rendering, so only that chip shows a spinner
+  const [making, setMaking] = useState<string | null>(null)
+  const [musicError, setMusicError] = useState('')
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
@@ -106,6 +153,40 @@ export function ReelAudioPanel({
     }
   }, [onChange, stopTracks, audio?.volume])
 
+  const makeMusic = useCallback(
+    async (style: (typeof MUSIC_STYLES)[number]) => {
+      setMusicError('')
+      setMaking(style.key)
+      try {
+        const res = await fetch('/api/product-master/generate-music', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: style.prompt, duration: 30 }),
+        })
+        const json = await res.json()
+        if (!json.success) throw new Error(json.error || 'Could not make the track')
+        // The route hands back a data URI, which fetch turns into a real Blob
+        // for ffmpeg without any cross-origin request
+        const blob = await (await fetch(json.audio)).blob()
+        onChange({
+          blob,
+          name: 'music.mp3',
+          kind: 'music',
+          origin: 'owned',
+          // Music is the only sound once the original is muted, so it starts
+          // near full rather than at a background-bed level
+          volume: audio?.volume ?? 85,
+          label: style.label,
+        })
+      } catch (e) {
+        setMusicError(e instanceof Error ? e.message : 'Could not make the track')
+      } finally {
+        setMaking(null)
+      }
+    },
+    [onChange, audio?.volume],
+  )
+
   const pickFile = useCallback(
     (f: File | undefined) => {
       if (!f) return
@@ -128,8 +209,9 @@ export function ReelAudioPanel({
     if (fileRef.current) fileRef.current.value = ''
   }, [onChange])
 
-  const switchTab = (t: 'silent' | 'voice' | 'track') => {
+  const switchTab = (t: 'silent' | 'music' | 'voice' | 'track') => {
     setTab(t)
+    setMusicError('')
     if (t === 'silent') clear()
   }
 
@@ -147,8 +229,9 @@ export function ReelAudioPanel({
         {(
           [
             { key: 'silent', label: 'No sound', icon: VolumeX },
+            { key: 'music', label: 'Pick music', icon: Music },
             { key: 'voice', label: 'Record your voice', icon: Mic },
-            { key: 'track', label: 'Add a track', icon: Music },
+            { key: 'track', label: 'Upload a track', icon: Upload },
           ] as const
         ).map((t) => (
           <button
@@ -172,6 +255,51 @@ export function ReelAudioPanel({
           The video posts with no sound at all. Safe, but a silent reel usually holds attention less well
           than one with a voice over it.
         </p>
+      )}
+
+      {tab === 'music' && (
+        <div className="flex flex-col gap-2">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Pick a style and a brand new instrumental is made for this video. Nobody else has it, so there
+            is nothing to clear and nothing to credit. Try a style again for a different take.
+          </p>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {MUSIC_STYLES.map((s) => {
+              const active = audio?.kind === 'music' && audio.label === s.label
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  disabled={making !== null}
+                  onClick={() => makeMusic(s)}
+                  className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                    active
+                      ? 'border-amber-500 bg-amber-500/15 text-amber-500'
+                      : 'border-border text-muted-foreground hover:border-amber-500/40 hover:text-foreground'
+                  }`}
+                >
+                  {making === s.key ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Making
+                    </>
+                  ) : (
+                    <>
+                      {active && <CheckCircle2 className="h-3 w-3" />}
+                      {s.label}
+                    </>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          {making && (
+            <p className="text-[11px] text-muted-foreground" aria-live="polite">
+              Writing a 30 second track. This takes a moment.
+            </p>
+          )}
+          {musicError && <p className="text-[11px] text-red-400">{musicError}</p>}
+        </div>
       )}
 
       {tab === 'voice' && (
@@ -229,9 +357,14 @@ export function ReelAudioPanel({
           </div>
 
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Meta Sound Collection is free and cleared for business pages on Facebook and Instagram. Chart
-            music from the in-app library is not: that licence is for personal posts, and using it on a
-            page selling products gets the audio muted or the post pulled.
+            Meta Sound Collection tracks cannot be listed inside this app: Meta publishes no API for them,
+            the library sits behind your business login, and the licence only covers use on Facebook and
+            Instagram. Open it in the tab above, download a track, then upload it here.
+          </p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Chart music from the in-app library is a different thing and is not cleared for you: that
+            licence is for personal posts, and using it on a page selling products gets the audio muted or
+            the post pulled.
           </p>
 
           {audio?.kind === 'track' && (
@@ -264,7 +397,11 @@ export function ReelAudioPanel({
         <div className="flex flex-col gap-2 rounded-md border border-border bg-background/60 p-2">
           <div className="flex items-center justify-between gap-2">
             <span className="truncate text-[11px] font-semibold text-foreground">
-              {audio.kind === 'voice' ? 'Your voiceover' : audio.name}
+              {audio.kind === 'voice'
+                ? 'Your voiceover'
+                : audio.kind === 'music'
+                  ? `${audio.label} - made for this video`
+                  : audio.name}
             </span>
             <button
               type="button"
@@ -294,9 +431,11 @@ export function ReelAudioPanel({
               <CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0" />
               {audio.kind === 'voice'
                 ? 'Your own recording. Nothing to clear.'
-                : audio.origin === 'meta'
-                  ? 'Cleared for Facebook and Instagram. Not for other platforms.'
-                  : 'You confirmed you hold the rights to this.'}
+                : audio.kind === 'music'
+                  ? 'Made for this video and cleared for commercial use. Yours to keep.'
+                  : audio.origin === 'meta'
+                    ? 'Cleared for Facebook and Instagram. Not for other platforms.'
+                    : 'You confirmed you hold the rights to this.'}
             </p>
           ) : (
             <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-amber-500">
