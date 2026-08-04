@@ -16,11 +16,8 @@ import {
   Plus,
   ScanSearch,
   Search,
-  Sparkles,
   Upload,
 } from 'lucide-react'
-import { useClipRelevance } from '@/hooks/use-clip-relevance'
-import { RELEVANT_THRESHOLD, relevanceLabel } from '@/lib/product-master/clip-relevance'
 
 export type VideoHit = {
   id: string
@@ -134,8 +131,6 @@ export function VideoSearchPanel({
   // 'all' = whole short-video index, 'temu' = Temu listings and hauls only
   const [source, setSource] = useState<'all' | 'temu'>('all')
   const lastQuery = useRef('')
-  /** The term the current results came from. Drives the relevance scan. */
-  const [searchedTerm, setSearchedTerm] = useState('')
   const lastSource = useRef<'all' | 'temu'>('all')
   // Feature 9: which of these results are ALREADY in the clip library, so the
   // same video is not downloaded and saved a second time.
@@ -144,11 +139,6 @@ export function VideoSearchPanel({
   // to stop you re-watching and re-downloading footage you own. The toggle
   // exists because "show me everything" is still a legitimate thing to want.
   const [hideSaved, setHideSaved] = useState(true)
-  // Clips whose frames show a DIFFERENT product are collapsed by default -
-  // the point of scanning is that the grid mainly shows this product. Only
-  // clips actually judged irrelevant are hidden; unscanned and failed-to-scan
-  // clips always stay visible, so a model outage never empties the grid.
-  const [hideIrrelevant, setHideIrrelevant] = useState(true)
 
   // Lens state
   const [lensImage, setLensImage] = useState<string | null>(productImage)
@@ -166,10 +156,6 @@ export function VideoSearchPanel({
   const [pickLoading, setPickLoading] = useState(false)
   const [pickSearched, setPickSearched] = useState(false)
 
-  // Judge each clip against the product this studio was opened with, falling
-  // back to whatever was typed. Scans run lazily as cards scroll into view.
-  const scanTarget = defaultQuery.trim() || searchedTerm.trim()
-  const { states: scanStates, watch: watchClip } = useClipRelevance(scanTarget)
 
   useEffect(() => {
     setLensImage(productImage)
@@ -240,10 +226,6 @@ export function VideoSearchPanel({
         setHasMore(Boolean(json.hasMore))
         lastQuery.current = term
         lastSource.current = src
-        // Must be STATE, not just the ref above: the relevance scan reads this
-        // during render, and a ref assignment does not re-render, so the scan
-        // would see an empty product name and skip every clip.
-        setSearchedTerm(term)
         setSearched(true)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Search failed')
@@ -437,13 +419,11 @@ export function VideoSearchPanel({
 
   /** One click to take every result on screen that has not been added yet */
   const useAll = () => {
-    // Operates on what is actually on screen, matching the button's count.
-    // Never bulk-download something already in the library, or a clip the
-    // scan judged to be a different product - both are the exact waste these
-    // checks exist to prevent, and "Use all" is the easiest way to trigger it.
-    const pending = visibleResults.filter((h) => {
+    const pending = results.filter((h) => {
+      // Never bulk-download something already in the library - that is the
+      // exact waste the dedupe check exists to prevent, and "Use all" is the
+      // easiest way to trigger it by accident.
       if (savedIds.has(h.id)) return false
-      if (judgedIrrelevant(h.id)) return false
       const s = jobs[h.id]
       return s !== 'queued' && s !== 'working' && s !== 'done'
     })
@@ -464,25 +444,10 @@ export function VideoSearchPanel({
   const queuedCount = Object.values(jobs).filter((s) => s === 'queued' || s === 'working').length
   const doneCount = Object.values(jobs).filter((s) => s === 'done').length
 
-  /** True only when a scan COMPLETED and judged this clip to be a different
-   *  product. Unscanned, scanning, and errored clips are never hidden. */
-  const judgedIrrelevant = (id: string) => {
-    const s = scanStates[id]
-    return s?.status === 'done' && !s.verdict.showsProduct
-  }
-
   // What the grid actually renders. Kept as a separate value so the raw
   // `results` still drives paging and the "N hidden" count stays truthful.
-  const visibleResults = results.filter((r) => {
-    if (hideSaved && savedIds.has(r.id)) return false
-    if (hideIrrelevant && judgedIrrelevant(r.id)) return false
-    return true
-  })
-  // Counted separately so each toggle can name what IT is hiding - a single
-  // combined figure would claim "N already in library" for off-topic clips.
-  const savedCount = results.filter((r) => savedIds.has(r.id)).length
-  const offTopicCount = results.filter((r) => judgedIrrelevant(r.id) && !savedIds.has(r.id)).length
-  const scanningCount = results.filter((r) => scanStates[r.id]?.status === 'scanning').length
+  const visibleResults = hideSaved ? results.filter((r) => !savedIds.has(r.id)) : results
+  const hiddenCount = results.length - visibleResults.length
 
   const publicImage = lensImage && /^https?:\/\//i.test(lensImage) ? lensImage : null
 
@@ -834,31 +799,15 @@ export function VideoSearchPanel({
             <Plus className="mr-1 h-3 w-3" />
             Use all {visibleResults.length}
           </Button>
-          {savedCount > 0 && (
+          {hiddenCount > 0 && (
             <Button
               size="sm"
               variant="ghost"
               className="h-7 px-2.5 text-[11px] text-muted-foreground"
               onClick={() => setHideSaved((v) => !v)}
             >
-              {hideSaved ? `Show ${savedCount} already in library` : 'Hide clips in library'}
+              {hideSaved ? `Show ${hiddenCount} already in library` : 'Hide clips in library'}
             </Button>
-          )}
-          {offTopicCount > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2.5 text-[11px] text-muted-foreground"
-              onClick={() => setHideIrrelevant((v) => !v)}
-            >
-              {hideIrrelevant ? `Show ${offTopicCount} off-topic` : 'Hide off-topic'}
-            </Button>
-          )}
-          {scanningCount > 0 && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Checking {scanningCount}
-            </span>
           )}
           {queuedCount > 0 && (
             <span className="flex items-center gap-1.5 text-[11px] text-amber-400" aria-live="polite">
@@ -877,25 +826,11 @@ export function VideoSearchPanel({
 
       {visibleResults.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {visibleResults.map((hit) => {
-            // Bound once: TypeScript cannot narrow a repeated `states[hit.id]`
-            // lookup because hit.id is a plain string, not a literal key.
-            const scan = scanStates[hit.id]
-            return (
+          {visibleResults.map((hit) => (
             <div
               key={hit.id}
-              // Scans kick off when the card nears the viewport
-              ref={watchClip({
-                id: hit.id,
-                url: hit.play ? inlineUrl(hit.play) : null,
-                durationHint: hit.duration,
-              })}
               className={`flex flex-col overflow-hidden rounded-lg border bg-card ${
-                savedIds.has(hit.id)
-                  ? 'border-emerald-500/60'
-                  : judgedIrrelevant(hit.id)
-                    ? 'border-border opacity-60'
-                    : 'border-border'
+                savedIds.has(hit.id) ? 'border-emerald-500/60' : 'border-border'
               }`}
             >
               <div className="relative aspect-[9/16] bg-black">
@@ -953,40 +888,6 @@ export function VideoSearchPanel({
                   <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
                     <Check className="h-3 w-3" />
                     In library
-                  </span>
-                )}
-
-                {/* Frame-scan verdict: does this clip actually show the
-                    product? Sits bottom-left, the one free corner. */}
-                {scan?.status === 'scanning' && (
-                  <span className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Checking
-                  </span>
-                )}
-                {/* Surfaced rather than swallowed: a silent failure is
-                    indistinguishable from "the feature never ran". */}
-                {scan?.status === 'error' && (
-                  <span
-                    title={scan.message}
-                    className="absolute bottom-1.5 left-1.5 rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground"
-                  >
-                    Check failed
-                  </span>
-                )}
-                {scan?.status === 'done' && (
-                  <span
-                    title={scan.verdict.reason}
-                    className={`absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                      scan.verdict.relevance >= 8
-                        ? 'bg-emerald-600 text-white'
-                        : scan.verdict.relevance >= RELEVANT_THRESHOLD
-                          ? 'bg-amber-500 text-black'
-                          : 'bg-black/75 text-white'
-                    }`}
-                  >
-                    {scan.verdict.relevance >= RELEVANT_THRESHOLD && <Sparkles className="h-3 w-3" />}
-                    {relevanceLabel(scan.verdict.relevance)}
                   </span>
                 )}
               </div>
@@ -1066,22 +967,17 @@ export function VideoSearchPanel({
                 </div>
               </div>
             </div>
-            )
-          })}
+          ))}
         </div>
       )}
 
-      {/* Everything got filtered out. Without this the grid would simply be
+      {/* Every hit is already saved. Without this the grid would simply be
           empty and read as "the search found nothing", which is the opposite
-          of what happened - so name the actual reason and how to undo it. */}
+          of what happened. */}
       {results.length > 0 && visibleResults.length === 0 && (
         <p className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[11px] text-muted-foreground">
-          {savedCount > 0 && offTopicCount > 0
-            ? `All ${results.length} results are hidden - ${savedCount} already in your library, ${offTopicCount} showing a different product.`
-            : offTopicCount > 0
-              ? `None of the ${results.length} results appear to show this product. Try a different search term.`
-              : `All ${results.length} ${results.length === 1 ? 'result is' : 'results are'} already in your library.`}{' '}
-          Use the toggles above to show them.
+          All {results.length} {results.length === 1 ? 'result is' : 'results are'} already in your
+          library.
         </p>
       )}
 

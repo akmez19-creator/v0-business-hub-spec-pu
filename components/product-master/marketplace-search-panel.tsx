@@ -18,8 +18,6 @@ import {
   X,
 } from 'lucide-react'
 import { ClipPreview } from './clip-preview'
-import { useClipRelevance } from '@/hooks/use-clip-relevance'
-import { RELEVANT_THRESHOLD, relevanceLabel } from '@/lib/product-master/clip-relevance'
 
 export type MarketplaceHit = {
   id: string
@@ -135,20 +133,6 @@ export function MarketplaceSearchPanel({
   const queue = useRef<Promise<void>>(Promise.resolve())
   /** Listing ids whose video is already saved in the clip library (feature 9) */
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
-  /**
-   * The term the current results came from. STATE, not a ref: the relevance
-   * scan reads it during render, and a ref assignment does not re-render, so
-   * the scan would see an empty product name and skip every clip.
-   */
-  const [searchedTerm, setSearchedTerm] = useState('')
-  /** Collapse listings whose frames show a different product */
-  const [hideIrrelevant, setHideIrrelevant] = useState(true)
-
-  // Judge each listing clip against the product. defaultQuery is the product
-  // this studio was opened with, so it stays correct even for image-mode
-  // searches, which have no keyword at all.
-  const scanTarget = defaultQuery.trim() || searchedTerm.trim()
-  const { states: scanStates, watch: watchClip } = useClipRelevance(scanTarget)
 
   // The platform list comes from the server so there is only ever one copy of it
   useEffect(() => {
@@ -256,7 +240,6 @@ export function MarketplaceSearchPanel({
         // Only refresh the proposals when the server found some, so an empty
         // search does not wipe the strip the user is picking from
         if (json.candidateImages?.length) setCandidates(json.candidateImages)
-        setSearchedTerm(term)
         setSearched(true)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Search failed')
@@ -389,20 +372,6 @@ export function MarketplaceSearchPanel({
       // Oldest falls off rather than blocking the click, which would look broken
       return [...prev, src].slice(-MAX_REFS)
     })
-
-  /**
-   * True only when a scan COMPLETED and judged this listing to show a
-   * different product. Unscanned, in-flight and errored clips are never
-   * hidden, so a model outage degrades to "no badges" rather than an empty grid.
-   */
-  const judgedIrrelevant = (id: string) => {
-    const s = scanStates[id]
-    return s?.status === 'done' && !s.verdict.showsProduct
-  }
-
-  const visibleResults = hideIrrelevant ? results.filter((r) => !judgedIrrelevant(r.id)) : results
-  const offTopicCount = results.filter((r) => judgedIrrelevant(r.id)).length
-  const scanningCount = results.filter((r) => scanStates[r.id]?.status === 'scanning').length
 
   const videoCount = results.filter((r) => r.video).length
   const failedPlatforms = perPlatform.filter((p) => p.error)
@@ -674,16 +643,6 @@ export function MarketplaceSearchPanel({
         </div>
       )}
 
-      {/* Everything got filtered out. Without this the grid would simply be
-          empty and read as "the search found nothing", which is the opposite
-          of what happened - so name the reason and how to undo it. */}
-      {results.length > 0 && visibleResults.length === 0 && (
-        <p className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[11px] text-muted-foreground">
-          None of the {results.length} listings appear to show this product. Use{' '}
-          {'"'}Show {offTopicCount} off-topic{'"'} above to see them anyway.
-        </p>
-      )}
-
       {searched && !loading && results.length === 0 && !error && (
         <p className="text-xs text-muted-foreground">
           No listings found. Try a shorter term, or untick {'"'}Only listings with a video{'"'}.
@@ -706,26 +665,6 @@ export function MarketplaceSearchPanel({
         </label>
       )}
 
-      {(offTopicCount > 0 || scanningCount > 0) && (
-        <div className="flex flex-wrap items-center gap-2">
-          {offTopicCount > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2.5 text-[11px] text-muted-foreground"
-              onClick={() => setHideIrrelevant((v) => !v)}
-            >
-              {hideIrrelevant ? `Show ${offTopicCount} off-topic` : 'Hide off-topic'}
-            </Button>
-          )}
-          {scanningCount > 0 && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Checking {scanningCount}
-            </span>
-          )}
-        </div>
-      )}
 
       {results.length > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -751,27 +690,15 @@ export function MarketplaceSearchPanel({
         </p>
       )}
 
-      {visibleResults.length > 0 && (
+      {results.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {visibleResults.map((hit) => {
+          {results.map((hit) => {
             const job = jobs[hit.id]
-            // Bound once: TypeScript cannot narrow a repeated states[hit.id]
-            // lookup because hit.id is a plain string, not a literal key.
-            const scan = scanStates[hit.id]
             return (
             <div
               key={hit.id}
-              // Scans kick off when the card nears the viewport
-              ref={watchClip({
-                id: hit.id,
-                url: hit.video ? inlineUrl(hit.video) : null,
-              })}
               className={`flex flex-col overflow-hidden rounded-lg border bg-background ${
-                savedIds.has(hit.id)
-                  ? 'border-emerald-500/60'
-                  : judgedIrrelevant(hit.id)
-                    ? 'border-border opacity-60'
-                    : 'border-border'
+                savedIds.has(hit.id) ? 'border-emerald-500/60' : 'border-border'
               }`}
             >
               <div className="relative aspect-square bg-black">
@@ -783,38 +710,6 @@ export function MarketplaceSearchPanel({
                   </span>
                 )}
 
-                {/* Frame-scan verdict. Sits bottom-left, the one free corner.
-                    Errors are surfaced rather than swallowed - a silent
-                    failure is indistinguishable from "nothing ran". */}
-                {scan?.status === 'scanning' && (
-                  <span className="absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Checking
-                  </span>
-                )}
-                {scan?.status === 'error' && (
-                  <span
-                    title={scan.message}
-                    className="absolute bottom-1.5 left-1.5 z-10 rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground"
-                  >
-                    Check failed
-                  </span>
-                )}
-                {scan?.status === 'done' && (
-                  <span
-                    title={scan.verdict.reason}
-                    className={`absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                      scan.verdict.relevance >= 8
-                        ? 'bg-emerald-600 text-white'
-                        : scan.verdict.relevance >= RELEVANT_THRESHOLD
-                          ? 'bg-amber-500 text-black'
-                          : 'bg-black/75 text-white'
-                    }`}
-                  >
-                    {scan.verdict.relevance >= RELEVANT_THRESHOLD && <Sparkles className="h-3 w-3" />}
-                    {relevanceLabel(scan.verdict.relevance)}
-                  </span>
-                )}
                   {playing === hit.id && hit.video ? (
                     <video
                       src={inlineUrl(hit.video)}
