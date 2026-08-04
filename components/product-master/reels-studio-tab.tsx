@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import { ReelPublishPanel } from './reel-publish-panel'
 import { ReelAdPanel } from './reel-ad-panel'
+import { ReelAudioPanel, audioIsCleared, type ReelAudio } from './reel-audio-panel'
 
 interface Clip {
   id: string
@@ -690,6 +691,8 @@ export function ReelsStudioTab({
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(0)
   const [muteAudio, setMuteAudio] = useState(false)
+  // Replacement sound, only meaningful once the original is muted
+  const [audio, setAudio] = useState<ReelAudio | null>(null)
 
   // Reels safe zones: the platform's own UI covers the top 14% and bottom 35%
   // of a 9:16 frame, so anything burned in there is hidden in the feed
@@ -1098,6 +1101,10 @@ export function ReelsStudioTab({
     // with no overlays is still a valid render
     const wantsTransform = zoom > 0 || speed !== 1 || muteAudio
     if (!source || (!wantsTitle && !wantsPrice && !logoOn && !wantsTransform)) return
+    // A track of unknown origin is never burned in. This is the copyright gate:
+    // the button is already disabled, so reaching here means something slipped
+    // through, and silently dropping the audio is safer than publishing it.
+    const newAudio = muteAudio && audio && audioIsCleared(audio) ? audio : null
     setBusy('brand')
     setProgress(0)
     setError('')
@@ -1164,14 +1171,32 @@ export function ReelsStudioTab({
         last = 'sp'
       }
 
-      // Audio: muting drops the track entirely, and a speed change has to
-      // re-time it or the sound runs ahead of the picture. `0:a?` keeps all of
-      // this safe on clips that have no audio track at all.
-      const audioArgs = muteAudio
-        ? ['-an']
-        : speed !== 1
-          ? ['-map', '0:a?', '-af', `atempo=${speed}`, '-c:a', 'aac']
-          : ['-map', '0:a?', '-c:a', 'copy']
+      // Audio, in three cases:
+      //  - muted with a replacement: the new sound becomes the only track. It
+      //    is NOT re-timed by `speed`, because it was never in sync with the
+      //    footage to begin with. `apad` pads it with silence so a track
+      //    shorter than the clip cannot cut the video off via -shortest.
+      //  - muted with nothing: no audio at all.
+      //  - kept: a speed change has to re-time it or sound runs ahead of picture.
+      // `0:a?` keeps every branch safe on clips that have no audio track.
+      let audioArgs: string[]
+      if (muteAudio && newAudio) {
+        await ffmpeg.writeFile(newAudio.name, await fetchFile(newAudio.blob))
+        inputs.push('-i', newAudio.name)
+        const vol = Math.max(0, newAudio.volume) / 100
+        audioArgs = [
+          '-map', `${idx}:a`,
+          '-af', `volume=${vol.toFixed(2)},apad`,
+          '-c:a', 'aac', '-shortest',
+        ]
+        idx++
+      } else if (muteAudio) {
+        audioArgs = ['-an']
+      } else if (speed !== 1) {
+        audioArgs = ['-map', '0:a?', '-af', `atempo=${speed}`, '-c:a', 'aac']
+      } else {
+        audioArgs = ['-map', '0:a?', '-c:a', 'copy']
+      }
 
       // Mute-only renders touch no video filter at all, and ffmpeg rejects an
       // empty -filter_complex, so the graph is omitted entirely in that case
@@ -1422,18 +1447,31 @@ export function ReelsStudioTab({
             <Button
               size="sm"
               onClick={brandVideo}
-              disabled={
-                !ffmpegReady ||
-                busy !== null ||
-                !brandSource ||
-                (!(titleOn && titleText.trim()) && !(priceOn && priceText.trim()) && !logoOn)
-              }
-            >
+          disabled={
+            !ffmpegReady ||
+            busy !== null ||
+            !brandSource ||
+            // Picture and sound edits are valid work on their own, so they
+            // count towards having something to render
+            (!(titleOn && titleText.trim()) &&
+              !(priceOn && priceText.trim()) &&
+              !logoOn &&
+              !(zoom > 0 || speed !== 1 || muteAudio)) ||
+            // Never render a track whose origin is still unanswered
+            !audioIsCleared(audio)
+          }
+        >
               {busy === 'brand' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Stamp className="mr-1.5 h-3.5 w-3.5" />}
               {busy === 'brand' ? 'Branding\u2026' : preBrand ? 'Update branding' : 'Apply branding'}
             </Button>
           </div>
         </div>
+        {/* A disabled button with no reason given is the worst outcome here */}
+        {!audioIsCleared(audio) && (
+          <p className="text-xs text-amber-500" aria-live="polite">
+            Choose where your track came from below before rendering.
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           {preBrand
             ? 'Branding is editable: change anything below and hit Update branding to replace it, or remove it entirely.'
@@ -1469,56 +1507,74 @@ export function ReelsStudioTab({
           )}
         </div>
 
-        {/* Make it yours: edits to the footage itself. Overlays sit on top of
-            untouched frames and audio - these change the actual picture and
-            sound, which is what makes the post genuinely different work. */}
-        <div className="flex flex-col gap-2.5 rounded-md border bg-background/60 p-2.5">
-          <span className="text-xs font-semibold text-foreground">Make it yours</span>
-
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
-                Zoom in {zoom > 0 ? `${zoom}%` : 'off'}
-              </span>
-              <Slider min={0} max={20} step={1} value={[zoom]} onValueChange={(v) => setZoom(v[0])} aria-label="Zoom in" className="flex-1" />
-            </div>
+        {/* Make it yours: edits to the footage itself, split into picture and
+            sound. Overlays sit on top of untouched frames and audio - these
+            change the video itself, which is what makes it your own work. */}
+        <div className="flex flex-col gap-3 rounded-md border border-amber-500/25 bg-amber-500/[0.04] p-3">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-semibold text-foreground">Make it yours</span>
             <span className="text-[11px] leading-relaxed text-muted-foreground">
-              Crops a little closer to the product, like standing one step nearer. Trims the outer edge,
-              so keep it low if the product touches the sides.
+              Your logo and price sit on top of the video. These change the video itself, which is what
+              makes the post count as your own work instead of a copy.
             </span>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
-                {speed === 1 ? 'Speed: normal' : speed < 1 ? `Slower (${speed.toFixed(2)}x)` : `Faster (${speed.toFixed(2)}x)`}
-              </span>
-              <Slider min={0.8} max={1.25} step={0.05} value={[speed]} onValueChange={(v) => setSpeed(v[0])} aria-label="Playback speed" className="flex-1" />
+          {/* Picture */}
+          <div className="flex flex-col gap-2.5 rounded-md border border-border bg-background/40 p-2.5">
+            <div className="flex items-center gap-2">
+              <Film className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-xs font-semibold text-foreground">Picture</span>
             </div>
-            <span className="text-[11px] leading-relaxed text-muted-foreground">
-              Plays the clip a touch slower or faster. Anything up to about 1.1x is hard to notice.
-            </span>
+
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
+                  Zoom in {zoom > 0 ? `${zoom}%` : 'off'}
+                </span>
+                <Slider min={0} max={20} step={1} value={[zoom]} onValueChange={(v) => setZoom(v[0])} aria-label="Zoom in" className="flex-1" />
+              </div>
+              <span className="text-[11px] leading-relaxed text-muted-foreground">
+                Crops a little closer to the product, like standing one step nearer. Trims the outer edge,
+                so keep it low if the product touches the sides.
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
+                  {speed === 1 ? 'Speed: normal' : speed < 1 ? `Slower (${speed.toFixed(2)}x)` : `Faster (${speed.toFixed(2)}x)`}
+                </span>
+                <Slider min={0.8} max={1.25} step={0.05} value={[speed]} onValueChange={(v) => setSpeed(v[0])} aria-label="Playback speed" className="flex-1" />
+              </div>
+              <span className="text-[11px] leading-relaxed text-muted-foreground">
+                Plays the clip a touch slower or faster. Anything up to about 1.1x is hard to notice.
+              </span>
+            </div>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          {/* Sound. Muting is the strongest single change, and it opens the
+              choice of what goes in place of the original. */}
+          <div className="flex flex-col gap-2">
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
               <input
                 type="checkbox"
                 checked={muteAudio}
-                onChange={(e) => setMuteAudio(e.target.checked)}
-                className="h-3.5 w-3.5 accent-amber-500"
+                onChange={(e) => {
+                  setMuteAudio(e.target.checked)
+                  if (!e.target.checked) setAudio(null)
+                }}
+                className="mt-0.5 h-3.5 w-3.5 accent-amber-500"
               />
-              Mute the original audio
+              <span>
+                <span className="font-semibold text-foreground">Mute the original audio</span>
+                <span className="block text-[11px] leading-relaxed">
+                  The strongest change of the three, and it clears the way for your own sound.
+                </span>
+              </span>
             </label>
-            <span className="text-[11px] leading-relaxed text-muted-foreground">
-              The strongest one. Silence the original, then record your own voice over it when you post.
-            </span>
-          </div>
 
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Your logo and price sit on top of the video. These three change the video itself, which is
-            what makes the post count as your own work instead of a copy.
-          </p>
+            {muteAudio && <ReelAudioPanel audio={audio} onChange={setAudio} />}
+          </div>
         </div>
 
         {/* Safe zones: where the platform's UI will cover the video */}
