@@ -459,6 +459,65 @@ export function ReelsStudioTab({
     setLogoXY({ ...p.logo })
     setLayoutPreset(id)
   }, [])
+
+  // The banner placement is a saved default, not a per-session choice: it is
+  // stored server-side next to the brand logo, so it comes back after a reload,
+  // a full exit, or a sign-in on another machine. Until the saved value has
+  // loaded we must not write, or the empty starting layout would immediately
+  // overwrite whatever is on the server.
+  const [layoutLoaded, setLayoutLoaded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/company-settings')
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return
+        const saved = json?.reels_banner_layout
+        if (saved && typeof saved === 'object') {
+          // Restore the exact spots, not just the preset name, so a hand-placed
+          // "custom" layout returns where the user left it
+          if (saved.title) setTitlePos(saved.title)
+          if (saved.price) setPricePos(saved.price)
+          if (saved.logo) setLogoXY(saved.logo)
+          if (saved.preset) setLayoutPreset(saved.preset)
+          setLockLayout(saved.locked === true)
+        }
+      })
+      .catch(() => {
+        // Lookup failed - fall through to the built-in starting layout
+      })
+      .finally(() => {
+        if (!cancelled) setLayoutLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Save the placement whenever it settles. Debounced because dragging fires
+  // this on every pointer move, and skipped entirely until the initial load has
+  // finished so we never clobber the stored default with the starting one.
+  useEffect(() => {
+    if (!layoutLoaded) return
+    const t = setTimeout(() => {
+      fetch('/api/company-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reels_banner_layout: {
+            preset: layoutPreset,
+            locked: lockLayout,
+            title: titlePos,
+            price: pricePos,
+            logo: logoXY,
+          },
+        }),
+      }).catch(() => {
+        // Non-blocking: the layout still works this session if the save fails
+      })
+    }, 600)
+    return () => clearTimeout(t)
+  }, [layoutLoaded, layoutPreset, lockLayout, titlePos, pricePos, logoXY])
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
   const dragTarget = useRef<'title' | 'price' | 'logo' | 'logo-resize' | null>(null)
