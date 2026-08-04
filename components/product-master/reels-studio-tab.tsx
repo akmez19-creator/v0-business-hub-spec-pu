@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VideoSearchPanel } from '@/components/product-master/video-search-panel'
+import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -2036,6 +2037,21 @@ export function ReelsStudioTab({
       <VideoSearchPanel
         defaultQuery={productName}
         productImage={productImage}
+        onUseClip={(file) => addFiles([file], { source: 'search' })}
+        onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
+        onClipSettled={(id, ok) => {
+          if (ok) return setPending((p) => p.filter((x) => x.id !== id))
+          setPending((p) => p.map((x) => (x.id === id ? { ...x, failed: true } : x)))
+          setTimeout(() => setPending((p) => p.filter((x) => x.id !== id)), 5000)
+        }}
+      />
+
+      {/* ---- Marketplace listing videos ----
+          A second, independent source: seller videos attached to real product
+          listings. Fewer clips than the TikTok feed, but guaranteed to show
+          this exact product rather than something that resembles it. */}
+      <MarketplaceSearchPanel
+        defaultQuery={productName}
         onUseClip={(file) => addFiles([file], { source: 'search' })}
         onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
         onClipSettled={(id, ok) => {

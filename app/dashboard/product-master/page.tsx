@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import useSWR, { mutate } from 'swr'
-import { Clapperboard, Copy, GitMerge } from 'lucide-react'
+import { Clapperboard, Copy, GitMerge, Sparkles } from 'lucide-react'
 import { ProductsTab, type ToolRequest } from '@/components/product-master/products-tab'
 import { ReelsStudioTab } from '@/components/product-master/reels-studio-tab'
+import { PosterStudioTab } from '@/components/product-master/poster-studio-tab'
 import { CampaignCreatorTab } from '@/components/product-master/campaign-creator-tab'
 import { MergeCenter } from '@/components/product-master/merge-center'
 import { Badge } from '@/components/ui/badge'
@@ -111,6 +112,34 @@ export default function ProductMasterPage() {
                   // Creator pre-filled with the just-published post
                   setRequest((r) => (r ? { ...r, tool: 'campaigns', boost } : r))
                 }
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---- Poster Studio ---- */}
+      <Dialog open={request?.tool === 'poster'} onOpenChange={(o) => !o && close()}>
+        <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+          <DialogHeader className="border-b px-6 py-4">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-fuchsia-500/15">
+                <Sparkles className="h-4 w-4 text-fuchsia-400" />
+              </span>
+              Poster Studio
+              <span className="truncate font-normal text-muted-foreground">{productName}</span>
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Generate a promotional poster from a product photo using AI
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {request?.tool === 'poster' && (
+              <PosterStudioTab
+                productName={productName}
+                productImage={request.product.image ?? null}
+                productPrice={request.product.price ?? null}
+                productPromoPrice={request.product.promoPrice ?? null}
               />
             )}
           </div>

@@ -163,8 +163,11 @@ export async function POST(request: Request) {
 
 // GET ?src=<resolved cdn url>&filename=x.mp4 -> proxy-stream the file so the
 // browser can save it despite CDN CORS. Host-allowlisted to prevent abuse.
+// The marketplace CDNs are here because TMAPI listing photos and videos are
+// served from them - without these entries every marketplace thumbnail and clip
+// would be refused by our own proxy with a 403.
 const ALLOWED_HOSTS =
-  /(\.fbcdn\.net|\.tiktokcdn[^/]*\.com|tikwm\.com|\.googlevideo\.com|\.akamaized\.net|\.mm\.bing\.net|duckduckgo\.com)$/i
+  /(\.fbcdn\.net|\.tiktokcdn[^/]*\.com|tikwm\.com|\.googlevideo\.com|\.akamaized\.net|\.mm\.bing\.net|duckduckgo\.com|\.alicdn\.com|\.aliexpress-media\.com|\.susercontent\.com|\.shopeemobile\.com|\.shopee\.[a-z.]+|\.media-amazon\.com|\.ssl-images-amazon\.com|\.lazcdn\.com|\.slatic\.net|\.dhresource\.com|\.byteimg\.com|\.tbcdn\.cn|\.taobaocdn\.com)$/i
 
 export async function GET(request: Request) {
   try {

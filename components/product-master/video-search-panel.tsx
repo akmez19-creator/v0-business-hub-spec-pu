@@ -434,7 +434,10 @@ export function VideoSearchPanel({
         {(
           [
             { key: 'all', label: 'All videos' },
-            { key: 'temu', label: 'Temu videos' },
+            // Named "mentions" deliberately: TMAPI has no Temu endpoint, and
+            // this is a TikTok keyword search, not real Temu listing data.
+            // The old "Temu videos" label implied a data source that does not exist.
+            { key: 'temu', label: 'Temu mentions' },
           ] as const
         ).map((s) => (
           <button
@@ -461,7 +464,7 @@ export function VideoSearchPanel({
         ))}
         {source === 'temu' && (
           <span className="text-xs text-muted-foreground">
-            Temu listing demos and hauls of this product
+            TikTok clips that mention Temu {'\u2014'} for real listings use Marketplace listings below
           </span>
         )}
       </div>

@@ -19,6 +19,7 @@ import {
   Megaphone,
   Search,
   ShoppingCart,
+  Sparkles,
   Tag,
   Users,
 } from 'lucide-react'
@@ -29,7 +30,7 @@ import { ManagePosts } from '@/components/product-master/manage-posts'
 // promo pricing, logo, publishing and the ad handoff. 'campaigns' is still
 // reachable, but only as the "Boost this post" handoff out of Studio.
 export interface ToolRequest {
-  tool: 'reels' | 'campaigns'
+  tool: 'reels' | 'campaigns' | 'poster'
   product: {
     id: string
     name: string
@@ -407,6 +408,36 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       >
                         <Clapperboard className="h-3.5 w-3.5" />
                         Studio
+                      </Button>
+                    )}
+                    {/* Poster sits beside Studio rather than inside it: video
+                        and still-image promos are separate jobs, and burying
+                        one inside the other would hide it. */}
+                    {onOpenTool && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 shrink-0 gap-1.5 px-2 text-[11px] font-medium text-fuchsia-400 hover:bg-fuchsia-500/10 hover:text-fuchsia-300"
+                        title={`Generate a promo poster for ${p.name}`}
+                        aria-label={`Generate a promo poster for ${p.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onOpenTool({
+                            tool: 'poster',
+                            product: {
+                              id: p.id,
+                              name: p.name,
+                              image: p.image_url,
+                              price: p.price,
+                              promoPrice: p.promo_price,
+                              isB1g1: p.is_b1g1,
+                              bundlePrices: p.bundle_prices,
+                            },
+                          })
+                        }}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        Poster
                       </Button>
                     )}
                   </span>
