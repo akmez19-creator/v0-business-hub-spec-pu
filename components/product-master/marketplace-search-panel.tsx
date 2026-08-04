@@ -15,6 +15,7 @@ import {
   Sparkles,
   Upload,
   Video,
+  X,
 } from 'lucide-react'
 
 export type MarketplaceHit = {
@@ -57,6 +58,13 @@ const compact = (n: number) => {
  */
 const DEFAULT_PLATFORMS = ['alibaba']
 
+/**
+ * Reference photos allowed per search. Mirrors the server cap. Measured
+ * overlap between photos of the same product is high, so a fourth photo costs
+ * a full extra search for barely any new listings.
+ */
+const MAX_REFS = 3
+
 export function MarketplaceSearchPanel({
   defaultQuery = '',
   productImage = null,
@@ -85,7 +93,16 @@ export function MarketplaceSearchPanel({
   // nothing like ours, which is the usual case on 1688 where titles are
   // Chinese. Keyword stays available for when there is no photo.
   const [mode, setMode] = useState<'keyword' | 'image'>('keyword')
-  const [searchImage, setSearchImage] = useState<string | null>(productImage)
+  /**
+   * Reference photos to search from. Several are allowed because one photo of
+   * a product often pulls the wrong variant - searching the blue coil and the
+   * packaging shot together lands on the right listing far more often.
+   */
+  const [refImages, setRefImages] = useState<string[]>(productImage ? [productImage] : [])
+  /** Photos of the product lifted from the last set of listings */
+  const [candidates, setCandidates] = useState<string[]>([])
+  /** True once results were actually checked for video, vs never looked at */
+  const [videoChecked, setVideoChecked] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -120,44 +137,58 @@ export function MarketplaceSearchPanel({
   // default whenever we have one - it consistently returns the actual product
   // where an English keyword returns whatever loosely matches the words.
   useEffect(() => {
-    setSearchImage(productImage)
+    setRefImages(productImage ? [productImage] : [])
+    setCandidates([])
     setMode(productImage ? 'image' : 'keyword')
   }, [productImage])
 
-  const runSearch = useCallback(async () => {
-    const term = query.trim()
-    const byImage = mode === 'image' && Boolean(searchImage)
-    if ((!byImage && term.length < 2) || !selected.length) return
-    setLoading(true)
-    setError('')
-    setResults([])
-    setPlaying(null)
-    try {
-      const res = await fetch('/api/product-master/marketplace-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: term,
-          platforms: selected,
-          page: 1,
-          videoOnly,
-          imageUrl: byImage ? searchImage : undefined,
-        }),
-      })
-      const json = await res.json()
-      if (!json.success) {
+  /**
+   * `overrides` lets a candidate photo be searched in the same click that
+   * selects it, instead of waiting a render for state to settle.
+   */
+  const runSearch = useCallback(
+    async (overrides?: { images?: string[]; videoOnly?: boolean }) => {
+      const term = query.trim()
+      const images = overrides?.images ?? refImages
+      const wantVideo = overrides?.videoOnly ?? videoOnly
+      const byImage = mode === 'image' && images.length > 0
+      if ((!byImage && term.length < 2) || !selected.length) return
+      setLoading(true)
+      setError('')
+      setResults([])
+      setPlaying(null)
+      try {
+        const res = await fetch('/api/product-master/marketplace-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: term,
+            platforms: selected,
+            page: 1,
+            videoOnly: wantVideo,
+            imageUrls: byImage ? images : undefined,
+          }),
+        })
+        const json = await res.json()
+        if (!json.success) {
+          setPerPlatform(json.platforms || [])
+          throw new Error(json.error || 'Search failed')
+        }
+        setResults(json.results || [])
         setPerPlatform(json.platforms || [])
-        throw new Error(json.error || 'Search failed')
+        setVideoChecked(Boolean(json.videoChecked))
+        // Only refresh the proposals when the server found some, so an empty
+        // search does not wipe the strip the user is picking from
+        if (json.candidateImages?.length) setCandidates(json.candidateImages)
+        setSearched(true)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Search failed')
+      } finally {
+        setLoading(false)
       }
-      setResults(json.results || [])
-      setPerPlatform(json.platforms || [])
-      setSearched(true)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed')
-    } finally {
-      setLoading(false)
-    }
-  }, [query, selected, videoOnly, mode, searchImage])
+    },
+    [query, selected, videoOnly, mode, refImages],
+  )
 
   /**
    * Pull a listing video into the feed. Runs through a promise chain so ten
@@ -204,7 +235,7 @@ export function MarketplaceSearchPanel({
       const res = await fetch('/api/upload', { method: 'POST', body: form })
       const json = await res.json()
       if (!json?.url) throw new Error(json?.error || 'Upload failed')
-      setSearchImage(json.url)
+      setRefImages([json.url])
       setMode('image')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed')
@@ -215,6 +246,14 @@ export function MarketplaceSearchPanel({
 
   const toggle = (id: string) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
+
+  /** Add or drop a reference photo, holding the cap at MAX_REFS */
+  const toggleRef = (src: string) =>
+    setRefImages((prev) => {
+      if (prev.includes(src)) return prev.filter((p) => p !== src)
+      // Oldest falls off rather than blocking the click, which would look broken
+      return [...prev, src].slice(-MAX_REFS)
+    })
 
   const videoCount = results.filter((r) => r.video).length
   const failedPlatforms = perPlatform.filter((p) => p.error)
@@ -305,57 +344,129 @@ export function MarketplaceSearchPanel({
       </div>
 
       {mode === 'image' ? (
-        <div className="flex items-center gap-3">
-          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-black">
-            {searchImage ? (
-              <img
-                src={searchImage || '/placeholder.svg'}
-                alt="Photo being searched"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <ImageIcon className="h-5 w-5 text-muted-foreground" />
-              </div>
-            )}
-          </div>
-          <div className="flex flex-1 flex-col gap-2">
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              {searchImage
-                ? 'Finds the same physical product, even when the seller\u2019s title is in Chinese.'
-                : 'No product photo yet \u2014 upload one to search by image.'}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">
-                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                {searchImage ? 'Use another photo' : 'Upload a photo'}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  disabled={uploading}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    if (f) uploadSearchImage(f)
-                    e.target.value = ''
-                  }}
-                />
-              </label>
-              {productImage && searchImage !== productImage && (
-                <button
-                  type="button"
-                  onClick={() => setSearchImage(productImage)}
-                  className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Back to product photo
-                </button>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            {/* Selected reference photos. Showing them as a row rather than a
+                single thumbnail makes it obvious more than one can be used. */}
+            <div className="flex shrink-0 gap-1.5">
+              {refImages.length ? (
+                refImages.map((src) => (
+                  <div key={src} className="relative h-20 w-20 overflow-hidden rounded-lg border border-amber-500 bg-black">
+                    <img src={src || '/placeholder.svg'} alt="Reference photo" className="h-full w-full object-cover" />
+                    {refImages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => toggleRef(src)}
+                        aria-label="Remove this reference photo"
+                        className="absolute right-0.5 top-0.5 rounded-full bg-black/80 p-0.5 text-white hover:bg-black"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-border bg-black">
+                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                </div>
               )}
             </div>
+
+            <div className="flex flex-1 flex-col gap-2">
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                {refImages.length
+                  ? `Searching from ${refImages.length} ${refImages.length === 1 ? 'photo' : 'photos'}. Finds the same physical product, even when the seller\u2019s title is in Chinese.`
+                  : 'No product photo yet \u2014 upload one to search by image.'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  {refImages.length ? 'Use another photo' : 'Upload a photo'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    disabled={uploading}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) uploadSearchImage(f)
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                {productImage && (refImages.length !== 1 || refImages[0] !== productImage) && (
+                  <button
+                    type="button"
+                    onClick={() => setRefImages([productImage])}
+                    className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Back to product photo
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <Button onClick={() => runSearch()} disabled={loading || !refImages.length || !selected.length}>
+              {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Camera className="mr-1.5 h-3.5 w-3.5" />}
+              Search
+            </Button>
           </div>
-          <Button onClick={runSearch} disabled={loading || !searchImage || !selected.length}>
-            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Camera className="mr-1.5 h-3.5 w-3.5" />}
-            Search
-          </Button>
+
+          {/* The proposals. Listing photos are already on Alibaba's CDN, so
+              re-searching one skips the upload step a Supabase photo needs -
+              which is why refining is cheaper than the first search. */}
+          {candidates.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-background/60 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold">Wrong product? Pick a closer photo</p>
+                <span className="text-[10px] text-muted-foreground">
+                  Tap up to {MAX_REFS} {'\u2014'} then Find videos
+                </span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {candidates.map((src) => {
+                  const on = refImages.includes(src)
+                  return (
+                    <button
+                      key={src}
+                      type="button"
+                      onClick={() => toggleRef(src)}
+                      aria-pressed={on}
+                      title={on ? 'Remove from reference photos' : 'Search from this photo'}
+                      className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-md border-2 transition-colors ${
+                        on ? 'border-amber-500' : 'border-transparent hover:border-border'
+                      }`}
+                    >
+                      <img
+                        src={inlineUrl(src) || '/placeholder.svg'}
+                        alt="Suggested reference photo"
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                      {on && (
+                        <span className="absolute right-0.5 top-0.5 rounded-full bg-amber-500 p-0.5">
+                          <Check className="h-2.5 w-2.5 text-black" />
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-fit"
+                disabled={loading || !refImages.length || !videoCapable}
+                onClick={() => {
+                  setVideoOnly(true)
+                  runSearch({ videoOnly: true })
+                }}
+              >
+                {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Video className="mr-1.5 h-3.5 w-3.5" />}
+                Find videos for these photos
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex gap-2">
@@ -372,7 +483,7 @@ export function MarketplaceSearchPanel({
             className="flex-1"
             aria-label="Search marketplace listings"
           />
-          <Button onClick={runSearch} disabled={loading || query.trim().length < 2 || !selected.length}>
+          <Button onClick={() => runSearch()} disabled={loading || query.trim().length < 2 || !selected.length}>
             {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Search className="mr-1.5 h-3.5 w-3.5" />}
             Search
           </Button>
@@ -420,9 +531,30 @@ export function MarketplaceSearchPanel({
         </p>
       )}
 
+      {/* "0 with video" used to show even when video was never looked up,
+          which read as "this product has no videos" when nothing had been
+          checked at all. Only claim a count once it was actually measured. */}
       {results.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          {results.length} {results.length === 1 ? 'listing' : 'listings'} {'\u2014'} {videoCount} with video
+          {results.length} {results.length === 1 ? 'listing' : 'listings'}
+          {videoChecked ? (
+            <> {'\u2014'} {videoCount} with video</>
+          ) : (
+            <>
+              {' \u2014 '}
+              <button
+                type="button"
+                onClick={() => {
+                  setVideoOnly(true)
+                  runSearch({ videoOnly: true })
+                }}
+                disabled={!videoCapable || loading}
+                className="underline underline-offset-2 hover:text-foreground disabled:no-underline disabled:opacity-50"
+              >
+                check which have video
+              </button>
+            </>
+          )}
         </p>
       )}
 

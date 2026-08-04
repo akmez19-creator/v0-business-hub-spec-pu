@@ -210,6 +210,23 @@ export function extractList(json: unknown): Raw[] {
  * Returns null when the payload looks fine.
  */
 /**
+ * Is this image already hosted by Alibaba?
+ *
+ * Worth checking because 1688's image search accepts an alicdn URL directly -
+ * verified returning a full 20 results with no conversion. Listing photos are
+ * all alicdn-hosted, so re-searching from one costs a single call instead of
+ * the convert + search pair our own Supabase photos need.
+ */
+export function isAlibabaHosted(imageUrl: string): boolean {
+  try {
+    const host = new URL(imageUrl).hostname
+    return /(^|\.)(alicdn\.com|alibaba\.com|1688\.com)$/i.test(host)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Turn any image URL into one 1688's reverse-image search will accept.
  *
  * The image search endpoint only recognises Alibaba-hosted images, so passing

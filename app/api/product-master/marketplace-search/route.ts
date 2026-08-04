@@ -8,6 +8,7 @@ import {
   attachVideos,
   convertImageUrl,
   extractList,
+  isAlibabaHosted,
   normalizeHit,
   type MarketplaceHit,
   type MarketplaceId,
@@ -15,6 +16,15 @@ import {
 } from '@/lib/product-master/tmapi'
 
 export const maxDuration = 60
+
+/**
+ * Ceiling on reference photos per search.
+ *
+ * Each one is its own paid search, and measured overlap between photos of the
+ * same product is high (15-20 of 20 results repeat), so a fourth photo buys
+ * almost no new listings for a full extra call.
+ */
+const MAX_REFERENCE_IMAGES = 3
 
 /** Per-platform outcome, so the UI can say which source failed and why. */
 type PlatformResult = {
@@ -108,8 +118,16 @@ export async function POST(request: Request) {
     const query = String(body?.query || '').trim()
     const page = Math.max(1, Number(body?.page || 1) || 1)
     const videoOnly = Boolean(body?.videoOnly)
-    const imageUrl = String(body?.imageUrl || '').trim()
-    const byImage = Boolean(imageUrl)
+    // imageUrls (plural) is the "propose several photos" flow: each selected
+    // reference photo is searched and the results merged. imageUrl stays
+    // supported so the single-photo path keeps working unchanged.
+    const rawImages: string[] = Array.isArray(body?.imageUrls)
+      ? (body.imageUrls as unknown[]).map((u) => String(u || '').trim()).filter(Boolean)
+      : []
+    const single = String(body?.imageUrl || '').trim()
+    // Capped because every reference photo is its own paid search
+    const imageUrls = [...new Set(rawImages.length ? rawImages : single ? [single] : [])].slice(0, MAX_REFERENCE_IMAGES)
+    const byImage = imageUrls.length > 0
 
     if (!byImage && query.length < 2) {
       return NextResponse.json({ success: false, error: 'Type at least 2 characters' }, { status: 400 })
@@ -124,9 +142,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Pick at least one marketplace' }, { status: 400 })
     }
 
-    // Image search needs an Alibaba-hosted image. Convert once up front and
-    // reuse it, rather than paying for one upload per selected marketplace.
-    let imageRef: string | null = null
+    // Image search needs an Alibaba-hosted image. Resolve every reference photo
+    // up front so a conversion is never repeated per marketplace.
+    let imageRefs: string[] = []
     if (byImage) {
       const capable = selected.filter((p) => p.imagePath && p.convertPath)
       if (!capable.length) {
@@ -135,21 +153,55 @@ export async function POST(request: Request) {
           { status: 400 },
         )
       }
-      const converted = await convertImageUrl(capable[0], imageUrl, token)
-      if (!converted.url) {
+
+      const resolved = await Promise.all(
+        imageUrls.map(async (src) => {
+          // A listing photo is already on alicdn and the search takes it as-is,
+          // so skipping the upload halves the cost of every refine search.
+          if (isAlibabaHosted(src)) return { url: src, error: null }
+          return convertImageUrl(capable[0], src, token)
+        }),
+      )
+
+      imageRefs = resolved.map((r) => r.url).filter((u): u is string => Boolean(u))
+      if (!imageRefs.length) {
         return NextResponse.json(
-          { success: false, error: converted.error || 'Could not prepare that image' },
+          { success: false, error: resolved[0]?.error || 'Could not prepare that image' },
           { status: 502 },
         )
       }
-      imageRef = converted.url
     }
 
     // Fan out in parallel: these are independent vendors, so one being slow or
-    // down should cost us nothing on the others.
-    const settled = await Promise.all(
-      selected.map((p) => searchPlatform(p, query, page, token, imageRef)),
+    // down should cost us nothing on the others. With several reference photos
+    // every (marketplace x photo) pair is one search, and they are independent
+    // in exactly the same way.
+    const jobs = byImage
+      ? selected.flatMap((p) => imageRefs.map((ref) => ({ platform: p, ref })))
+      : selected.map((p) => ({ platform: p, ref: null as string | null }))
+
+    const jobResults = await Promise.all(
+      jobs.map((jb) => searchPlatform(jb.platform, query, page, token, jb.ref)),
     )
+
+    // Collapse the per-photo jobs back down to one row per marketplace, so the
+    // status line still reads "1688: 24" rather than the same source repeated
+    const settled = selected.map((p) => {
+      const mine = jobs.map((jb, i) => ({ jb, r: jobResults[i] })).filter((x) => x.jb.platform.id === p.id)
+      const hits: MarketplaceHit[] = []
+      const seenIds = new Set<string>()
+      for (const { r } of mine) {
+        for (const hit of r.hits) {
+          if (seenIds.has(hit.id)) continue
+          seenIds.add(hit.id)
+          hits.push(hit)
+        }
+      }
+      // Only a total failure is worth reporting - one photo of several finding
+      // nothing is normal and must not look like an outage
+      const error = mine.every((x) => x.r.error) ? mine[0]?.r.error ?? null : null
+      return { hits, error }
+    })
 
     const platformResults: PlatformResult[] = selected.map((p, i) => ({
       id: p.id,
@@ -191,11 +243,25 @@ export async function POST(request: Request) {
       )
     }
 
+    // Photos of the same product taken from the listings themselves. These are
+    // the "several images" offered back to the user to refine with: they cost
+    // nothing extra here, and because they are alicdn-hosted, searching one
+    // later skips the conversion call entirely.
+    const usedRefs = new Set(imageUrls)
+    const candidateImages = [
+      ...new Set(enriched.flatMap((h) => (h.image ? [h.image] : [])).filter((u) => !usedRefs.has(u))),
+    ].slice(0, 12)
+
     return NextResponse.json({
       success: true,
       results,
       platforms: platformResults,
       withVideo,
+      // Distinguishes "we checked and found none" from "we never looked",
+      // which is what made the old "0 with video" line misleading
+      videoChecked: videoOnly,
+      candidateImages,
+      referenceImages: imageUrls,
       page,
       // Any platform filling its page suggests there is more behind it
       hasMore: settled.some((s) => s.hits.length >= 10),
