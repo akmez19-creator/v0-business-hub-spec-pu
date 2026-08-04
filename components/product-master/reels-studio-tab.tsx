@@ -1508,6 +1508,30 @@ export function ReelsStudioTab({
       const zip = new JSZip()
       const dir = zip.folder(folder)!
 
+      // Pick every look up front rather than shuffling as we go: this whole
+      // loop runs inside one render, so state set mid-loop would not be visible
+      // to later iterations and every clip would come out identically styled.
+      const pickDistinct = (exclude: string[]) => {
+        const pool = TITLE_STYLES.filter((s) => !exclude.includes(s.id))
+        return (pool.length ? pool : TITLE_STYLES)[Math.floor(Math.random() * (pool.length || TITLE_STYLES.length))]
+      }
+      // Titles already spent in this batch, so four clips give four different
+      // looks rather than four independent rolls that can land on the same one.
+      // Resets once every style has been used, for batches longer than the list.
+      let spent: string[] = []
+      const stylePlan = list.map((_, i) => {
+        // The first clip keeps exactly what is on screen, so the batch matches
+        // the preview the user just approved
+        if (i === 0 || !autoRestyle || !hasBranding) {
+          spent = [activeStyle.id]
+          return { title: activeStyle, price: activePriceStyle }
+        }
+        if (spent.length >= TITLE_STYLES.length) spent = []
+        const title = pickDistinct(spent)
+        spent.push(title.id)
+        return { title, price: pickDistinct([title.id]) }
+      })
+
       // One at a time: ffmpeg.wasm is a single instance here, so renders cannot
       // overlap. A clip that fails is collected and reported at the end rather
       // than throwing away the clips that already rendered.
@@ -1515,7 +1539,7 @@ export function ReelsStudioTab({
         const c = list[i]
         setBatch({ done: i, total: list.length })
         try {
-          const blob = mustRender(c) ? await renderBrandedBlob(c.file) : c.file
+          const blob = mustRender(c) ? await renderBrandedBlob(c.file, stylePlan[i]) : c.file
           const stem = safeName(c.name.replace(/^(branded-|cut-)+/, '').replace(/\.[^.]+$/, ''))
           // Numbered by feed order so the sequence survives the alphabetical
           // sort every OS file browser applies
@@ -1524,9 +1548,6 @@ export function ReelsStudioTab({
         } catch {
           failed.push(c.name)
         }
-        // Roll a new look between posts, so a four-clip batch comes out as four
-        // visually distinct posts rather than four copies of one design
-        if (autoRestyle && hasBranding && i < list.length - 1) shuffleStyles()
       }
 
       if (added === 0) throw new Error('Every clip failed to render')
@@ -1724,9 +1745,16 @@ export function ReelsStudioTab({
 
   // Burn version of the promo tag: the same tight canvas placed onto a
   // transparent full-frame canvas at the dragged (clamped) position.
-  const renderPromoTagPng = (vw: number, vh: number, pos: { x: number; y: number }): Promise<Uint8Array> =>
+  const renderPromoTagPng = (
+    vw: number,
+    vh: number,
+    pos: { x: number; y: number },
+    // Same reason as renderBrandedBlob: the batch varies this per clip and
+    // cannot rely on state that only updates between renders
+    st: (typeof TITLE_STYLES)[number] = activePriceStyle,
+  ): Promise<Uint8Array> =>
     new Promise((resolve, reject) => {
-      const tag = drawPromoTag(vw, priceOld, priceNew, promoLayout, activePriceStyle, priceSize, activeOffer)
+      const tag = drawPromoTag(vw, priceOld, priceNew, promoLayout, st, priceSize, activeOffer)
       if (!tag) return reject(new Error('no tag'))
       const frame = document.createElement('canvas')
       frame.width = vw
@@ -1784,7 +1812,21 @@ export function ReelsStudioTab({
   // Burn the current branding onto any source and hand back the mp4. Writes no
   // state, so the Apply button and the per-clip download go through one graph
   // instead of two that can drift apart.
-  const renderBrandedBlob = async (data: Blob | File): Promise<Blob> => {
+  /**
+   * `styles` overrides the title/price look for this one render.
+   *
+   * The batch download needs a different style per clip, but it renders them in
+   * a loop inside a single call - and `activeStyle` is derived from state at
+   * render time, so calling shuffleStyles() mid-loop would not change it and
+   * every clip would come out identical. Passing the pair in explicitly is what
+   * actually makes each post look different.
+   */
+  const renderBrandedBlob = async (
+    data: Blob | File,
+    styles?: { title: (typeof TITLE_STYLES)[number]; price: (typeof TITLE_STYLES)[number] },
+  ): Promise<Blob> => {
+    const styleForTitle = styles?.title ?? activeStyle
+    const styleForPrice = styles?.price ?? activePriceStyle
     const ffmpeg = ffmpegRef.current
     // A track of unknown origin is never burned in. This is the copyright gate:
     // the button is already disabled, so reaching here means something slipped
@@ -1836,14 +1878,17 @@ export function ReelsStudioTab({
       }
 
       if (wantsTitle) {
-        await ffmpeg.writeFile('title.png', await renderBannerPng(out.w, out.h, titleText, activeStyle, titleSize, titlePos))
+        await ffmpeg.writeFile(
+          'title.png',
+          await renderBannerPng(out.w, out.h, titleText, styleForTitle, titleSize, titlePos),
+        )
         inputs.push('-i', 'title.png')
         chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
         last = `v${idx}`
         idx++
       }
       if (wantsPrice) {
-        await ffmpeg.writeFile('price.png', await renderPromoTagPng(out.w, out.h, pricePos))
+        await ffmpeg.writeFile('price.png', await renderPromoTagPng(out.w, out.h, pricePos, styleForPrice))
         inputs.push('-i', 'price.png')
         chains.push(`[${last}][${idx}:v]overlay=0:0[v${idx}]`)
         last = `v${idx}`
