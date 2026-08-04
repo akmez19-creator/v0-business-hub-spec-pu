@@ -2,9 +2,8 @@
 
 import { useState } from 'react'
 import useSWR, { mutate } from 'swr'
-import { Clapperboard, Copy, Frame, GitMerge, Sparkles } from 'lucide-react'
+import { Clapperboard, Copy, GitMerge } from 'lucide-react'
 import { ProductsTab, type ToolRequest } from '@/components/product-master/products-tab'
-import { AiPostsTab } from '@/components/product-master/ai-posts-tab'
 import { ReelsStudioTab } from '@/components/product-master/reels-studio-tab'
 import { CampaignCreatorTab } from '@/components/product-master/campaign-creator-tab'
 import { MergeCenter } from '@/components/product-master/merge-center'
@@ -20,9 +19,11 @@ import {
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
-// Product Master: the inventory + purchase-order table IS the page, and
-// every product row carries its own tool buttons (AI Post, Reels, Frame,
-// Campaign). Clicking one pops the tool up pre-loaded with that product.
+// Product Master: the inventory + purchase-order table IS the page, and every
+// product row has ONE tool button - Studio - which opens pre-loaded with that
+// product's name, image and pricing. Studio covers what used to be four
+// separate popups (AI copy, reels, frames, campaigns); Campaign Creator still
+// exists but is reached as the "Boost this post" handoff out of Studio.
 // The AI Merge Center reconciles differing product names from POs and
 // deliveries into the canonical inventory, with user validation.
 export default function ProductMasterPage() {
@@ -80,26 +81,6 @@ export default function ProductMasterPage() {
       </Dialog>
 
       {/* ---- Tool popups, pre-loaded with the clicked product ---- */}
-      <Dialog open={request?.tool === 'ai-posts'} onOpenChange={(o) => !o && close()}>
-        <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-          <DialogHeader className="border-b px-6 py-4">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15">
-                <Sparkles className="h-4 w-4 text-amber-500" />
-              </span>
-              AI Post
-              <span className="truncate font-normal text-muted-foreground">{productName}</span>
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              Generate ad copy, captions and descriptions for this product
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            {request?.tool === 'ai-posts' && <AiPostsTab initialProductId={request.product.id} />}
-          </div>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={request?.tool === 'reels'} onOpenChange={(o) => !o && close()}>
         <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="border-b px-6 py-4">
@@ -120,6 +101,8 @@ export default function ProductMasterPage() {
               <ReelsStudioTab
                 productName={productName}
                 productImage={request.product.image ?? null}
+                productPrice={request.product.price ?? null}
+                productPromoPrice={request.product.promoPrice ?? null}
                 onBoostPost={(boost) =>
                   // Seamless handoff: swap this dialog for the Campaign
                   // Creator pre-filled with the just-published post
@@ -131,25 +114,8 @@ export default function ProductMasterPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={request?.tool === 'frames'} onOpenChange={(o) => !o && close()}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Frame className="h-5 w-5" /> Frame Input {'\u2014'} {productName}
-            </DialogTitle>
-            <DialogDescription>
-              Feed a structured frame template (hook, scenes, captions, CTA) and generate
-              ready-to-post reels automatically. This workflow is coming soon.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-center py-4">
-            <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500">
-              Coming soon
-            </Badge>
-          </div>
-        </DialogContent>
-      </Dialog>
-
+      {/* Campaign Creator is no longer a row tool - it opens as the
+          "Boost this post" handoff out of Studio */}
       <Dialog open={request?.tool === 'campaigns'} onOpenChange={(o) => !o && close()}>
         <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
           <DialogHeader className="border-b px-6 py-4">

@@ -24,7 +24,12 @@ export async function GET() {
 
     const [{ data: products }, { data: aliases }, { data: pos }, { data: links }, { data: cache }, { data: deliveries }, { data: postRows }] =
       await Promise.all([
-        admin.from('products').select('id, name, sku, category, price, quantity, image_url, is_active, sold_out').order('name'),
+        // promo_price rides along so Reels Studio can prefill the "was / now"
+        // tag straight from Product Master
+        admin
+          .from('products')
+          .select('id, name, sku, category, price, promo_price, quantity, image_url, is_active, sold_out')
+          .order('name'),
         admin.from('product_aliases').select('alias_name, product_id'),
         admin
           .from('purchase_orders')
@@ -128,7 +133,9 @@ export async function GET() {
   }
 }
 
-// PATCH: manually toggle a product's sold-out flag (user-initiated only)
+// PATCH: user-initiated edits to a single product. Handles the sold-out flag
+// and the promo price; only the keys actually present in the body are written,
+// so sending one never clears the other.
 export async function PATCH(request: Request) {
   try {
     const supabase = await createClient()
@@ -139,19 +146,41 @@ export async function PATCH(request: Request) {
 
     const body = await request.json()
     const productId: string = String(body?.productId || '')
-    const soldOut: boolean = body?.soldOut === true
 
     if (!productId) {
       return NextResponse.json({ success: false, error: 'productId is required' }, { status: 400 })
     }
 
+    const patch: Record<string, unknown> = {}
+
+    if ('soldOut' in body) patch.sold_out = body.soldOut === true
+
+    if ('promoPrice' in body) {
+      // Empty string / null clears the promo; anything else must be a real,
+      // non-negative number or we reject rather than writing NaN
+      const raw = body.promoPrice
+      if (raw === null || raw === '') {
+        patch.promo_price = null
+      } else {
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n < 0) {
+          return NextResponse.json({ success: false, error: 'promoPrice must be a positive number' }, { status: 400 })
+        }
+        patch.promo_price = n
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ success: false, error: 'Nothing to update' }, { status: 400 })
+    }
+
     const admin = createAdminClient()
-    const { error } = await admin.from('products').update({ sold_out: soldOut }).eq('id', productId)
+    const { error } = await admin.from('products').update(patch).eq('id', productId)
     if (error) throw error
 
-    return NextResponse.json({ success: true, productId, soldOut })
+    return NextResponse.json({ success: true, productId, ...patch })
   } catch (error) {
-    console.error('sold-out toggle error:', error)
-    return NextResponse.json({ success: false, error: 'Failed to update sold-out flag' }, { status: 500 })
+    console.error('product patch error:', error)
+    return NextResponse.json({ success: false, error: 'Failed to update product' }, { status: 500 })
   }
 }

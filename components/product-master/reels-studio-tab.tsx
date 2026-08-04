@@ -75,6 +75,34 @@ const PROMO_LAYOUTS = [
 ] as const
 type PromoLayoutId = (typeof PROMO_LAYOUTS)[number]['id']
 
+// Logo shipped with the app, used until a page has one saved
+const DEFAULT_LOGO = '/images/reels-brand-logo.png'
+// Shared logo row: covers pages that have never had their own logo set
+const DEFAULT_PAGE_KEY = '__default__'
+
+// Prices are Postgres `numeric`. supabase-js hands them over as real numbers,
+// but raw SQL clients serialize the same column as a string ("475.00"), so
+// coerce rather than trusting typeof - a silent string here would skip every
+// prefill without throwing anything.
+function toNum(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+// Product Master stores prices as plain numerics; the tag wants them the way
+// a customer reads them. Drops trailing ".00" so "Rs 999" never becomes
+// "Rs 999.00" on screen.
+function fmtRs(v: number | string | null | undefined): string {
+  const n = toNum(v)
+  if (n === null) return ''
+  const rounded = Math.round(n * 100) / 100
+  const body = Number.isInteger(rounded)
+    ? rounded.toLocaleString('en-IN')
+    : rounded.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `Rs ${body}`
+}
+
 // Reels Studio: everything runs IN the browser via ffmpeg.wasm - cut a scene
 // out of a clip (trim), brand it (product-name title + logo watermark), or
 // merge the strip into one reel. No server cost, files never leave the
@@ -82,11 +110,18 @@ type PromoLayoutId = (typeof PROMO_LAYOUTS)[number]['id']
 export function ReelsStudioTab({
   productName = '',
   productImage = null,
+  productPrice = null,
+  productPromoPrice = null,
   onBoostPost,
 }: {
   productName?: string
   /** Inventory photo for this product - powers the lens video search */
   productImage?: string | null
+  /** Product Master list price - becomes the struck-out "was" price.
+   *  Postgres numeric, so it can arrive as a string. */
+  productPrice?: number | string | null
+  /** Product Master promo price - becomes the highlighted "now" price */
+  productPromoPrice?: number | string | null
   /** Called when the user wants to boost the post they just published */
   onBoostPost?: (boost: { pageId: string; postId: string }) => void
 }) {
@@ -115,30 +150,61 @@ export function ReelsStudioTab({
   const [titleText, setTitleText] = useState(productName)
   const [titleStyle, setTitleStyle] = useState<TitleStyleId>('sunny')
   const [titleSize, setTitleSize] = useState(8.5) // font size as % of video width
-  const [priceOn, setPriceOn] = useState(false)
-  const [priceOld, setPriceOld] = useState('')
-  const [priceNew, setPriceNew] = useState('')
-  const [promoLayout, setPromoLayout] = useState<PromoLayoutId>('wasnow')
+  // Prices come straight from Product Master: the list price is the struck-out
+  // "was", the promo price is the "now". A product with a promo set turns the
+  // tag on by default (that is the whole point of setting one); a product
+  // without one just prefills its list price and leaves the tag off.
+  const listPrice = toNum(productPrice)
+  const promoPrice = toNum(productPromoPrice)
+  const hasPromo = promoPrice !== null && promoPrice > 0
+  const hasList = listPrice !== null && listPrice > 0
+  const [priceOn, setPriceOn] = useState(hasPromo)
+  const [priceOld, setPriceOld] = useState(hasPromo && hasList ? fmtRs(listPrice) : '')
+  const [priceNew, setPriceNew] = useState(hasPromo ? fmtRs(promoPrice) : hasList ? fmtRs(listPrice) : '')
+  const [promoLayout, setPromoLayout] = useState<PromoLayoutId>(hasPromo ? 'wasnow' : 'only')
   const [priceStyle, setPriceStyle] = useState<TitleStyleId>('flash')
   const [priceSize, setPriceSize] = useState(7) // font size as % of video width
   const [logoOn, setLogoOn] = useState(true)
   const [logoOpacity, setLogoOpacity] = useState(50) // %
   const [logoSize, setLogoSize] = useState(18) // % of video width
-  const [logoSrc, setLogoSrc] = useState('/images/reels-brand-logo.png')
+  const [logoSrc, setLogoSrc] = useState(DEFAULT_LOGO)
   const [logoRemoveBg, setLogoRemoveBg] = useState(false)
   const [logoBgTol, setLogoBgTol] = useState(30) // background match tolerance %
   const [processedLogo, setProcessedLogo] = useState<string | null>(null)
   const [logoSaving, setLogoSaving] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
 
-  // Load the persisted brand logo on mount so every new reel starts with the
-  // last logo the user set (falls back to the bundled default)
+  // ---- Per-page brand logo ------------------------------------------------
+  // Each Facebook Page keeps its own saved logo. Switching the page below
+  // swaps the watermark instead of making the user re-upload every time.
+  // Pages with nothing saved fall back to the shared logo, then the bundled one.
+  const [brandPageId, setBrandPageId] = useState('')
+  const [brandPages, setBrandPages] = useState<{ id: string; name: string }[]>([])
+  const [pageLogos, setPageLogos] = useState<Record<string, string>>({})
+  const [logoFallback, setLogoFallback] = useState('')
+
   useEffect(() => {
     let cancelled = false
-    fetch('/api/company-settings')
-      .then((r) => r.json())
-      .then((j) => {
-        if (!cancelled && j.reels_logo_url) setLogoSrc(j.reels_logo_url)
+    Promise.all([
+      fetch('/api/page-logos')
+        .then((r) => r.json())
+        .catch(() => ({ logos: {}, fallback: '' })),
+      fetch('/api/product-master/posts/publish')
+        .then((r) => r.json())
+        .catch(() => ({ pages: [] })),
+    ])
+      .then(([logoJson, pageJson]) => {
+        if (cancelled) return
+        const logos = (logoJson?.logos ?? {}) as Record<string, string>
+        const fallback = String(logoJson?.fallback || '')
+        const pages = (pageJson?.pages ?? []) as { id: string; name: string }[]
+        setPageLogos(logos)
+        setLogoFallback(fallback)
+        setBrandPages(pages)
+        const first = pages[0]?.id ?? ''
+        setBrandPageId(first)
+        const resolved = (first && logos[first]) || fallback
+        if (resolved) setLogoSrc(resolved)
       })
       .catch(() => {})
     return () => {
@@ -146,12 +212,19 @@ export function ReelsStudioTab({
     }
   }, [])
 
-  // Change logo: show it instantly, upload to blob storage, then persist the
-  // URL in company settings so it is reused for all future reels
+  // Switch the page the logo belongs to and show that page's saved logo
+  const selectBrandPage = (id: string) => {
+    setBrandPageId(id)
+    setLogoSrc(pageLogos[id] || logoFallback || DEFAULT_LOGO)
+  }
+
+  // Change logo: show it instantly, upload to blob storage, then save it
+  // against the SELECTED page so it comes back automatically next time.
   const handleLogoFile = async (f: File) => {
     const previewUrl = URL.createObjectURL(f)
     setLogoSrc(previewUrl)
     setLogoSaving(true)
+    const targetId = brandPageId || DEFAULT_PAGE_KEY
     try {
       const fd = new FormData()
       fd.append('file', f)
@@ -159,11 +232,17 @@ export function ReelsStudioTab({
       const upJson = await up.json()
       if (!up.ok || !upJson.url) throw new Error(upJson.error || 'Upload failed')
       setLogoSrc(upJson.url)
-      await fetch('/api/company-settings', {
+      await fetch('/api/page-logos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reels_logo_url: upJson.url }),
+        body: JSON.stringify({
+          pageId: targetId,
+          pageName: brandPages.find((p) => p.id === targetId)?.name ?? null,
+          logoUrl: upJson.url,
+        }),
       })
+      setPageLogos((m) => ({ ...m, [targetId]: upJson.url }))
+      if (targetId === DEFAULT_PAGE_KEY) setLogoFallback(upJson.url)
     } catch {
       // Keep the local preview even if persistence fails
     } finally {
@@ -1336,6 +1415,44 @@ export function ReelsStudioTab({
             <ImageIcon className="h-3.5 w-3.5 text-amber-500" />
             Logo watermark
           </label>
+
+          {/* Which page this logo belongs to. Each page remembers its own, so
+              switching here swaps the watermark instead of re-uploading. */}
+          {logoOn && brandPages.length > 0 && (
+            <div className="flex flex-col gap-1.5 pl-6">
+              <span className="text-xs text-muted-foreground">
+                Saved for page
+                {!pageLogos[brandPageId] && <span className="ml-1 opacity-70">(using shared logo)</span>}
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {brandPages.map((p) => {
+                  const active = p.id === brandPageId
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => selectBrandPage(p.id)}
+                      aria-pressed={active}
+                      title={pageLogos[p.id] ? `${p.name} has its own saved logo` : `${p.name} uses the shared logo`}
+                      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
+                        active
+                          ? 'border-amber-500 bg-amber-500/15 text-amber-500'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          pageLogos[p.id] ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                        }`}
+                      />
+                      {p.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {logoOn && (
             <div className="flex flex-col gap-3 pl-6 sm:flex-row sm:items-start">
               <div className="flex flex-col items-center gap-1.5">
@@ -1367,8 +1484,9 @@ export function ReelsStudioTab({
                   }}
                 />
                 {logoSaving && (
-                  <p className="text-xs text-muted-foreground" aria-live="polite">
-                    Saving logo for all reels{'\u2026'}
+                  <p className="text-center text-xs text-muted-foreground" aria-live="polite">
+                    Saving for {brandPages.find((p) => p.id === brandPageId)?.name ?? 'all pages'}
+                    {'\u2026'}
                   </p>
                 )}
               </div>

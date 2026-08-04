@@ -14,22 +14,31 @@ import {
   ChevronDown,
   ChevronRight,
   Clapperboard,
-  Copy,
   ExternalLink,
   FileText,
-  Frame,
   Megaphone,
   Search,
   ShoppingCart,
-  Sparkles,
+  Tag,
   Users,
 } from 'lucide-react'
 import { ManagePosts } from '@/components/product-master/manage-posts'
 
-// A row tool click: which tool, for which product
+// A row tool click: which tool, for which product.
+// 'reels' is the single entry point from the table - Studio covers titles,
+// promo pricing, logo, publishing and the ad handoff. 'campaigns' is still
+// reachable, but only as the "Boost this post" handoff out of Studio.
 export interface ToolRequest {
-  tool: 'ai-posts' | 'reels' | 'frames' | 'campaigns'
-  product: { id: string; name: string; image?: string | null }
+  tool: 'reels' | 'campaigns'
+  product: {
+    id: string
+    name: string
+    image?: string | null
+    /** List price from Product Master - the struck-out "was" */
+    price?: number | string | null
+    /** Promo price from Product Master - the highlighted "now" */
+    promoPrice?: number | string | null
+  }
   /** Pre-selected page + post when arriving from "Boost this post" */
   boost?: { pageId: string; postId: string }
 }
@@ -51,7 +60,9 @@ interface OverviewProduct {
   name: string
   sku: string | null
   category: string | null
-  price: number | null
+  // numeric columns arrive as strings - always run them through toNum()
+  price: number | string | null
+  promo_price: number | string | null
   quantity: number | null
   image_url: string | null
   is_active: boolean
@@ -68,6 +79,14 @@ interface OverviewProduct {
 }
 
 const LOW_STOCK = 10
+
+// Postgres `numeric` comes back as a string ("475.00"), so prices must be
+// coerced before they are formatted, compared, or sent to Studio.
+function toNum(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
+}
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -104,6 +123,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
   const [filter, setFilter] = useState<'all' | 'low' | 'sold-out' | 'with-po' | 'advertised'>('all')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [togglingSoldOut, setTogglingSoldOut] = useState<string | null>(null)
+  const [savingPromo, setSavingPromo] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   // Manage Posts dialog - controlled so a Posts badge click can open it
@@ -123,6 +143,46 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
   }
 
   // Manual, user-initiated sold-out toggle with optimistic update
+  // Save the promo price for one product. Blank clears it, which puts the
+  // product back to plain list-price branding in Studio.
+  const savePromoPrice = async (product: OverviewProduct, raw: string) => {
+    const trimmed = raw.trim()
+    const next = trimmed === '' ? null : Number(trimmed)
+    if (next !== null && (!Number.isFinite(next) || next < 0)) return
+    // Compare as numbers - the stored value arrives as a string
+    if (toNum(product.promo_price) === next) return
+
+    setSavingPromo(product.id)
+    try {
+      await mutate(
+        async (current) => {
+          const res = await fetch('/api/product-master/overview', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: product.id, promoPrice: next }),
+          })
+          const json = await res.json()
+          if (!res.ok || !json.success) throw new Error(json.error || 'Update failed')
+          return current
+            ? { ...current, products: current.products.map((p) => (p.id === product.id ? { ...p, promo_price: next } : p)) }
+            : current
+        },
+        {
+          optimisticData: (current) =>
+            current
+              ? { ...current, products: current.products.map((p) => (p.id === product.id ? { ...p, promo_price: next } : p)) }
+              : (current as never),
+          rollbackOnError: true,
+          revalidate: false,
+        },
+      )
+    } catch {
+      // SWR rolls the optimistic value back on failure
+    } finally {
+      setSavingPromo(null)
+    }
+  }
+
   const toggleSoldOut = async (product: OverviewProduct) => {
     setTogglingSoldOut(product.id)
     const next = !product.soldOut
@@ -310,33 +370,34 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                       </span>
                     )}
                     <span className="truncate font-medium">{p.name}</span>
-                    {/* Per-product tools - popups pre-loaded with this product */}
+                    {/* One entry point. Studio already covers the title, promo
+                        price, logo, publishing and the boost-to-campaign
+                        handoff, so the old four-icon strip was four doors into
+                        the same room. */}
                     {onOpenTool && (
-                      <span className="ml-1 flex shrink-0 items-center gap-1">
-                        {(
-                          [
-                            ['ai-posts', Sparkles, 'text-amber-500', 'AI Post'],
-                            ['reels', Clapperboard, 'text-sky-500', 'Reels Studio'],
-                            ['frames', Frame, 'text-muted-foreground', 'Frame Input (soon)'],
-                            ['campaigns', Copy, 'text-emerald-500', 'Campaign Creator'],
-                          ] as const
-                        ).map(([tool, Icon, color, label]) => (
-                          <Button
-                            key={tool}
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            title={label}
-                            aria-label={`${label} for ${p.name}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onOpenTool({ tool, product: { id: p.id, name: p.name, image: p.image_url } })
-                            }}
-                          >
-                            <Icon className={`h-3.5 w-3.5 ${color}`} />
-                          </Button>
-                        ))}
-                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-1 h-6 shrink-0 gap-1.5 px-2 text-[11px] font-medium text-sky-500 hover:bg-sky-500/10 hover:text-sky-400"
+                        title={`Open Studio for ${p.name}`}
+                        aria-label={`Open Studio for ${p.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onOpenTool({
+                            tool: 'reels',
+                            product: {
+                              id: p.id,
+                              name: p.name,
+                              image: p.image_url,
+                              price: p.price,
+                              promoPrice: p.promo_price,
+                            },
+                          })
+                        }}
+                      >
+                        <Clapperboard className="h-3.5 w-3.5" />
+                        Studio
+                      </Button>
                     )}
                   </span>
                   <span className="text-right">
@@ -418,6 +479,48 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                 </div>
                 {isOpen && (
                   <div className="flex flex-col gap-3 bg-muted/30 px-10 py-3">
+                    {/* Pricing: the list price is read-only inventory data, the
+                        promo price is set here and drives the Studio price tag */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <Tag className="h-3 w-3" />
+                        List price
+                        <span className="font-semibold tabular-nums text-foreground">
+                          {toNum(p.price) !== null ? `Rs ${toNum(p.price)!.toLocaleString('en-IN')}` : '\u2014'}
+                        </span>
+                      </span>
+                      <label className="flex items-center gap-1.5 text-muted-foreground">
+                        Promo price
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          defaultValue={p.promo_price ?? ''}
+                          placeholder="none"
+                          disabled={savingPromo === p.id}
+                          onClick={(e) => e.stopPropagation()}
+                          // Commit on blur / Enter rather than per keystroke,
+                          // so typing "1200" is one write, not four
+                          onBlur={(e) => savePromoPrice(p, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.nativeEvent.isComposing) e.currentTarget.blur()
+                          }}
+                          className="h-7 w-28 text-xs"
+                          aria-label={`Promo price for ${p.name}`}
+                        />
+                      </label>
+                      {(() => {
+                        const list = toNum(p.price)
+                        const promo = toNum(p.promo_price)
+                        if (list === null || promo === null || list <= 0 || promo >= list) return null
+                        return (
+                          <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-500">
+                            {Math.round(((list - promo) / list) * 100)}% off in Studio
+                          </Badge>
+                        )
+                      })()}
+                      {savingPromo === p.id && <span className="text-muted-foreground">Saving{'\u2026'}</span>}
+                    </div>
                     {/* Demand + ads summary line + manual sold-out control */}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
