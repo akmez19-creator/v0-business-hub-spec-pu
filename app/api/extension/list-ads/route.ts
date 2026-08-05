@@ -27,6 +27,9 @@ async function getUserFromToken(request: NextRequest) {
   return { user, supabase: adminSupabase }
 }
 
+/** Most ads sent to the picker - see the truncation note below. */
+const MAX_ADS = 400
+
 /** One selectable ad in the extension's picker. */
 interface AdOption {
   /** The ad id stored on deliveries.ad_id - this is what gets submitted. */
@@ -131,8 +134,21 @@ export async function GET(request: NextRequest) {
       return b.spend - a.spend
     })
 
+    // The account carries ~2,000 mostly-paused campaigns. Shipping all of them
+    // to every agent on every order is a large payload for no benefit, so cap
+    // the list. The sort above guarantees every ACTIVE ad survives the cap
+    // (there are only ~55) and the paused ones kept are those still spending.
+    const truncated = ads.length > MAX_ADS
+    const list = truncated ? ads.slice(0, MAX_ADS) : ads
+
     return NextResponse.json(
-      { success: true, ads, lastRefresh: cached?.last_refresh ?? null },
+      {
+        success: true,
+        ads: list,
+        total: ads.length,
+        truncated,
+        lastRefresh: cached?.last_refresh ?? null,
+      },
       { headers: corsHeaders },
     )
   } catch (error) {
