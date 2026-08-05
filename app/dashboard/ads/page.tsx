@@ -19,7 +19,6 @@ import {
 import { Calendar } from '@/components/ui/calendar'
 import { TvDashboard } from '@/components/ads/tv-dashboard'
 import { AdAttributionPanel } from '@/components/ads/ad-attribution-panel'
-import { AdTestPanel } from '@/components/ads/ad-test-panel'
 import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
 import { USD_TO_RS } from '@/lib/ads/currency'
 import { Tv } from 'lucide-react'
@@ -206,6 +205,17 @@ export default function AdsManagerPage() {
   const [tvUnassignedLocalities, setTvUnassignedLocalities] = useState<{ name: string; clients: number }[]>([])
   // User-selected batch date (null = auto: the active delivery batch)
   const [tvRidersDate, setTvRidersDate] = useState<string | null>(null)
+  // Revenue booked per Facebook AD, keyed by deliveries.ad_id. This is order
+  // value (every delivery row is still unpaid), not cash collected.
+  const [adRevenue, setAdRevenue] = useState<Record<string, { revenue: number; orders: number; clients: number }>>({})
+  // Money that could not be tied to any ad id, so the per-ad totals can never
+  // masquerade as the whole business
+  const [adRevenueLeftover, setAdRevenueLeftover] = useState<{
+    labelledOrders: number
+    labelledRevenue: number
+    missingOrders: number
+    missingRevenue: number
+  } | null>(null)
 
   // Load riders/regions when TV mode opens (refreshed on each entry) or
   // when the user picks a different batch date on the Riders panel
@@ -226,6 +236,25 @@ export default function AdsManagerPage() {
       })
       .catch(() => {})
   }, [tvMode, tvRidersDate])
+
+  // Per-ad revenue for the wall. Scoped to orders entered TODAY when the
+  // "Today's Spend" toggle is on, so revenue and spend cover the same window;
+  // all-time otherwise (an ad that ran last week still earned that money).
+  useEffect(() => {
+    if (!tvMode) return
+    const entryDate = showTodayOnly
+      ? new Date().toLocaleDateString('en-CA', { timeZone: 'Indian/Mauritius' })
+      : null
+    fetch(`/api/ads/ad-revenue${entryDate ? `?entryDate=${entryDate}` : ''}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success) {
+          setAdRevenue(data.byAd || {})
+          setAdRevenueLeftover(data.unattributed || null)
+        }
+      })
+      .catch(() => {})
+  }, [tvMode, showTodayOnly])
 
   // Product grouping view (a product can have multiple campaigns)
   const [groupByProduct, setGroupByProduct] = useState(true)
@@ -1133,6 +1162,8 @@ export default function AdsManagerPage() {
           unassignedLocalities={tvUnassignedLocalities}
         pageStats={pageStats}
         activities={activities}
+        adRevenue={adRevenue}
+        adRevenueLeftover={adRevenueLeftover}
         showTodayOnly={showTodayOnly}
         countdown={countdown}
         lastRefresh={lastRefresh}
@@ -1502,9 +1533,6 @@ export default function AdsManagerPage() {
           until={dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : null}
         />
       )}
-
-      {/* 3-variant testing harness */}
-      <AdTestPanel />
 
       {/* Account Spend Breakdown */}
       {selectedAccount === 'all' && accountSpendList.length > 0 && (

@@ -18,6 +18,17 @@ export interface TvCampaign {
   messages?: number
   results?: number
   resultKind?: ResultKind
+  // The Facebook AD ids under this campaign. These are what deliveries.ad_id
+  // stores, so they are the join key for revenue attribution.
+  ads?: { id: string; postId: string | null }[]
+  adIds?: string[] // legacy shape, still present on stale cache entries
+}
+
+// Money booked against one ad id (order value - nothing here is paid yet)
+export interface AdRevenueStat {
+  revenue: number
+  orders: number
+  clients: number
 }
 
 // A product group enriched with client count + cost-per-client (in Rs).
@@ -91,6 +102,15 @@ interface TvDashboardProps {
   unassignedLocalities?: { name: string; clients: number }[]
   pageStats?: TvPageStat[]
   activities?: TvActivity[]
+  // Revenue per Facebook ad id (deliveries.ad_id -> order value in Rs)
+  adRevenue?: Record<string, AdRevenueStat>
+  // Revenue that maps to no ad id, so the per-ad figures stay honest
+  adRevenueLeftover?: {
+    labelledOrders: number
+    labelledRevenue: number
+    missingOrders: number
+    missingRevenue: number
+  } | null
   showTodayOnly: boolean
   countdown: number
   lastRefresh: Date
@@ -145,6 +165,41 @@ function rankByCostPerResult(list: TvCampaign[]): TvCampaign[] {
   })
 }
 
+/**
+ * Roll the per-AD revenue up to the campaign the wall actually renders.
+ *
+ * `deliveries.ad_id` is an AD id, but a row here is a CAMPAIGN, so the money a
+ * campaign made is the sum over its ads. `perAd` is kept alongside the total so
+ * the row can name the exact ad id that earned each rupee - a campaign with one
+ * winning ad and two dead ones looks identical to three mediocre ones until you
+ * split it out.
+ *
+ * Returns null when no ad of the campaign has any attributed order at all,
+ * which is deliberately different from "earned Rs 0": the first means we have
+ * no signal, the second means the ad is genuinely not selling.
+ */
+function campaignRevenue(
+  c: TvCampaign,
+  byAd: Record<string, AdRevenueStat>,
+): { revenue: number; orders: number; perAd: { id: string; revenue: number; orders: number }[] } | null {
+  // New shape is ads[{id}]; fall back to the legacy adIds[] on a stale cache.
+  const ids = c.ads?.length ? c.ads.map((a) => a.id) : (c.adIds ?? [])
+  if (ids.length === 0) return null
+  const perAd: { id: string; revenue: number; orders: number }[] = []
+  let revenue = 0
+  let orders = 0
+  for (const id of ids) {
+    const stat = byAd[id]
+    if (!stat) continue
+    perAd.push({ id, revenue: stat.revenue, orders: stat.orders })
+    revenue += stat.revenue
+    orders += stat.orders
+  }
+  if (perAd.length === 0) return null
+  perAd.sort((a, b) => b.revenue - a.revenue)
+  return { revenue, orders, perAd }
+}
+
 // Shared dense grid template used by both the header and every row.
 // Last column: budget action badge (increase / decrease / hold).
 const ROW_GRID = 'grid grid-cols-[1.9rem_1fr_4.5rem_2.6rem_4.5rem_1.6rem] items-center gap-1.5'
@@ -171,6 +226,8 @@ export function TvDashboard({
   unassignedLocalities = [],
   pageStats = [],
   activities = [],
+  adRevenue = {},
+  adRevenueLeftover = null,
   showTodayOnly,
   countdown,
   lastRefresh,
@@ -642,6 +699,40 @@ export function TvDashboard({
                           >
                             {formatRs(cpr)}/{label}
                           </span>
+                        </span>
+                      )
+                    })()}
+                    {/* What this ad actually BROUGHT IN. Cost per message says
+                        how cheaply an ad starts conversations; only this says
+                        whether those conversations turned into orders. Keyed by
+                        deliveries.ad_id, so the tooltip can name the ad id. */}
+                    {(() => {
+                      const rev = campaignRevenue(c, adRevenue)
+                      if (!rev) return null
+                      const spendRsNum = parseFloat(c.spend || '0') * USD_TO_RS
+                      // Return on ad spend: rupees booked per rupee spent.
+                      const roas = spendRsNum > 0 ? rev.revenue / spendRsNum : null
+                      const tone =
+                        roas === null
+                          ? 'bg-muted text-muted-foreground'
+                          : roas >= 3
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : roas >= 1.5
+                              ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-red-500/20 text-red-400'
+                      const breakdown = rev.perAd
+                        .map((a) => `ad ${a.id}: ${formatRs(a.revenue)} (${a.orders} order${a.orders !== 1 ? 's' : ''})`)
+                        .join('\n')
+                      return (
+                        <span
+                          className={`shrink-0 rounded px-1 py-0 ${
+                            isTight ? 'text-[10px]' : 'text-[11px]'
+                          } font-black tabular-nums ${tone}`}
+                          title={`Booked from this campaign's ads\n${breakdown}${
+                            roas !== null ? `\n\n${roas.toFixed(1)}x of ${formatRs(spendRsNum)} spent` : ''
+                          }\n\nOrder value - deliveries are still unpaid.`}
+                        >
+                          {formatRs(rev.revenue)} in{roas !== null ? ` \u00b7 ${roas.toFixed(1)}x` : ''}
                         </span>
                       )
                     })()}
@@ -1433,6 +1524,46 @@ export function TvDashboard({
             })}
           </>
         )}
+
+        {/* Booked revenue that IS tied to an ad id, plus the money that is not.
+            The second half matters as much as the first: deliveries.ad_id is
+            shared with the CRM (it also holds labels like "AI transferred"),
+            so a chunk of real revenue can never be credited to an ad. Showing
+            it stops the per-ad totals from being read as the whole business. */}
+        {(() => {
+          const bookedRs = Object.values(adRevenue).reduce((s, a) => s + a.revenue, 0)
+          if (bookedRs <= 0) return null
+          const lo = adRevenueLeftover
+          const unmatched = lo ? lo.labelledRevenue + lo.missingRevenue : 0
+          const unmatchedOrders = lo ? lo.labelledOrders + lo.missingOrders : 0
+          return (
+            <>
+              <span className="mx-1 h-5 w-px bg-border" />
+              <div
+                className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1"
+                title={`Order value booked against a real Facebook ad id${
+                  showTodayOnly ? ' for orders entered today' : ' (all time)'
+                }. Deliveries are still unpaid, so this is revenue earned, not cash collected.`}
+              >
+                <span className="text-sm font-semibold text-muted-foreground">Booked / ad</span>
+                <span className="text-sm font-bold tabular-nums text-emerald-400">{formatRs(bookedRs)}</span>
+              </div>
+              {unmatched > 0 && (
+                <div
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1"
+                  title={`${formatRs(unmatched)} across ${unmatchedOrders} order${
+                    unmatchedOrders !== 1 ? 's' : ''
+                  } cannot be credited to any ad: ${
+                    lo ? `${lo.labelledOrders} carry a CRM label instead of an ad id, ${lo.missingOrders} have none` : ''
+                  }.`}
+                >
+                  <span className="text-sm font-semibold text-muted-foreground">No ad id</span>
+                  <span className="text-sm font-bold tabular-nums text-amber-500">{formatRs(unmatched)}</span>
+                </div>
+              )}
+            </>
+          )
+        })()}
       </div>
 
       {/* One continuous ranked league flowing across 3 balanced columns (no
