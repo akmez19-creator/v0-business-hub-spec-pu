@@ -2371,8 +2371,170 @@ function renderOrdersForm() {
   adidToggle.onclick = () => {
     const show = adidRow.style.display === 'none';
     adidRow.style.display = show ? '' : 'none';
-    adidToggle.textContent = show ? 'Hide Ad ID' : 'Show Ad ID (auto-captured)';
+    adidToggle.textContent = show ? 'Hide ad' : adidToggleLabel();
+    if (show) loadAdList();
   };
+
+  // ---- Ad picker -------------------------------------------------------
+  // The agent picks which Business Suite ad produced this order, so every
+  // delivery carries an ad_id and the Ads wall can rank ads by real orders.
+  // The ad id is still auto-captured from the conversation when possible;
+  // this is the manual override for when that fails or is wrong.
+  const adPick = document.getElementById('ak-adpick');
+  const adPickSuggest = document.getElementById('ak-adpick-suggest');
+  const adPickPicked = document.getElementById('ak-adpick-picked');
+  let adList = [];        // all selectable ads from the cache
+  let adMatches = [];     // currently shown
+  let adActive = -1;
+  let adListLoaded = false;
+
+  // Ad and product names come from Facebook, so they are untrusted text
+  // going into innerHTML - escape before rendering.
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  function adidToggleLabel() {
+    return fields.adid.input.value ? 'Change ad' : 'Choose the ad for this order';
+  }
+
+  function loadAdList() {
+    if (adListLoaded) return;
+    adListLoaded = true;
+    adPickSuggest.innerHTML = '<div class="akmez-suggest-item">Loading your ads...</div>';
+    adPickSuggest.style.display = 'block';
+    chrome.runtime.sendMessage({ action: 'listAds' }, resp => {
+      adPickSuggest.style.display = 'none';
+      if (chrome.runtime.lastError || !resp || !resp.success) {
+        adListLoaded = false;   // allow a retry on next open
+        return;
+      }
+      adList = resp.ads || [];
+      renderPickedAd();
+    });
+  }
+
+  // Live ads first, then most recently spending - the ad an agent needs is
+  // almost always one that is currently running.
+  function rankAds(q) {
+    const scored = [];
+    for (const a of adList) {
+      const hay = (a.name + ' ' + (a.productName || '') + ' ' + a.id).toLowerCase();
+      if (q && !hay.includes(q)) continue;
+      scored.push(a);
+    }
+    scored.sort((x, y) => (y.active - x.active) || (y.spend - x.spend));
+    return scored.slice(0, 8);
+  }
+
+  function paintAdActive() {
+    adPickSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => {
+      el.classList.toggle('active', i === adActive);
+      if (i === adActive) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function showAdSuggestions() {
+    loadAdList();
+    if (!adList.length) return;
+    adMatches = rankAds(adPick.value.toLowerCase().trim());
+    if (!adMatches.length) {
+      adPickSuggest.innerHTML = '<div class="akmez-suggest-item">No matching ad</div>';
+      adPickSuggest.style.display = 'block';
+      return;
+    }
+    adActive = 0;
+    adPickSuggest.innerHTML = adMatches.map((a, i) => {
+      const badge = a.active
+        ? '<span class="akmez-adpick-live">LIVE</span>'
+        : '<span class="akmez-adpick-off">OFF</span>';
+      const prod = a.productName
+        ? ` \u00b7 <span class="akmez-adpick-prod">${esc(a.productName)}</span>`
+        : '';
+      return `<div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
+        <div class="akmez-adpick-line">
+          <div class="akmez-adpick-name">${esc(a.name)}${badge}</div>
+          <div class="akmez-adpick-meta">${esc(a.id)}${prod}</div>
+        </div>
+      </div>`;
+    }).join('');
+    adPickSuggest.style.display = 'block';
+    adPickSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
+      it.onmousedown = e => { e.preventDefault(); selectAd(parseInt(it.dataset.i, 10)); };
+    });
+  }
+
+  function selectAd(i) {
+    if (i < 0 || i >= adMatches.length) return;
+    const ad = adMatches[i];
+    fields.adid.input.value = ad.id;     // this is what gets submitted
+    adPick.value = '';
+    adPickSuggest.style.display = 'none';
+    adActive = -1;
+    renderPickedAd();
+    // Pull in the linked product just like an auto-captured ad id does
+    resolveProductFromAdId(ad.id);
+  }
+
+  // Confirmation line so the agent can see the order is attributed before
+  // hitting submit - an unattributed order is invisible on the Ads wall.
+  function renderPickedAd() {
+    const id = fields.adid.input.value.trim();
+    adidToggle.textContent = adidRow.style.display === 'none' ? adidToggleLabel() : 'Hide ad';
+    if (!id) {
+      adPickPicked.style.display = 'none';
+      adPick.placeholder = 'Search your ads by campaign or product...';
+      return;
+    }
+    const known = adList.find(a => a.id === id);
+    adPickPicked.style.display = 'flex';
+    adPickPicked.innerHTML = `
+      <div class="akmez-adpick-line">
+        <div class="akmez-adpick-name">${known ? esc(known.name) : 'Ad ' + esc(id)}</div>
+        <div class="akmez-adpick-meta">${esc(id)}${known && known.productName ? ' \u00b7 ' + esc(known.productName) : ''}</div>
+      </div>
+      <button type="button" class="akmez-adpick-clear" id="ak-adpick-clear" title="Clear ad">&times;</button>`;
+    const clr = document.getElementById('ak-adpick-clear');
+    if (clr) clr.onclick = () => { fields.adid.input.value = ''; renderPickedAd(); };
+  }
+
+  adPick.addEventListener('input', showAdSuggestions);
+  adPick.addEventListener('focus', showAdSuggestions);
+  adPick.addEventListener('blur', () => setTimeout(() => { adPickSuggest.style.display = 'none'; }, 150));
+  adPick.addEventListener('keydown', e => {
+    const open = adPickSuggest.style.display === 'block' && adMatches.length;
+    if (e.key === 'ArrowDown') {
+      if (!open) { showAdSuggestions(); return; }
+      e.preventDefault();
+      adActive = (adActive + 1) % adMatches.length;
+      paintAdActive();
+    } else if (e.key === 'ArrowUp') {
+      if (!open) return;
+      e.preventDefault();
+      adActive = (adActive - 1 + adMatches.length) % adMatches.length;
+      paintAdActive();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (open && adActive >= 0) {
+        if (e.key === 'Enter') e.preventDefault();
+        selectAd(adActive);
+      }
+    } else if (e.key === 'Escape') {
+      adPickSuggest.style.display = 'none';
+    }
+  });
+
+  // Keep the confirmation line in sync when the ad id is auto-captured or
+  // pasted by hand rather than picked from the list.
+  fields.adid.input.addEventListener('input', renderPickedAd);
+
+  // If nothing was auto-captured, open the picker so the agent is prompted
+  // to attribute the order instead of silently leaving it blank.
+  if (!fields.adid.input.value.trim()) {
+    adidRow.style.display = '';
+    adidToggle.textContent = 'Hide ad';
+    loadAdList();
+  }
+  renderPickedAd();
 
   // Region autocomplete - type-to-search with full keyboard navigation
   const regionInput = document.getElementById('ak-region');

@@ -29,10 +29,13 @@ async function getUserFromToken(request: NextRequest) {
 
 /** One selectable ad in the extension's picker. */
 interface AdOption {
-  adId: string
+  /** The ad id stored on deliveries.ad_id - this is what gets submitted. */
+  id: string
+  /** Campaign name, shown as the ad's label in the picker. */
+  name: string
   campaignId: string
-  campaignName: string
-  status: string
+  /** Currently running, so it sorts to the top of the picker. */
+  active: boolean
   spend: number
   productId: string | null
   productName: string | null
@@ -58,19 +61,23 @@ type CachedCampaign = {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Auth (token first, then cookie fallback for dashboard usage)
+    // Auth (extension bearer token first, then cookie fallback for dashboard)
     const tokenAuth = await getUserFromToken(request)
     let user: { id: string } | null = tokenAuth?.user ?? null
-    let supabase = tokenAuth?.supabase
     if (!user) {
       const cookieSupabase = await createClient()
       const { data: { user: cookieUser } } = await cookieSupabase.auth.getUser()
       user = cookieUser
-      supabase = cookieSupabase as never
     }
-    if (!user || !supabase) {
+    if (!user) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401, headers: corsHeaders })
     }
+
+    // Read with the service role: the ads cache and campaign links are shared
+    // reference data, not per-user rows, so RLS would only get in the way.
+    const supabase =
+      tokenAuth?.supabase ??
+      createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
     const { data: cached } = await supabase
       .from('ads_cache')
@@ -106,10 +113,10 @@ export async function GET(request: NextRequest) {
       const product = productByCampaign.get(c.id) ?? null
       for (const ad of c.ads || []) {
         ads.push({
-          adId: ad.id,
+          id: ad.id,
+          name: c.name,
           campaignId: c.id,
-          campaignName: c.name,
-          status: c.status,
+          active: c.status === 'ACTIVE',
           spend: parseFloat(c.spend || '0'),
           productId: product?.id ?? null,
           productName: product?.name ?? null,
@@ -120,9 +127,7 @@ export async function GET(request: NextRequest) {
     // Active ads first, then by today's spend - the ad a live conversation
     // came from is almost always one that is currently running and spending.
     ads.sort((a, b) => {
-      const aActive = a.status === 'ACTIVE' ? 0 : 1
-      const bActive = b.status === 'ACTIVE' ? 0 : 1
-      if (aActive !== bActive) return aActive - bActive
+      if (a.active !== b.active) return a.active ? -1 : 1
       return b.spend - a.spend
     })
 
