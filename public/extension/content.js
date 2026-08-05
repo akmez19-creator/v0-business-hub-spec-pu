@@ -1219,12 +1219,55 @@ function readCustomerPhone(cb) {
     cb(digits);
   });
 }
+// Matches the Business Suite label "ad_id.120248441310790621" in any of the
+// spellings it appears in (ad_id. / ad id: / adid-).
+const AD_ID_RE = /ad[\s._-]*id[\s._:-]*(\d{6,})/i;
+
+// Pull the ad id out of a blob of text. Returns '' when there is no ad id,
+// which is the important part: labels like "Ordered" sit in the same chip
+// list and must NOT be mistaken for an ad id.
+function parseAdId(raw) {
+  if (!raw) return '';
+  const tagged = raw.match(AD_ID_RE);
+  if (tagged) return tagged[1];
+  // Untagged digits are only an ad id if the text is nothing but a long
+  // number. Meta ad ids are 15+ digits, so this threshold is what keeps an
+  // 8-digit phone number (54791946) from being stored as an ad id.
+  const bare = raw.trim().match(/^(\d{15,})$/);
+  return bare ? bare[1] : '';
+}
+
+// Scan the visible page for an "ad_id.<digits>" label. This is the reliable
+// source: the label is rendered as its own chip in the contact panel, so we
+// can find it without depending on a hand-picked CSS selector that breaks
+// whenever Meta reshuffles their DOM.
+function scanPageForAdId() {
+  // Narrow to elements whose own text is the label, so we get the id itself
+  // rather than a huge ancestor that happens to contain it.
+  const nodes = document.querySelectorAll('span, div, a, li, p');
+  for (const el of nodes) {
+    const text = (el.textContent || '').trim();
+    if (!text || text.length > 60) continue;
+    const m = text.match(AD_ID_RE);
+    if (m) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue;   // hidden node
+      return m[1];
+    }
+  }
+  // Last resort: the whole body, in case the chip is nested oddly.
+  const body = (document.body && document.body.innerText) || '';
+  const m = body.match(AD_ID_RE);
+  return m ? m[1] : '';
+}
+
 // Extract the ad id (e.g. "ad_id.120248441310790621" -> "120248441310790621")
 function readCustomerAdId(cb) {
   readFromSelectors('adid', raw => {
-    if (!raw) { cb(''); return; }
-    const m = raw.match(/(\d{6,})/);
-    cb(m ? m[1] : raw.trim());
+    // The configured selector often points at the label CONTAINER, so its
+    // text can be "Ordered ad_id.1202..." or just "Ordered". Only trust it
+    // when a real ad id comes out; otherwise scan the page.
+    cb(parseAdId(raw) || scanPageForAdId());
   });
 }
 
@@ -2310,22 +2353,33 @@ function renderOrdersForm() {
 
   // Given a captured Ad ID, resolve its linked product (ad -> campaign -> product)
   // and auto-add it to the cart. Guards against resolving the same ad twice.
-  function resolveProductFromAdId(adId) {
+  // force = the agent explicitly asked for this ad (clicked the field or a
+  // label), so bypass the "already resolved" guard and say why nothing was
+  // added when the lookup comes back empty.
+  function resolveProductFromAdId(adId, force) {
     if (!adId || !/^\d+$/.test(adId)) return;
-    if (window.__akmezLastResolvedAd === adId) return;
+    if (!force && window.__akmezLastResolvedAd === adId) return;
     window.__akmezLastResolvedAd = adId;
     chrome.runtime.sendMessage({ action: 'resolveAdProduct', adId }, resp => {
       if (chrome.runtime.lastError) return;
-      if (!resp || !resp.success || !resp.product) return;
+      if (!resp || !resp.success || !resp.product) {
+        if (force) toast('Ad ' + adId + ' is not linked to a product');
+        return;
+      }
       // Only add if this ad id is still the one shown (conversation may have changed)
       if (fields.adid.input.value !== adId) return;
       // Match against a loaded product so the cart id lines up with the picker
       const match = products.find(p => p.id === resp.product.id);
-      if (!match) return;
+      if (!match) {
+        if (force) toast('Linked product not in your product list');
+        return;
+      }
       if (!cart[match.id]) {
         cart[match.id] = 1;
         updateCart();
-        toast('Product linked from Ad ID: ' + match.name);
+        toast('Product added from Ad ID: ' + match.name);
+      } else if (force) {
+        toast(match.name + ' is already in the order');
       }
     });
   }
@@ -2467,13 +2521,12 @@ function renderOrdersForm() {
   function selectAd(i) {
     if (i < 0 || i >= adMatches.length) return;
     const ad = adMatches[i];
-    fields.adid.input.value = ad.id;     // this is what gets submitted
     adPick.value = '';
     adPickSuggest.style.display = 'none';
     adActive = -1;
+    // Sets the field, protects it from the sync, and adds the linked product
+    applyAdId(ad.id);
     renderPickedAd();
-    // Pull in the linked product just like an auto-captured ad id does
-    resolveProductFromAdId(ad.id);
   }
 
   // Confirmation line so the agent can see the order is attributed before
@@ -2526,6 +2579,55 @@ function renderOrdersForm() {
   // Keep the confirmation line in sync when the ad id is auto-captured or
   // pasted by hand rather than picked from the list.
   fields.adid.input.addEventListener('input', renderPickedAd);
+
+  // Apply an ad id from anywhere (page scan or label click): fill the field,
+  // show the confirmation line, and pull in the linked product.
+  function applyAdId(id, note) {
+    if (!id || fields.adid.input.value === id) return false;
+    fields.adid.input.value = id;
+    // Mark as a deliberate choice so the background sync does not overwrite
+    // it on the next poll (applyField skips fields flagged as edited).
+    fields.adid.last = id;
+    fields.adid.edited = true;
+    fields.adid.emptyStreak = 0;
+    renderPickedAd();
+    if (note) toast(note + id);
+    resolveProductFromAdId(id, true);
+    return true;
+  }
+
+  // Clicking the AD ID field grabs the ad_id label off the conversation.
+  // Auto-capture already tries this, but it silently loses when the contact
+  // panel loads late, so this gives the agent a deliberate way to retry.
+  fields.adid.input.addEventListener('focus', () => {
+    const found = scanPageForAdId();
+    if (!found) {
+      if (!fields.adid.input.value) toast('No ad_id label found on this conversation');
+      return;
+    }
+    if (!applyAdId(found, 'Ad ID captured: ')) {
+      // Same id already there - still make sure the product got added.
+      resolveProductFromAdId(found, true);
+    }
+  });
+
+  // Clicking the "ad_id.1202..." chip in the contact panel sends it straight
+  // to the field. Capture phase so it still fires if Meta stops the event.
+  document.addEventListener('click', e => {
+    const el = e.target;
+    if (!el || widget.contains(el)) return;        // ignore clicks inside our panel
+    // Walk up a few levels: the click usually lands on an inner text node.
+    let node = el, id = '';
+    for (let i = 0; i < 4 && node && !id; i++) {
+      const text = (node.textContent || '').trim();
+      if (text && text.length <= 60) {
+        const m = text.match(AD_ID_RE);
+        if (m) id = m[1];
+      }
+      node = node.parentElement;
+    }
+    if (id) applyAdId(id, 'Ad ID captured: ');
+  }, true);
 
   // If nothing was auto-captured, open the picker so the agent is prompted
   // to attribute the order instead of silently leaving it blank.
