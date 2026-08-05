@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CalendarDays, DollarSign, TrendingUp, Megaphone, X, RefreshCw, AlertCircle, Users, Bike, Gauge, History, Facebook, Cat } from 'lucide-react'
 import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/lib/ads-recommendations'
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
-import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
+import { costPerResultRs, type ResultKind } from '@/lib/ads-conversions'
 import { TvRulesCat } from '@/components/ads/tv-rules-cat'
 
 // Minimal structural shape of a campaign needed for the TV view.
@@ -229,6 +229,12 @@ function groupRevenue(
   perAd.sort((a, b) => b.revenue - a.revenue)
   return { revenue, orders, perAd }
 }
+
+// On the TV wall every Facebook result - a message, a lead or a purchase -
+// is spoken about as one CLIENT. The floor team does not distinguish them,
+// so the wall says "client" everywhere instead of msg/lead/sale. The full
+// dashboard keeps the precise RESULT_LABEL wording.
+const TV_RESULT_LABEL = 'client'
 
 // Shared dense grid template used by both the header and every row.
 // Columns: rank, product, spend, clients, cost/client, revenue booked, action.
@@ -716,15 +722,15 @@ export function TvDashboard({
           {(g.totalResults ?? 0) > 0 && (
             <div className="mb-1 flex items-center justify-between gap-2 border-b border-blue-500/20 pb-1">
               <span className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-                Cheapest first {'\u00b7'} {g.totalResults} {RESULT_LABEL[g.campaigns.find((c) => c.resultKind && c.resultKind !== 'none')?.resultKind ?? 'msg']}
+                Cheapest first {'\u00b7'} {g.totalResults} {TV_RESULT_LABEL}
                 {(g.totalResults ?? 0) !== 1 ? 's' : ''} total
               </span>
               {g.costPerResult != null && (
                 <span
                   className={`rounded px-1.5 py-0 text-[10px] font-black tabular-nums ${ZONE_STYLES[zoneFor(g.costPerResult)].bg} ${ZONE_STYLES[zoneFor(g.costPerResult)].text}`}
-                  title={`Product average: ${formatSpend(g.totalSpend.toString())} across ${g.totalResults} results`}
+                  title={`Product average: ${formatSpend(g.totalSpend.toString())} across ${g.totalResults} ${TV_RESULT_LABEL}${(g.totalResults ?? 0) !== 1 ? 's' : ''}`}
                 >
-                  avg {formatRs(g.costPerResult)}
+                  avg {formatRs(g.costPerResult)}/{TV_RESULT_LABEL}
                 </span>
               )}
             </div>
@@ -751,7 +757,7 @@ export function TvDashboard({
                       const spendUsd = parseFloat(c.spend || '0')
                       const results = c.results ?? 0
                       const cpr = costPerResultRs(spendUsd, results, USD_TO_RS)
-                      const label = RESULT_LABEL[c.resultKind ?? 'none']
+                      const label = TV_RESULT_LABEL
                       const size = isTight ? 'text-[10px]' : 'text-[11px]'
                       // Whole rupees only: these rows share their width with six
                       // action buttons, and paise never change a decision.

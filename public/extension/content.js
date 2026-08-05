@@ -2723,6 +2723,17 @@ function submitOrder() {
     err.style.display = 'block';
     return;
   }
+
+  // Ad ID is mandatory and must be linked to a product - the server enforces
+  // this too, but catching it here saves a round trip and reveals the hidden
+  // Ad ID field so the agent can see and fix what is missing.
+  if (!adId || !/^\d+$/.test(adId)) {
+    const adidRow = document.getElementById('ak-adid-row');
+    if (adidRow) adidRow.style.display = '';
+    err.textContent = 'Ad ID is required. Open this order from the ad conversation so the Ad ID is captured.';
+    err.style.display = 'block';
+    return;
+  }
   
   const entries = Object.entries(cart).filter(([,q]) => q > 0);
   if (!entries.length) {

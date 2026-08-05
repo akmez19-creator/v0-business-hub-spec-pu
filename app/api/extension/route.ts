@@ -304,6 +304,69 @@ export async function POST(request: NextRequest) {
     if (!products) {
       return NextResponse.json({ success: false, error: 'At least one product is required' }, { status: 400, headers: corsHeaders })
     }
+
+    // ---- Ad ID is mandatory, and must resolve to a linked product ----------
+    // Every entry has to be attributable to the ad that produced it, otherwise
+    // the Ads wall cannot tell what a client actually cost. An ad id that is
+    // present but NOT linked to a product is just as useless for attribution
+    // as no ad id at all, so both are rejected here rather than silently
+    // creating an orphan row.
+    const trimmedAdId = typeof adId === 'string' ? adId.trim() : ''
+    if (!trimmedAdId) {
+      return NextResponse.json(
+        { success: false, error: 'Ad ID is required. Open the order from the ad conversation so the Ad ID is captured.' },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+    if (!/^\d+$/.test(trimmedAdId)) {
+      return NextResponse.json(
+        { success: false, error: `Ad ID "${trimmedAdId}" is not valid - it should be numeric.` },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+
+    const fbToken = process.env.FACEBOOK_ACCESS_TOKEN
+    if (!fbToken) {
+      return NextResponse.json(
+        { success: false, error: 'Facebook access token not configured, cannot verify the Ad ID.' },
+        { status: 500, headers: corsHeaders },
+      )
+    }
+
+    // Ad -> campaign (Meta), then campaign -> product (our link table). Both
+    // hops must succeed for the entry to be allowed through.
+    let linkedCampaignId: string | null = null
+    try {
+      const metaRes = await fetch(
+        `https://graph.facebook.com/v21.0/${trimmedAdId}?fields=campaign_id&access_token=${fbToken}`,
+      )
+      const metaData = await metaRes.json()
+      linkedCampaignId = metaData?.campaign_id ?? null
+    } catch {
+      linkedCampaignId = null
+    }
+    if (!linkedCampaignId) {
+      return NextResponse.json(
+        { success: false, error: `Ad ID ${trimmedAdId} could not be found on Facebook.` },
+        { status: 400, headers: corsHeaders },
+      )
+    }
+
+    const { data: adLink } = await supabase
+      .from('campaign_product_links')
+      .select('product_id')
+      .eq('campaign_id', linkedCampaignId)
+      .maybeSingle()
+
+    if (!adLink?.product_id) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Ad ID ${trimmedAdId} is not linked to any product. Link its campaign to a product in Product Master before making this entry.`,
+        },
+        { status: 400, headers: corsHeaders },
+      )
+    }
     
     // Generate reply token
     const replyToken = uuidv4()
@@ -358,7 +421,8 @@ export async function POST(request: NextRequest) {
       // For Exchange / Trade In, the product the client is returning (what the
       // rider must collect) so stock reconciliation stays accurate.
       return_product: (typeof returnProduct === 'string' && returnProduct.trim()) ? returnProduct.trim() : null,
-      ad_id: adId?.trim() || null,
+      // Verified above: numeric, exists on Meta, and linked to a product
+      ad_id: trimmedAdId,
       status: 'pending',
       entry_date: nowIso.split('T')[0],
       delivery_date: resolvedDeliveryDate,
