@@ -232,8 +232,10 @@ function groupRevenue(
 
 // Shared dense grid template used by both the header and every row.
 // Columns: rank, product, spend, clients, cost/client, revenue booked, action.
+// The clients column is deliberately the widest of the numeric ones because
+// the wall is sorted by it - it is the number the row is ranked on.
 const ROW_GRID =
-  'grid grid-cols-[1.5rem_minmax(0,1fr)_3.4rem_1.8rem_3rem_3.6rem_1.2rem] items-center gap-1'
+  'grid grid-cols-[1.5rem_minmax(0,1fr)_3.2rem_3rem_2.9rem_3.4rem_1.2rem] items-center gap-1'
 
 // Row density presets. The number of rows per column decides the density so
 // the whole league fits on the TV screen with NO scrolling.
@@ -405,16 +407,26 @@ export function TvDashboard({
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editedSignature])
-  // ONE continuous league ranked by cost-per-client (best first), flowing
-  // across balanced columns with no per-zone gaps. Zone colors stay on each
-  // row so green/yellow/red reads at a glance.
+  // Cost-per-client ordering (cheapest first). Still used for the mascot's
+  // "best / worst by cost" callouts, but NO LONGER the wall order.
   const byCac = (a: TvGroup, b: TvGroup) => {
     if (a.cac === null && b.cac === null) return b.totalSpend - a.totalSpend
     if (a.cac === null) return 1
     if (b.cac === null) return -1
     return a.cac - b.cac
   }
-  const ranked = [...groups].sort(byCac)
+  const rankedByCac = [...groups].sort(byCac)
+
+  // THE WALL ORDER: how many clients each product actually brought in, most
+  // first. This is what the team asked to lead with - volume of clients won,
+  // not the cost efficiency. Ties (and the many zero-client products) fall
+  // back to cheapest cost-per-client so the best-value ones still surface
+  // above the pure dead weight.
+  const byClients = (a: TvGroup, b: TvGroup) => {
+    if (b.clients !== a.clients) return b.clients - a.clients
+    return byCac(a, b)
+  }
+  const ranked = [...groups].sort(byClients)
 
   // Zone tallies + per-zone client totals for the legend chips
   const zoneStats = groups.reduce(
@@ -573,8 +585,15 @@ export function TvDashboard({
           {(g.totalSpend * USD_TO_RS).toLocaleString('en-US', { maximumFractionDigits: 0 })}
         </span>
 
-        {/* Clients */}
-        <span className={`text-right ${density.num} font-bold tabular-nums`}>{g.clients.toLocaleString()}</span>
+        {/* Clients - the sort key, so it is the loudest number on the row:
+            violet (matching the Total Clients tile) and a touch larger. A
+            zero-client product is dimmed so the eye skips it. */}
+        <span
+          className={`text-right ${density.cac} font-bold tabular-nums ${g.clients > 0 ? 'text-violet-400' : 'text-muted-foreground/40'}`}
+          title={`${g.clients} client${g.clients !== 1 ? 's' : ''} acquired`}
+        >
+          {g.clients.toLocaleString()}
+        </span>
 
         {/* Cost per client - the league metric, colored by zone. Rows edited
             today also show whether the edit is IMPROVING the cost: live CAC
@@ -970,7 +989,14 @@ export function TvDashboard({
         <span className="text-right">
           Spend <span className="text-amber-500">Rs</span>
         </span>
-        <span className="text-right">Cl</span>
+        {/* Clients is the sort key - flagged with a caret and tinted violet to
+            match the Total Clients tile, so it reads as the primary number */}
+        <span
+          className="flex items-center justify-end gap-0.5 text-right text-violet-400"
+          title="Clients this product's ads brought in. The wall is sorted by this, most first."
+        >
+          {'\u25bc'} Clients
+        </span>
         <span className="text-right">
           Cost <span className="text-foreground/70">Rs</span>
         </span>
@@ -1364,10 +1390,12 @@ export function TvDashboard({
         verdict: info.turnOff ? 'TURN OFF' : 'DECREASE MORE',
       })),
     },
-    // Cost/client leaders and losers so the cat names real products
-    bestProducts: ranked.filter((g) => g.cac !== null).slice(0, 5)
+    // Cost/client leaders and losers so the cat names real products. These
+    // read from the cost-sorted list on purpose - the WALL is sorted by
+    // clients now, but "best / worst value" is still a cost-per-client fact.
+    bestProducts: rankedByCac.filter((g) => g.cac !== null).slice(0, 5)
       .map((g) => ({ product: g.productName, costPerClientRs: g.cac, clients: g.clients })),
-    worstProducts: ranked.filter((g) => g.cac !== null).slice(-5)
+    worstProducts: rankedByCac.filter((g) => g.cac !== null).slice(-5)
       .map((g) => ({ product: g.productName, costPerClientRs: g.cac, clients: g.clients })),
     editedToday: ranked.filter((g) => g.todayEdit)
       .map((g) => ({ product: g.productName, edit: g.todayEdit?.summary, costPerClientRs: g.cac })),
