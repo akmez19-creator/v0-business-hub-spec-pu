@@ -24,6 +24,7 @@ import {
   Users,
 } from 'lucide-react'
 import { ManagePosts } from '@/components/product-master/manage-posts'
+import { BulkPosterDialog, type BulkProduct } from '@/components/product-master/bulk-poster-dialog'
 
 // A row tool click: which tool, for which product.
 // 'reels' is the single entry point from the table - Studio covers titles,
@@ -139,6 +140,12 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
   // pre-filtered to that product
   const [postsOpen, setPostsOpen] = useState(false)
   const [postsProductFilter, setPostsProductFilter] = useState('')
+  // Bulk poster generation - tick rows, then generate a one-click post for each
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkOpen, setBulkOpen] = useState(false)
+  // Snapshot the chosen products at launch so filtering/sorting the table
+  // mid-run cannot change what the batch is working on
+  const [bulkProducts, setBulkProducts] = useState<BulkProduct[]>([])
 
   // Click a column header to sort; click again to flip direction
   const handleSort = (key: SortKey) => {
@@ -259,6 +266,46 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
       return next
     })
 
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  // Select-all acts on what is currently visible (search + filter), so ticking
+  // it while a filter is on never quietly selects hidden rows.
+  const visibleIds = filtered.map((p) => p.id)
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
+  const toggleSelectAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id))
+      else visibleIds.forEach((id) => next.add(id))
+      return next
+    })
+
+  // Freeze the current selection into the batch, then open the dialog
+  const startBulk = () => {
+    const chosen = (data?.products || [])
+      .filter((p) => selected.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        image: p.image_url,
+        price: p.price,
+        promoPrice: p.promo_price,
+      }))
+    if (chosen.length === 0) return
+    setBulkProducts(chosen)
+    setBulkOpen(true)
+  }
+
+  const selectedWithoutPhoto = (data?.products || []).filter(
+    (p) => selected.has(p.id) && !(p.image_url && p.image_url.trim()),
+  ).length
+
   if (error || (data && !data.success)) {
     return (
       <Card>
@@ -316,7 +363,17 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
 
       <Card>
         <CardContent className="p-0">
-          <div className="grid grid-cols-[24px_1fr_80px_80px_72px_72px_70px_70px_96px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[28px_24px_1fr_80px_80px_72px_72px_70px_70px_96px] items-center gap-2 border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="flex items-center justify-center">
+              <input
+                type="checkbox"
+                className="h-4 w-4 cursor-pointer accent-fuchsia-500"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                aria-label="Select all visible products"
+                title="Select all visible products"
+              />
+            </span>
             <span />
             {(
               [
@@ -366,8 +423,21 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                     }
                   }}
                   aria-expanded={isOpen}
-                  className="grid w-full cursor-pointer grid-cols-[24px_1fr_80px_80px_72px_72px_70px_70px_96px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
+                  className="grid w-full cursor-pointer grid-cols-[28px_24px_1fr_80px_80px_72px_72px_70px_70px_96px] items-center gap-2 px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted/50"
                 >
+                  <span
+                    className="flex items-center justify-center"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer accent-fuchsia-500"
+                      checked={selected.has(p.id)}
+                      onChange={() => toggleSelect(p.id)}
+                      aria-label={`Select ${p.name} for bulk posts`}
+                    />
+                  </span>
                   {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   <span className="flex items-center gap-2 truncate">
                     {p.image_url ? (
@@ -634,6 +704,31 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
           })}
         </CardContent>
       </Card>
+
+      {/* Floating batch bar - only present once something is ticked */}
+      {selected.size > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-full border border-border bg-card/95 px-4 py-2 shadow-lg backdrop-blur">
+            <span className="text-sm font-medium tabular-nums">
+              {selected.size} selected
+            </span>
+            {selectedWithoutPhoto > 0 && (
+              <span className="text-xs text-amber-500">
+                {selectedWithoutPhoto} without a photo will be skipped
+              </span>
+            )}
+            <Button size="sm" onClick={startBulk}>
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              Generate posts
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <BulkPosterDialog open={bulkOpen} onOpenChange={setBulkOpen} products={bulkProducts} />
     </div>
   )
 }

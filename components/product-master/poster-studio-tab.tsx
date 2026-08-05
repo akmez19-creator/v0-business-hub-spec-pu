@@ -533,21 +533,9 @@ export function PosterStudioTab({
         {busy && <span className="text-[11px] text-muted-foreground">This usually takes 20-60 seconds</span>}
       </div>
 
-      {/* Feature 7: score the candidate photos and promote the best one.
-          Only worth showing once there is an actual choice to make. */}
-      {candidates.length > 1 && (
-        <BestImagePicker
-          productId={productId}
-          images={candidates}
-          selected={sourceImage}
-          onSelect={(url) => {
-            setSourceImage(url)
-            setSourceLabel('Best-scoring photo')
-          }}
-        />
-      )}
-
-      {/* Feature 6: poster AND caption in one press, from both providers */}
+      {/* Feature 6: poster AND caption in one press, from both providers. Sits
+          right next to the Studio generate button so the two ways to produce a
+          poster are side by side, not scrolled apart. */}
       <OneClickPostPanel
         disabled={!sourceImage}
         onUsePoster={(dataUrl) => {
@@ -575,6 +563,20 @@ export function PosterStudioTab({
           lifestyleShots,
         }}
       />
+
+      {/* Feature 7: score the candidate photos and promote the best one.
+          Only worth showing once there is an actual choice to make. */}
+      {candidates.length > 1 && (
+        <BestImagePicker
+          productId={productId}
+          images={candidates}
+          selected={sourceImage}
+          onSelect={(url) => {
+            setSourceImage(url)
+            setSourceLabel('Best-scoring photo')
+          }}
+        />
+      )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
       {warnings.length > 0 && (
