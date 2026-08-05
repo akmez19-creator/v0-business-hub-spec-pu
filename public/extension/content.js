@@ -1979,33 +1979,96 @@ function renderOrdersForm() {
     }
   }
 
+  // Identity of the open conversation. The thread id in the URL is the only
+  // signal that changes the instant the agent clicks a different chat, so it
+  // beats watching the name (which is slow, and identical for two clients
+  // with the same name).
+  function getConversationKey() {
+    try {
+      const u = new URL(location.href);
+      const thread = u.searchParams.get('selected_item_id')
+        || u.searchParams.get('thread_id')
+        || u.searchParams.get('conversation_id')
+        || u.searchParams.get('tid')
+        || u.searchParams.get('cid');
+      if (thread) return 't:' + thread;
+      // Some inbox views keep the thread id in the path instead of the query.
+      const path = location.pathname.match(/\/t\/(\d+)/);
+      if (path) return 't:' + path[1];
+    } catch (e) { /* fall through */ }
+    // No thread id available - fall back to who the form is showing.
+    const nm = (fields.name.input.value || '').trim();
+    const ph = (fields.phone.input.value || '').trim();
+    return nm || ph ? 'n:' + nm + '|' + ph : null;
+  }
+  let lastConvKey = getConversationKey();
+
+  // Wipe everything tied to the previous client so the new chat starts clean
+  // and re-captures its own ad id and product.
+  function resetForConversation() {
+    if (Object.keys(cart).length) {
+      cart = {};
+      updateCart();
+    }
+    // Clearing `edited` is the important part: applyField refuses to touch a
+    // field the agent edited, so without this the previous chat's ad id would
+    // stay in the box forever.
+    fields.adid.input.value = '';
+    fields.adid.last = null;
+    fields.adid.edited = false;
+    fields.adid.manual = false;
+    fields.adid.emptyStreak = 0;
+    window.__akmezLastResolvedAd = null;
+    try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
+
+    // Grab the new conversation's ad id right away rather than waiting for
+    // the next poll, so the linked product lands in the cart immediately.
+    const found = scanPageForAdId();
+    if (found) {
+      fields.adid.input.value = found;
+      fields.adid.last = found;
+      try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
+      resolveProductFromAdId(found);
+    }
+  }
+
   function syncFields() {
     // Self-clean if the order form is no longer on screen
     if (!document.getElementById('ak-name')) {
       if (window.__akmezSyncTimer) { clearInterval(window.__akmezSyncTimer); window.__akmezSyncTimer = null; }
       return;
     }
+
+    // Conversation switch check runs first, so the reset happens before any
+    // of the readers below write the new client's details into the form.
+    const key = getConversationKey();
+    if (key && lastConvKey && key !== lastConvKey) {
+      lastConvKey = key;
+      resetForConversation();
+    } else if (key && !lastConvKey) {
+      lastConvKey = key;
+    }
+
     readCustomerName(txt => {
       const prevName = fields.name.last;
       applyField(fields.name, txt);
-      // New conversation detected (name switched to a different client):
-      // reset the product cart so items from the previous client don't carry over.
+      // Backstop for inbox views with no thread id in the URL: a changed
+      // client name still means a new conversation.
       if (txt && fields.name.last !== prevName && prevName !== null) {
-        if (Object.keys(cart).length) {
-          cart = {};
-          updateCart();
-        }
-        // Allow the new client's ad id to resolve its product again
-        window.__akmezLastResolvedAd = null;
+        resetForConversation();
       }
     });
     readCustomerPhone(num => { applyField(fields.phone, num); refreshClientRating(); lookupLastDelivered(); });
     readCustomerAdId(id => {
+      // The agent deliberately chose an ad for THIS conversation - never let
+      // the page scan overwrite it. Cleared on conversation switch.
+      if (fields.adid.manual) return;
       const prev = fields.adid.last;
       applyField(fields.adid, id);
       // When the ad id changes to a new value, auto-resolve its linked product
       if (fields.adid.input.value && fields.adid.input.value !== prev) {
         resolveProductFromAdId(fields.adid.input.value);
+        try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
       }
     });
   }
@@ -2548,7 +2611,14 @@ function renderOrdersForm() {
       </div>
       <button type="button" class="akmez-adpick-clear" id="ak-adpick-clear" title="Clear ad">&times;</button>`;
     const clr = document.getElementById('ak-adpick-clear');
-    if (clr) clr.onclick = () => { fields.adid.input.value = ''; renderPickedAd(); };
+    if (clr) clr.onclick = () => {
+      // Drop the manual lock too, so auto-capture can fill it again
+      fields.adid.input.value = '';
+      fields.adid.last = null;
+      fields.adid.edited = false;
+      fields.adid.manual = false;
+      renderPickedAd();
+    };
   }
 
   adPick.addEventListener('input', showAdSuggestions);
@@ -2589,6 +2659,7 @@ function renderOrdersForm() {
     // it on the next poll (applyField skips fields flagged as edited).
     fields.adid.last = id;
     fields.adid.edited = true;
+    fields.adid.manual = true;
     fields.adid.emptyStreak = 0;
     renderPickedAd();
     if (note) toast(note + id);
