@@ -217,6 +217,11 @@ function isReelAspect(w: number, h: number) {
   const LOGO_MIN = 6
   const LOGO_MAX = 45
 
+// Product-photo overlay width bounds. Wider than the logo range because the
+// product shot is meant to be a hero element on the clip, not a small mark.
+const PRODUCT_MIN = 12
+const PRODUCT_MAX = 90
+
   // Meta's Reels safe area for a 1080x1920 frame, as percentages: the top 14%
   // (~269px) carries the platform header, the bottom 35% (~672px) the caption
   // and the like/share rail, and 6% down each side. Branding burned outside
@@ -412,6 +417,21 @@ export function ReelsStudioTab({
   const [logoSaving, setLogoSaving] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
 
+  // ---- Product photo overlay ---------------------------------------------
+  // The inventory photo, placed directly on the clip so the exact product is
+  // on screen even when the footage is a generic lifestyle shot. Off by
+  // default (opt-in) and only offered when the product actually has a photo.
+  // Background removal is optional here - unlike the logo, a raw catalogue
+  // shot on its white card often reads fine, and cutting it out is a choice.
+  const hasProductImage = Boolean(productImage && productImage.trim())
+  const [productOn, setProductOn] = useState(false)
+  const [productXY, setProductXY] = useState({ x: 50, y: 50 })
+  const [productSize, setProductSize] = useState(40) // % of video width
+  const [productOpacity, setProductOpacity] = useState(100) // %
+  const [productRemoveBg, setProductRemoveBg] = useState(false)
+  const [productProcessed, setProductProcessed] = useState<string | null>(null)
+  const [productRemovingBg, setProductRemovingBg] = useState(false)
+
   // ---- Per-page brand logo ------------------------------------------------
   // Each Facebook Page keeps its own saved logo. Switching the page below
   // swaps the watermark instead of making the user re-upload every time.
@@ -547,6 +567,16 @@ export function ReelsStudioTab({
       setLogoRemoveBg(wm.removeBg !== false)
       if (typeof wm.bgTol === 'number') setLogoBgTol(wm.bgTol)
     }
+    // Product-photo placement travels with the layout too. The image source is
+    // per-product (never saved here), only where/how big/how visible it sits.
+    const pr = (l as any).product
+    if (pr && typeof pr === 'object') {
+      if (typeof pr.on === 'boolean') setProductOn(pr.on)
+      if (pr.xy && typeof pr.xy === 'object') setProductXY(pr.xy)
+      if (typeof pr.size === 'number') setProductSize(pr.size)
+      if (typeof pr.opacity === 'number') setProductOpacity(pr.opacity)
+      if (typeof pr.removeBg === 'boolean') setProductRemoveBg(pr.removeBg)
+    }
   }, [])
 
   // The banner placement is a saved default, not a per-session choice: it is
@@ -617,6 +647,14 @@ export function ReelsStudioTab({
         removeBg: logoRemoveBg,
         bgTol: logoBgTol,
       },
+      // Where the product photo sits - not the photo, which is per-product
+      product: {
+        on: productOn,
+        xy: productXY,
+        size: productSize,
+        opacity: productOpacity,
+        removeBg: productRemoveBg,
+      },
     }
     const t = setTimeout(() => {
       const target = brandPageId
@@ -658,16 +696,23 @@ export function ReelsStudioTab({
     logoOpacity,
     logoRemoveBg,
     logoBgTol,
+    productOn,
+    productXY,
+    productSize,
+    productOpacity,
+    productRemoveBg,
     brandPageId,
     brandPages,
   ])
   const previewBoxRef = useRef<HTMLDivElement>(null)
   const [previewW, setPreviewW] = useState(0)
-  const dragTarget = useRef<'title' | 'price' | 'logo' | 'logo-resize' | null>(null)
+  const dragTarget = useRef<
+    'title' | 'price' | 'logo' | 'logo-resize' | 'product' | 'product-resize' | null
+  >(null)
   // Tapping any overlay on the preview selects it, which reveals that one
   // element's full controls in the editor docked under the video. Nothing is
   // selected by default, so the panel starts quiet.
-  const [activeLayer, setActiveLayer] = useState<'title' | 'price' | 'logo' | null>(null)
+  const [activeLayer, setActiveLayer] = useState<'title' | 'price' | 'logo' | 'product' | null>(null)
 
   // Keep the preview font/logo scale proportional to the rendered video box
   useEffect(() => {
@@ -699,6 +744,16 @@ export function ReelsStudioTab({
       return
     }
 
+    // Same corner-handle math as the logo, against the product overlay's own
+    // center and size bounds
+    if (dragTarget.current === 'product-resize') {
+      const centerX = rect.left + (productXY.x / 100) * rect.width
+      const halfW = Math.abs(e.clientX - centerX)
+      const pct = (halfW * 2) / rect.width * 100
+      setProductSize(Math.round(Math.min(PRODUCT_MAX, Math.max(PRODUCT_MIN, pct))))
+      return
+    }
+
     // Locked layout: the resize handle above still works (lock is about where
     // the banners sit, not how big they are), but nothing may move
     if (lockLayout) return
@@ -720,6 +775,7 @@ export function ReelsStudioTab({
     setLayoutPreset('custom')
     if (dragTarget.current === 'title') setTitlePos({ x, y })
     else if (dragTarget.current === 'price') setPricePos({ x, y })
+    else if (dragTarget.current === 'product') setProductXY({ x, y })
     else setLogoXY({ x, y })
   }
 
@@ -835,6 +891,49 @@ export function ReelsStudioTab({
     }
   }, [logoSrc, logoRemoveBg, logoBgTol, logoResolved])
 
+  // Cut the product photo out of its background on demand, through the same AI
+  // matting route the logo uses. On any failure we simply keep the original
+  // photo rather than blocking - a product on its white card is still usable.
+  useEffect(() => {
+    if (!productRemoveBg || !hasProductImage || !productImage) {
+      setProductProcessed(null)
+      return
+    }
+    let cancelled = false
+    setProductRemovingBg(true)
+    ;(async () => {
+      try {
+        let payload = productImage
+        if (payload.startsWith('/')) {
+          const r = await fetch(payload)
+          const blob = await r.blob()
+          payload = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader()
+            fr.onload = () => resolve(fr.result as string)
+            fr.onerror = reject
+            fr.readAsDataURL(blob)
+          })
+        }
+        const res = await fetch('/api/product-master/remove-bg', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: payload }),
+        })
+        const json = await res.json()
+        if (!res.ok || !json.dataUrl) throw new Error(json.error || 'AI removal failed')
+        if (!cancelled) setProductProcessed(json.dataUrl)
+      } catch {
+        if (!cancelled) setProductProcessed(null)
+      } finally {
+        if (!cancelled) setProductRemovingBg(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [productRemoveBg, productImage, hasProductImage])
+
+  const effectiveProductSrc = productRemoveBg && productProcessed ? productProcessed : productImage
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
   const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
@@ -1826,6 +1925,33 @@ export function ReelsStudioTab({
       img.src = effectiveLogoSrc
     })
 
+  // Same idea as the logo: draw the product photo (cut out if enabled) at the
+  // chosen size and opacity onto a small transparent canvas, so the ffmpeg
+  // overlay stays a single flat image.
+  const renderProductPng = (vw: number): Promise<{ png: Uint8Array; w: number; h: number }> =>
+    new Promise((resolve, reject) => {
+      if (!effectiveProductSrc) return reject(new Error('no product image'))
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        const w = Math.max(48, Math.round((productSize / 100) * vw))
+        const h = Math.round(w * (img.naturalHeight / img.naturalWidth))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return reject(new Error('no canvas'))
+        ctx.globalAlpha = productOpacity / 100
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(async (blob) => {
+          if (!blob) return reject(new Error('toBlob failed'))
+          resolve({ png: new Uint8Array(await blob.arrayBuffer()), w, h })
+        }, 'image/png')
+      }
+      img.onerror = () => reject(new Error('product image load failed'))
+      img.src = effectiveProductSrc
+    })
+
   // BRAND: burn the title + price + logo onto the clean (un-branded) source.
   // Non-destructive: the first brand snapshots the clean source, and every
   // re-apply renders from that snapshot - so changing settings and applying
@@ -1837,7 +1963,10 @@ export function ReelsStudioTab({
   // Transformations count as work on their own - a punch-in or a speed change
   // with no overlays is still a valid render
   const wantsTransform = zoom > 0 || speed !== 1 || muteAudio
-  const hasBranding = wantsTitle || wantsPrice || logoOn || wantsTransform
+  // The product photo is real branding on its own - a clip with only the
+  // product placed on it is still a valid render
+  const wantsProduct = productOn && hasProductImage
+  const hasBranding = wantsTitle || wantsPrice || logoOn || wantsProduct || wantsTransform
 
   // Burn the current branding onto any source and hand back the mp4. Writes no
   // state, so the Apply button and the per-clip download go through one graph
@@ -1905,6 +2034,20 @@ export function ReelsStudioTab({
         const f = 1 + zoom / 100
         chains.push(`[${last}]crop=iw/${f}:ih/${f},scale=${out.w}:${out.h},setsar=1[zm]`)
         last = 'zm'
+      }
+
+      // Product photo goes on FIRST, so the title, price and logo all sit on
+      // top of it and stay readable - the product is the backdrop hero, not a
+      // sticker over the text.
+      if (wantsProduct) {
+        const { png, w: pw, h: ph } = await renderProductPng(out.w)
+        await ffmpeg.writeFile('product.png', png)
+        inputs.push('-i', 'product.png')
+        const x = Math.round(Math.min(Math.max((productXY.x / 100) * out.w - pw / 2, 0), out.w - pw))
+        const y = Math.round(Math.min(Math.max((productXY.y / 100) * out.h - ph / 2, 0), out.h - ph))
+        chains.push(`[${last}][${idx}:v]overlay=${x}:${y}[v${idx}]`)
+        last = `v${idx}`
+        idx++
       }
 
       if (wantsTitle) {
@@ -2664,6 +2807,35 @@ export function ReelsStudioTab({
           )}
         </div>
 
+        {/* Product photo controls - only offered when the product has a photo */}
+        {hasProductImage && (
+          <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={productOn}
+                onChange={(e) => {
+                  setProductOn(e.target.checked)
+                  if (e.target.checked) setActiveLayer('product')
+                }}
+                className="h-3.5 w-3.5 accent-amber-500"
+              />
+              <Stamp className="h-3.5 w-3.5 text-amber-500" />
+              Product photo
+            </label>
+            {productOn && (
+              <button
+                type="button"
+                onClick={() => setActiveLayer('product')}
+                className="ml-6 w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <span>Placed on the video</span>
+                <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Price tag controls */}
         <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
           <label className="flex items-center gap-2 text-sm font-medium">
@@ -2848,6 +3020,55 @@ export function ReelsStudioTab({
                     />
                   </>
                 )}
+                {/* Product photo overlay - drawn before the text/logo so it
+                    layers underneath them here, exactly as it does in the burn */}
+                {productOn && hasProductImage && effectiveProductSrc && (
+                  <div
+                    className="absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{ left: `${productXY.x}%`, top: `${productXY.y}%`, width: `${productSize}%` }}
+                  >
+                    <img
+                      src={effectiveProductSrc || '/placeholder.svg'}
+                      alt="Drag to position the product photo"
+                      role="button"
+                      onPointerDown={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                        setActiveLayer('product')
+                        if (lockLayout) return
+                        dragTarget.current = 'product'
+                        setDragging(true)
+                      }}
+                      className={`w-full cursor-grab active:cursor-grabbing ${
+                        activeLayer === 'product' ? 'outline outline-1 outline-amber-400' : ''
+                      }`}
+                      style={{ opacity: productOpacity / 100 }}
+                      draggable={false}
+                    />
+                    {/* Corner handle: drag outward to scale the product photo */}
+                    {activeLayer === 'product' && (
+                      <span
+                        role="button"
+                        aria-label="Drag to resize the product photo"
+                        title="Drag to resize"
+                        onPointerDown={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          ;(previewBoxRef.current as HTMLElement)?.setPointerCapture?.(e.pointerId)
+                          dragTarget.current = 'product-resize'
+                          setDragging(true)
+                        }}
+                        className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-background bg-amber-400 shadow"
+                      />
+                    )}
+                    {productRemovingBg && (
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                        <Loader2 className="h-5 w-5 animate-spin text-white" />
+                      </span>
+                    )}
+                  </div>
+                )}
                 {titleOn &&
                   titleText.trim() &&
                   (() => {
@@ -2980,8 +3201,8 @@ export function ReelsStudioTab({
               <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-background/80 p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-500">
-                    {activeLayer === 'title' ? <Type className="h-3.5 w-3.5" /> : activeLayer === 'price' ? <Tag className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
-                    {activeLayer === 'title' ? 'Title' : activeLayer === 'price' ? 'Price tag' : 'Logo'}
+                    {activeLayer === 'title' ? <Type className="h-3.5 w-3.5" /> : activeLayer === 'price' ? <Tag className="h-3.5 w-3.5" /> : activeLayer === 'product' ? <Stamp className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
+                    {activeLayer === 'title' ? 'Title' : activeLayer === 'price' ? 'Price tag' : activeLayer === 'product' ? 'Product photo' : 'Logo'}
                   </span>
                   <button
                     type="button"
@@ -3076,12 +3297,35 @@ export function ReelsStudioTab({
                     </div>
                   </>
                 )}
+
+                {activeLayer === 'product' && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-[11px] text-muted-foreground">Size {productSize}%</span>
+                      <Slider min={PRODUCT_MIN} max={PRODUCT_MAX} step={1} value={[productSize]} onValueChange={(v) => setProductSize(v[0])} aria-label="Product photo size" className="flex-1" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-[11px] text-muted-foreground">Opacity {productOpacity}%</span>
+                      <Slider min={10} max={100} step={1} value={[productOpacity]} onValueChange={(v) => setProductOpacity(v[0])} aria-label="Product photo transparency" className="flex-1" />
+                    </div>
+                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={productRemoveBg}
+                        onChange={(e) => setProductRemoveBg(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-amber-500"
+                      />
+                      Remove background
+                      {productRemovingBg && <Loader2 className="h-3 w-3 animate-spin" />}
+                    </label>
+                  </>
+                )}
               </div>
             )}
             <p className="text-center text-[11px] text-muted-foreground">
               {activeLayer
                 ? 'The exact positions shown here are burned into the video.'
-                : 'Tap the title, price tag or logo on the video to edit it. Drag to move.'}
+                : 'Tap the title, price tag, product photo or logo on the video to edit it. Drag to move.'}
             </p>
           </div>
         )}
