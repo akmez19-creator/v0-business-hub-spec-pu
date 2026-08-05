@@ -4,6 +4,10 @@
 
 const API_BASE = 'https://www.akmez.tech';
 
+// Ad picker list, cached in memory for 5 min so opening the dropdown on every
+// order does not re-hit the server. { at, ads } or null.
+let adsListCache = null;
+
 // Read stored auth state
 function getStoredAuth() {
   return new Promise(resolve => {
@@ -198,6 +202,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           method: 'GET'
         });
         sendResponse({ success: !!data.success, product: data.product || null, error: data.error });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
+    if (request.action === 'listAds') {
+      // Ads the agent can attribute an order to (served from the ads cache).
+      // Cached for the session so reopening the picker is instant.
+      try {
+        if (adsListCache && Date.now() - adsListCache.at < 5 * 60 * 1000) {
+          sendResponse({ success: true, ads: adsListCache.ads });
+          return;
+        }
+        const data = await fetchWithAuth(API_BASE + '/api/extension/list-ads', { method: 'GET' });
+        if (data.success) adsListCache = { at: Date.now(), ads: data.ads || [] };
+        sendResponse({ success: !!data.success, ads: data.ads || [], error: data.error });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
       }

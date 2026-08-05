@@ -223,8 +223,18 @@ style.textContent = `
 .akmez-sel-del:hover{background:rgba(239,68,68,0.3);}
 .akmez-sel-empty{font-size:11px;color:#777;padding:8px;text-align:center;line-height:1.4;}
 .akmez-hint-text{font-size:10px;color:#777;margin:6px 0 4px;line-height:1.4;}
-.akmez-adid-toggle{font-size:11px;color:#f97316;cursor:pointer;margin:2px 0 8px;user-select:none;display:inline-block;}
-.akmez-adid-toggle:hover{text-decoration:underline;}
+  .akmez-adid-toggle{font-size:11px;color:#f97316;cursor:pointer;margin:2px 0 8px;user-select:none;display:inline-block;}
+  .akmez-adid-toggle:hover{text-decoration:underline;}
+  /* Ad picker - lets the agent choose which Business Suite ad the order came from */
+  .akmez-adpick-line{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}
+  .akmez-adpick-name{font-size:12px;color:#eee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .akmez-adpick-meta{font-size:10px;color:#8b93a7;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .akmez-adpick-prod{color:#10b981;}
+  .akmez-adpick-live{display:inline-block;background:rgba(16,185,129,0.15);color:#10b981;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:6px;}
+  .akmez-adpick-off{display:inline-block;background:rgba(148,163,184,0.15);color:#94a3b8;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:6px;}
+  .akmez-adpick-picked{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:6px 9px;font-size:11px;color:#6ee7b7;margin-top:6px;line-height:1.35;}
+  .akmez-adpick-clear{margin-left:auto;background:rgba(239,68,68,0.15);border:none;color:#fca5a5;width:20px;height:20px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;}
+  .akmez-adpick-clear:hover{background:rgba(239,68,68,0.3);}
 .akmez-select{width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 12px;color:white;font-size:13px;outline:none;cursor:pointer;transition:border-color 0.15s,box-shadow 0.15s;}
 .akmez-select:focus{border-color:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,0.18);}
 .akmez-select option{background:#1a1a2e;color:white;}
@@ -1706,7 +1716,13 @@ function renderOrdersForm() {
       <div id="ak-oldprod-hint" class="akmez-oldprod-hint"></div>
     </div>
     <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
-    <div class="akmez-row akmez-adid-row" id="ak-adid-row" style="display:none;">
+    <div class="akmez-adid-row" id="ak-adid-row" style="display:none;">
+      <div class="akmez-field akmez-autocomplete">
+        <div class="akmez-label">Which ad brought this client?</div>
+        <input type="text" id="ak-adpick" class="akmez-input akmez-input-plain" placeholder="Search your ads by campaign or product..." autocomplete="off">
+        <div class="akmez-suggest" id="ak-adpick-suggest"></div>
+        <div id="ak-adpick-picked" class="akmez-adpick-picked" style="display:none;"></div>
+      </div>
       <div class="akmez-field">
         <div class="akmez-label">Ad ID</div>
         <div class="akmez-input-wrap">
