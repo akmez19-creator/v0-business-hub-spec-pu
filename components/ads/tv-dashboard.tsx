@@ -200,9 +200,40 @@ function campaignRevenue(
   return { revenue, orders, perAd }
 }
 
+/**
+ * Money booked against a whole PRODUCT row: the sum over every ad of every
+ * campaign in the group. This is the number the wall leads with, because a row
+ * is a product, not an ad.
+ *
+ * `perAd` carries the individual ad ids so the row's tooltip can show exactly
+ * which ad id earned what - the point of attributing by ad_id in the first
+ * place. Returns null when not a single ad in the group has an attributed
+ * order, which is deliberately different from "earned Rs 0": no signal vs
+ * genuinely not selling.
+ */
+function groupRevenue(
+  g: TvGroup,
+  byAd: Record<string, AdRevenueStat>,
+): { revenue: number; orders: number; perAd: { id: string; revenue: number; orders: number }[] } | null {
+  const perAd: { id: string; revenue: number; orders: number }[] = []
+  let revenue = 0
+  let orders = 0
+  for (const c of g.campaigns) {
+    const cr = campaignRevenue(c, byAd)
+    if (!cr) continue
+    perAd.push(...cr.perAd)
+    revenue += cr.revenue
+    orders += cr.orders
+  }
+  if (perAd.length === 0) return null
+  perAd.sort((a, b) => b.revenue - a.revenue)
+  return { revenue, orders, perAd }
+}
+
 // Shared dense grid template used by both the header and every row.
-// Last column: budget action badge (increase / decrease / hold).
-const ROW_GRID = 'grid grid-cols-[1.9rem_1fr_4.5rem_2.6rem_4.5rem_1.6rem] items-center gap-1.5'
+// Columns: rank, product, spend, clients, cost/client, revenue booked, action.
+const ROW_GRID =
+  'grid grid-cols-[1.5rem_minmax(0,1fr)_3.4rem_1.8rem_3rem_3.6rem_1.2rem] items-center gap-1'
 
 // Row density presets. The number of rows per column decides the density so
 // the whole league fits on the TV screen with NO scrolling.
@@ -580,6 +611,62 @@ export function TvDashboard({
           </span>
         </span>
 
+        {/* Money BOOKED against this product's ad ids, with ROAS underneath.
+            ROAS is the whole point of pairing it with spend: Rs 900 booked on
+            Rs 300 spent is 3.0x and worth scaling, the same Rs 900 on Rs 1,200
+            is 0.75x and is losing money. Colored by that ratio, not by size.
+            An em dash means no order carries any of this product's ad ids -
+            no signal, which is NOT the same as having sold nothing. */}
+        {(() => {
+          const rev = groupRevenue(g, adRevenue)
+          const spendRs = g.totalSpend * USD_TO_RS
+          if (!rev) {
+            return (
+              <span
+                className={`text-right ${density.num} tabular-nums text-muted-foreground/40`}
+                title="No delivery carries an ad id from this product's campaigns yet"
+              >
+                —
+              </span>
+            )
+          }
+          const roas = spendRs > 0 ? rev.revenue / spendRs : null
+          // Below 1x the ad is spending more than it books; 2x+ is scalable.
+          const roasStyle =
+            roas === null
+              ? 'text-muted-foreground'
+              : roas >= 2
+                ? 'text-emerald-500'
+                : roas >= 1
+                  ? 'text-amber-500'
+                  : 'text-red-500'
+          const top = rev.perAd
+            .slice(0, 3)
+            .map((a) => `  ${a.id}: ${formatRs(a.revenue)} (${a.orders} order${a.orders !== 1 ? 's' : ''})`)
+            .join('\n')
+          const title =
+            `${formatRs(rev.revenue)} booked from ${rev.orders} order${rev.orders !== 1 ? 's' : ''}\n` +
+            `Spent ${formatRs(spendRs)}${roas !== null ? ` \u00b7 ${roas.toFixed(2)}x return` : ''}\n` +
+            `Top ad ids:\n${top}${rev.perAd.length > 3 ? `\n  +${rev.perAd.length - 3} more` : ''}`
+          return (
+            <span className="flex flex-col items-end leading-none" title={title}>
+              <span className={`${density.num} font-bold tabular-nums ${roasStyle}`}>
+                {/* Abbreviated (2.4k) so a five-figure sum cannot widen the
+                    column and squeeze the product name - the exact rupee
+                    figure is in the tooltip. */}
+                {rev.revenue >= 1000
+                  ? `${(rev.revenue / 1000).toFixed(rev.revenue >= 10000 ? 0 : 1)}k`
+                  : rev.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </span>
+              {roas !== null && (
+                <span className={`text-[9px] font-semibold tabular-nums ${roasStyle} opacity-80`}>
+                  {roas.toFixed(1)}x
+                </span>
+              )}
+            </span>
+          )
+        })()}
+
         {/* Budget action: ↑ increase (scale), ↓ decrease (burning), ● hold (<4 days),
             ✓ edited (already taken care of - glyph tinted by whether results are
             improving: green better, amber no change, red still expensive).
@@ -886,6 +973,12 @@ export function TvDashboard({
         <span className="text-right">Cl</span>
         <span className="text-right">
           Cost <span className="text-foreground/70">Rs</span>
+        </span>
+        <span
+          className="text-right"
+          title="Order value booked against this product's Facebook ad ids, and the return on its spend"
+        >
+          In <span className="text-emerald-500">Rs</span>
         </span>
         <span className="text-center" title="Budget action: increase / decrease / hold">Act</span>
       </div>
