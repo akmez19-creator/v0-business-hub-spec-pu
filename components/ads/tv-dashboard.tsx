@@ -178,26 +178,47 @@ function rankByCostPerResult(list: TvCampaign[]): TvCampaign[] {
  * which is deliberately different from "earned Rs 0": the first means we have
  * no signal, the second means the ad is genuinely not selling.
  */
+/** What a single AD earned, keyed by deliveries.ad_id. */
+interface PerAdStat {
+  id: string
+  revenue: number
+  orders: number
+  /** Real clients booked from this exact ad - NOT Facebook messages. */
+  clients: number
+}
+
+/** A campaign's or product's ads rolled up, keeping the per-ad detail. */
+interface AdRollup {
+  revenue: number
+  orders: number
+  clients: number
+  perAd: PerAdStat[]
+}
+
 function campaignRevenue(
   c: TvCampaign,
   byAd: Record<string, AdRevenueStat>,
-): { revenue: number; orders: number; perAd: { id: string; revenue: number; orders: number }[] } | null {
+): AdRollup | null {
   // New shape is ads[{id}]; fall back to the legacy adIds[] on a stale cache.
   const ids = c.ads?.length ? c.ads.map((a) => a.id) : (c.adIds ?? [])
   if (ids.length === 0) return null
-  const perAd: { id: string; revenue: number; orders: number }[] = []
+  const perAd: PerAdStat[] = []
   let revenue = 0
   let orders = 0
+  let clients = 0
   for (const id of ids) {
     const stat = byAd[id]
     if (!stat) continue
-    perAd.push({ id, revenue: stat.revenue, orders: stat.orders })
+    // `clients` rides along per ad id - this is what lets the wall answer
+    // "which AD brought how many clients", not just which product did.
+    perAd.push({ id, revenue: stat.revenue, orders: stat.orders, clients: stat.clients })
     revenue += stat.revenue
     orders += stat.orders
+    clients += stat.clients
   }
   if (perAd.length === 0) return null
   perAd.sort((a, b) => b.revenue - a.revenue)
-  return { revenue, orders, perAd }
+  return { revenue, orders, clients, perAd }
 }
 
 /**
@@ -214,20 +235,22 @@ function campaignRevenue(
 function groupRevenue(
   g: TvGroup,
   byAd: Record<string, AdRevenueStat>,
-): { revenue: number; orders: number; perAd: { id: string; revenue: number; orders: number }[] } | null {
-  const perAd: { id: string; revenue: number; orders: number }[] = []
+): AdRollup | null {
+  const perAd: PerAdStat[] = []
   let revenue = 0
   let orders = 0
+  let clients = 0
   for (const c of g.campaigns) {
     const cr = campaignRevenue(c, byAd)
     if (!cr) continue
     perAd.push(...cr.perAd)
     revenue += cr.revenue
     orders += cr.orders
+    clients += cr.clients
   }
   if (perAd.length === 0) return null
   perAd.sort((a, b) => b.revenue - a.revenue)
-  return { revenue, orders, perAd }
+  return { revenue, orders, clients, perAd }
 }
 
 // TWO DIFFERENT NUMBERS - do not conflate them:
@@ -649,14 +672,22 @@ export function TvDashboard({
                 : roas >= 1
                   ? 'text-amber-500'
                   : 'text-red-500'
-          const top = rev.perAd
+          // Ranked by clients so the tooltip answers "which ad id is actually
+          // bringing customers", with each ad's own cost per client.
+          const top = [...rev.perAd]
+            .sort((a, b) => b.clients - a.clients)
             .slice(0, 3)
-            .map((a) => `  ${a.id}: ${formatRs(a.revenue)} (${a.orders} order${a.orders !== 1 ? 's' : ''})`)
+            .map(
+              (a) =>
+                `  ${a.id}: ${a.clients} client${a.clients !== 1 ? 's' : ''} \u00b7 ${formatRs(a.revenue)}`,
+            )
             .join('\n')
+          const groupCac = rev.clients > 0 ? spendRs / rev.clients : null
           const title =
             `${formatRs(rev.revenue)} booked from ${rev.orders} order${rev.orders !== 1 ? 's' : ''}\n` +
+            `${rev.clients} client${rev.clients !== 1 ? 's' : ''}${groupCac !== null ? ` \u00b7 ${formatRs(groupCac)} per client` : ''}\n` +
             `Spent ${formatRs(spendRs)}${roas !== null ? ` \u00b7 ${roas.toFixed(2)}x return` : ''}\n` +
-            `Top ad ids:\n${top}${rev.perAd.length > 3 ? `\n  +${rev.perAd.length - 3} more` : ''}`
+            `Top ad ids by clients:\n${top}${rev.perAd.length > 3 ? `\n  +${rev.perAd.length - 3} more` : ''}`
           return (
             <span className="flex flex-col items-end leading-none" title={title}>
               <span className={`${density.num} font-bold tabular-nums ${roasStyle}`}>
@@ -816,20 +847,49 @@ export function TvDashboard({
                             : roas >= 1.5
                               ? 'bg-amber-500/20 text-amber-400'
                               : 'bg-red-500/20 text-red-400'
+                      // Per-AD detail: which ad id produced how many clients.
+                      // This is the whole point of forcing an ad id on every
+                      // extension entry, so it leads the tooltip.
                       const breakdown = rev.perAd
-                        .map((a) => `ad ${a.id}: ${formatRs(a.revenue)} (${a.orders} order${a.orders !== 1 ? 's' : ''})`)
+                        .map(
+                          (a) =>
+                            `ad ${a.id}: ${a.clients} client${a.clients !== 1 ? 's' : ''} \u00b7 ${formatRs(a.revenue)} (${a.orders} order${a.orders !== 1 ? 's' : ''})`,
+                        )
                         .join('\n')
+                      // Cost per CLIENT for this campaign - spend divided by
+                      // real orders booked, not by messages. Sits next to the
+                      // Rs/msg chip so you can see an ad that starts cheap
+                      // conversations but converts none of them.
+                      const cac = rev.clients > 0 ? spendRsNum / rev.clients : null
+                      const cacZone = cac !== null ? ZONE_STYLES[zoneFor(cac)] : null
+                      const chip = `rounded px-1 py-0 ${isTight ? 'text-[10px]' : 'text-[11px]'} font-black tabular-nums`
                       return (
-                        <span
-                          className={`shrink-0 rounded px-1 py-0 ${
-                            isTight ? 'text-[10px]' : 'text-[11px]'
-                          } font-black tabular-nums ${tone}`}
-                          title={`Booked from this campaign's ads\n${breakdown}${
-                            roas !== null ? `\n\n${roas.toFixed(1)}x of ${formatRs(spendRsNum)} spent` : ''
-                          }\n\nOrder value - deliveries are still unpaid.`}
-                        >
-                          {formatRs(rev.revenue)} in{roas !== null ? ` \u00b7 ${roas.toFixed(1)}x` : ''}
-                        </span>
+                        <>
+                          <span
+                            className={`shrink-0 ${chip} ${
+                              cacZone
+                                ? `${cacZone.bg} ${cacZone.text}`
+                                : spendRsNum > 0
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : 'bg-muted text-muted-foreground'
+                            }`}
+                            title={
+                              cac !== null
+                                ? `${rev.clients} client${rev.clients !== 1 ? 's' : ''} from this campaign \u00b7 ${formatRs(cac)} per client\n\nPer ad:\n${breakdown}`
+                                : `No clients booked from this campaign yet\n\nPer ad:\n${breakdown}`
+                            }
+                          >
+                            {rev.clients} cl{cac !== null ? ` \u00b7 ${formatRs(cac)}/cl` : ''}
+                          </span>
+                          <span
+                            className={`shrink-0 ${chip} ${tone}`}
+                            title={`Booked from this campaign's ads\n${breakdown}${
+                              roas !== null ? `\n\n${roas.toFixed(1)}x of ${formatRs(spendRsNum)} spent` : ''
+                            }\n\nOrder value - deliveries are still unpaid.`}
+                          >
+                            {formatRs(rev.revenue)} in{roas !== null ? ` \u00b7 ${roas.toFixed(1)}x` : ''}
+                          </span>
+                        </>
                       )
                     })()}
                     {/* Budget boost: add 20% / 50% of the remaining budget.
