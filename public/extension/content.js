@@ -2552,6 +2552,15 @@ function renderOrdersForm() {
   // added when the lookup comes back empty.
   function resolveProductFromAdId(adId, force) {
     if (!adId || !/^\d+$/.test(adId)) return;
+    // Auto-adding a product only makes sense for a NEW customer who replied to a
+    // single ad - then that ad's product is almost certainly what they want.
+    // A returning customer's contact panel stacks every ad they ever clicked
+    // (this client shows 13+ ad_id chips), and picking any one of them to
+    // force a product into the cart is how "Magic Stick is already there" keeps
+    // happening. When the page shows more than one distinct ad, capture the ad
+    // for attribution but let the AGENT add the product from the actual chat.
+    // `force` = the agent explicitly clicked an ad, so honour their choice.
+    if (!force && scanAllAdIdsOnPage().length > 1) return;
     if (!force && window.__akmezLastResolvedAd === adId) return;
     window.__akmezLastResolvedAd = adId;
     chrome.runtime.sendMessage({ action: 'resolveAdProduct', adId }, resp => {
