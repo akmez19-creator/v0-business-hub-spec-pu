@@ -500,6 +500,10 @@ document.head.appendChild(style);
 
 // State
 let products = [], regions = [], cart = {}, currentTab = 'orders';
+// Which conversation the current cart belongs to. The cart is module scope and
+// survives every re-render of the panel, so without an owner stamp it silently
+// follows the agent into the next client's chat. Null = not claimed yet.
+let cartOwner = null;
 // Map: region name -> { contractor, rider } (delivery assignment set by admin)
 let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
@@ -1727,6 +1731,9 @@ function renderCurrentTab() {
 
 // Render orders form
 function renderOrdersForm() {
+  // Re-rendering the form (tab switch, panel reopen, New Order) must never
+  // resurrect a cart from another chat.
+  akmezCartGuard();
   const body = document.getElementById('akmez-body');
   body.innerHTML = `
     <button type="button" class="akmez-set-btn" id="ak-ai-reply">&#9728; Reply with AI</button>
@@ -2024,29 +2031,17 @@ function renderOrdersForm() {
   // signal that changes the instant the agent clicks a different chat, so it
   // beats watching the name (which is slow, and identical for two clients
   // with the same name).
-  function getConversationKey() {
-    try {
-      const u = new URL(location.href);
-      const thread = u.searchParams.get('selected_item_id')
-        || u.searchParams.get('thread_id')
-        || u.searchParams.get('conversation_id')
-        || u.searchParams.get('tid')
-        || u.searchParams.get('cid');
-      if (thread) return 't:' + thread;
-      // Some inbox views keep the thread id in the path instead of the query.
-      const path = location.pathname.match(/\/t\/(\d+)/);
-      if (path) return 't:' + path[1];
-    } catch (e) { /* fall through */ }
-    // No thread id available - fall back to who the form is showing.
-    const nm = (fields.name.input.value || '').trim();
-    const ph = (fields.phone.input.value || '').trim();
-    return nm || ph ? 'n:' + nm + '|' + ph : null;
-  }
+  // Single source of truth lives at module scope (akmezConvKey) so the cart
+  // guard can ask the same question from outside this closure.
+  const getConversationKey = akmezConvKey;
   let lastConvKey = getConversationKey();
 
   // Wipe everything tied to the previous client so the new chat starts clean
   // and re-captures its own ad id and product.
   function resetForConversation() {
+    // Hand the cart to whoever is on screen now, so the guard does not later
+    // wipe products the agent adds for this new client.
+    cartOwner = akmezConvKey();
     if (Object.keys(cart).length) {
       cart = {};
       updateCart();
@@ -2083,6 +2078,11 @@ function renderOrdersForm() {
       if (window.__akmezSyncTimer) { clearInterval(window.__akmezSyncTimer); window.__akmezSyncTimer = null; }
       return;
     }
+
+    // Catches the case the checks below cannot: the cart was filled in another
+    // chat while this closure's lastConvKey was re-initialised (post-submit
+    // re-render), so no "switch" is ever seen but the cart is still foreign.
+    akmezCartGuard();
 
     // Conversation switch check runs first, so the reset happens before any
     // of the readers below write the new client's details into the form.
@@ -3207,6 +3207,46 @@ function akmezCartResolve(key) {
   return { p, variant, priced, label };
 }
 
+// Identity of the open conversation, readable from ANYWHERE (module scope).
+// The thread id in the URL changes the instant the agent clicks another chat,
+// so it beats watching the name. Falls back to name+phone for inbox views that
+// keep no thread id in the URL.
+function akmezConvKey() {
+  try {
+    const u = new URL(location.href);
+    const thread = u.searchParams.get('selected_item_id')
+      || u.searchParams.get('thread_id')
+      || u.searchParams.get('conversation_id')
+      || u.searchParams.get('tid')
+      || u.searchParams.get('cid');
+    if (thread) return 't:' + thread;
+    const path = location.pathname.match(/\/t\/(\d+)/);
+    if (path) return 't:' + path[1];
+  } catch (e) { /* fall through */ }
+  const n = document.getElementById('ak-name');
+  const p = document.getElementById('ak-c1');
+  const nm = n ? (n.value || '').trim() : '';
+  const ph = p ? (p.value || '').trim() : '';
+  return nm || ph ? 'n:' + nm + '|' + ph : null;
+}
+
+// Drop the cart if it belongs to a different conversation than the one on
+// screen. This is the backstop that makes a leftover cart impossible: the
+// per-chat reset in syncFields() cannot be relied on alone, because the sync
+// timer is killed while the success screen is up (the form is gone), so a chat
+// switch made right after creating an order is never observed.
+function akmezCartGuard() {
+  const key = akmezConvKey();
+  if (!key) return;                                   // cannot tell yet - leave it
+  if (cartOwner === null) { cartOwner = key; return; } // unclaimed: adopt this chat
+  if (cartOwner === key) return;                       // same chat, keep the cart
+  cartOwner = key;
+  if (Object.keys(cart).length) {
+    cart = {};
+    try { updateCart(); } catch (e) { /* panel not built yet */ }
+  }
+}
+
 function updateCart() {
   const c = document.getElementById('ak-cart');
   const list = document.getElementById('ak-cart-list');
@@ -3425,6 +3465,13 @@ function submitOrder() {
       return;
     }
     
+    // The order is banked, so the cart is spent - empty it HERE rather than in
+    // the "New Order" button. The agent normally just clicks the next chat in
+    // Messenger instead of that button, and the products used to survive into
+    // the new client's form.
+    cart = {};
+    cartOwner = null;
+
     const entryCount = data.entryCount || 1;
     // Proforma invoice link(s) returned by the server - the same public page the
     // rider shares: it shows a Proforma now and becomes an Invoice once delivered.
@@ -3475,6 +3522,7 @@ function submitOrder() {
     });
     document.getElementById('ak-new').onclick = () => {
       cart = {};
+      cartOwner = null;   // re-adopt whichever chat is open now
       renderOrdersForm();
     };
   });
