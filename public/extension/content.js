@@ -264,6 +264,8 @@ style.textContent = `
 .akmez-autocomplete{position:relative;}
 .akmez-suggest{position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:10;background:#181826;border:1px solid rgba(249,115,22,0.4);border-radius:10px;max-height:200px;overflow-y:auto;box-shadow:0 12px 32px rgba(0,0,0,0.55);display:none;}
 .akmez-suggest-item{padding:9px 12px;font-size:12px;color:#eee;cursor:pointer;}
+.akmez-suggest-empty{padding:9px 12px;font-size:12px;color:#fcd34d;cursor:pointer;text-align:center;}
+.akmez-suggest-empty:hover{background:rgba(249,115,22,0.12);}
 .akmez-suggest-item:hover,.akmez-suggest-item.active{background:rgba(249,115,22,0.35);color:#fff;}
   .akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
   .akmez-cutoff-input:focus{border-color:#f97316;}
@@ -604,7 +606,7 @@ function detectSourcePage() {
   let found = null;
   const pageId = getCurrentPageId();
   if (pageMappings.length) {
-    // 1) Match by Page ID (asset_id) — bulletproof, works on every conversation
+    // 1) Match by Page ID (asset_id) �� bulletproof, works on every conversation
     if (pageId) {
       found = pageMappings.find(m => m.pageId && String(m.pageId) === String(pageId)) || null;
     }
@@ -3146,6 +3148,20 @@ function renderOrdersForm() {
 
   function showRegionSuggestions() {
     const q = regionInput.value.toLowerCase().trim();
+    // Regions haven't arrived yet (still fetching, or the last fetch failed).
+    // Silence here is exactly what made agents think the field was broken, so
+    // say so explicitly and let them retry from inside the box.
+    if (!regions.length) {
+      regionSuggest.innerHTML = '<div class="akmez-suggest-empty" id="ak-region-reload">Loading regions… tap to reload</div>';
+      regionSuggest.style.display = 'block';
+      const el = document.getElementById('ak-region-reload');
+      if (el) el.onmousedown = e => {
+        e.preventDefault();
+        el.textContent = 'Reloading…';
+        if (typeof loadData === 'function') loadData();
+      };
+      return;
+    }
     regionMatches = rankRegions(q);
     if (!regionMatches.length) { regionSuggest.style.display = 'none'; return; }
     // Highlight the first match by default so Enter/Tab accepts it immediately
