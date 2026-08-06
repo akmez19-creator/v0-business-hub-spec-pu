@@ -111,6 +111,11 @@ interface TvDashboardProps {
     missingOrders: number
     missingRevenue: number
   } | null
+  // Clients whose delivery carries no usable ad id, per product. The extension
+  // captures ad ids silently, but some chats have no ad label at all - those
+  // orders are still taken, so the gap has to be reported rather than hidden.
+  attributionGaps?: { product: string; total: number; attributed: number; missing: number }[]
+  attributionTotals?: { total: number; attributed: number; missing: number; coverage: number } | null
   showTodayOnly: boolean
   countdown: number
   lastRefresh: Date
@@ -291,6 +296,8 @@ export function TvDashboard({
   activities = [],
   adRevenue = {},
   adRevenueLeftover = null,
+  attributionGaps = [],
+  attributionTotals = null,
   showTodayOnly,
   countdown,
   lastRefresh,
@@ -1343,7 +1350,7 @@ export function TvDashboard({
           )
         })()}
       </div>
-      <div className="min-h-0 overflow-y-auto">
+              <div className="min-h-0 overflow-y-auto">
         {activities.length === 0 ? (
           <div className="px-3 py-3 text-center text-sm text-muted-foreground">No edits in the last 7 days</div>
         ) : (
@@ -1374,6 +1381,94 @@ export function TvDashboard({
       </div>
     </div>
   )
+
+  // Which CAMPAIGN brought how many clients, and where attribution is leaking.
+  //
+  // Two halves on purpose. The top ranks live campaigns by real clients, which
+  // is the number the wall never showed at campaign level. The bottom lists
+  // products whose clients arrived with no usable ad id - without it a product
+  // can look like it has a terrible cost-per-client when the truth is that its
+  // orders simply were not tagged.
+  const attributionPanel = (() => {
+    const ranked: { name: string; product: string; clients: number }[] = []
+    for (const g of groups) {
+      for (const c of g.campaigns) {
+        const cr = campaignRevenue(c, adRevenue)
+        if (!cr || cr.clients <= 0) continue
+        ranked.push({ name: c.name, product: g.productName, clients: cr.clients })
+      }
+    }
+    ranked.sort((a, b) => b.clients - a.clients)
+
+    const gaps = attributionGaps.slice(0, 6)
+    const missingTotal = attributionTotals?.missing ?? 0
+    const coverage = attributionTotals ? Math.round(attributionTotals.coverage * 100) : null
+    if (ranked.length === 0 && gaps.length === 0) return null
+
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
+        <div className={`flex shrink-0 items-center justify-between gap-2 bg-sky-500/10 px-2.5 ${isTight ? 'py-1' : 'py-1.5'}`}>
+          <div className="flex items-center gap-2">
+            <Megaphone className="h-4 w-4 text-sky-400" />
+            <span className={`${isTight ? 'text-sm' : 'text-base'} font-bold text-sky-400`}>Clients by Campaign</span>
+          </div>
+          {coverage !== null && (
+            <span
+              className={`${isTight ? 'text-xs' : 'text-sm'} font-bold tabular-nums ${
+                coverage >= 90 ? 'text-emerald-400' : coverage >= 70 ? 'text-amber-500' : 'text-red-500'
+              }`}
+              title={`${attributionTotals?.attributed ?? 0} of ${attributionTotals?.total ?? 0} clients carry a real ad id`}
+            >
+              {coverage}% tagged
+            </span>
+          )}
+        </div>
+
+        <div className="min-h-0 overflow-y-auto">
+          {ranked.map((r, i) => (
+            <div
+              key={`${r.name}-${i}`}
+              className={`flex items-center gap-2 border-b border-border/50 px-2.5 ${isTight ? 'py-0.5' : 'py-1'} ${
+                i % 2 === 1 ? 'bg-card/40' : ''
+              }`}
+              title={`${r.name} \u00b7 ${r.product} \u00b7 ${r.clients} client${r.clients !== 1 ? 's' : ''}`}
+            >
+              <span className={`min-w-0 flex-1 truncate ${isTight ? 'text-[11px]' : 'text-xs'} font-semibold`}>{r.name}</span>
+              <span className={`shrink-0 tabular-nums ${isTight ? 'text-xs' : 'text-sm'} font-bold text-sky-400`}>{r.clients}</span>
+            </div>
+          ))}
+
+          {gaps.length > 0 && (
+            <>
+              <div className="sticky top-0 flex items-center justify-between bg-amber-500/10 px-2.5 py-1">
+                <span className={`${isTight ? 'text-[10px]' : 'text-xs'} font-bold uppercase tracking-wide text-amber-500`}>
+                  No ad id
+                </span>
+                <span className={`${isTight ? 'text-[10px]' : 'text-xs'} font-bold tabular-nums text-amber-500`}>
+                  {missingTotal} client{missingTotal !== 1 ? 's' : ''}
+                </span>
+              </div>
+              {gaps.map((g) => (
+                <div
+                  key={g.product}
+                  className={`flex items-center gap-2 border-b border-border/50 px-2.5 ${isTight ? 'py-0.5' : 'py-1'}`}
+                  title={`${g.product}: ${g.missing} of ${g.total} clients have no usable ad id`}
+                >
+                  <span className={`min-w-0 flex-1 truncate ${isTight ? 'text-[11px]' : 'text-xs'} font-semibold`}>{g.product}</span>
+                  <span className={`shrink-0 tabular-nums ${isTight ? 'text-[10px]' : 'text-xs'} text-muted-foreground`}>
+                    /{g.total}
+                  </span>
+                  <span className={`shrink-0 tabular-nums ${isTight ? 'text-xs' : 'text-sm'} font-bold text-amber-500`}>
+                    {g.missing}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    )
+  })()
 
   // News ticker: products that STILL need action - recommendation says
   // increase or decrease AND no budget edit has been made today. Once someone
@@ -1741,6 +1836,7 @@ export function TvDashboard({
             {/* Right rail: riders/regions on top, recent campaign edits below */}
             <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
               {ridersPanel}
+              {attributionPanel}
               {editsPanel}
             </div>
           </div>

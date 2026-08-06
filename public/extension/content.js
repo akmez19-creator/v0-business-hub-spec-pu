@@ -235,6 +235,8 @@ style.textContent = `
   .akmez-adpick-picked{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:6px 9px;font-size:11px;color:#6ee7b7;margin-top:6px;line-height:1.35;}
   .akmez-adpick-clear{margin-left:auto;background:rgba(239,68,68,0.15);border:none;color:#fca5a5;width:20px;height:20px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;}
   .akmez-adpick-clear:hover{background:rgba(239,68,68,0.3);}
+  .akmez-ad-missing{background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);color:#fcd34d;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.45;margin-bottom:8px;}
+  .akmez-ad-missing b{color:#fff;font-weight:700;}
   .akmez-adpick-head{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8b93a7;padding:7px 9px 3px;background:#12151c;position:sticky;top:0;}
   .akmez-adpick-new{display:inline-block;background:rgba(249,115,22,0.2);color:#fb923c;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:6px;}
   .akmez-adpick-warn{color:#fbbf24;}
@@ -1784,6 +1786,10 @@ function renderOrdersForm() {
       <div id="ak-oldprod-picked" class="akmez-oldprod-picked" style="display:none;"></div>
       <div id="ak-oldprod-hint" class="akmez-oldprod-hint"></div>
     </div>
+    <div class="akmez-ad-missing" id="ak-ad-missing" style="display:none;">
+      No ad label on this chat &mdash; this order will be logged as
+      <b>unattributed</b>. Pick the ad below if you know it.
+    </div>
     <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
     <div class="akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field akmez-autocomplete">
@@ -2047,6 +2053,9 @@ function renderOrdersForm() {
     fields.adid.emptyStreak = 0;
     window.__akmezLastResolvedAd = null;
     window.__akmezMismatchOk = null;   // new chat = re-confirm any mismatch
+    // Collapse the picker again: the new chat gets to prove itself first.
+    const tg = document.getElementById('ak-adid-toggle');
+    if (tg) tg.dataset.opened = '';
     try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
 
     // Grab the new conversation's ad id right away rather than waiting for
@@ -2517,8 +2526,36 @@ function renderOrdersForm() {
     const show = adidRow.style.display === 'none';
     adidRow.style.display = show ? '' : 'none';
     adidToggle.textContent = show ? 'Hide ad' : adidToggleLabel();
+    adidToggle.dataset.opened = show ? '1' : '';
     if (show) loadAdList();
   };
+
+  // ---- Silent-by-default attribution ------------------------------------
+  // The ad id is plumbing: when it is captured the agent should never have to
+  // look at it. The only case worth their attention is when the conversation
+  // carries NO ad label, because then the order lands unattributed and the
+  // wall cannot tell which campaign paid for it.
+  function applyAdVisibility() {
+    const missing = !fields.adid.input.value.trim();
+    const alertBox = document.getElementById('ak-ad-missing');
+    if (alertBox) alertBox.style.display = missing ? 'block' : 'none';
+
+    if (missing) {
+      // Surface the picker automatically so the fix is one click away.
+      adidRow.style.display = '';
+      adidToggle.style.display = 'none';
+      loadAdList();
+      return;
+    }
+    // Captured: collapse everything unless the agent deliberately opened it.
+    if (!adidToggle.dataset.opened) {
+      adidRow.style.display = 'none';
+      adidToggle.textContent = adidToggleLabel();
+    }
+    adidToggle.style.display = '';
+  }
+  window.__akmezApplyAdVisibility = applyAdVisibility;
+  applyAdVisibility();
 
   // ---- Ad picker -------------------------------------------------------
   // The agent picks which Business Suite ad produced this order, so every
@@ -2687,6 +2724,7 @@ function renderOrdersForm() {
       renderPickedAd();
     };
     renderAdFlag();
+    if (typeof window.__akmezApplyAdVisibility === 'function') window.__akmezApplyAdVisibility();
   }
 
   // Let submitOrder (defined outside this scope) read the current state.
@@ -3258,25 +3296,17 @@ function submitOrder() {
     return;
   }
 
-  // Every order must be attributed to an ad - an order with no ad id never
-  // shows up in ad reporting, which defeats the point of tracking spend.
-  if (!adId) {
-    err.textContent = 'Pick the ad that brought this client before creating the order.';
-    err.style.display = 'block';
-    const row = document.getElementById('ak-adid-row');
-    const toggle = document.getElementById('ak-adid-toggle');
-    if (row && row.style.display === 'none' && toggle) toggle.click();
-    const pick = document.getElementById('ak-adpick');
-    if (pick) pick.focus();
-    return;
-  }
-
-  // A mismatch is a warning, not a wall: clients do change their mind
-  // mid-chat. Require one deliberate confirmation, then let it through.
+  // A missing ad id no longer blocks the order. Some chats genuinely carry no
+  // ad label, and holding up a real sale to chase one costs more than the
+  // attribution is worth - the order is recorded unattributed instead and the
+  // TV wall reports the gap per product.
+  //
+  // A mismatch is still worth one confirmation click: clients do change their
+  // mind mid-chat, but a wrong ad silently misprices a whole campaign.
   const matchState = typeof window.__akmezAdMatchState === 'function'
     ? window.__akmezAdMatchState()
     : 'ok';
-  if (matchState === 'mismatch' && window.__akmezMismatchOk !== adId) {
+  if (adId && matchState === 'mismatch' && window.__akmezMismatchOk !== adId) {
     window.__akmezMismatchOk = adId;
     err.textContent = 'This ad does not match the product you added. Check the flag above, then press Create Order again to confirm.';
     err.style.display = 'block';

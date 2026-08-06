@@ -216,6 +216,17 @@ export default function AdsManagerPage() {
     missingOrders: number
     missingRevenue: number
   } | null>(null)
+  // Clients arriving with no usable ad id, per product. Orders are never
+  // blocked for a missing ad, so this is how the gap stays visible.
+  const [attributionGaps, setAttributionGaps] = useState<
+    { product: string; total: number; attributed: number; missing: number }[]
+  >([])
+  const [attributionTotals, setAttributionTotals] = useState<{
+    total: number
+    attributed: number
+    missing: number
+    coverage: number
+  } | null>(null)
 
   // Load riders/regions when TV mode opens (refreshed on each entry) or
   // when the user picks a different batch date on the Riders panel
@@ -251,6 +262,18 @@ export default function AdsManagerPage() {
         if (data?.success) {
           setAdRevenue(data.byAd || {})
           setAdRevenueLeftover(data.unattributed || null)
+        }
+      })
+      .catch(() => {})
+
+    // Same window as the revenue call above, so "tagged %" describes exactly
+    // the same set of clients the wall is costing.
+    fetch(`/api/ads/attribution-gaps${entryDate ? `?entryDate=${entryDate}` : ''}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success) {
+          setAttributionGaps(data.byProduct || [])
+          setAttributionTotals(data.totals || null)
         }
       })
       .catch(() => {})
@@ -1164,6 +1187,8 @@ export default function AdsManagerPage() {
         activities={activities}
         adRevenue={adRevenue}
         adRevenueLeftover={adRevenueLeftover}
+        attributionGaps={attributionGaps}
+        attributionTotals={attributionTotals}
         showTodayOnly={showTodayOnly}
         countdown={countdown}
         lastRefresh={lastRefresh}
