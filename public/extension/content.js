@@ -2676,8 +2676,18 @@ function renderOrdersForm() {
   function akmezRenderAdProductHint() {
     const host = document.getElementById('ak-adprod-hint');
     if (!host) return;
-    const ap = window.__akmezAdProduct;
-    const cur = fields.adid.input ? fields.adid.input.value : '';
+    const cur = fields.adid.input ? fields.adid.input.value.trim() : '';
+    // Prefer the async resolve result, but fall back to what we already know
+    // locally: the ad picker itself renders "· Skin Tag Remover" from
+    // adList[].productName, so the linkage is in memory and the chip must not
+    // depend on a background message that may never have completed.
+    let ap = window.__akmezAdProduct;
+    if ((!ap || ap.adId !== cur) && cur) {
+      const known = adList.find(a => a.id === cur);
+      const cached = adProductCacheGet()[cur];
+      if (known && known.productId) ap = { id: known.productId, name: known.productName || '', adId: cur };
+      else if (cached && cached.id) ap = { id: cached.id, name: cached.name || '', adId: cur };
+    }
     if (!ap || ap.adId !== cur || cart[ap.id]) {
       host.style.display = 'none';
       host.innerHTML = '';
@@ -2988,7 +2998,10 @@ function renderOrdersForm() {
       renderAdFlag();
       return;
     }
-    ensureAdLinkage(id);
+    // Repaint the "+ Add <product>" chip once the linkage is available, so the
+    // suggestion shows up for a hand-pasted ad id too, not just a picked one.
+    ensureAdLinkage(id, akmezRenderAdProductHint);
+    akmezRenderAdProductHint();
     const known = adList.find(a => a.id === id);
     adPickPicked.style.display = 'flex';
     adPickPicked.innerHTML = `
@@ -3151,7 +3164,15 @@ function renderOrdersForm() {
   // Apply an ad id from anywhere (page scan or label click): fill the field,
   // show the confirmation line, and pull in the linked product.
   function applyAdId(id, note) {
-    if (!id || fields.adid.input.value === id) return false;
+    if (!id) return false;
+    // Re-picking the ad that is ALREADY in the field used to bail out here, so
+    // "Change ad" -> choose the same (auto-captured) ad did nothing at all: no
+    // product, no suggestion. Selecting an ad is an explicit request, so always
+    // (re)resolve its product even when the field value does not change.
+    if (fields.adid.input.value === id) {
+      resolveProductFromAdId(id, true);
+      return false;
+    }
     fields.adid.input.value = id;
     // Mark as a deliberate choice so the background sync does not overwrite
     // it on the next poll (applyField skips fields flagged as edited).
