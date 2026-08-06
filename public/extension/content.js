@@ -522,16 +522,23 @@ let cartFromAd = {};
 // So an ad id only counts once it has been read on two consecutive polls with
 // the conversation unchanged. Costs ~1.2s before the ad appears, which is far
 // cheaper than attributing an order to the wrong campaign.
-let adConfirm = { key: null, id: null, hits: 0 };
-function akmezAdConfirmed(key, id) {
-  if (adConfirm.key !== key || adConfirm.id !== id) {
-    adConfirm = { key, id, hits: 1 };
-    return false;      // first sighting - wait for the DOM to settle
+// Tracks ONLY the id, never the conversation key. Keying this on the page key
+// was a bug: getConversationKey() briefly returns null mid re-render, so the key
+// flickered value->null->value, reset hits to 1 every poll, and the id never
+// confirmed - the ad id field simply never filled for one/two-ad clients.
+// The switch case is already covered because resetForConversation() calls
+// akmezResetAdConfirm(), and by the next 1200ms poll the panel has repainted to
+// the new client, so a lingering old chip never survives two reads.
+let adConfirm = { id: null, hits: 0 };
+function akmezAdConfirmed(id) {
+  if (adConfirm.id !== id) {
+    adConfirm = { id, hits: 1 };
+    return false;      // first sighting - wait one poll for the DOM to settle
   }
   adConfirm.hits++;
   return adConfirm.hits >= 2;
 }
-function akmezResetAdConfirm() { adConfirm = { key: null, id: null, hits: 0 }; }
+function akmezResetAdConfirm() { adConfirm = { id: null, hits: 0 }; }
 // Map: region name -> { contractor, rider } (delivery assignment set by admin)
 let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
@@ -2186,7 +2193,7 @@ function renderOrdersForm() {
       // Hold everything back until this exact id has been seen twice for this
       // same conversation. A stale chip left over from the previous chat only
       // ever survives one poll, so it can no longer reach the field or the cart.
-      if (!akmezAdConfirmed(key, id)) return;
+      if (!akmezAdConfirmed(id)) return;
       const prev = fields.adid.last;
       applyField(fields.adid, id);
       // When the ad id changes to a new value, auto-resolve its linked product
