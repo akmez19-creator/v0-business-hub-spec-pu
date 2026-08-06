@@ -801,24 +801,17 @@ export function TvDashboard({
                         </span>
                       )
                     })()}
-                    {/* What this ad actually BROUGHT IN. Cost per message says
-                        how cheaply an ad starts conversations; only this says
-                        whether those conversations turned into orders. Keyed by
-                        deliveries.ad_id, so the tooltip can name the ad id. */}
+                    {/* Clients + cost per client for this campaign. The old
+                        "Rs 675 in - 1.1x" revenue/ROAS chip that used to sit
+                        beside this was removed on request: order value is not
+                        money received (deliveries are unpaid), so the ratio read
+                        as profit when it is not, and it crowded the row that
+                        carries the budget controls. Cost per client is the
+                        number the wall is steered by. */}
                     {(() => {
                       const rev = campaignRevenue(c, adRevenue)
                       if (!rev) return null
                       const spendRsNum = parseFloat(c.spend || '0') * USD_TO_RS
-                      // Return on ad spend: rupees booked per rupee spent.
-                      const roas = spendRsNum > 0 ? rev.revenue / spendRsNum : null
-                      const tone =
-                        roas === null
-                          ? 'bg-muted text-muted-foreground'
-                          : roas >= 3
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : roas >= 1.5
-                              ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-red-500/20 text-red-400'
                       // Per-AD detail: which ad id produced how many clients.
                       // This is the whole point of forcing an ad id on every
                       // extension entry, so it leads the tooltip.
@@ -836,32 +829,22 @@ export function TvDashboard({
                       const cacZone = cac !== null ? ZONE_STYLES[zoneFor(cac)] : null
                       const chip = `rounded px-1 py-0 ${isTight ? 'text-[10px]' : 'text-[11px]'} font-black tabular-nums`
                       return (
-                        <>
-                          <span
-                            className={`shrink-0 ${chip} ${
-                              cacZone
-                                ? `${cacZone.bg} ${cacZone.text}`
-                                : spendRsNum > 0
-                                  ? 'bg-red-500/20 text-red-400'
-                                  : 'bg-muted text-muted-foreground'
-                            }`}
-                            title={
-                              cac !== null
-                                ? `${rev.clients} client${rev.clients !== 1 ? 's' : ''} from this campaign \u00b7 ${formatRs(cac)} per client\n\nPer ad:\n${breakdown}`
-                                : `No clients booked from this campaign yet\n\nPer ad:\n${breakdown}`
-                            }
-                          >
-                            {rev.clients} cl{cac !== null ? ` \u00b7 ${formatRs(cac)}/cl` : ''}
-                          </span>
-                          <span
-                            className={`shrink-0 ${chip} ${tone}`}
-                            title={`Booked from this campaign's ads\n${breakdown}${
-                              roas !== null ? `\n\n${roas.toFixed(1)}x of ${formatRs(spendRsNum)} spent` : ''
-                            }\n\nOrder value - deliveries are still unpaid.`}
-                          >
-                            {formatRs(rev.revenue)} in{roas !== null ? ` \u00b7 ${roas.toFixed(1)}x` : ''}
-                          </span>
-                        </>
+                        <span
+                          className={`shrink-0 ${chip} ${
+                            cacZone
+                              ? `${cacZone.bg} ${cacZone.text}`
+                              : spendRsNum > 0
+                                ? 'bg-red-500/20 text-red-400'
+                                : 'bg-muted text-muted-foreground'
+                          }`}
+                          title={
+                            cac !== null
+                              ? `${rev.clients} client${rev.clients !== 1 ? 's' : ''} from this campaign \u00b7 ${formatRs(cac)} per client\n\nPer ad:\n${breakdown}`
+                              : `No clients booked from this campaign yet\n\nPer ad:\n${breakdown}`
+                          }
+                        >
+                          {rev.clients} cl{cac !== null ? ` \u00b7 ${formatRs(cac)}/cl` : ''}
+                        </span>
                       )
                     })()}
                     {/* Budget boost: add 20% / 50% of the remaining budget.

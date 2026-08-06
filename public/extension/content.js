@@ -74,6 +74,11 @@ function updateToggleButton() {
 
 // Listen for auth state changes from popup
 chrome.storage.onChanged.addListener((changes, namespace) => {
+  // Admin re-picked the name/phone selector - refresh the synchronous copy the
+  // conversation key relies on, or it keeps matching on stale selectors.
+  if (namespace === 'local' && (changes.nameSelectors || changes.phoneSelectors)) {
+    akmezWarmSelCache();
+  }
   if (namespace === 'local' && (changes.authToken || changes.tokenExpiry)) {
     updateToggleButton();
     // If widget is open, reload data
@@ -1184,7 +1189,40 @@ const SEL_KEYS = { name: 'nameSelectors', phone: 'phoneSelectors', adid: 'adidSe
 
 function getSelectors(kind, cb) {
   const key = SEL_KEYS[kind];
-  chrome.storage.local.get([key], s => cb(Array.isArray(s[key]) ? s[key] : []));
+  chrome.storage.local.get([key], s => {
+    const list = Array.isArray(s[key]) ? s[key] : [];
+    if (kind === 'name' || kind === 'phone') akmezSelCache[kind] = list;  // keep the sync copy warm
+    cb(list);
+  });
+}
+
+// chrome.storage is async-only, but akmezConvKey() has to answer INSTANTLY -
+// it runs inside renderOrdersForm() and on every sync tick. So keep a plain
+// synchronous copy of the two selectors the conversation key needs.
+const akmezSelCache = { name: [], phone: [] };
+function akmezWarmSelCache() {
+  try {
+    chrome.storage.local.get(['nameSelectors', 'phoneSelectors'], s => {
+      akmezSelCache.name = Array.isArray(s.nameSelectors) ? s.nameSelectors : [];
+      akmezSelCache.phone = Array.isArray(s.phoneSelectors) ? s.phoneSelectors : [];
+    });
+  } catch (e) { /* extension context torn down */ }
+}
+akmezWarmSelCache();
+
+// Read a value straight off the PAGE. Never read the extension's own inputs
+// for identity: those lag behind by one chat and make the key self-referential.
+function akmezReadPage(list) {
+  for (const sel of (list || [])) {
+    try {
+      const el = document.querySelector(sel);
+      if (el) {
+        const t = (el.value || el.textContent || '').trim();
+        if (t) return t;
+      }
+    } catch (e) { /* invalid selector, skip */ }
+  }
+  return '';
 }
 function saveSelectors(kind, list, cb) {
   chrome.storage.local.set({ [SEL_KEYS[kind]]: list }, () => cb && cb());
@@ -3253,10 +3291,15 @@ function akmezConvKey() {
     const path = location.pathname.match(/\/t\/(\d+)/);
     if (path) return 't:' + path[1];
   } catch (e) { /* fall through */ }
-  const n = document.getElementById('ak-name');
-  const p = document.getElementById('ak-c1');
-  const nm = n ? (n.value || '').trim() : '';
-  const ph = p ? (p.value || '').trim() : '';
+  // Fallback for inbox views with no thread id in the URL (Business Suite keeps
+  // one URL for every chat). This MUST come off the page, not off #ak-name /
+  // #ak-c1: those are our own fields, still showing the PREVIOUS client at the
+  // moment the guard runs, because syncFields() deliberately checks for a chat
+  // switch before it writes the new details in. Reading them made the key
+  // depend on the very value the reset was supposed to trigger - so it never
+  // changed, the guard never fired, and the cart kept crossing chats.
+  const nm = akmezReadPage(akmezSelCache.name);
+  const ph = akmezReadPage(akmezSelCache.phone);
   return nm || ph ? 'n:' + nm + '|' + ph : null;
 }
 
@@ -3942,12 +3985,22 @@ function showSelToolbar() {
   }
 }
 
+// The quick-fill toolbar exists to lift a phone number out of a CHAT. On our
+// own dashboard it has nothing to fill, and it floats over the TV wall covering
+// the campaign rows the moment anyone selects a figure to read it.
+function akmezIsOwnDashboard() {
+  const h = location.hostname;
+  return h === 'akmez.tech' || h.endsWith('.akmez.tech');
+}
+
 // Trigger on both normal selection (mouseup) and double-click (word select)
 document.addEventListener('mouseup', e => {
+  if (akmezIsOwnDashboard()) return;
   if (e.target.closest('#akmez-sel,#akmez-widget')) return;
   setTimeout(showSelToolbar, 10);
 });
 document.addEventListener('dblclick', e => {
+  if (akmezIsOwnDashboard()) return;
   if (e.target.closest('#akmez-sel,#akmez-widget')) return;
   setTimeout(showSelToolbar, 10);
 });
