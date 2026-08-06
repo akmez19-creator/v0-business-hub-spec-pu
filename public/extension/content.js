@@ -1366,7 +1366,17 @@ function scanAllAdIdsWithPos() {
     if (!m) continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) continue;     // hidden node
-    if (seen.has(m[1])) continue;
+    // Meta really does render the SAME ad_id twice (seen on Anobabrain Hiven:
+    // 120209676702730790 and 120249268527610621 both appear as adjacent pairs).
+    // Dedupe by id, but keep the LOWEST occurrence, not the first one. If an ad
+    // shows up high in the history AND again right above "AI transferred",
+    // keeping the first position would leave it recorded near the top and the
+    // marker anchor would then pick the chip above it - the wrong ad.
+    if (seen.has(m[1])) {
+      const prev = hits.find(h => h.id === m[1]);
+      if (prev && r.top > prev.top) { prev.top = r.top; prev.left = r.left; }
+      continue;
+    }
     seen.add(m[1]);
     // Keep where it sits on screen: Meta stacks the chips visually oldest at
     // the top, and DOM order does not always follow that (the contact panel
@@ -3268,8 +3278,16 @@ function renderOrdersForm() {
     box.style.display = 'flex';
     box.classList.toggle('cyclone', cyclone);
   }
+  // Fill the date SYNCHRONOUSLY first. It used to be set only inside the
+  // getCutoff -> computeDefaultDeliveryDate callbacks, so whenever that fetch
+  // stalled or failed the required DATE field just sat empty on "dd/mm/yyyy"
+  // (seen alongside the empty region list - same stalled-fetch root cause).
+  // The async result below still overrides this with the cut-off-aware date.
+  try { dateInput.value = ymd(nextWorkingOnOrAfter(new Date())); } catch (e) { dateInput.value = ymd(new Date()); }
+  updateDeliveryInfo();
   getCutoff((cutoff, scheme) => {
     computeDefaultDeliveryDate(cutoff, scheme, (d, afterCutoff, fromScheme) => {
+      if (!d) return;                 // keep the synchronous fallback
       dateInput.value = ymd(d);
       if (fromScheme) toast('Delivery date set to ' + ymd(d));
       else if (afterCutoff) toast('After ' + cutoff + ' cut-off - delivery set to ' + ymd(d));
