@@ -226,38 +226,6 @@ function campaignRevenue(
   return { revenue, orders, clients, perAd }
 }
 
-/**
- * Money booked against a whole PRODUCT row: the sum over every ad of every
- * campaign in the group. This is the number the wall leads with, because a row
- * is a product, not an ad.
- *
- * `perAd` carries the individual ad ids so the row's tooltip can show exactly
- * which ad id earned what - the point of attributing by ad_id in the first
- * place. Returns null when not a single ad in the group has an attributed
- * order, which is deliberately different from "earned Rs 0": no signal vs
- * genuinely not selling.
- */
-function groupRevenue(
-  g: TvGroup,
-  byAd: Record<string, AdRevenueStat>,
-): AdRollup | null {
-  const perAd: PerAdStat[] = []
-  let revenue = 0
-  let orders = 0
-  let clients = 0
-  for (const c of g.campaigns) {
-    const cr = campaignRevenue(c, byAd)
-    if (!cr) continue
-    perAd.push(...cr.perAd)
-    revenue += cr.revenue
-    orders += cr.orders
-    clients += cr.clients
-  }
-  if (perAd.length === 0) return null
-  perAd.sort((a, b) => b.revenue - a.revenue)
-  return { revenue, orders, clients, perAd }
-}
-
 // TWO DIFFERENT NUMBERS - do not conflate them:
 //   * RESULTS  = Facebook conversions (messages, else leads, else purchases).
 //     A person can message five times and never buy. Labelled msg/lead/sale
@@ -650,66 +618,63 @@ export function TvDashboard({
           </span>
         </span>
 
-        {/* Money BOOKED against this product's ad ids, with ROAS underneath.
-            ROAS is the whole point of pairing it with spend: Rs 900 booked on
-            Rs 300 spent is 3.0x and worth scaling, the same Rs 900 on Rs 1,200
-            is 0.75x and is losing money. Colored by that ratio, not by size.
-            An em dash means no order carries any of this product's ad ids -
-            no signal, which is NOT the same as having sold nothing. */}
+        {/* How many campaigns under this product are LIVE right now, with the
+            Rs those live ones burned today underneath.
+            "Live" = status ACTIVE *and* spend > 0 today, so a switched-on
+            campaign that is not actually delivering does not pad the count.
+            This deliberately differs from SPEND RS, which totals every
+            campaign in the row including ones paused mid-day: read together,
+            SPEND RS is today's total burn and this is what is still burning.
+            0 with a non-zero SPEND RS is the signal to look at - the product
+            spent money today and is now completely switched off. */}
         {(() => {
-          const rev = groupRevenue(g, adRevenue)
-          const spendRs = g.totalSpend * USD_TO_RS
-          if (!rev) {
+          const total = g.campaigns.length
+          const live = g.campaigns.filter(
+            (c) => c.status === 'ACTIVE' && Number.parseFloat(c.spend || '0') > 0,
+          )
+          // Rs from the live ones only. USD_TO_RS already carries VAT, so this
+          // is the same rupee basis as every other money figure on the wall.
+          const liveRs = live.reduce((s, c) => s + Number.parseFloat(c.spend || '0'), 0) * USD_TO_RS
+          if (total === 0) {
             return (
               <span
                 className={`text-right ${density.num} tabular-nums text-muted-foreground/40`}
-                title="No delivery carries an ad id from this product's campaigns yet"
+                title="No campaigns under this product"
               >
                 —
               </span>
             )
           }
-          const roas = spendRs > 0 ? rev.revenue / spendRs : null
-          // Below 1x the ad is spending more than it books; 2x+ is scalable.
-          const roasStyle =
-            roas === null
-              ? 'text-muted-foreground'
-              : roas >= 2
+          // Grey when nothing is live, amber when only some of the row is
+          // running, green when everything is delivering.
+          const liveStyle =
+            live.length === 0
+              ? 'text-muted-foreground/50'
+              : live.length === total
                 ? 'text-emerald-500'
-                : roas >= 1
-                  ? 'text-amber-500'
-                  : 'text-red-500'
-          // Ranked by clients so the tooltip answers "which ad id is actually
-          // bringing customers", with each ad's own cost per client.
-          const top = [...rev.perAd]
-            .sort((a, b) => b.clients - a.clients)
-            .slice(0, 3)
-            .map(
-              (a) =>
-                `  ${a.id}: ${a.clients} client${a.clients !== 1 ? 's' : ''} \u00b7 ${formatRs(a.revenue)}`,
-            )
-            .join('\n')
-          const groupCac = rev.clients > 0 ? spendRs / rev.clients : null
+                : 'text-amber-500'
+          const idle = total - live.length
           const title =
-            `${formatRs(rev.revenue)} booked from ${rev.orders} order${rev.orders !== 1 ? 's' : ''}\n` +
-            `${rev.clients} client${rev.clients !== 1 ? 's' : ''}${groupCac !== null ? ` \u00b7 ${formatRs(groupCac)} per client` : ''}\n` +
-            `Spent ${formatRs(spendRs)}${roas !== null ? ` \u00b7 ${roas.toFixed(2)}x return` : ''}\n` +
-            `Top ad ids by clients:\n${top}${rev.perAd.length > 3 ? `\n  +${rev.perAd.length - 3} more` : ''}`
+            `${live.length} of ${total} campaign${total !== 1 ? 's' : ''} live (active and spending today)\n` +
+            `${formatRs(liveRs)} spent today by the live ones\n` +
+            (idle > 0
+              ? `${idle} not spending (paused, or on with zero delivery)\n`
+              : '') +
+            `Row total including anything paused today: ${formatRs(g.totalSpend * USD_TO_RS)}`
           return (
             <span className="flex flex-col items-end leading-none" title={title}>
-              <span className={`${density.num} font-bold tabular-nums ${roasStyle}`}>
+              <span className={`${density.num} font-bold tabular-nums ${liveStyle}`}>
+                {live.length}
+                <span className="opacity-40">/{total}</span>
+              </span>
+              <span className={`text-[9px] font-semibold tabular-nums ${liveStyle} opacity-80`}>
                 {/* Abbreviated (2.4k) so a five-figure sum cannot widen the
                     column and squeeze the product name - the exact rupee
                     figure is in the tooltip. */}
-                {rev.revenue >= 1000
-                  ? `${(rev.revenue / 1000).toFixed(rev.revenue >= 10000 ? 0 : 1)}k`
-                  : rev.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                {liveRs >= 1000
+                  ? `${(liveRs / 1000).toFixed(liveRs >= 10000 ? 0 : 1)}k`
+                  : Math.round(liveRs).toLocaleString('en-US')}
               </span>
-              {roas !== null && (
-                <span className={`text-[9px] font-semibold tabular-nums ${roasStyle} opacity-80`}>
-                  {roas.toFixed(1)}x
-                </span>
-              )}
             </span>
           )
         })()}
@@ -1052,9 +1017,9 @@ export function TvDashboard({
         </span>
         <span
           className="text-right"
-          title="Order value booked against this product's Facebook ad ids, and the return on its spend"
+          title="Campaigns live right now (active and spending today) out of the total, and the Rs those live ones spent today"
         >
-          In <span className="text-emerald-500">Rs</span>
+          Live <span className="text-emerald-500">Rs</span>
         </span>
         <span className="text-center" title="Budget action: increase / decrease / hold">Act</span>
       </div>
