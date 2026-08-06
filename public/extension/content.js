@@ -513,6 +513,25 @@ let cartOwner = null;
 // put in the cart by itself; anything the agent adds or touches is removed from
 // this map and is then never auto-removed.
 let cartFromAd = {};
+
+// Clicking another chat does NOT repaint the contact panel instantly - Messenger
+// reuses the DOM and the previous client's ad_id chips stay on screen for a few
+// hundred ms. Scanning in that window returns the OLD ad, which both misbills
+// the order and auto-adds the old client's product to a freshly cleared cart
+// (the "Magic Stick is already there" report).
+// So an ad id only counts once it has been read on two consecutive polls with
+// the conversation unchanged. Costs ~1.2s before the ad appears, which is far
+// cheaper than attributing an order to the wrong campaign.
+let adConfirm = { key: null, id: null, hits: 0 };
+function akmezAdConfirmed(key, id) {
+  if (adConfirm.key !== key || adConfirm.id !== id) {
+    adConfirm = { key, id, hits: 1 };
+    return false;      // first sighting - wait for the DOM to settle
+  }
+  adConfirm.hits++;
+  return adConfirm.hits >= 2;
+}
+function akmezResetAdConfirm() { adConfirm = { key: null, id: null, hits: 0 }; }
 // Map: region name -> { contractor, rider } (delivery assignment set by admin)
 let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
@@ -2118,21 +2137,14 @@ function renderOrdersForm() {
     if (tg) tg.dataset.opened = '';
     try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
 
-    // Grab the new conversation's ad id right away rather than waiting for
-    // the next poll, so the linked product lands in the cart immediately.
-    const found = scanPageForAdId();
-    // Let the same ad resolve again in the new chat, and retire any product the
-    // PREVIOUS chat's ad had auto-added. `found` is '' when this conversation
-    // carries no ad label, which is exactly the unattributed case where a
-    // leftover auto-added product used to linger.
-    window.__akmezLastResolvedAd = null;
-    akmezDropAutoAdded(found || null);
-    if (found) {
-      fields.adid.input.value = found;
-      fields.adid.last = found;
-      try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
-      resolveProductFromAdId(found);
-    }
+    // Deliberately NO immediate scan here. This used to read the ad id the
+    // instant the chat changed and auto-add its product - but the contact panel
+    // still shows the PREVIOUS client's chips at that moment, so it re-added the
+    // old product to the cart it had just cleared, and stamped the order with
+    // the old campaign. The polled reader below picks the ad up ~1.2s later,
+    // once it has been confirmed twice against a settled DOM.
+    akmezDropAutoAdded(null);      // retire the previous ad's auto-added product
+    akmezResetAdConfirm();         // new chat must earn its ad id from scratch
   }
 
   function syncFields() {
@@ -2171,6 +2183,10 @@ function renderOrdersForm() {
       // The agent deliberately chose an ad for THIS conversation - never let
       // the page scan overwrite it. Cleared on conversation switch.
       if (fields.adid.manual) return;
+      // Hold everything back until this exact id has been seen twice for this
+      // same conversation. A stale chip left over from the previous chat only
+      // ever survives one poll, so it can no longer reach the field or the cart.
+      if (!akmezAdConfirmed(key, id)) return;
       const prev = fields.adid.last;
       applyField(fields.adid, id);
       // When the ad id changes to a new value, auto-resolve its linked product
