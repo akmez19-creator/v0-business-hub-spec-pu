@@ -235,6 +235,17 @@ style.textContent = `
   .akmez-adpick-picked{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:6px 9px;font-size:11px;color:#6ee7b7;margin-top:6px;line-height:1.35;}
   .akmez-adpick-clear{margin-left:auto;background:rgba(239,68,68,0.15);border:none;color:#fca5a5;width:20px;height:20px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;}
   .akmez-adpick-clear:hover{background:rgba(239,68,68,0.3);}
+  .akmez-adpick-head{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8b93a7;padding:7px 9px 3px;background:#12151c;position:sticky;top:0;}
+  .akmez-adpick-new{display:inline-block;background:rgba(249,115,22,0.2);color:#fb923c;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:6px;}
+  .akmez-adpick-warn{color:#fbbf24;}
+  /* Attribution flag: missing ad, or ad that does not match the cart */
+  .akmez-ad-flag{border-radius:8px;padding:7px 9px;font-size:11px;line-height:1.4;margin-top:6px;}
+  .akmez-ad-flag.warn{background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#fcd34d;}
+  .akmez-ad-flag.bad{background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#fca5a5;}
+  .akmez-ad-flag b{color:#fff;font-weight:700;}
+  .akmez-ad-flag-fix{display:inline-block;margin-top:5px;background:rgba(249,115,22,0.9);border:none;color:#fff;font-size:10px;font-weight:700;padding:4px 9px;border-radius:6px;cursor:pointer;}
+  .akmez-ad-flag-fix:hover{background:#f97316;}
+  .akmez-field-bad input{border-color:rgba(239,68,68,0.6)!important;}
 .akmez-select{width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 12px;color:white;font-size:13px;outline:none;cursor:pointer;transition:border-color 0.15s,box-shadow 0.15s;}
 .akmez-select:focus{border-color:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,0.18);}
 .akmez-select option{background:#1a1a2e;color:white;}
@@ -1237,11 +1248,12 @@ function parseAdId(raw) {
   return bare ? bare[1] : '';
 }
 
-// Scan the visible page for an "ad_id.<digits>" label. This is the reliable
-// source: the label is rendered as its own chip in the contact panel, so we
-// can find it without depending on a hand-picked CSS selector that breaks
-// whenever Meta reshuffles their DOM.
-function scanPageForAdId() {
+// Collect EVERY "ad_id.<digits>" label on the page, in the order Meta renders
+// them. A returning customer replies to many ads over months, so the contact
+// panel commonly shows 10+ of these chips stacked oldest -> newest.
+function scanAllAdIdsOnPage() {
+  const found = [];
+  const seen = new Set();
   // Narrow to elements whose own text is the label, so we get the id itself
   // rather than a huge ancestor that happens to contain it.
   const nodes = document.querySelectorAll('span, div, a, li, p');
@@ -1249,16 +1261,30 @@ function scanPageForAdId() {
     const text = (el.textContent || '').trim();
     if (!text || text.length > 60) continue;
     const m = text.match(AD_ID_RE);
-    if (m) {
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 && r.height === 0) continue;   // hidden node
-      return m[1];
-    }
+    if (!m) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;     // hidden node
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    found.push(m[1]);
   }
-  // Last resort: the whole body, in case the chip is nested oddly.
+  if (found.length) return found;
+  // Last resort: the whole body, in case the chips are nested oddly.
   const body = (document.body && document.body.innerText) || '';
-  const m = body.match(AD_ID_RE);
-  return m ? m[1] : '';
+  const all = body.match(new RegExp(AD_ID_RE.source, 'gi')) || [];
+  for (const chunk of all) {
+    const m = chunk.match(AD_ID_RE);
+    if (m && !seen.has(m[1])) { seen.add(m[1]); found.push(m[1]); }
+  }
+  return found;
+}
+
+// The ad to bill this order to is the MOST RECENT one the customer replied
+// to - Meta stacks the label chips oldest first, so that is the LAST match.
+// Taking the first match attributed orders to an ad from months ago.
+function scanPageForAdId() {
+  const all = scanAllAdIdsOnPage();
+  return all.length ? all[all.length - 1] : '';
 }
 
 // Extract the ad id (e.g. "ad_id.120248441310790621" -> "120248441310790621")
@@ -1765,6 +1791,7 @@ function renderOrdersForm() {
         <input type="text" id="ak-adpick" class="akmez-input akmez-input-plain" placeholder="Search your ads by campaign or product..." autocomplete="off">
         <div class="akmez-suggest" id="ak-adpick-suggest"></div>
         <div id="ak-adpick-picked" class="akmez-adpick-picked" style="display:none;"></div>
+        <div id="ak-ad-flag" class="akmez-ad-flag" style="display:none;"></div>
       </div>
       <div class="akmez-field">
         <div class="akmez-label">Ad ID</div>
@@ -2019,6 +2046,7 @@ function renderOrdersForm() {
     fields.adid.manual = false;
     fields.adid.emptyStreak = 0;
     window.__akmezLastResolvedAd = null;
+    window.__akmezMismatchOk = null;   // new chat = re-confirm any mismatch
     try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
 
     // Grab the new conversation's ad id right away rather than waiting for
@@ -2531,17 +2559,42 @@ function renderOrdersForm() {
     });
   }
 
-  // Live ads first, then most recently spending - the ad an agent needs is
-  // almost always one that is currently running.
+  // Build the candidate list. Ads this customer actually replied to come
+  // first: with ~2,000 ads in the account, the right answer is nearly always
+  // one of the handful of chips on the conversation, not a search result.
   function rankAds(q) {
-    const scored = [];
-    for (const a of adList) {
-      const hay = (a.name + ' ' + (a.productName || '') + ' ' + a.id).toLowerCase();
-      if (q && !hay.includes(q)) continue;
-      scored.push(a);
+    const convIds = scanAllAdIdsOnPage();
+    const newest = convIds.length ? convIds[convIds.length - 1] : null;
+    const convSet = new Set(convIds);
+    const byId = new Map(adList.map(a => [a.id, a]));
+
+    // Conversation ads, newest first (Meta stacks the chips oldest -> newest).
+    const conv = [];
+    for (let i = convIds.length - 1; i >= 0; i--) {
+      const id = convIds[i];
+      const known = byId.get(id);
+      conv.push(Object.assign(
+        // An id on the conversation that is not in the cached ad list is
+        // still selectable - the agent must not be blocked by a stale cache.
+        known || { id, name: 'Ad ' + id, active: false, spend: 0, productName: null, unknown: true },
+        { fromConv: true, newest: id === newest },
+      ));
     }
-    scored.sort((x, y) => (y.active - x.active) || (y.spend - x.spend));
-    return scored.slice(0, 8);
+
+    const rest = [];
+    for (const a of adList) {
+      if (convSet.has(a.id)) continue;         // already listed above
+      rest.push(a);
+    }
+    rest.sort((x, y) => (y.active - x.active) || (y.spend - x.spend));
+
+    const filter = a => {
+      if (!q) return true;
+      return (a.name + ' ' + (a.productName || '') + ' ' + a.id).toLowerCase().includes(q);
+    };
+    // Conversation ads always stay visible while searching, so the agent can
+    // never search their way past the correct answer.
+    return conv.filter(filter).concat(rest.filter(filter).slice(0, 8));
   }
 
   function paintAdActive() {
@@ -2561,14 +2614,26 @@ function renderOrdersForm() {
       return;
     }
     adActive = 0;
+    let headed = { conv: false, other: false };
     adPickSuggest.innerHTML = adMatches.map((a, i) => {
-      const badge = a.active
-        ? '<span class="akmez-adpick-live">LIVE</span>'
-        : '<span class="akmez-adpick-off">OFF</span>';
+      // Section headers make it obvious which ads came off this chat.
+      let head = '';
+      if (a.fromConv && !headed.conv) {
+        headed.conv = true;
+        head = '<div class="akmez-adpick-head">Replied to by this customer</div>';
+      } else if (!a.fromConv && !headed.other) {
+        headed.other = true;
+        head = '<div class="akmez-adpick-head">All other ads</div>';
+      }
+      const badge = a.newest
+        ? '<span class="akmez-adpick-new">LATEST</span>'
+        : a.active
+          ? '<span class="akmez-adpick-live">LIVE</span>'
+          : '<span class="akmez-adpick-off">OFF</span>';
       const prod = a.productName
         ? ` \u00b7 <span class="akmez-adpick-prod">${esc(a.productName)}</span>`
-        : '';
-      return `<div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
+        : (a.unknown ? ' \u00b7 <span class="akmez-adpick-warn">not in ad cache</span>' : '');
+      return `${head}<div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
         <div class="akmez-adpick-line">
           <div class="akmez-adpick-name">${esc(a.name)}${badge}</div>
           <div class="akmez-adpick-meta">${esc(a.id)}${prod}</div>
@@ -2600,8 +2665,10 @@ function renderOrdersForm() {
     if (!id) {
       adPickPicked.style.display = 'none';
       adPick.placeholder = 'Search your ads by campaign or product...';
+      renderAdFlag();
       return;
     }
+    ensureAdLinkage(id);
     const known = adList.find(a => a.id === id);
     adPickPicked.style.display = 'flex';
     adPickPicked.innerHTML = `
@@ -2619,7 +2686,11 @@ function renderOrdersForm() {
       fields.adid.manual = false;
       renderPickedAd();
     };
+    renderAdFlag();
   }
+
+  // Let submitOrder (defined outside this scope) read the current state.
+  window.__akmezAdMatchState = adMatchState;
 
   adPick.addEventListener('input', showAdSuggestions);
   adPick.addEventListener('focus', showAdSuggestions);
@@ -2645,6 +2716,111 @@ function renderOrdersForm() {
       adPickSuggest.style.display = 'none';
     }
   });
+
+  // ---- Attribution flag -----------------------------------------------
+  // Every order needs an ad id, and the ad has to make sense for what the
+  // agent actually sold. Maps adId -> product | null, where null means
+  // "looked up, genuinely not linked to any product". Held on window and
+  // created lazily: renderPickedAd runs on a timer and can fire before this
+  // block is reached, which a `const` here would turn into a TDZ crash.
+  function adProductCacheGet() {
+    if (!window.__akmezAdProductCache) window.__akmezAdProductCache = {};
+    return window.__akmezAdProductCache;
+  }
+
+  function cartProductIds() {
+    const ids = new Set();
+    for (const key of Object.keys(cart)) {
+      if (!cart[key]) continue;
+      ids.add(String(key).split('::')[0]);   // strip the variant suffix
+    }
+    return ids;
+  }
+
+  function setFlag(cls, html) {
+    const box = document.getElementById('ak-ad-flag');
+    if (!box) return;
+    if (!cls) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.className = 'akmez-ad-flag ' + cls;
+    box.innerHTML = html;
+    box.style.display = 'block';
+  }
+
+  // Returns 'ok' | 'missing' | 'mismatch' | 'unlinked' | 'pending'
+  function adMatchState() {
+    const id = fields.adid.input.value.trim();
+    if (!id) return 'missing';
+    const ids = cartProductIds();
+    if (!ids.size) return 'ok';                 // nothing sold yet, nothing to compare
+    if (!(id in adProductCacheGet())) return 'pending';
+    const linked = adProductCacheGet()[id];
+    if (!linked) return 'unlinked';
+    return ids.has(linked.id) ? 'ok' : 'mismatch';
+  }
+
+  function renderAdFlag() {
+    const state = adMatchState();
+    const id = fields.adid.input.value.trim();
+
+    if (state === 'missing') {
+      setFlag('bad', 'This order has <b>no ad</b>. Pick the ad that brought this client &mdash; without it the order is invisible in ad reporting.');
+      return;
+    }
+    if (state === 'mismatch') {
+      const linked = adProductCacheGet()[id];
+      const sold = [...cartProductIds()]
+        .map(pid => (products.find(p => p.id === pid) || {}).name)
+        .filter(Boolean);
+      setFlag('bad',
+        `<b>Ad does not match the order.</b> This ad sells <b>${esc(linked.name)}</b>, ` +
+        `but you added <b>${esc(sold.join(', ') || 'something else')}</b>.<br>` +
+        `Either pick the ad for what you sold, or continue if the client changed their mind.` +
+        `<br><button type="button" class="akmez-ad-flag-fix" id="ak-flag-fix">Add ${esc(linked.name)} instead</button>`);
+      const fix = document.getElementById('ak-flag-fix');
+      if (fix) fix.onclick = () => {
+        const match = products.find(p => p.id === linked.id);
+        if (!match) { toast('That product is not in your list'); return; }
+        cart = {};
+        cart[match.id] = 1;
+        updateCart();
+      };
+      return;
+    }
+    if (state === 'unlinked') {
+      setFlag('warn', `Ad <b>${esc(id)}</b> is not linked to any product, so we cannot check it matches this order.`);
+      return;
+    }
+    setFlag(null);
+  }
+
+  // Look up the ad's product (once per ad) purely to validate the match.
+  function ensureAdLinkage(adId, done) {
+    if (!adId || !/^\d+$/.test(adId)) { if (done) done(); return; }
+    if (adId in adProductCacheGet()) { if (done) done(); return; }
+    const known = adList.find(a => a.id === adId);
+    if (known && known.productId) {
+      adProductCacheGet()[adId] = { id: known.productId, name: known.productName || 'Linked product' };
+      renderAdFlag();
+      if (done) done();
+      return;
+    }
+    chrome.runtime.sendMessage({ action: 'resolveAdProduct', adId }, resp => {
+      adProductCacheGet()[adId] = (!chrome.runtime.lastError && resp && resp.success && resp.product)
+        ? resp.product
+        : null;
+      renderAdFlag();
+      if (done) done();
+    });
+  }
+
+  // Re-validate whenever the cart changes (chained so we do not clobber any
+  // handler the product list already registered).
+  const prevCartHook = window.__akmezOnCartChange;
+  window.__akmezOnCartChange = function () {
+    if (typeof prevCartHook === 'function') { try { prevCartHook(); } catch (e) { /* ignore */ } }
+    ensureAdLinkage(fields.adid.input.value.trim());
+    renderAdFlag();
+  };
 
   // Keep the confirmation line in sync when the ad id is auto-captured or
   // pasted by hand rather than picked from the list.
@@ -3079,6 +3255,32 @@ function submitOrder() {
   if (!entries.length) {
     err.textContent = 'Please select at least one product';
     err.style.display = 'block';
+    return;
+  }
+
+  // Every order must be attributed to an ad - an order with no ad id never
+  // shows up in ad reporting, which defeats the point of tracking spend.
+  if (!adId) {
+    err.textContent = 'Pick the ad that brought this client before creating the order.';
+    err.style.display = 'block';
+    const row = document.getElementById('ak-adid-row');
+    const toggle = document.getElementById('ak-adid-toggle');
+    if (row && row.style.display === 'none' && toggle) toggle.click();
+    const pick = document.getElementById('ak-adpick');
+    if (pick) pick.focus();
+    return;
+  }
+
+  // A mismatch is a warning, not a wall: clients do change their mind
+  // mid-chat. Require one deliberate confirmation, then let it through.
+  const matchState = typeof window.__akmezAdMatchState === 'function'
+    ? window.__akmezAdMatchState()
+    : 'ok';
+  if (matchState === 'mismatch' && window.__akmezMismatchOk !== adId) {
+    window.__akmezMismatchOk = adId;
+    err.textContent = 'This ad does not match the product you added. Check the flag above, then press Create Order again to confirm.';
+    err.style.display = 'block';
+    btn.textContent = 'Confirm mismatch';
     return;
   }
   
