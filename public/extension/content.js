@@ -110,6 +110,7 @@ widget.innerHTML = `
       <div style="font-size:10px;opacity:0.7">Create orders from anywhere</div>
     </div>
     <div class="akmez-header-btns">
+      <button class="akmez-hbtn" id="akmez-reload" title="Reload this chat's details (name, phone, region, ad)" aria-label="Reload chat details">&#8635;</button>
       <button class="akmez-hbtn" id="akmez-settings" title="Settings" aria-label="Open settings">&#9881;</button>
       <button class="akmez-hbtn" id="akmez-close" title="Close" aria-label="Close panel">&times;</button>
     </div>
@@ -163,6 +164,9 @@ style.textContent = `
 .akmez-logo{width:34px;height:34px;background:rgba(255,255,255,0.22);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.3);}
 .akmez-header span{font-weight:700;font-size:14px;text-shadow:0 1px 2px rgba(0,0,0,0.2);}
 .akmez-header-btns{display:flex;gap:6px;}
+.akmez-hbtn#akmez-reload{font-size:16px;line-height:1;}
+.akmez-spin{animation:akmez-spin 0.7s linear;}
+@keyframes akmez-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 .akmez-hbtn{width:32px;height:32px;border:none;border-radius:8px;background:rgba(255,255,255,0.18);color:white;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s,transform 0.15s;}
 .akmez-hbtn:hover{background:rgba(255,255,255,0.32);transform:translateY(-1px);}
 .akmez-tabs{display:flex;background:rgba(0,0,0,0.35);border-bottom:1px solid rgba(255,255,255,0.08);}
@@ -750,6 +754,17 @@ chrome.runtime.onMessage.addListener((request) => {
 
 // Settings panel
 document.getElementById('akmez-settings').addEventListener('click', () => renderSettings());
+document.getElementById('akmez-reload').addEventListener('click', () => {
+  const btn = document.getElementById('akmez-reload');
+  if (btn) { btn.classList.add('akmez-spin'); setTimeout(() => btn.classList.remove('akmez-spin'), 700); }
+  if (typeof window.__akmezForceResync === 'function') {
+    window.__akmezForceResync();
+    toast('Chat details reloaded');
+  } else {
+    // Order form not built yet (e.g. sitting on Settings) - just refresh data.
+    if (typeof loadData === 'function') loadData();
+  }
+});
 
 // Delivery cut-off countdown: starts 15 minutes before the cut-off time and
 // recolors the whole interface to a red alert theme so the agent can't miss it.
@@ -1326,6 +1341,12 @@ function parseAdId(raw) {
 // them. A returning customer replies to many ads over months, so the contact
 // panel commonly shows 10+ of these chips stacked oldest -> newest.
 function scanAllAdIdsOnPage() {
+  return scanAllAdIdsWithPos().map(h => h.id);
+}
+
+// Same scan, but keeps each chip's on-screen position so callers can compare it
+// against the "AI transferred" marker.
+function scanAllAdIdsWithPos() {
   const hits = [];
   const seen = new Set();
   // Narrow to elements whose own text is the label, so we get the id itself
@@ -1352,27 +1373,55 @@ function scanAllAdIdsOnPage() {
   }
   if (hits.length) {
     hits.sort((a, b) => (a.top - b.top) || (a.left - b.left));
-    return hits.map(h => h.id);
+    return hits;
   }
   // Last resort: the whole body, in case the chips are nested oddly. Read the
   // conversation area only, so the widget's own text cannot leak in here either.
+  // No positions are available on this path, so mark them as +Infinity - the
+  // marker-anchored picker will just fall back to the last one.
   const host = document.querySelector('[role="main"]') || document.body;
   const body = (host && host.innerText) || '';
   const found = [];
   const all = body.match(new RegExp(AD_ID_RE.source, 'gi')) || [];
   for (const chunk of all) {
     const m = chunk.match(AD_ID_RE);
-    if (m && !seen.has(m[1])) { seen.add(m[1]); found.push(m[1]); }
+    if (m && !seen.has(m[1])) { seen.add(m[1]); found.push({ id: m[1], top: Infinity, left: 0 }); }
   }
   return found;
 }
 
-// The ad to bill this order to is the MOST RECENT one the customer replied
-// to - Meta stacks the label chips oldest first, so that is the LAST match.
-// Taking the first match attributed orders to an ad from months ago.
+// Find the vertical position of the "AI transferred" marker chip, if present.
+// The agent's rule: the ad that actually brought THIS conversation is the
+// ad_id label sitting directly ABOVE "AI transferred". Everything below that
+// marker (messenger_ads, and occasionally re-surfaced history) is not it.
+function akmezAiTransferredTop() {
+  const nodes = document.querySelectorAll('span, div, a, li, p');
+  for (const el of nodes) {
+    if (el.closest('#akmez-widget, #akmez-toggle, .akmez-hover-card')) continue;
+    const t = (el.textContent || '').trim();
+    if (t.length > 40) continue;
+    if (/^ai\s*transferred$/i.test(t)) {
+      const r = el.getBoundingClientRect();
+      if (r.width || r.height) return r.top;
+    }
+  }
+  return null;
+}
+
+// The ad to bill this order to is the one just ABOVE the "AI transferred"
+// marker. scanAllAdIdsOnPage() returns the chips sorted top->bottom, so:
+//  - with the marker present: the LAST ad_id whose top is above the marker,
+//  - without it (older conversations): fall back to the bottom-most chip,
+//    which is the most recent ad the customer replied to.
 function scanPageForAdId() {
-  const all = scanAllAdIdsOnPage();
-  return all.length ? all[all.length - 1] : '';
+  const all = scanAllAdIdsWithPos();
+  if (!all.length) return '';
+  const markerTop = akmezAiTransferredTop();
+  if (markerTop !== null) {
+    const above = all.filter(h => h.top < markerTop + 4);
+    if (above.length) return above[above.length - 1].id;
+  }
+  return all[all.length - 1].id;
 }
 
 // Extract the ad id (e.g. "ad_id.120248441310790621" -> "120248441310790621")
@@ -2213,6 +2262,41 @@ function renderOrdersForm() {
   detectSourcePage();
   if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
   window.__akmezSyncTimer = setInterval(() => { syncFields(); detectSourcePage(); }, 1200);
+
+  // Manual reload (header ↻ button). Sometimes Meta's re-render leaves a field
+  // blank - the agent sees "no region / no ad" and assumes the order is broken.
+  // Rather than reload the whole browser tab (which loses the chat), this drops
+  // every auto field's cached state so the readers re-read the page from
+  // scratch, and re-fetches products/regions from the server in case that list
+  // was what failed to load. It does NOT clear the cart or agent edits.
+  window.__akmezForceResync = function () {
+    for (const k of ['name', 'phone', 'adid']) {
+      const f = fields[k];
+      if (!f) continue;
+      f.last = null;
+      f.emptyStreak = 0;
+      if (k === 'adid') { f.edited = false; f.manual = false; }  // let the ad re-scan
+    }
+    window.__akmezLastResolvedAd = null;
+    akmezResetAdConfirm();
+    syncFields();          // re-read name / phone right away
+    detectSourcePage();
+    // The two-poll ad confirmation exists to reject chips left over from a chat
+    // switch. A manual reload is the agent asserting the DOM is settled, so skip
+    // the wait and apply the ad (the one above "AI transferred") immediately.
+    if (!fields.adid.manual) {
+      const id = scanPageForAdId();
+      if (id) {
+        applyField(fields.adid, id);
+        akmezResetAdConfirm();
+        window.__akmezLastResolvedAd = id;
+        resolveProductFromAdId(id);
+        try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
+        if (typeof window.__akmezApplyAdVisibility === 'function') window.__akmezApplyAdVisibility();
+      }
+    }
+    if (typeof loadData === 'function') loadData();   // refresh regions & products
+  };
   
   // Product search - type-to-search autocomplete with keyboard navigation
   const prodInput = document.getElementById('ak-search');
