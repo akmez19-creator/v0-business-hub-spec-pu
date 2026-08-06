@@ -1426,6 +1426,18 @@ function scanPageForAdId() {
   return all[all.length - 1].id;
 }
 
+// True when `adId` is the chip sitting directly above the "AI transferred"
+// marker - i.e. the ad that genuinely started THIS conversation. When that
+// holds, the pick is authoritative no matter how many history chips are on the
+// page, so its linked product is safe to auto-add. Without the marker we cannot
+// tell the live ad from months-old history, so a multi-ad page stays ambiguous.
+function akmezAdIsMarkerAnchored(adId) {
+  const markerTop = akmezAiTransferredTop();
+  if (markerTop === null) return false;
+  const above = scanAllAdIdsWithPos().filter(h => h.top < markerTop + 4);
+  return above.length > 0 && above[above.length - 1].id === adId;
+}
+
 // Extract the ad id (e.g. "ad_id.120248441310790621" -> "120248441310790621")
 function readCustomerAdId(cb) {
   // Scan the page FIRST, and only fall back to the configured selector.
@@ -2645,15 +2657,15 @@ function renderOrdersForm() {
   // added when the lookup comes back empty.
   function resolveProductFromAdId(adId, force) {
     if (!adId || !/^\d+$/.test(adId)) return;
-    // Auto-adding a product only makes sense for a NEW customer who replied to a
-    // single ad - then that ad's product is almost certainly what they want.
-    // A returning customer's contact panel stacks every ad they ever clicked
-    // (this client shows 13+ ad_id chips), and picking any one of them to
-    // force a product into the cart is how "Magic Stick is already there" keeps
-    // happening. When the page shows more than one distinct ad, capture the ad
-    // for attribution but let the AGENT add the product from the actual chat.
+    // Decide whether this ad is trustworthy enough to auto-add its product.
+    // Counting chips was wrong: it refused every returning customer, so a client
+    // with just two ads got no product at all. What matters is WHICH chip we
+    // picked - the one directly above "AI transferred" is the live ad, so its
+    // product is safe to add even with a stack of history chips above it.
+    // Only a multi-ad page with NO marker is genuinely ambiguous; there we keep
+    // the ad for attribution and let the agent pick the product from the chat.
     // `force` = the agent explicitly clicked an ad, so honour their choice.
-    if (!force && scanAllAdIdsOnPage().length > 1) return;
+    if (!force && !akmezAdIsMarkerAnchored(adId) && scanAllAdIdsOnPage().length > 1) return;
     if (!force && window.__akmezLastResolvedAd === adId) return;
     window.__akmezLastResolvedAd = adId;
     chrome.runtime.sendMessage({ action: 'resolveAdProduct', adId }, resp => {
