@@ -1291,12 +1291,20 @@ function scanPageForAdId() {
 
 // Extract the ad id (e.g. "ad_id.120248441310790621" -> "120248441310790621")
 function readCustomerAdId(cb) {
-  readFromSelectors('adid', raw => {
-    // The configured selector often points at the label CONTAINER, so its
-    // text can be "Ordered ad_id.1202..." or just "Ordered". Only trust it
-    // when a real ad id comes out; otherwise scan the page.
-    cb(parseAdId(raw) || scanPageForAdId());
-  });
+  // Scan the page FIRST, and only fall back to the configured selector.
+  //
+  // The order here is the whole ballgame. readFromSelectors() uses
+  // querySelector(), which returns the FIRST element matching the saved
+  // selector - and that selector matches every ad_id chip in the contact
+  // panel. On a returning customer with 8 chips it therefore handed back the
+  // OLDEST ad and parseAdId() happily accepted it, so scanPageForAdId() (the
+  // "most recent chip wins" rule) never got a chance to run. Every repeat
+  // customer's order was being billed to a campaign from months ago.
+  const scanned = scanPageForAdId();
+  if (scanned) { cb(scanned); return; }
+  // No "ad_id.<digits>" chip anywhere: fall back to the configured selector
+  // for pages that surface the id in some other shape.
+  readFromSelectors('adid', raw => cb(parseAdId(raw)));
 }
 
 // Read the whole visible conversation as [{ from: 'customer'|'business', text }].
@@ -2107,6 +2115,10 @@ function renderOrdersForm() {
         resolveProductFromAdId(fields.adid.input.value);
         try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
       }
+      // The scan lands AFTER the panel first renders, so the "no ad label"
+      // banner is drawn against an empty field. Re-run visibility here or it
+      // keeps warning about a missing ad that was in fact captured.
+      if (typeof window.__akmezApplyAdVisibility === 'function') window.__akmezApplyAdVisibility();
     });
   }
   syncFields();
