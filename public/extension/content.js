@@ -265,6 +265,9 @@ style.textContent = `
 .akmez-suggest{position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:10;background:#181826;border:1px solid rgba(249,115,22,0.4);border-radius:10px;max-height:200px;overflow-y:auto;box-shadow:0 12px 32px rgba(0,0,0,0.55);display:none;}
 .akmez-suggest-item{padding:9px 12px;font-size:12px;color:#eee;cursor:pointer;}
 .akmez-suggest-empty{padding:9px 12px;font-size:12px;color:#fcd34d;cursor:pointer;text-align:center;}
+.akmez-adprod-chip{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 8px;padding:10px 12px;font-size:12px;font-weight:600;color:#fde68a;background:rgba(249,115,22,0.14);border:1px dashed rgba(249,115,22,0.55);border-radius:8px;cursor:pointer;text-align:left;}
+.akmez-adprod-chip:hover{background:rgba(249,115,22,0.24);}
+.akmez-adprod-tag{margin-left:auto;font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:#fbbf24;opacity:.85;}
 .akmez-suggest-empty:hover{background:rgba(249,115,22,0.12);}
 .akmez-suggest-item:hover,.akmez-suggest-item.active{background:rgba(249,115,22,0.35);color:#fff;}
   .akmez-cutoff-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;color:#fff;font-size:12px;font-weight:600;outline:none;}
@@ -1981,9 +1984,10 @@ function renderOrdersForm() {
       <div class="akmez-label">Notes</div>
       <textarea id="ak-notes" class="akmez-input akmez-input-plain akmez-notes" placeholder="Optional note for the delivery team..." rows="2"></textarea>
     </div>
-    <div class="akmez-section">Add Products</div>
-    <div class="akmez-autocomplete">
-      <input type="text" class="akmez-product-search" id="ak-search" placeholder="Type to search ${products.length} products..." autocomplete="off">
+  <div class="akmez-section">Add Products</div>
+  <div id="ak-adprod-hint" style="display:none"></div>
+  <div class="akmez-autocomplete">
+  <input type="text" class="akmez-product-search" id="ak-search" placeholder="Type to search ${products.length} products..." autocomplete="off">
       <div class="akmez-suggest" id="ak-prod-suggest"></div>
     </div>
     <div class="akmez-cart-list" id="ak-cart-list"></div>
@@ -2223,8 +2227,10 @@ function renderOrdersForm() {
     // old product to the cart it had just cleared, and stamped the order with
     // the old campaign. The polled reader below picks the ad up ~1.2s later,
     // once it has been confirmed twice against a settled DOM.
-    akmezDropAutoAdded(null);      // retire the previous ad's auto-added product
-    akmezResetAdConfirm();         // new chat must earn its ad id from scratch
+  akmezDropAutoAdded(null);      // retire the previous ad's auto-added product
+  akmezResetAdConfirm();         // new chat must earn its ad id from scratch
+  window.__akmezAdProduct = null; // drop the previous ad's suggestion chip
+  if (typeof window.__akmezRenderAdProductHint === 'function') window.__akmezRenderAdProductHint();
   }
 
   function syncFields() {
@@ -2660,6 +2666,40 @@ function renderOrdersForm() {
     });
   }
 
+  // How many times we've waited for the products catalog for the current ad.
+  let adProductWait = 0;
+
+  // The ad's linked product is the single most likely thing the agent needs to
+  // add, so surface it right above ADD PRODUCTS as a one-tap chip whenever it
+  // is known but not already in the cart. Previously the ad resolved fine and
+  // the agent was still left staring at an empty "Type to search 236 products".
+  function akmezRenderAdProductHint() {
+    const host = document.getElementById('ak-adprod-hint');
+    if (!host) return;
+    const ap = window.__akmezAdProduct;
+    const cur = fields.adid.input ? fields.adid.input.value : '';
+    if (!ap || ap.adId !== cur || cart[ap.id]) {
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
+    const match = products.find(p => p.id === ap.id);
+    const label = (match && match.name) || ap.name || 'the ad product';
+    host.style.display = 'block';
+    host.innerHTML = `<button type="button" class="akmez-adprod-chip" id="ak-adprod-add">
+        + Add ${label.replace(/</g, '&lt;')}<span class="akmez-adprod-tag">from this ad</span>
+      </button>`;
+    const btn = document.getElementById('ak-adprod-add');
+    if (btn) btn.onclick = () => {
+      if (!match) { toast('Linked product not in your product list'); return; }
+      cart[match.id] = (cart[match.id] || 0) + 1;
+      cartFromAd[match.id] = ap.adId;
+      updateCart();
+      akmezRenderAdProductHint();
+    };
+  }
+  window.__akmezRenderAdProductHint = akmezRenderAdProductHint;
+
   // Given a captured Ad ID, resolve its linked product (ad -> campaign -> product)
   // and auto-add it to the cart. Guards against resolving the same ad twice.
   // force = the agent explicitly asked for this ad (clicked the field or a
@@ -2676,22 +2716,45 @@ function renderOrdersForm() {
     // the ad for attribution and let the agent pick the product from the chat.
     // `force` = the agent explicitly clicked an ad, so honour their choice.
     if (!force && !akmezAdIsMarkerAnchored(adId) && scanAllAdIdsOnPage().length > 1) return;
-    if (!force && window.__akmezLastResolvedAd === adId) return;
+    // Already resolved: nothing to fetch, but still (re)paint the chip so the
+    // suggestion is visible after a panel rebuild or a cart clear.
+    if (!force && window.__akmezLastResolvedAd === adId) { akmezRenderAdProductHint(); return; }
     window.__akmezLastResolvedAd = adId;
     chrome.runtime.sendMessage({ action: 'resolveAdProduct', adId }, resp => {
-      if (chrome.runtime.lastError) return;
+      // Any transient failure must RELEASE the guard, otherwise the one early
+      // attempt poisons the ad forever and the cart stays empty.
+      const retry = (why) => {
+        window.__akmezLastResolvedAd = null;
+        console.log('[v0] ad product resolve retry:', why, adId);
+      };
+      if (chrome.runtime.lastError) { retry('runtime error'); return; }
       if (!resp || !resp.success || !resp.product) {
         if (force) toast('Ad ' + adId + ' is not linked to a product');
+        else retry('no product in response');
         return;
       }
       // Only add if this ad id is still the one shown (conversation may have changed)
       if (fields.adid.input.value !== adId) return;
-      // Match against a loaded product so the cart id lines up with the picker
+      // Remember the ad's product even if we cannot add it yet, so ADD PRODUCTS
+      // can surface it as a suggestion instead of showing the agent nothing.
+      window.__akmezAdProduct = { id: resp.product.id, name: resp.product.name || '', adId };
+      // The products catalog loads asynchronously. This used to run before the
+      // 236 products arrived, find nothing, and silently give up with the guard
+      // already consumed - exactly the "ad resolved but no product" case. Wait
+      // for the catalog and try again instead of dropping the ad's product.
       const match = products.find(p => p.id === resp.product.id);
       if (!match) {
+        if (!products.length) {
+          retry('products not loaded yet');
+          adProductWait = (adProductWait || 0) + 1;
+          if (adProductWait <= 12) setTimeout(() => resolveProductFromAdId(adId, force), 800);
+          return;
+        }
         if (force) toast('Linked product not in your product list');
+        akmezRenderAdProductHint();
         return;
       }
+      adProductWait = 0;
       if (!cart[match.id]) {
         cart[match.id] = 1;
         cartFromAd[match.id] = adId;   // ours, so it can be taken back
@@ -2700,6 +2763,7 @@ function renderOrdersForm() {
       } else if (force) {
         toast(match.name + ' is already in the order');
       }
+      akmezRenderAdProductHint();
     });
   }
 
@@ -3501,6 +3565,11 @@ function updateCart() {
   const c = document.getElementById('ak-cart');
   const list = document.getElementById('ak-cart-list');
   if (!c || !list) return;
+  // Keep the "add the ad's product" chip in sync: it must vanish once the
+  // product is in the cart and come back if the agent removes it again.
+  if (typeof window.__akmezRenderAdProductHint === 'function') {
+    setTimeout(window.__akmezRenderAdProductHint, 0);
+  }
   const entries = Object.entries(cart).filter(([,q]) => q > 0);
   if (!entries.length) {
     c.style.display = 'none';
