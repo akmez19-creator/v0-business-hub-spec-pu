@@ -504,6 +504,10 @@ let products = [], regions = [], cart = {}, currentTab = 'orders';
 // survives every re-render of the panel, so without an owner stamp it silently
 // follows the agent into the next client's chat. Null = not claimed yet.
 let cartOwner = null;
+// productId -> the ad id that auto-added it. Only tracks lines the extension
+// put in the cart by itself; anything the agent adds or touches is removed from
+// this map and is then never auto-removed.
+let cartFromAd = {};
 // Map: region name -> { contractor, rider } (delivery assignment set by admin)
 let regionDelivery = {};
 // Admin-defined page mappings: [{ match: 'Made By Moris', code: 'MBM' }]
@@ -1258,12 +1262,17 @@ function parseAdId(raw) {
 // them. A returning customer replies to many ads over months, so the contact
 // panel commonly shows 10+ of these chips stacked oldest -> newest.
 function scanAllAdIdsOnPage() {
-  const found = [];
+  const hits = [];
   const seen = new Set();
   // Narrow to elements whose own text is the label, so we get the id itself
   // rather than a huge ancestor that happens to contain it.
   const nodes = document.querySelectorAll('span, div, a, li, p');
   for (const el of nodes) {
+    // NEVER scan our own panel. It prints example ids in the settings hint
+    // ("ad_id.120248...") and real ids in the ad picker, and because the widget
+    // is appended to <body> it sorts LAST - so the "newest chip wins" rule below
+    // would happily bill the order to the extension's own placeholder text.
+    if (el.closest('#akmez-widget, #akmez-toggle, .akmez-hover-card')) continue;
     const text = (el.textContent || '').trim();
     if (!text || text.length > 60) continue;
     const m = text.match(AD_ID_RE);
@@ -1272,11 +1281,20 @@ function scanAllAdIdsOnPage() {
     if (r.width === 0 && r.height === 0) continue;     // hidden node
     if (seen.has(m[1])) continue;
     seen.add(m[1]);
-    found.push(m[1]);
+    // Keep where it sits on screen: Meta stacks the chips visually oldest at
+    // the top, and DOM order does not always follow that (the contact panel
+    // re-orders and virtualises rows), so position is the trustworthy signal.
+    hits.push({ id: m[1], top: r.top, left: r.left });
   }
-  if (found.length) return found;
-  // Last resort: the whole body, in case the chips are nested oddly.
-  const body = (document.body && document.body.innerText) || '';
+  if (hits.length) {
+    hits.sort((a, b) => (a.top - b.top) || (a.left - b.left));
+    return hits.map(h => h.id);
+  }
+  // Last resort: the whole body, in case the chips are nested oddly. Read the
+  // conversation area only, so the widget's own text cannot leak in here either.
+  const host = document.querySelector('[role="main"]') || document.body;
+  const body = (host && host.innerText) || '';
+  const found = [];
   const all = body.match(new RegExp(AD_ID_RE.source, 'gi')) || [];
   for (const chunk of all) {
     const m = chunk.match(AD_ID_RE);
@@ -2044,6 +2062,7 @@ function renderOrdersForm() {
     cartOwner = akmezConvKey();
     if (Object.keys(cart).length) {
       cart = {};
+      cartFromAd = {};
       updateCart();
     }
     // Clearing `edited` is the important part: applyField refuses to touch a
@@ -2064,6 +2083,12 @@ function renderOrdersForm() {
     // Grab the new conversation's ad id right away rather than waiting for
     // the next poll, so the linked product lands in the cart immediately.
     const found = scanPageForAdId();
+    // Let the same ad resolve again in the new chat, and retire any product the
+    // PREVIOUS chat's ad had auto-added. `found` is '' when this conversation
+    // carries no ad label, which is exactly the unattributed case where a
+    // leftover auto-added product used to linger.
+    window.__akmezLastResolvedAd = null;
+    akmezDropAutoAdded(found || null);
     if (found) {
       fields.adid.input.value = found;
       fields.adid.last = found;
@@ -2111,8 +2136,10 @@ function renderOrdersForm() {
       const prev = fields.adid.last;
       applyField(fields.adid, id);
       // When the ad id changes to a new value, auto-resolve its linked product
-      if (fields.adid.input.value && fields.adid.input.value !== prev) {
-        resolveProductFromAdId(fields.adid.input.value);
+      const now = fields.adid.input.value;
+      if (now !== prev) akmezDropAutoAdded(now || null);  // retire the old ad's product
+      if (now && now !== prev) {
+        resolveProductFromAdId(now);
         try { renderPickedAd(); } catch (e) { /* panel not built yet */ }
       }
       // The scan lands AFTER the panel first renders, so the "no ad label"
@@ -2193,6 +2220,7 @@ function renderOrdersForm() {
       return;
     }
     cart[p.id] = (cart[p.id] || 0) + 1;
+    delete cartFromAd[p.id];   // agent chose it, so it is not ad-owned
     updateCart();
     // Clear the query so the agent can immediately search the next product
     prodInput.value = '';
@@ -2488,6 +2516,7 @@ function renderOrdersForm() {
       }
       if (!cart[match.id]) {
         cart[match.id] = 1;
+        cartFromAd[match.id] = adId;   // ours, so it can be taken back
         updateCart();
         toast('Product added from Ad ID: ' + match.name);
       } else if (force) {
@@ -2831,6 +2860,7 @@ function renderOrdersForm() {
         const match = products.find(p => p.id === linked.id);
         if (!match) { toast('That product is not in your list'); return; }
         cart = {};
+        cartFromAd = {};
         cart[match.id] = 1;
         updateCart();
       };
@@ -3235,6 +3265,20 @@ function akmezConvKey() {
 // per-chat reset in syncFields() cannot be relied on alone, because the sync
 // timer is killed while the success screen is up (the form is gone), so a chat
 // switch made right after creating an order is never observed.
+// The extension auto-adds the product linked to the detected ad id. When that
+// ad id changes - or disappears, as on a chat with no ad label - the product it
+// added must go with it, otherwise the previous client's item (a "Magic Stick"
+// nobody asked for) stays in the order while the panel reports no ad at all.
+function akmezDropAutoAdded(newAdId) {
+  let changed = false;
+  for (const pid of Object.keys(cartFromAd)) {
+    if (cartFromAd[pid] === newAdId) continue;   // still the ad in force
+    delete cartFromAd[pid];
+    if (cart[pid]) { delete cart[pid]; changed = true; }
+  }
+  if (changed) { try { updateCart(); } catch (e) { /* panel not built */ } }
+}
+
 function akmezCartGuard() {
   const key = akmezConvKey();
   if (!key) return;                                   // cannot tell yet - leave it
@@ -3243,6 +3287,7 @@ function akmezCartGuard() {
   cartOwner = key;
   if (Object.keys(cart).length) {
     cart = {};
+    cartFromAd = {};
     try { updateCart(); } catch (e) { /* panel not built yet */ }
   }
 }
@@ -3297,6 +3342,9 @@ function updateCart() {
   list.querySelectorAll('.akmez-qty-btn').forEach(b => {
     b.onclick = () => {
       const id = b.dataset.id;
+      // The agent has taken charge of this line, so stop treating it as
+      // ad-owned - it must survive any later ad id change.
+      delete cartFromAd[id];
       if (b.dataset.act === 'inc') cart[id] = (cart[id] || 0) + 1;
       else if (b.dataset.act === 'dec') cart[id] = Math.max(0, (cart[id] || 0) - 1);
       else if (b.dataset.act === 'del') cart[id] = 0;
@@ -3470,6 +3518,7 @@ function submitOrder() {
     // Messenger instead of that button, and the products used to survive into
     // the new client's form.
     cart = {};
+    cartFromAd = {};
     cartOwner = null;
 
     const entryCount = data.entryCount || 1;
@@ -3522,6 +3571,7 @@ function submitOrder() {
     });
     document.getElementById('ak-new').onclick = () => {
       cart = {};
+      cartFromAd = {};
       cartOwner = null;   // re-adopt whichever chat is open now
       renderOrdersForm();
     };
