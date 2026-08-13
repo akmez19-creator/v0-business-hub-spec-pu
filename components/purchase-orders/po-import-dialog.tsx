@@ -1,7 +1,7 @@
 'use client'
 
 import React from "react"
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,7 @@ import {
 import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import * as XLSX from 'xlsx'
 
@@ -94,6 +95,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [creatingAllProducts, setCreatingAllProducts] = useState(false)
   const [aiMatching, setAiMatching] = useState(false)
   const [aiMatchStats, setAiMatchStats] = useState<{ fuzzy: number; ai: number; unmatched: number } | null>(null)
+  const [mapFilter, setMapFilter] = useState<'all' | 'review' | 'unmatched' | 'matched'>('all')
+  const [mapSearch, setMapSearch] = useState('')
 
   useEffect(() => {
     if (open) loadSystemData()
@@ -408,10 +411,37 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const mappedCount = productMappings.filter(m => m.mappedId).length
   const unmappedCount = productMappings.filter(m => !m.mappedId).length
 
+  // Review buckets. A confident match (manual pick, or >=85% auto) is trusted;
+  // an auto-match below that needs a human glance; no match at all is unmatched.
+  function categoryOf(m: ProductMapping): 'matched' | 'review' | 'unmatched' {
+    if (!m.mappedId) return 'unmatched'
+    if (m.matchMethod === 'manual' || (m.matchConfidence ?? 1) >= 0.85) return 'matched'
+    return 'review'
+  }
+  const reviewCount = productMappings.filter(m => categoryOf(m) === 'review').length
+
+  // Sorted + filtered view. Default sort surfaces the work: low-confidence
+  // matches to check first (weakest first), then unmatched, then trusted last.
+  const visibleMappings = useMemo(() => {
+    const rank = { review: 0, unmatched: 1, matched: 2 } as const
+    const q = mapSearch.trim().toLowerCase()
+    return productMappings
+      .filter(m => (mapFilter === 'all' ? true : categoryOf(m) === mapFilter))
+      .filter(m => (q ? m.excelProduct.toLowerCase().includes(q) : true))
+      .sort((a, b) => {
+        const ca = categoryOf(a)
+        const cb = categoryOf(b)
+        if (ca !== cb) return rank[ca] - rank[cb]
+        if (ca === 'review') return (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0)
+        return b.count - a.count
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productMappings, mapFilter, mapSearch])
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); else setOpen(true) }}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {step === 'upload' && 'Step 1: Upload Purchase Order Excel'}
@@ -549,9 +579,45 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                   <p>No product names found. Check your column mapping.</p>
                 </div>
               ) : (
-                <ScrollArea className="h-[300px] border rounded-lg">
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1 rounded-lg border p-1">
+                      {([
+                        { key: 'all', label: `All (${productMappings.length})` },
+                        { key: 'review', label: `Needs review (${reviewCount})` },
+                        { key: 'unmatched', label: `Unmatched (${unmappedCount})` },
+                        { key: 'matched', label: `Matched (${mappedCount})` },
+                      ] as const).map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => setMapFilter(tab.key)}
+                          className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                            mapFilter === tab.key
+                              ? 'bg-primary text-primary-foreground'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                    <Input
+                      value={mapSearch}
+                      onChange={(e) => setMapSearch(e.target.value)}
+                      placeholder="Search product name..."
+                      className="h-8 w-full sm:w-64 text-sm"
+                    />
+                  </div>
+
+                  <ScrollArea className="h-[420px] border rounded-lg">
                   <div className="p-4 space-y-3">
-                    {productMappings.map((mapping) => (
+                    {visibleMappings.length === 0 && (
+                      <div className="text-center py-8 text-sm text-muted-foreground">
+                        No products in this view.
+                      </div>
+                    )}
+                    {visibleMappings.map((mapping) => (
                       <div key={mapping.excelProduct} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate text-sm">{mapping.excelProduct}</div>
@@ -578,7 +644,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           value={mapping.mappedId || 'unmapped'}
                           onValueChange={(v) => updateProductMapping(mapping.excelProduct, v === 'unmapped' ? null : v)}
                         >
-                          <SelectTrigger className="w-[200px]">
+                          <SelectTrigger className="w-[320px] flex-shrink-0">
                             <SelectValue placeholder="Select product..." />
                           </SelectTrigger>
                           <SelectContent>
@@ -613,7 +679,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       </div>
                     ))}
                   </div>
-                </ScrollArea>
+                  </ScrollArea>
+                </>
               )}
 
               <div className="text-xs text-muted-foreground bg-muted p-3 rounded-md space-y-1">

@@ -62,26 +62,41 @@ function fuzzyScore(a: string, b: string): number {
   return jaccard * 0.6 + containment * 0.4
 }
 
-function bestFuzzy(name: string, candidates: Candidate[]): { c: Candidate; score: number } | null {
-  let best: { c: Candidate; score: number } | null = null
-  for (const c of candidates) {
-    const score = fuzzyScore(name, c.name)
-    if (!best || score > best.score) best = { c, score }
-  }
-  return best
-}
-
 // ---- AI semantic stage ------------------------------------------------------
 
-const AI_BATCH_SIZE = 40
+// How many fuzzy-ranked candidates to show the model per product. A tight
+// shortlist is the key to quality: the model reranks a handful of plausible
+// items instead of guessing across the whole catalog.
+const SHORTLIST_SIZE = 20
+// Products per AI request. Each carries its own shortlist, so batches stay small.
+const AI_BATCH_SIZE = 15
+
+// Top-N fuzzy candidates for one product, above a minimal signal floor.
+function shortlist(name: string, candidates: Candidate[]): { c: Candidate; score: number }[] {
+  return candidates
+    .map((c) => ({ c, score: fuzzyScore(name, c.name) }))
+    .filter((x) => x.score > 0.12)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, SHORTLIST_SIZE)
+}
+
+interface BatchItem {
+  name: string
+  options: { c: Candidate; score: number }[]
+}
 
 async function aiMatchBatch(
-  products: string[],
-  candidates: Candidate[],
-): Promise<Map<string, { index: number; confidence: number; reason: string }>> {
-  // Present candidates by integer index to keep tokens down and prevent the
-  // model from inventing malformed UUIDs. We map the index back to a real id.
-  const candidateList = candidates.map((c, i) => `${i}: ${c.name}`).join('\n')
+  items: BatchItem[],
+): Promise<Map<string, { id: string | null; confidence: number; reason: string }>> {
+  // Each product gets its own numbered shortlist. The model only chooses among
+  // pre-filtered plausible options, which massively improves match rate and
+  // keeps token cost low even with a large catalog.
+  const block = items
+    .map((it, pi) => {
+      const opts = it.options.map((o, oi) => `    ${oi}: ${o.c.name}`).join('\n')
+      return `PRODUCT ${pi}: "${it.name}"\n  OPTIONS:\n${opts || '    (none)'}`
+    })
+    .join('\n\n')
 
   const { output } = await generateText({
     model: 'openai/gpt-4o-mini',
@@ -89,33 +104,36 @@ async function aiMatchBatch(
       schema: z.object({
         matches: z.array(
           z.object({
-            product: z.string(),
-            candidateIndex: z.number().describe('Index of the best matching inventory item, or -1 if none is a genuine match'),
+            productIndex: z.number().describe('The PRODUCT number'),
+            optionIndex: z.number().describe('The chosen OPTION number for that product, or -1 if none is a genuine match'),
             confidence: z.number().describe('0 to 1, how confident the match is'),
             reason: z.string().describe('Very brief justification'),
           }),
         ),
       }),
     }),
-    prompt: `You match supplier product names to an existing inventory catalog.
+    prompt: `You match supplier product names to an existing inventory catalog. Each product has its own pre-filtered list of candidate OPTIONS.
 
-INVENTORY CATALOG (index: name):
-${candidateList}
-
-PRODUCTS TO MATCH:
-${products.map((p) => `- ${p}`).join('\n')}
+${block}
 
 RULES:
-- For each product, pick the SINGLE best matching inventory index, or -1 if nothing is truly the same item.
+- For each PRODUCT, pick the SINGLE best OPTION number, or -1 if none is truly the same item.
 - Match the same physical product even when wording differs: synonyms ("Remover" vs "Removal Agent"), word order ("Cleaner Vacuum" vs "Vacuum Cleaner"), abbreviations ("Mini Iron" vs "Mini Ironing Machine"), extra descriptors, or minor typos.
 - Do NOT match merely related or same-category items (a "Coffee Cup" is not a "Coffee Maker").
 - confidence: 0.9+ = clearly the same item, 0.7-0.9 = likely same, below 0.5 = unsure (prefer -1).
-- Return exactly one entry per product, echoing the product name verbatim.`,
+- Return exactly one entry per PRODUCT.`,
   })
 
-  const map = new Map<string, { index: number; confidence: number; reason: string }>()
+  const map = new Map<string, { id: string | null; confidence: number; reason: string }>()
   for (const m of output?.matches || []) {
-    map.set(m.product, { index: m.candidateIndex, confidence: m.confidence, reason: m.reason })
+    const item = items[m.productIndex]
+    if (!item) continue
+    const opt = m.optionIndex >= 0 ? item.options[m.optionIndex] : null
+    map.set(item.name, {
+      id: opt ? opt.c.id : null,
+      confidence: opt ? m.confidence : 0,
+      reason: m.reason,
+    })
   }
   return map
 }
@@ -134,12 +152,15 @@ export async function POST(req: Request) {
     }
 
     const results: MatchResult[] = []
-    const needsAi: string[] = []
+    const needsAi: BatchItem[] = []
 
-    // Stage 1: local fuzzy. Auto-accept strong matches; defer the rest to AI.
+    // Stage 1: local fuzzy. Auto-accept strong matches; build a shortlist for
+    // the rest. Products whose shortlist is empty have no plausible match at
+    // all, so we skip the AI call entirely (saves tokens, avoids false hits).
     const STRONG = 0.9
     for (const p of products) {
-      const best = bestFuzzy(p.name, candidates)
+      const options = shortlist(p.name, candidates)
+      const best = options[0]
       if (best && best.score >= STRONG) {
         results.push({
           excelProduct: p.name,
@@ -148,38 +169,40 @@ export async function POST(req: Request) {
           method: 'fuzzy',
           reason: `Name similarity ${(best.score * 100).toFixed(0)}%`,
         })
+      } else if (options.length > 0) {
+        needsAi.push({ name: p.name, options })
       } else {
-        needsAi.push(p.name)
+        results.push({ excelProduct: p.name, matchedId: null, confidence: 0, method: 'none' })
       }
     }
 
-    console.log(`[v0] ai-match: ${results.length} matched by fuzzy, ${needsAi.length} to AI, ${candidates.length} candidates`)
+    console.log(`[v0] ai-match: ${results.length} decided by fuzzy, ${needsAi.length} to AI, ${candidates.length} candidates`)
 
-    // Stage 2: AI semantic matching for the leftovers, in batches.
+    // Stage 2: AI reranks each product's shortlist, in batches.
     let aiCount = 0
     for (let i = 0; i < needsAi.length; i += AI_BATCH_SIZE) {
       const batch = needsAi.slice(i, i + AI_BATCH_SIZE)
       try {
-        const matched = await aiMatchBatch(batch, candidates)
-        for (const name of batch) {
-          const m = matched.get(name)
-          if (m && m.index >= 0 && m.index < candidates.length && m.confidence >= 0.5) {
+        const matched = await aiMatchBatch(batch)
+        for (const item of batch) {
+          const m = matched.get(item.name)
+          if (m && m.id && m.confidence >= 0.5) {
             results.push({
-              excelProduct: name,
-              matchedId: candidates[m.index].id,
+              excelProduct: item.name,
+              matchedId: m.id,
               confidence: m.confidence,
               method: 'ai',
               reason: m.reason,
             })
             aiCount++
           } else {
-            results.push({ excelProduct: name, matchedId: null, confidence: 0, method: 'none' })
+            results.push({ excelProduct: item.name, matchedId: null, confidence: 0, method: 'none' })
           }
         }
       } catch (err) {
         console.error(`[v0] ai-match batch ${i / AI_BATCH_SIZE + 1} failed:`, err)
-        for (const name of batch) {
-          results.push({ excelProduct: name, matchedId: null, confidence: 0, method: 'none' })
+        for (const item of batch) {
+          results.push({ excelProduct: item.name, matchedId: null, confidence: 0, method: 'none' })
         }
       }
     }
