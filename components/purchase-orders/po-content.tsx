@@ -1,6 +1,9 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +22,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import {
@@ -30,6 +49,11 @@ import {
   DollarSign,
   BoxesIcon,
   Filter,
+  Download,
+  Trash2,
+  Loader2,
+  FileSpreadsheet,
+  ChevronDown,
 } from 'lucide-react'
 import { POImportDialog } from './po-import-dialog'
 
@@ -91,6 +115,138 @@ function formatCurrency(value: number, currency = 'Rs') {
   return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Export headers deliberately mirror the import column aliases (see
+// PO_COLUMN_ALIASES in po-import-dialog) so an exported file re-imports cleanly.
+function orderToExportRow(o: PurchaseOrder): Record<string, string | number> {
+  return {
+    'Status': o.status || 'pending',
+    'Reorder': o.reorder || '',
+    'Link': o.link || '',
+    'Supplier Name': o.supplier_name || '',
+    'Index': o.index_no || '',
+    'Carton': o.carton || '',
+    'Product Name': o.product_name || '',
+    'Inventory Match': o.products?.name || '',
+    'Qty': o.qty || 0,
+    'Unit Price': o.unit_price || 0,
+    'Discounted Unit Price': o.discounted_unit_price || 0,
+    'Shipment To Warehouse': o.shipment_to_warehouse || 0,
+    'Discounted Shipment To Warehouse': o.discounted_shipment_to_warehouse || 0,
+    'Discounted Percentage': o.discounted_percentage || 0,
+    'Total Payment To Supplier Yuan': o.total_payment_supplier_yuan || 0,
+    'Total Payment To Supplier': o.total_payment_supplier || 0,
+    'Payment Link': o.payment_link || '',
+    'Weight (kg)': o.weight_kg || 0,
+    'CBM': o.cbm || 0,
+    'Boxes': o.boxes || 0,
+    'CBM Cost': o.cbm_cost || 0,
+    'Import CP': o.import_cp || 0,
+    'Total CP Import': o.total_cp_import || 0,
+    'Tracking Number': o.tracking_number || '',
+  }
+}
+
+// A single illustrative row rendered when the table is completely empty, so the
+// expected import format (columns, units, sign of the discount, etc.) is clear.
+const EXAMPLE_ORDER: PurchaseOrder = {
+  id: 'example',
+  status: 'Received',
+  reorder: null,
+  link: 'https://detail.1688.com/...',
+  supplier_name: '晟瑞塑料制品有限公司',
+  index_no: 'A-01',
+  carton: null,
+  image_url: null,
+  product_name: 'Rabbit Foot Rub',
+  product_id: null,
+  products: { id: 'x', name: 'Rub Foot Rabbit', image_url: null },
+  qty: 500,
+  unit_price: 5.5,
+  discounted_unit_price: 5.2,
+  shipment_to_warehouse: 715,
+  discounted_shipment_to_warehouse: 0,
+  discounted_percentage: -5.45,
+  total_payment_supplier_yuan: 2820,
+  total_payment_supplier: 23763.38,
+  payment_link: null,
+  weight_kg: 190,
+  cbm: 0.397,
+  boxes: 10,
+  cbm_cost: 0,
+  import_cp: 47.53,
+  total_cp_import: 23763.38,
+  tracking_number: '300637638892',
+  batch_id: null,
+  created_at: new Date().toISOString(),
+}
+
+function OrderRow({ order, example = false }: { order: PurchaseOrder; example?: boolean }) {
+  return (
+    <TableRow className={example ? 'opacity-60 italic pointer-events-none' : undefined}>
+      <TableCell>
+        <Badge variant="outline" className={statusColor(order.status)}>
+          {order.status || 'pending'}
+        </Badge>
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          {(order.products?.image_url || order.image_url) && (
+            <img
+              src={order.products?.image_url || order.image_url || ''}
+              alt=""
+              className="w-8 h-8 rounded object-cover"
+            />
+          )}
+          <span className="font-medium truncate max-w-[150px]">
+            {order.product_name || '-'}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell>
+        {order.products ? (
+          <Badge variant="secondary" className="text-xs truncate max-w-[100px]">
+            {order.products.name}
+          </Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">Unmatched</span>
+        )}
+      </TableCell>
+      <TableCell className="truncate max-w-[140px]">{order.supplier_name || '-'}</TableCell>
+      <TableCell className="text-right font-medium">{order.qty || 0}</TableCell>
+      <TableCell className="text-right">{formatCurrency(order.unit_price)}</TableCell>
+      <TableCell className="text-right">{formatCurrency(order.discounted_unit_price)}</TableCell>
+      <TableCell className="text-right">{formatCurrency(order.shipment_to_warehouse)}</TableCell>
+      <TableCell className="text-right">{order.discounted_percentage ? `${order.discounted_percentage}%` : '-'}</TableCell>
+      <TableCell className="text-right">{order.total_payment_supplier_yuan ? `¥ ${Number(order.total_payment_supplier_yuan).toLocaleString()}` : '-'}</TableCell>
+      <TableCell className="text-right font-medium">{formatCurrency(order.total_payment_supplier)}</TableCell>
+      <TableCell className="text-right">{order.weight_kg ? `${order.weight_kg} kg` : '-'}</TableCell>
+      <TableCell className="text-right">{order.cbm || '-'}</TableCell>
+      <TableCell className="text-right">{order.boxes || '-'}</TableCell>
+      <TableCell className="text-right">{formatCurrency(order.import_cp)}</TableCell>
+      <TableCell className="text-right font-medium">{formatCurrency(order.total_cp_import)}</TableCell>
+      <TableCell>
+        <span className="truncate max-w-[120px] text-xs font-mono">
+          {order.tracking_number || '-'}
+        </span>
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
+          {order.link && (
+            <a href={order.link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
+          {order.payment_link && (
+            <a href={order.payment_link} target="_blank" rel="noopener noreferrer" className="text-green-500 hover:underline">
+              <DollarSign className="w-4 h-4" />
+            </a>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
 export function PurchaseOrdersContent({
   initialOrders,
   stats,
@@ -100,9 +256,14 @@ export function PurchaseOrdersContent({
   stats: Stats
   suppliers: string[]
 }) {
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [supplierFilter, setSupplierFilter] = useState<string>('all')
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [, startTransition] = useTransition()
 
   const allStatuses = useMemo(() => {
     const set = new Set<string>()
@@ -129,6 +290,40 @@ export function PurchaseOrdersContent({
     })
   }, [initialOrders, statusFilter, supplierFilter, search])
 
+  function handleExport(format: 'xlsx' | 'csv') {
+    if (filtered.length === 0) return
+    const rows = filtered.map(orderToExportRow)
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Purchase Orders')
+    const stamp = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(workbook, `purchase-orders-${stamp}.${format}`, { bookType: format })
+  }
+
+  async function handleDeleteAll() {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const supabase = createClient()
+      // Supabase requires a filter on delete; match every row via non-null id.
+      const { error } = await supabase
+        .from('purchase_orders')
+        .delete()
+        .not('id', 'is', null)
+      if (error) {
+        setDeleteError(error.message)
+        setDeleting(false)
+        return
+      }
+      setDeleteOpen(false)
+      setDeleting(false)
+      startTransition(() => router.refresh())
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete orders')
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -137,13 +332,80 @@ export function PurchaseOrdersContent({
           <h2 className="text-2xl font-bold text-foreground">Purchase Orders</h2>
           <p className="text-muted-foreground">Manage and track supplier purchase orders</p>
         </div>
-        <POImportDialog>
-          <Button>
-            <Upload className="w-4 h-4 mr-2" />
-            Import PO Excel
-          </Button>
-        </POImportDialog>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" disabled={filtered.length === 0}>
+                <Download className="w-4 h-4 mr-2" />
+                Export
+                <ChevronDown className="w-4 h-4 ml-2 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('xlsx')}>
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Export as Excel ({filtered.length})
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Export as CSV ({filtered.length})
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {initialOrders.length > 0 && (
+            <Button
+              variant="outline"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              onClick={() => { setDeleteError(null); setDeleteOpen(true) }}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete All
+            </Button>
+          )}
+          <POImportDialog>
+            <Button>
+              <Upload className="w-4 h-4 mr-2" />
+              Import PO Excel
+            </Button>
+          </POImportDialog>
+        </div>
       </div>
+
+      {/* Delete-all confirmation */}
+      <AlertDialog open={deleteOpen} onOpenChange={(o) => { if (!deleting) setDeleteOpen(o) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all purchase orders?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes all <strong>{initialOrders.length}</strong> purchase
+              orders. This action cannot be undone. Export a backup first if you may need
+              this data later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && (
+            <p className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-md p-2">
+              {deleteError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDeleteAll() }}
+              disabled={deleting}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>Delete all {initialOrders.length}</>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -263,78 +525,41 @@ export function PurchaseOrdersContent({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {initialOrders.length === 0 ? (
+                <>
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={18} className="py-4 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <Package className="w-8 h-8 opacity-50" />
+                        <p className="font-medium text-foreground">No purchase orders yet</p>
+                        <p className="text-sm text-muted-foreground">
+                          Import an Excel file to get started. The row below is an{' '}
+                          <span className="font-medium text-foreground">example</span> showing
+                          the expected format.
+                        </p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={18} className="py-1 pl-2">
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-wide text-muted-foreground border-dashed">
+                        Example row
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                  <OrderRow order={EXAMPLE_ORDER} example />
+                </>
+              ) : filtered.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={18} className="text-center py-12 text-muted-foreground">
-                    <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                    <p>No purchase orders found.</p>
-                    <p className="text-sm">Import an Excel file to get started.</p>
+                    <Search className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                    <p>No orders match your filters.</p>
+                    <p className="text-sm">Try clearing the search or status/supplier filters.</p>
                   </TableCell>
                 </TableRow>
               ) : (
                 filtered.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell>
-                      <Badge variant="outline" className={statusColor(order.status)}>
-                        {order.status || 'pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {(order.products?.image_url || order.image_url) && (
-                          <img
-                            src={order.products?.image_url || order.image_url || ''}
-                            alt=""
-                            className="w-8 h-8 rounded object-cover"
-                          />
-                        )}
-                        <span className="font-medium truncate max-w-[150px]">
-                          {order.product_name || '-'}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {order.products ? (
-                        <Badge variant="secondary" className="text-xs truncate max-w-[100px]">
-                          {order.products.name}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Unmatched</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="truncate max-w-[140px]">{order.supplier_name || '-'}</TableCell>
-                    <TableCell className="text-right font-medium">{order.qty || 0}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(order.unit_price)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(order.discounted_unit_price)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(order.shipment_to_warehouse)}</TableCell>
-                    <TableCell className="text-right">{order.discounted_percentage ? `${order.discounted_percentage}%` : '-'}</TableCell>
-                    <TableCell className="text-right">{order.total_payment_supplier_yuan ? `¥ ${Number(order.total_payment_supplier_yuan).toLocaleString()}` : '-'}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(order.total_payment_supplier)}</TableCell>
-                    <TableCell className="text-right">{order.weight_kg ? `${order.weight_kg} kg` : '-'}</TableCell>
-                    <TableCell className="text-right">{order.cbm || '-'}</TableCell>
-                    <TableCell className="text-right">{order.boxes || '-'}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(order.import_cp)}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(order.total_cp_import)}</TableCell>
-                    <TableCell>
-                      <span className="truncate max-w-[120px] text-xs font-mono">
-                        {order.tracking_number || '-'}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        {order.link && (
-                          <a href={order.link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
-                        )}
-                        {order.payment_link && (
-                          <a href={order.payment_link} target="_blank" rel="noopener noreferrer" className="text-green-500 hover:underline">
-                            <DollarSign className="w-4 h-4" />
-                          </a>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  <OrderRow key={order.id} order={order} />
                 ))
               )}
             </TableBody>
