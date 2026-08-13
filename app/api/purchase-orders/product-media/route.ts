@@ -218,22 +218,34 @@ export async function PATCH(request: Request) {
     const raw = Array.isArray(body?.items) ? body.items : []
     // Capped so one request cannot run past the function timeout.
     const items = raw
-      .map((i: Raw) => ({ productId: String(i?.productId || '').trim(), link: String(i?.link || '').trim() }))
-      .filter((i: { productId: string; link: string }) => i.productId && i.link)
+      .map((i: Raw) => ({
+        key: String(i?.key || i?.productId || '').trim(),
+        productId: String(i?.productId || '').trim() || null,
+        link: String(i?.link || '').trim(),
+      }))
+      // A product does not need to be mapped yet. The returned image is first
+      // attached to the import row, then persisted after matching/creation.
+      .filter((i: { key: string; link: string }) => i.key && i.link)
       .slice(0, 25)
 
     if (!items.length) {
       return NextResponse.json({ success: false, error: 'No products with a supplier link' }, { status: 400 })
     }
 
-    // Only fill genuine gaps, so re-running is safe and cheap.
-    const { data: existing } = await supabase
-      .from('products')
-      .select('id, image_url')
-      .in('id', items.map((i: { productId: string }) => i.productId))
-    const hasPhoto = new Set((existing || []).filter(p => p.image_url).map(p => p.id))
+    // Mapped rows may already own a photo. Unmapped rows are still fetched and
+    // returned under their import key, without writing to the database yet.
+    const productIds = items.flatMap(i => (i.productId ? [i.productId] : []))
+    const { data: existing } = productIds.length
+      ? await supabase.from('products').select('id, image_url').in('id', productIds)
+      : { data: [] }
+    const existingPhoto = new Map((existing || []).filter(p => p.image_url).map(p => [p.id, p.image_url as string]))
 
-    const results: { productId: string; status: 'done' | 'skipped' | 'failed'; image: string | null }[] = []
+    const results: {
+      key: string
+      productId: string | null
+      status: 'done' | 'skipped' | 'failed'
+      image: string | null
+    }[] = []
 
     // Small concurrency: fast enough, but gentle on the upstream API.
     const queue = [...items]
@@ -241,25 +253,34 @@ export async function PATCH(request: Request) {
       for (;;) {
         const item = queue.shift()
         if (!item) return
-        if (hasPhoto.has(item.productId)) {
-          results.push({ productId: item.productId, status: 'skipped', image: null })
+        const savedImage = item.productId ? existingPhoto.get(item.productId) : null
+        if (savedImage) {
+          results.push({ key: item.key, productId: item.productId, status: 'skipped', image: savedImage })
           continue
         }
         const data = await lookupOffer(item.link, token!)
         const image = data ? imagesFrom(data)[0] ?? null : null
         if (!image) {
-          results.push({ productId: item.productId, status: 'failed', image: null })
+          results.push({ key: item.key, productId: item.productId, status: 'failed', image: null })
           continue
         }
-        const { error } = await supabase
-          .from('products')
-          .update({ image_url: image })
-          .eq('id', item.productId)
-          .is('image_url', null)
+
+        // Persist immediately only when the row is already mapped. Otherwise
+        // the client holds the image until it knows which product owns it.
+        let failed = false
+        if (item.productId) {
+          const { error } = await supabase
+            .from('products')
+            .update({ image_url: image })
+            .eq('id', item.productId)
+            .is('image_url', null)
+          failed = !!error
+        }
         results.push({
+          key: item.key,
           productId: item.productId,
-          status: error ? 'failed' : 'done',
-          image: error ? null : image,
+          status: failed ? 'failed' : 'done',
+          image: failed ? null : image,
         })
       }
     }

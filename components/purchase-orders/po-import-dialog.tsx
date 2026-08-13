@@ -292,6 +292,18 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   }
 
   function updateProductMapping(excelProduct: string, productId: string | null) {
+    const row = productMappings.find(m => m.excelProduct === excelProduct)
+    if (productId && row?.fetchedImage && !productImageById.get(productId)) {
+      void fetch('/api/purchase-orders/product-media', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId, imageUrl: row.fetchedImage }),
+      }).then(() => {
+        setSystemProducts(prev =>
+          prev.map(p => (p.id === productId ? { ...p, image_url: row.fetchedImage || null } : p)),
+        )
+      })
+    }
     setProductMappings(prev =>
       prev.map(m =>
         m.excelProduct === excelProduct
@@ -321,7 +333,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          products: unmatched.map(m => ({ name: m.excelProduct })),
+          // Match on the visually identified name when available; preserve the
+          // Excel key separately so the response still updates the right row.
+          products: unmatched.map(m => ({
+            name: m.suggestedName || m.excelProduct,
+            key: m.excelProduct,
+          })),
           candidates: systemProducts.map(p => ({ id: p.id, name: p.name })),
         }),
       })
@@ -338,10 +355,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         }[]
         stats?: { fuzzy: number; ai: number; unmatched: number }
       }
-      const byName = new Map(data.matches.map(m => [m.excelProduct, m]))
+      const byName = new Map(data.matches.map(m => [normalizeName(m.excelProduct), m]))
       setProductMappings(prev =>
         prev.map(m => {
-          const match = byName.get(m.excelProduct)
+          const match = byName.get(normalizeName(m.suggestedName || m.excelProduct))
           if (!match || m.mappedId) return m
           // Keep the suggestions even when nothing was matched: they power the
           // one-click quick-pick chips on unmatched rows.
@@ -354,6 +371,19 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
             reason: match.reason,
             alternatives: match.alternatives || [],
           }
+        }),
+      )
+      // A row-level photo becomes an inventory photo only after the matcher has
+      // identified its owner. Do not refetch it or lose the reviewer’s choice.
+      await Promise.all(
+        unmatched.map(async row => {
+          const match = byName.get(normalizeName(row.suggestedName || row.excelProduct))
+          if (!match?.matchedId || !row.fetchedImage || productImageById.get(match.matchedId)) return
+          await fetch('/api/purchase-orders/product-media', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: match.matchedId, imageUrl: row.fetchedImage }),
+          })
         }),
       )
       if (data.stats) setAiMatchStats(data.stats)
@@ -376,7 +406,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         row?.nameStatus === 'accepted' && row.suggestedName ? row.suggestedName : excelProduct.trim()
       const { data, error } = await supabase
         .from('products')
-        .insert({ name: createName, is_active: true })
+        .insert({ name: createName, image_url: row?.fetchedImage || null, is_active: true })
         .select('id, name, image_url')
         .single()
 
@@ -560,21 +590,27 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // Products that are mapped, still have no photo in inventory, and carry a
-  // 1688 link we can pull one from. Mapping deliberately happens first so the
-  // photo lands on the right inventory item.
+  // Photos are fetched from the supplier link BEFORE naming or matching. For
+  // unmatched rows they live temporarily on ProductMapping; once a product is
+  // selected or created, that same chosen photo is persisted to inventory.
   const productImageById = useMemo(
     () => new Map(systemProducts.map(p => [p.id, p.image_url])),
     [systemProducts],
   )
 
   const imageTargets = useMemo(
-    () => productMappings.filter(m => m.mappedId && !productImageById.get(m.mappedId) && !!m.sourceLink),
+    () =>
+      productMappings.filter(
+        m => !m.fetchedImage && !(m.mappedId && productImageById.get(m.mappedId)) && !!m.sourceLink,
+      ),
     [productMappings, productImageById],
   )
 
   const missingImageNoLink = useMemo(
-    () => productMappings.filter(m => m.mappedId && !productImageById.get(m.mappedId) && !m.sourceLink).length,
+    () =>
+      productMappings.filter(
+        m => !m.fetchedImage && !(m.mappedId && productImageById.get(m.mappedId)) && !m.sourceLink,
+      ).length,
     [productMappings, productImageById],
   )
 
@@ -597,7 +633,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
    * Individual photos can still be refined afterwards with "Choose media".
    */
   async function fetchAllPhotos() {
-    const targets = imageTargets.filter(m => m.mappedId && m.sourceLink)
+    const targets = imageTargets.filter(m => m.sourceLink)
     if (!targets.length) return
 
     setPhotoBusy(true)
@@ -615,29 +651,30 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            items: page.map(m => ({ productId: m.mappedId, link: m.sourceLink })),
+            items: page.map(m => ({ key: m.excelProduct, productId: m.mappedId, link: m.sourceLink })),
           }),
         })
         const data = (await res.json()) as {
           success: boolean
           error?: string
-          results?: { productId: string; status: 'done' | 'skipped' | 'failed'; image: string | null }[]
+          results?: { key: string; productId: string | null; status: 'done' | 'skipped' | 'failed'; image: string | null }[]
         }
         if (!data.success) throw new Error(data.error || 'Photo fetch failed')
 
-        const byId = new Map((data.results || []).map(r => [r.productId, r]))
+        const byKey = new Map((data.results || []).map(r => [r.key, r]))
+        const byId = new Map(
+          (data.results || []).filter(r => r.productId).map(r => [r.productId as string, r]),
+        )
         setSystemProducts(prev =>
           prev.map(p => {
             const r = byId.get(p.id)
-            return r?.status === 'done' && r.image ? { ...p, image_url: r.image } : p
+            return r?.image ? { ...p, image_url: r.image } : p
           }),
         )
         setProductMappings(prev =>
           prev.map(m => {
-            const r = m.mappedId ? byId.get(m.mappedId) : undefined
-            return r?.status === 'done' && r.image
-              ? { ...m, fetchedImage: r.image, imageStatus: 'done' }
-              : m
+            const r = byKey.get(m.excelProduct)
+            return r?.image ? { ...m, fetchedImage: r.image, imageStatus: 'done' } : m
           }),
         )
         fetched += (data.results || []).filter(r => r.status === 'done').length
@@ -659,7 +696,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
    * Sent in pages of 40 so a 591-product import cannot blow the request limit.
    */
   async function suggestNames(scope: 'all' | 'unmatched') {
-    const pool = productMappings.filter(m => (scope === 'unmatched' ? !m.mappedId : true))
+    const pool = productMappings.filter(m => {
+      const hasPhoto = !!(m.fetchedImage || (m.mappedId && productImageById.get(m.mappedId)))
+      return hasPhoto && (scope === 'unmatched' ? !m.mappedId : true)
+    })
     if (!pool.length) return
 
     setNamingBusy(true)
@@ -744,6 +784,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   const pendingNames = productMappings.filter(m => m.nameStatus === 'ready')
   const acceptedNames = productMappings.filter(m => m.nameStatus === 'accepted' && m.suggestedName)
+  const unnamedPhotoCount = productMappings.filter(
+    m =>
+      !!(m.fetchedImage || (m.mappedId && productImageById.get(m.mappedId))) &&
+      m.nameStatus !== 'accepted',
+  ).length
+  const readyForMatching = imageTargets.length === 0 && unnamedPhotoCount === 0
 
   function acceptAllNames() {
     setProductMappings(prev =>
@@ -929,7 +975,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                     <Button
                       size="sm"
                       onClick={handleAiMatch}
-                      disabled={aiMatching || creatingAllProducts}
+                      disabled={aiMatching || creatingAllProducts || !readyForMatching}
                       className="gap-1"
                     >
                       {aiMatching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -941,7 +987,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       variant="outline"
                       size="sm"
                       onClick={handleCreateAllUnmappedProducts}
-                      disabled={creatingAllProducts || aiMatching}
+                      disabled={creatingAllProducts || aiMatching || !readyForMatching}
                       className="gap-1 bg-transparent"
                     >
                       {creatingAllProducts ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -958,15 +1004,14 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                 </div>
               ) : (
                 <>
-                  {/* The three stages run in order, because each one feeds the
-                      next: match to inventory, attach a photo, then let the AI
-                      name the product from that photo. */}
+                  {/* Dependency order is strict: fetch a supplier photo, identify
+                      the product from that photo, then match/create inventory. */}
                   <div className="grid gap-3 lg:grid-cols-3">
-                    {/* Stage 1 - match */}
-                    <div className="rounded-lg border p-3 flex flex-col gap-2">
+                    {/* Stage 3 - match/create only after visual naming. */}
+                    <div className="order-3 rounded-lg border p-3 flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          1. Match to inventory
+                          3. Match or create
                         </span>
                         <span className="text-xl font-bold tabular-nums">{coveragePct}%</span>
                       </div>
@@ -993,23 +1038,23 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       <p className="text-[11px] text-muted-foreground">
                         {hasClassified
                           ? needsReviewCount > 0
-                            ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below, then fetch photos.`
-                            : 'Every match is confident. Fetch photos next.'
-                          : `${tierCounts.exact} matched exactly by name or alias. Run AI Match for the remaining ${unmappedCount}.`}
+                            ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below.`
+                            : 'Every product has a confident inventory match.'
+                          : `${tierCounts.exact} matched exactly by name or alias. After photo naming, match the remaining ${unmappedCount}.`}
                       </p>
                     </div>
 
-                    {/* Stage 2 - photos. Bulk first, hand-picking second. */}
-                    <div className="rounded-lg border p-3 flex flex-col gap-2">
+                    {/* Stage 1 - photos. Bulk first, hand-picking second. */}
+                    <div className="order-1 rounded-lg border p-3 flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          2. Fetch photos
+                          1. Fetch photos
                         </span>
                         <ImageIcon className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <div className="text-xl font-bold tabular-nums">
                         {withPhotoCount}
-                        <span className="text-sm font-normal text-muted-foreground"> / {mappedCount} have a photo</span>
+                        <span className="text-sm font-normal text-muted-foreground"> / {productMappings.length} have a photo</span>
                       </div>
                       <p className="text-[11px] text-muted-foreground">
                         {photoBusy && photoProgress
@@ -1018,7 +1063,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             ? `Added ${photoStats.fetched} photo${photoStats.fetched === 1 ? '' : 's'}${photoStats.failed > 0 ? `, ${photoStats.failed} had none to pull` : ''}. Refine any of them with Choose media.`
                             : imageTargets.length > 0
                               ? `${imageTargets.length} can pull a photo from their 1688 listing. Do this before naming.`
-                              : 'All mapped products with a supplier link have a photo.'}
+                              : 'Every product with a supplier link has a photo ready for naming.'}
                         {missingImageNoLink > 0 && ` ${missingImageNoLink} have no 1688 link.`}
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-auto">
@@ -1039,13 +1084,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       </div>
                     </div>
 
-                    {/* Stage 3 - naming. Deliberately gated on stage 2: the
-                        namer reads the photo, so running it first wastes calls
-                        on text-only guesses. */}
-                    <div className={`rounded-lg border p-3 flex flex-col gap-2 ${photoReady ? '' : 'opacity-60'}`}>
+                    {/* Stage 2 - naming. Deliberately gated on stage 1: the
+                        namer reads the photo and never guesses from PO text. */}
+                    <div className={`order-2 rounded-lg border p-3 flex flex-col gap-2 ${photoReady ? '' : 'opacity-60'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          3. Clean up names
+                          2. Identify product name
                         </span>
                         <Wand2 className="w-4 h-4 text-muted-foreground" />
                       </div>
@@ -1067,7 +1111,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           size="sm"
                           variant="outline"
                           onClick={() => suggestNames('all')}
-                          disabled={namingBusy || photoBusy || productMappings.length === 0}
+                          disabled={namingBusy || photoBusy || !photoReady || withPhotoCount === 0}
                           className="h-7 gap-1 text-xs bg-transparent"
                         >
                           {namingBusy ? (
@@ -1082,7 +1126,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             size="sm"
                             variant="ghost"
                             onClick={() => suggestNames('unmatched')}
-                            disabled={namingBusy || photoBusy}
+                            disabled={namingBusy || photoBusy || !photoReady || withPhotoCount === 0}
                             className="h-7 text-xs"
                           >
                             Unmatched only
