@@ -3179,7 +3179,12 @@ function renderOrdersForm() {
     adidToggle.style.display = '';
   }
   window.__akmezApplyAdVisibility = applyAdVisibility;
-  applyAdVisibility();
+  // NOTE: do NOT call applyAdVisibility() here. When no ad id is captured it
+  // calls loadAdList(), which reads adListLoaded / adPickSuggest - both declared
+  // BELOW this point. Calling now is a temporal-dead-zone ReferenceError that
+  // throws mid-render and aborts renderOrdersForm before the region, date and
+  // product controls are wired (the "dropdowns dead when no ad found" bug). The
+  // initial call is made at the end of the ad-picker setup instead.
 
   // ---- Ad picker -------------------------------------------------------
   // The agent picks which Business Suite ad produced this order, so every
@@ -3189,8 +3194,10 @@ function renderOrdersForm() {
   const adPick = document.getElementById('ak-adpick');
   const adPickSuggest = document.getElementById('ak-adpick-suggest');
   const adPickPicked = document.getElementById('ak-adpick-picked');
-  // adList / adMatches / adActive / adListLoaded are declared above, before
-  // applyAdVisibility(), to avoid the temporal-dead-zone crash described there.
+  let adList = [];        // all selectable ads from the cache
+  let adMatches = [];     // currently shown
+  let adActive = -1;
+  let adListLoaded = false;
 
   // Ad and product names come from Facebook, so they are untrusted text
   // going into innerHTML - escape before rendering.
@@ -3617,17 +3624,16 @@ function renderOrdersForm() {
     if (id) applyAdId(id, 'Ad ID captured: ');
   }, true);
 
-  // If nothing was auto-captured, open the picker so the agent is prompted
-  // to attribute the order instead of silently leaving it blank.
-  // Guarded: this whole block only runs when NO ad id was captured, which is
-  // precisely the state the agent reported the form breaking in. Region, date
-  // and product are wired below, so a throw here must not reach them.
-  akmezSafe('no-ad init', () => {
-    if (!fields.adid.input.value.trim()) {
-      adidRow.style.display = '';
-      adidToggle.textContent = 'Hide ad';
-      loadAdList();
-    }
+  // Initial attribution state. This is the DEFERRED call that used to sit up at
+  // the applyAdVisibility() definition - it is here, at the end of the ad-picker
+  // setup, because only now do all of its dependencies (adPickSuggest, adList,
+  // adListLoaded, loadAdList, renderPickedAd) actually exist. applyAdVisibility
+  // shows the "no ad label" alert, opens the picker and loads the ad list when
+  // nothing was captured, or collapses the row when an id is present.
+  // Guarded so any failure here can never abort the region/date/product wiring
+  // that follows.
+  akmezSafe('initial attribution', () => {
+    applyAdVisibility();
     renderPickedAd();
   });
 
