@@ -1369,24 +1369,137 @@ const AD_POST_MARKER_RE = /repl(?:y|ied)\s+to\s+your\s+ad/i;
 // Boilerplate that surrounds the headline and must not reach the matcher.
 const AD_POST_STRIP_RE = /(this chat contains a|repl(?:y|ied) to your ad|view ad|see more|sponsored|learn more|shop now|send message|about an hour ago|\d+\s*(?:minutes?|hours?|days?)\s*ago)/gi;
 
-function akmezScanAdPostText() {
+// A client can reply to SEVERAL ads over time. The Activity panel stacks them
+// newest-first with a date on each ("Sun Apr 12, 2026", "Wed Jul 23, 2025"), so
+// merging them blends a current order with an ad from last year. Parse the date
+// out of each entry and keep only the most recent one.
+const AD_POST_DATE_RE = /\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b|\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\b/;
+
+function akmezEntryTime(text) {
+  const m = AD_POST_DATE_RE.exec(text || '');
+  if (!m) return null;
+  const t = m[3] ? Date.parse(`${m[2]} ${m[1]}, ${m[3]}`) : Date.parse(`${m[4]} ${m[5]}, ${m[6]}`);
+  return isNaN(t) ? null : t;
+}
+
+// Pull just the ad title out of an Activity entry. The raw text reads
+// "Philip replied to your ad BUY ONE GET ONE F... Sun Apr 12, 2026 8:07am", so
+// the client's name, the marker phrase and the timestamp all have to go or they
+// drown the two or three words that actually name the product.
+const AD_POST_TIME_RE = /\b\d{1,2}:\d{2}\s*(?:am|pm)\b/gi;
+const AD_POST_DATE_STRIP_RE = /\b(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s*/gi;
+
+function akmezExtractAdTitle(rawText) {
+  let text = String(rawText || '');
+  // Everything before "...replied to your ad" is the client's name.
+  const marker = /repl(?:y|ied)\s+to\s+your\s+ad\.?/i.exec(text);
+  if (marker) text = text.slice(marker.index + marker[0].length);
+  text = text
+    .replace(AD_POST_TIME_RE, ' ')
+    .replace(AD_POST_DATE_RE, ' ')
+    .replace(AD_POST_DATE_STRIP_RE, ' ')
+    .replace(AD_POST_STRIP_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Messenger truncates these titles ("BUY ONE GET ONE F...", "Genuine
+  // Adjustable H..."). The ellipsis can sit anywhere, so cut at the FIRST one
+  // and drop the partial word before it - a fragment like "mas" would
+  // otherwise be matched as if it were a real word.
+  let fragment = '';
+  const cut = text.search(/\u2026|\.\.\./);
+  if (cut !== -1) {
+    const head = text.slice(0, cut).trim();
+    const words = head.split(/\s+/);
+    // A cut immediately after a space means the last word is whole, not partial.
+    if (!/\s$/.test(text.slice(0, cut))) fragment = (words.pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    text = words.join(' ');
+  }
+  return { text, fragment };
+}
+
+// Read the visible conversation messages. When the ad title is truncated, the
+// full ad copy is usually pasted into the thread as a message ("This is the
+// definition of HANDS FREE! The Lazy Neck changes everything!"), which is the
+// only place the real product name appears.
+function akmezScanMessageText() {
   const out = [];
+  const rows = document.querySelectorAll('[role="row"], [data-scope="messages_table"] div[dir="auto"], div[dir="auto"]');
+  for (const el of rows) {
+    if (el.closest('#akmez-widget, #akmez-toggle, .akmez-hover-card')) continue;
+    const text = (el.textContent || '').trim();
+    if (!text || text.length < 12 || text.length > 600) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;
+    out.push(text);
+  }
+  return out;
+}
+
+// Return the best available ad-post text for product matching.
+function akmezScanAdPostText() {
+  const entries = [];
   const nodes = document.querySelectorAll('div, span, a, p, li, h1, h2, h3');
   for (const el of nodes) {
     if (el.closest('#akmez-widget, #akmez-toggle, .akmez-hover-card')) continue;
     const text = (el.textContent || '').trim();
     if (!text || text.length > 400) continue;
     if (!AD_POST_MARKER_RE.test(text)) continue;
-    // Keep the smallest containers only: a huge ancestor drags in the whole
-    // conversation and every unrelated product word with it.
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) continue;
-    out.push(text);
+    // The tightest node is often JUST the phrase "Philip replied to your ad" -
+    // the ad title sits in a sibling node. Climb until the wrapper actually
+    // carries more than the marker, but stop before we swallow the whole panel.
+    let node = el, text2 = text;
+    for (let i = 0; i < 4 && akmezExtractAdTitle(text2).text.length < 4; i++) {
+      const parent = node.parentElement;
+      if (!parent) break;
+      const ptext = (parent.textContent || '').trim();
+      if (!ptext || ptext.length > 400) break;
+      node = parent; text2 = ptext;
+    }
+    entries.push({ text: text2, time: akmezEntryTime(text2), top: r.top, len: text2.length });
   }
-  if (!out.length) return '';
-  // Shortest match is the tightest wrapper around the headline.
-  out.sort((a, b) => a.length - b.length);
-  return out.slice(0, 3).join(' \u00b7 ').replace(AD_POST_STRIP_RE, ' ');
+  if (!entries.length) return '';
+
+  // Newest wins. Undated entries fall back to visual order (Messenger lists the
+  // most recent ad first), then to the tightest wrapper.
+  entries.sort((a, b) => {
+    if (a.time && b.time && a.time !== b.time) return b.time - a.time;
+    if (a.time && !b.time) return -1;
+    if (!a.time && b.time) return 1;
+    if (a.top !== b.top) return a.top - b.top;
+    return a.len - b.len;
+  });
+
+  const { text: title, fragment } = akmezExtractAdTitle(entries[0].text);
+
+  // The title is cut off, so look for the full ad copy in the conversation: the
+  // message that repeats this headline also carries the product name.
+  //
+  // Locating that message must use RAW words, not product tokens. Plenty of ad
+  // titles are pure promo ("BUY ONE GET ONE FREE!") and every word in them is a
+  // stopword, so the filtered probe would be empty and we would never find the
+  // copy that does name the product ("The Lazy Neck").
+  const probe = akmezRawWords(title).slice(0, 8);
+  if (fragment && probe.length >= 3) {
+    let bestMsg = '', bestHits = 0;
+    for (const msg of akmezScanMessageText()) {
+      const hay = ' ' + akmezRawWords(msg).join(' ') + ' ';
+      const hits = probe.filter(t => hay.includes(' ' + t + ' ')).length;
+      if (hits > bestHits) { bestHits = hits; bestMsg = msg; }
+    }
+    // Most of the headline reappears here, so this really is the ad copy.
+    if (bestMsg && bestHits >= Math.max(3, Math.ceil(probe.length * 0.6))) {
+      return title + ' ' + bestMsg;
+    }
+  }
+  return fragment ? title + ' ' + fragment : title;
+}
+
+// Normalized words with stopwords KEPT - used only to locate the ad copy in the
+// thread, never to score products.
+function akmezRawWords(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w.length >= 2);
 }
 
 // Words that appear in nearly every ad headline and carry no product meaning.
@@ -1396,6 +1509,12 @@ const AD_POST_STOPWORDS = new Set([
   'top', 'quality', 'anytime', 'anywhere', 'relax', 'say', 'goodbye', 'hello',
   'to', 'a', 'an', 'of', 'in', 'on', 'at', 'is', 'it', 'this', 'that', 'from',
   'made', 'by', 'moris', 'mbm', 'rs', 'price', 'promo', 'offer', 'limited',
+  // Promo copy and agent chatter that sits right next to the product name and
+  // must never out-score it ("BUY ONE GET ONE FREE!", "Free Home Delivery!").
+  'one', 'two', 'definition', 'changes', 'change', 'everything', 'home',
+  'please', 'need', 'want', 'where', 'delivered', 'send', 'number', 'whatsapp',
+  'address', 'proceed', 'would', 'like', 'yes', 'comment', 'commented', 'post',
+  'facebook', 'created', 'chat', 'because', 'sent', 'reply', 'replied', 'ad',
 ]);
 
 function akmezPostTokens(s) {
@@ -1431,8 +1550,9 @@ function akmezRankProductsFromPost(postText, limit) {
     let ratio = weight / total;
     const nameNorm = toks.join(' ');
     if (nameNorm && hay.includes(' ' + nameNorm + ' ')) ratio = 1.2;
-    // A lone short generic word ("mini", "pro") is noise, not a candidate.
-    if (hit === 1 && ratio < 0.5) continue;
+    // A lone generic word ("massager", "mini", "pro") is noise, not a candidate:
+    // it would offer "Lazy Neck Massager" on an ad for a Mini Tense Massager.
+    if (hit === 1 && ratio <= 0.5) continue;
     scored.push({ product: p, ratio, hit });
   }
   scored.sort((a, b) => (b.ratio - a.ratio) || (b.hit - a.hit));
