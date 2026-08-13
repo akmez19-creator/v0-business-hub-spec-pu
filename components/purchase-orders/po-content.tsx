@@ -115,10 +115,19 @@ function formatCurrency(value: number, currency = 'Rs') {
   return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Order date is the created_at timestamp - there is no separate PO date field.
+function formatDate(value: string | null): string {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '-'
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 // Export headers deliberately mirror the import column aliases (see
 // PO_COLUMN_ALIASES in po-import-dialog) so an exported file re-imports cleanly.
 function orderToExportRow(o: PurchaseOrder): Record<string, string | number> {
   return {
+    'Date': o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) : '',
     'Status': o.status || 'pending',
     'Reorder': o.reorder || '',
     'Link': o.link || '',
@@ -183,6 +192,12 @@ const EXAMPLE_ORDER: PurchaseOrder = {
 function OrderRow({ order, example = false }: { order: PurchaseOrder; example?: boolean }) {
   return (
     <TableRow className={example ? 'opacity-60 italic pointer-events-none' : undefined}>
+      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+        {formatDate(order.created_at)}
+      </TableCell>
+      <TableCell className="text-sm font-mono text-muted-foreground">
+        {order.index_no || '-'}
+      </TableCell>
       <TableCell>
         <Badge variant="outline" className={statusColor(order.status)}>
           {order.status || 'pending'}
@@ -511,6 +526,8 @@ export function PurchaseOrdersContent({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="min-w-[110px]">Date</TableHead>
+                <TableHead className="min-w-[70px]">Index</TableHead>
                 <TableHead className="min-w-[60px]">Status</TableHead>
                 <TableHead className="min-w-[180px]">Product</TableHead>
                 <TableHead className="min-w-[100px]">Inventory Match</TableHead>
@@ -535,7 +552,7 @@ export function PurchaseOrdersContent({
               {initialOrders.length === 0 ? (
                 <>
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={18} className="py-4 text-center">
+                    <TableCell colSpan={20} className="py-4 text-center">
                       <div className="flex flex-col items-center gap-1">
                         <Package className="w-8 h-8 opacity-50" />
                         <p className="font-medium text-foreground">No purchase orders yet</p>
@@ -548,7 +565,7 @@ export function PurchaseOrdersContent({
                     </TableCell>
                   </TableRow>
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={18} className="py-1 pl-2">
+                    <TableCell colSpan={20} className="py-1 pl-2">
                       <Badge variant="outline" className="text-[10px] uppercase tracking-wide text-muted-foreground border-dashed">
                         Example row
                       </Badge>
@@ -558,7 +575,7 @@ export function PurchaseOrdersContent({
                 </>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={18} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={20} className="text-center py-12 text-muted-foreground">
                     <Search className="w-10 h-10 mx-auto mb-2 opacity-50" />
                     <p>No orders match your filters.</p>
                     <p className="text-sm">Try clearing the search or status/supplier filters.</p>
