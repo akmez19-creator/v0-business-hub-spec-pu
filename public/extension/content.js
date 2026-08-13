@@ -267,6 +267,10 @@ style.textContent = `
 .akmez-suggest-empty{padding:9px 12px;font-size:12px;color:#fcd34d;cursor:pointer;text-align:center;}
 .akmez-adprod-chip{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 8px;padding:10px 12px;font-size:12px;font-weight:600;color:#fde68a;background:rgba(249,115,22,0.14);border:1px dashed rgba(249,115,22,0.55);border-radius:8px;cursor:pointer;text-align:left;}
 .akmez-adprod-chip:hover{background:rgba(249,115,22,0.24);}
+.akmez-adprod-head{margin:0 0 6px;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#94a3b8;display:flex;justify-content:space-between;gap:8px;}
+.akmez-adprod-head span{color:#fbbf24;opacity:.9;text-transform:none;letter-spacing:0;font-weight:500;}
+.akmez-adprod-chip.akmez-adprod-alt{background:rgba(148,163,184,0.10);border-color:rgba(148,163,184,0.35);color:#cbd5e1;font-weight:500;}
+.akmez-adprod-chip.akmez-adprod-alt:hover{background:rgba(148,163,184,0.18);}
 .akmez-adprod-tag{margin-left:auto;font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:#fbbf24;opacity:.85;}
 .akmez-suggest-empty:hover{background:rgba(249,115,22,0.12);}
 .akmez-suggest-item:hover,.akmez-suggest-item.active{background:rgba(249,115,22,0.35);color:#fff;}
@@ -1407,6 +1411,34 @@ function akmezPostTokens(s) {
 // Requires most of the product's own words to be present, so "Mini Tense
 // Massager" wins on "MINI TENSE MASSAGER" while a product that merely shares
 // the word "massager" is rejected.
+// Ranked variant: return up to `limit` plausible products, best first.
+// Used when no single match is confident enough - showing three tappable
+// guesses is far more useful to the agent than showing nothing at all.
+function akmezRankProductsFromPost(postText, limit) {
+  if (!postText || !products.length) return [];
+  const hay = ' ' + akmezPostTokens(postText).join(' ') + ' ';
+  if (hay.trim().length < 3) return [];
+  const scored = [];
+  for (const p of products) {
+    const toks = akmezPostTokens(p.name);
+    if (!toks.length) continue;
+    let hit = 0, weight = 0, total = 0;
+    for (const t of toks) {
+      total += t.length >= 5 ? 2 : 1;
+      if (hay.includes(' ' + t + ' ')) { hit++; weight += t.length >= 5 ? 2 : 1; }
+    }
+    if (!hit) continue;
+    let ratio = weight / total;
+    const nameNorm = toks.join(' ');
+    if (nameNorm && hay.includes(' ' + nameNorm + ' ')) ratio = 1.2;
+    // A lone short generic word ("mini", "pro") is noise, not a candidate.
+    if (hit === 1 && ratio < 0.5) continue;
+    scored.push({ product: p, ratio, hit });
+  }
+  scored.sort((a, b) => (b.ratio - a.ratio) || (b.hit - a.hit));
+  return scored.slice(0, limit || 3);
+}
+
 function akmezMatchProductFromPost(postText) {
   if (!postText || !products.length) return null;
   const hay = ' ' + akmezPostTokens(postText).join(' ') + ' ';
@@ -2506,6 +2538,12 @@ function renderOrdersForm() {
     }
     cart[p.id] = (cart[p.id] || 0) + 1;
     delete cartFromAd[p.id];   // agent chose it, so it is not ad-owned
+    // The strongest learning signal there is: an ad WAS captured, yet the agent
+    // still had to search for the product by hand - meaning the campaign has no
+    // product link. Their choice is authoritative, so record it once. The
+    // server refuses to overwrite an existing link, so this only fills gaps.
+    const curAd = fields.adid.input ? fields.adid.input.value.trim() : '';
+    if (curAd && !products.some(x => x.id === p.id && cartFromAd[x.id])) akmezLearnAdProduct(curAd, p.id);
     updateCart();
     // Clear the query so the agent can immediately search the next product
     prodInput.value = '';
@@ -2798,37 +2836,76 @@ function renderOrdersForm() {
       if (known && known.productId) ap = { id: known.productId, name: known.productName || '', adId: cur };
       else if (cached && cached.id) ap = { id: cached.id, name: cached.name || '', adId: cur };
     }
-    // SECOND SOURCE: when the ad id gives us nothing - not captured, not mapped
-    // to a product, or the lookup never came back - read the ad's headline off
-    // the conversation and match it against the catalog. The post names the
-    // product the client replied about, so it works with no ad id at all.
+    // Build the candidate list. A confirmed link (campaign -> product) is the
+    // only thing we show on its own; anything derived from the ad's headline is
+    // a guess, so we offer up to three and let the agent choose.
+    let candidates = [];
     let source = 'from this ad';
-    if (!ap || ap.adId !== cur || !products.find(p => p.id === ap.id)) {
-      const fromPost = akmezMatchProductFromPost(akmezScanAdPostText());
-      if (fromPost) {
-        ap = { id: fromPost.id, name: fromPost.name, adId: cur, viaPost: true };
-        source = 'from the ad post';
-      }
+    const linked = ap && ap.adId === cur ? products.find(p => p.id === ap.id) : null;
+    if (linked) {
+      candidates = [{ product: linked, confirmed: true }];
+    } else {
+      // SECOND SOURCE: the ad id gave us nothing - not captured, campaign not
+      // mapped, or the lookup never came back. Read the ad's headline off the
+      // conversation and rank the catalog against it. Works with no ad id.
+      const ranked = akmezRankProductsFromPost(akmezScanAdPostText(), 3);
+      candidates = ranked.map(r => ({ product: r.product, ratio: r.ratio }));
+      source = 'from the ad post';
     }
-    if (!ap || (!ap.viaPost && ap.adId !== cur) || cart[ap.id]) {
+    // Never re-suggest something already in the order.
+    candidates = candidates.filter(c => !cart[c.product.id]);
+    if (!candidates.length) {
       host.style.display = 'none';
       host.innerHTML = '';
       return;
     }
-    const match = products.find(p => p.id === ap.id);
-    const label = (match && match.name) || ap.name || 'the ad product';
+
+    const confident = candidates[0].confirmed || candidates[0].ratio >= 0.85;
+    const heading = candidates.length > 1 && !candidates[0].confirmed
+      ? `<div class="akmez-adprod-head">Which product did they ask for? <span>${source}</span></div>`
+      : '';
     host.style.display = 'block';
-    host.innerHTML = `<button type="button" class="akmez-adprod-chip" id="ak-adprod-add">
-        + Add ${label.replace(/</g, '&lt;')}<span class="akmez-adprod-tag">${source}</span>
-      </button>`;
-    const btn = document.getElementById('ak-adprod-add');
-    if (btn) btn.onclick = () => {
-      if (!match) { toast('Linked product not in your product list'); return; }
-      cart[match.id] = (cart[match.id] || 0) + 1;
-      if (ap.adId) cartFromAd[match.id] = ap.adId;
-      updateCart();
-      akmezRenderAdProductHint();
-    };
+    host.innerHTML = heading + candidates.map((c, i) => `
+      <button type="button" class="akmez-adprod-chip${i > 0 ? ' akmez-adprod-alt' : ''}" data-akprod="${c.product.id}">
+        + Add ${String(c.product.name).replace(/</g, '&lt;')}
+        ${candidates.length === 1 ? `<span class="akmez-adprod-tag">${source}</span>` : ''}
+        ${candidates.length > 1 && i === 0 && confident ? '<span class="akmez-adprod-tag">best match</span>' : ''}
+      </button>`).join('');
+
+    host.querySelectorAll('[data-akprod]').forEach(btn => {
+      btn.onclick = () => {
+        const pid = btn.getAttribute('data-akprod');
+        const match = products.find(p => p.id === pid);
+        if (!match) { toast('Linked product not in your product list'); return; }
+        cart[match.id] = (cart[match.id] || 0) + 1;
+        if (cur) {
+          cartFromAd[match.id] = cur;
+          // AUTO-LEARN: the agent just told us what this ad actually sells.
+          // Save it so every future client on this campaign resolves instantly
+          // and no one has to guess from the post text again.
+          akmezLearnAdProduct(cur, match.id);
+        }
+        updateCart();
+        akmezRenderAdProductHint();
+      };
+    });
+  }
+
+  // Teach the server the ad -> product link. Fire and forget: this must never
+  // interrupt the agent. The server refuses to overwrite an existing mapping,
+  // so a wrong guess can only ever fill a gap that was empty anyway.
+  function akmezLearnAdProduct(adId, productId) {
+    if (!adId || !productId) return;
+    window.__akmezLearned = window.__akmezLearned || {};
+    const key = adId + ':' + productId;
+    if (window.__akmezLearned[key]) return;   // once per ad+product per session
+    window.__akmezLearned[key] = true;
+    try {
+      chrome.runtime.sendMessage({ action: 'learnAdProduct', adId, productId }, resp => {
+        if (chrome.runtime.lastError) return;
+        if (resp && resp.learned) toast('Ad linked to ' + (products.find(p => p.id === productId) || {}).name);
+      });
+    } catch (e) {}
   }
   window.__akmezRenderAdProductHint = akmezRenderAdProductHint;
 

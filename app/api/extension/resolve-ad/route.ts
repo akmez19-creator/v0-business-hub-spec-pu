@@ -66,15 +66,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, product: null }, { headers: corsHeaders })
     }
 
-    // Look up the product linked to that campaign
+    // Look up the product linked to that campaign.
+    // maybeSingle(), not single(): an unmapped campaign is the normal case here
+    // and single() turns "no row" into an error, which masked the real reason
+    // ads were never resolving.
     const { data: link } = await supabase
       .from('campaign_product_links')
       .select('product_id, products ( id, name, price )')
       .eq('campaign_id', campaignId)
-      .single()
+      .maybeSingle()
 
     const product = link?.products || null
-    return NextResponse.json({ success: true, campaignId, product }, { headers: corsHeaders })
+    // Tell the client whether this campaign is simply unmapped, so it can offer
+    // to learn the link from the agent instead of silently suggesting nothing.
+    return NextResponse.json(
+      { success: true, campaignId, product, unmapped: !product },
+      { headers: corsHeaders }
+    )
   } catch (error) {
     console.error('resolve-ad error:', error)
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500, headers: corsHeaders })

@@ -201,7 +201,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const data = await fetchWithAuth(API_BASE + '/api/extension/resolve-ad?adId=' + encodeURIComponent(request.adId), {
           method: 'GET'
         });
-        sendResponse({ success: !!data.success, product: data.product || null, error: data.error });
+        sendResponse({
+          success: !!data.success,
+          product: data.product || null,
+          campaignId: data.campaignId || null,
+          unmapped: !!data.unmapped,
+          error: data.error
+        });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
+    if (request.action === 'learnAdProduct') {
+      // Teach the ad -> campaign -> product link from what the agent actually
+      // sold, so the next client on that campaign resolves with no guessing.
+      // Fire-and-forget for the caller: failing here must never block an order.
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/extension/learn-ad-product', {
+          method: 'POST',
+          body: JSON.stringify({ adId: request.adId, productId: request.productId })
+        });
+        sendResponse({ success: !!data.success, learned: !!data.learned, error: data.error });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
       }
