@@ -67,12 +67,14 @@ export function PoMediaPicker({
   queue,
   startIndex = 0,
   onSaved,
+  onSkipped,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   queue: MediaQueueItem[]
   startIndex?: number
-  onSaved: (excelProduct: string, imageUrl: string) => void
+  onSaved: (excelProduct: string, imageUrl: string | null, videoUrls: string[]) => void
+  onSkipped: (excelProduct: string) => void
 }) {
   const [index, setIndex] = useState(startIndex)
   const [loading, setLoading] = useState(false)
@@ -158,6 +160,12 @@ export function PoMediaPicker({
     })
   }
 
+  /** Move on without keeping anything, recording the row as reviewed. */
+  function skipAndNext() {
+    if (current) onSkipped(current.excelProduct)
+    advance()
+  }
+
   function advance() {
     if (isLast) {
       onOpenChange(false)
@@ -184,11 +192,12 @@ export function PoMediaPicker({
           const json = await res.json()
           if (!json.success) throw new Error(json.error || 'Could not save the photo')
         }
-        onSaved(current.excelProduct, pickedImage)
       }
 
       // Selected videos go to the shared clip library by URL. The route
       // de-duplicates on source_id, so re-saving the same clip is harmless.
+      // An unmatched row has no owner yet, so its clips are handed back and
+      // attached once the product master record exists.
       if (current.productId) {
         for (const url of pickedVideos) {
           await fetch('/api/product-master/clips', {
@@ -211,6 +220,9 @@ export function PoMediaPicker({
         }
       }
 
+      // Always report the outcome so the row leaves the queue, even when the
+      // reviewer kept only videos, or nothing at all.
+      onSaved(current.excelProduct, pickedImage, current.productId ? [] : pickedVideos)
       setDoneCount(c => c + 1)
       advance()
     } catch (e) {
@@ -270,7 +282,7 @@ export function PoMediaPicker({
                 ? 'This listing has no photos or videos.'
                 : 'This product has no 1688 link, so there is nothing to browse.'}
             </p>
-            <Button variant="outline" onClick={advance} className="gap-1.5 bg-transparent">
+            <Button variant="outline" onClick={skipAndNext} className="gap-1.5 bg-transparent">
               Skip to next
               <ArrowRight className="w-4 h-4" />
             </Button>
@@ -416,8 +428,8 @@ export function PoMediaPicker({
               <ArrowLeft className="w-4 h-4" />
               Back
             </Button>
-            <Button variant="outline" onClick={advance} disabled={saving} className="gap-1.5 bg-transparent">
-              {isLast ? 'Finish' : 'Skip'}
+          <Button variant="outline" onClick={skipAndNext} disabled={saving} className="gap-1.5 bg-transparent">
+            {isLast ? 'Finish' : 'Skip'}
               <SkipForward className="w-4 h-4" />
             </Button>
             <Button onClick={saveAndNext} disabled={saving || (!pickedImage && pickedVideos.length === 0)} className="gap-1.5">

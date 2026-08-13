@@ -61,6 +61,9 @@ interface ProductMapping {
   imageStatus?: 'idle' | 'fetching' | 'done' | 'skipped' | 'failed'
   fetchedImage?: string | null
   imageNote?: string
+  // Clips chosen while the row was still unmatched. They are attached to the
+  // product master once the product is matched or created.
+  pendingVideos?: string[]
 }
 
 const TIER_META: Record<MatchTier, { label: string; text: string; bar: string; ring: string }> = {
@@ -152,9 +155,6 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   // the ability to keep stepping through the rest.
   const [mediaOpen, setMediaOpen] = useState(false)
   const [mediaStart, setMediaStart] = useState(0)
-  const [photoBusy, setPhotoBusy] = useState(false)
-  const [photoProgress, setPhotoProgress] = useState<{ done: number; total: number } | null>(null)
-  const [photoStats, setPhotoStats] = useState<{ fetched: number; failed: number } | null>(null)
   const [namingBusy, setNamingBusy] = useState(false)
   const [namingProgress, setNamingProgress] = useState<{ done: number; total: number } | null>(null)
   const [applyingNames, setApplyingNames] = useState(false)
@@ -294,19 +294,47 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     setStep('product_mapping')
   }
 
-  function updateProductMapping(excelProduct: string, productId: string | null) {
-    const row = productMappings.find(m => m.excelProduct === excelProduct)
-    if (productId && row?.fetchedImage && !productImageById.get(productId)) {
-      void fetch('/api/purchase-orders/product-media', {
+  /**
+   * Attach media the reviewer chose before this product existed. Runs when a
+   * row is matched or created, which is the first moment the clips and photo
+   * have an owner in the product master.
+   */
+  async function attachPendingMedia(productId: string, row?: ProductMapping) {
+    if (!row) return
+    if (row.fetchedImage && !productImageById.get(productId)) {
+      await fetch('/api/purchase-orders/product-media', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId, imageUrl: row.fetchedImage }),
-      }).then(() => {
-        setSystemProducts(prev =>
-          prev.map(p => (p.id === productId ? { ...p, image_url: row.fetchedImage || null } : p)),
-        )
-      })
+      }).catch(() => null)
+      setSystemProducts(prev =>
+        prev.map(p => (p.id === productId ? { ...p, image_url: row.fetchedImage || null } : p)),
+      )
     }
+    for (const url of row.pendingVideos || []) {
+      await fetch('/api/product-master/clips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId,
+          productName: row.suggestedName || row.excelProduct,
+          name: `${row.suggestedName || row.excelProduct} - 1688 clip`,
+          fileUrl: url,
+          source: '1688',
+          sourceId: url,
+          sourceUrl: row.sourceLink,
+          duration: 0,
+          width: 0,
+          height: 0,
+          sizeBytes: 0,
+        }),
+      }).catch(() => null)
+    }
+  }
+
+  function updateProductMapping(excelProduct: string, productId: string | null) {
+    const row = productMappings.find(m => m.excelProduct === excelProduct)
+    if (productId) void attachPendingMedia(productId, row)
     setProductMappings(prev =>
       prev.map(m =>
         m.excelProduct === excelProduct
@@ -376,17 +404,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
           }
         }),
       )
-      // A row-level photo becomes an inventory photo only after the matcher has
-      // identified its owner. Do not refetch it or lose the reviewer’s choice.
+      // The reviewer's photo and clips become product-master media only once
+      // the matcher has identified their owner.
       await Promise.all(
         unmatched.map(async row => {
           const match = byName.get(normalizeName(row.suggestedName || row.excelProduct))
-          if (!match?.matchedId || !row.fetchedImage || productImageById.get(match.matchedId)) return
-          await fetch('/api/purchase-orders/product-media', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ productId: match.matchedId, imageUrl: row.fetchedImage }),
-          })
+          if (match?.matchedId) await attachPendingMedia(match.matchedId, row)
         }),
       )
       if (data.stats) setAiMatchStats(data.stats)
@@ -651,6 +674,13 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     [productMappings, productImageById],
   )
 
+  // A row counts as reviewed once the wizard has been through it, whether the
+  // reviewer kept media or deliberately skipped it.
+  const reviewedCount = useMemo(
+    () => mediaQueue.filter(q => productMappings.find(m => m.excelProduct === q.excelProduct)?.imageStatus).length,
+    [mediaQueue, productMappings],
+  )
+
   /** Open the wizard, starting at a given row (or the first one). */
   function openMediaWizard(excelProduct?: string) {
     const at = excelProduct ? mediaQueue.findIndex(q => q.excelProduct === excelProduct) : 0
@@ -659,72 +689,18 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   }
 
   /**
-   * Stage 2: give every linked product a photo automatically, taking the
-   * listing's main image. This has to run BEFORE naming, because the namer
-   * reads the photo - without it stage 3 would be guessing from PO text alone.
-   * Individual photos can still be refined afterwards with "Choose media".
+   * Mark a row as reviewed without keeping any media. Skipping is a real
+   * decision, so it must clear the row from the queue - otherwise a listing
+   * the reviewer deliberately passed over would block naming forever.
    */
-  async function fetchAllPhotos() {
-    const targets = imageTargets.filter(m => m.sourceLink)
-    if (!targets.length) return
-
-    setPhotoBusy(true)
-    setPhotoStats(null)
-    setPhotoProgress({ done: 0, total: targets.length })
-    const PAGE = 25
-    let done = 0
-    let fetched = 0
-    let failed = 0
-
-    try {
-      for (let i = 0; i < targets.length; i += PAGE) {
-        const page = targets.slice(i, i + PAGE)
-        const res = await fetch('/api/purchase-orders/product-media', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: page.map(m => ({ key: m.excelProduct, productId: m.mappedId, link: m.sourceLink })),
-          }),
-        })
-        const data = (await res.json()) as {
-          success: boolean
-          error?: string
-          results?: { key: string; productId: string | null; status: 'done' | 'skipped' | 'failed'; image: string | null }[]
-        }
-        if (!data.success) throw new Error(data.error || 'Photo fetch failed')
-
-        const byKey = new Map((data.results || []).map(r => [r.key, r]))
-        const byId = new Map(
-          (data.results || []).filter(r => r.productId).map(r => [r.productId as string, r]),
-        )
-        setSystemProducts(prev =>
-          prev.map(p => {
-            const r = byId.get(p.id)
-            return r?.image ? { ...p, image_url: r.image } : p
-          }),
-        )
-        // Record the outcome for EVERY attempted row, including failures.
-        // Without this a listing that has no usable photo stays queued forever
-        // and blocks the rest of the workflow.
-        setProductMappings(prev =>
-          prev.map(m => {
-            const r = byKey.get(m.excelProduct)
-            if (!r) return m
-            if (r.image) return { ...m, fetchedImage: r.image, imageStatus: 'done' as const }
-            return { ...m, imageStatus: 'failed' as const, imageNote: 'No photo on the listing' }
-          }),
-        )
-        fetched += (data.results || []).filter(r => r.status === 'done').length
-        failed += (data.results || []).filter(r => r.status === 'failed').length
-        done += page.length
-        setPhotoProgress({ done, total: targets.length })
-      }
-      setPhotoStats({ fetched, failed })
-    } catch (err) {
-      console.error('[v0] bulk photo fetch failed:', err)
-    } finally {
-      setPhotoBusy(false)
-    }
+  function handleMediaSkipped(excelProduct: string) {
+    setProductMappings(prev =>
+      prev.map(m =>
+        m.excelProduct === excelProduct && !m.imageStatus
+          ? { ...m, imageStatus: 'skipped' as const }
+          : m,
+      ),
+    )
   }
 
   /**
@@ -871,14 +847,22 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   // Record the photo the reviewer picked in the media wizard. The row keeps it
   // even when unmatched; it reaches inventory once the product is chosen.
-  function handleMediaSaved(excelProduct: string, imageUrl: string) {
+  function handleMediaSaved(excelProduct: string, imageUrl: string | null, videoUrls: string[]) {
     const target = productMappings.find(m => m.excelProduct === excelProduct)
     setProductMappings(prev =>
       prev.map(m =>
-        m.excelProduct === excelProduct ? { ...m, fetchedImage: imageUrl, imageStatus: 'done' } : m,
+        m.excelProduct === excelProduct
+          ? {
+              ...m,
+              fetchedImage: imageUrl || m.fetchedImage,
+              // Clips chosen before the product exists wait here.
+              pendingVideos: videoUrls.length ? videoUrls : m.pendingVideos,
+              imageStatus: 'done' as const,
+            }
+          : m,
       ),
     )
-    if (!target?.mappedId) return
+    if (!target?.mappedId || !imageUrl) return
     setSystemProducts(prev => prev.map(p => (p.id === target.mappedId ? { ...p, image_url: imageUrl } : p)))
   }
 
@@ -1084,56 +1068,42 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       </p>
                     </div>
 
-                    {/* Stage 1 - photos. Bulk first, hand-picking second. */}
+                    {/* Stage 1 - media selection. There is no automatic pass:
+                        the reviewer sees every photo and video on each listing
+                        and chooses what belongs on the product. */}
                     <div className="order-1 rounded-lg border p-3 flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          1. Fetch photos
+                          1. Select photos &amp; videos
                         </span>
-                        <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                        <Images className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <div className="text-xl font-bold tabular-nums">
-                        {withPhotoCount}
-                        <span className="text-sm font-normal text-muted-foreground"> / {productMappings.length} have a photo</span>
+                        {reviewedCount}
+                        <span className="text-sm font-normal text-muted-foreground">
+                          {' '}
+                          / {mediaQueue.length} reviewed
+                        </span>
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        {photoBusy && photoProgress
-                          ? `Fetching ${photoProgress.done} of ${photoProgress.total}...`
-                          : photoStats
-                            ? `Added ${photoStats.fetched} photo${photoStats.fetched === 1 ? '' : 's'}${photoStats.failed > 0 ? `, ${photoStats.failed} had none to pull` : ''}. Refine any of them with Choose media.`
-                            : pendingPhotos.length > 0
-                              ? `${pendingPhotos.length} can pull a photo from their 1688 listing. Do this before naming.`
-                              : imageTargets.length > 0
-                                ? `${imageTargets.length} listing${imageTargets.length === 1 ? '' : 's'} had no photo - retry, or set one with Choose media.`
-                                : 'Every product with a supplier link has a photo ready for naming.'}
+                        {mediaQueue.length === 0
+                          ? 'No rows have a 1688 link to browse.'
+                          : pendingPhotos.length > 0
+                            ? `Step through each listing and pick the photo and any videos to keep. ${pendingPhotos.length} left.`
+                            : 'Every linked product has been reviewed. Re-open any row to change its media.'}
                         {missingImageNoLink > 0 && ` ${missingImageNoLink} have no 1688 link.`}
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-auto">
                         <Button
                           size="sm"
-                          onClick={fetchAllPhotos}
-                          disabled={photoBusy || imageTargets.length === 0}
+                          onClick={() => openMediaWizard()}
+                          disabled={mediaQueue.length === 0}
                           className="h-7 gap-1 text-xs"
                         >
-                          {photoBusy ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <ImageIcon className="w-3 h-3" />
-                          )}
-                          Fetch {imageTargets.length > 0 ? imageTargets.length : ''} photo
-                          {imageTargets.length === 1 ? '' : 's'}
-                        </Button>
-                        {/* Manual pass: step through each listing to choose the
-                            exact photo and any videos worth keeping. */}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openMediaWizard()}
-                          disabled={photoBusy || mediaQueue.length === 0}
-                          className="h-7 gap-1 text-xs bg-transparent"
-                        >
                           <Images className="w-3 h-3" />
-                          Review {mediaQueue.length > 0 ? mediaQueue.length : ''} one by one
+                          {pendingPhotos.length > 0
+                            ? `Select media (${pendingPhotos.length})`
+                            : 'Review media again'}
                         </Button>
                       </div>
                     </div>
@@ -1165,7 +1135,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           size="sm"
                           variant="outline"
                           onClick={() => suggestNames('all')}
-                          disabled={namingBusy || photoBusy || !photoReady || productMappings.length === 0}
+                          disabled={namingBusy || !photoReady || productMappings.length === 0}
                           className="h-7 gap-1 text-xs bg-transparent"
                         >
                           {namingBusy ? (
@@ -1180,7 +1150,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             size="sm"
                             variant="ghost"
                             onClick={() => suggestNames('unmatched')}
-                            disabled={namingBusy || photoBusy || !photoReady || unmappedCount === 0}
+                            disabled={namingBusy || !photoReady || unmappedCount === 0}
                             className="h-7 text-xs"
                           >
                             Unmatched only
@@ -1590,6 +1560,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       queue={mediaQueue}
       startIndex={mediaStart}
       onSaved={handleMediaSaved}
+      onSkipped={handleMediaSkipped}
     />
     </>
   )
