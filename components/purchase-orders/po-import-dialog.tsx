@@ -21,7 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon } from 'lucide-react'
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon, Images } from 'lucide-react'
+import { PoMediaPicker } from './po-media-picker'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -132,8 +133,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [mapFilter, setMapFilter] = useState<'all' | MatchTier>('all')
   const [mapSearch, setMapSearch] = useState('')
   const [mapSort, setMapSort] = useState<'risk' | 'confidence_desc' | 'rows_desc' | 'name'>('risk')
-  const [fetchingImages, setFetchingImages] = useState(false)
-  const [imageStats, setImageStats] = useState<{ fetched: number; skipped: number; failed: number } | null>(null)
+  // Row whose 1688 listing is open in the media browser.
+  const [mediaTarget, setMediaTarget] = useState<ProductMapping | null>(null)
 
   useEffect(() => {
     if (open) loadSystemData()
@@ -549,59 +550,16 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     [productMappings, productImageById],
   )
 
-  async function fetchProductImages() {
-    if (!imageTargets.length) return
-    setFetchingImages(true)
-    setImageStats(null)
-    const targetIds = new Set(imageTargets.map(m => m.excelProduct))
+  // Record the photo the reviewer picked in the media browser.
+  function handleMediaSaved(imageUrl: string) {
+    const target = mediaTarget
+    if (!target?.mappedId) return
     setProductMappings(prev =>
-      prev.map(m => (targetIds.has(m.excelProduct) ? { ...m, imageStatus: 'fetching' } : m)),
+      prev.map(m =>
+        m.excelProduct === target.excelProduct ? { ...m, fetchedImage: imageUrl, imageStatus: 'done' } : m,
+      ),
     )
-
-    try {
-      const res = await fetch('/api/purchase-orders/fetch-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: imageTargets.map(m => ({ productId: m.mappedId, link: m.sourceLink })),
-        }),
-      })
-      const data = (await res.json()) as {
-        success: boolean
-        error?: string
-        results?: { productId: string; status: 'done' | 'skipped' | 'failed'; image: string | null; note: string }[]
-        stats?: { fetched: number; skipped: number; failed: number }
-      }
-      if (!data.success) throw new Error(data.error || 'Image fetch failed')
-
-      const byProduct = new Map((data.results || []).map(r => [r.productId, r]))
-      setProductMappings(prev =>
-        prev.map(m => {
-          const r = m.mappedId ? byProduct.get(m.mappedId) : undefined
-          if (!r) return m.imageStatus === 'fetching' ? { ...m, imageStatus: 'idle' } : m
-          return { ...m, imageStatus: r.status, fetchedImage: r.image, imageNote: r.note }
-        }),
-      )
-      // Reflect the new photos locally so the "needs a photo" count settles.
-      setSystemProducts(prev =>
-        prev.map(p => {
-          const r = byProduct.get(p.id)
-          return r?.status === 'done' && r.image ? { ...p, image_url: r.image } : p
-        }),
-      )
-      if (data.stats) setImageStats(data.stats)
-    } catch (err) {
-      console.error('[v0] fetch images failed:', err)
-      setProductMappings(prev =>
-        prev.map(m =>
-          m.imageStatus === 'fetching'
-            ? { ...m, imageStatus: 'failed', imageNote: 'Request failed' }
-            : m,
-        ),
-      )
-    } finally {
-      setFetchingImages(false)
-    }
+    setSystemProducts(prev => prev.map(p => (p.id === target.mappedId ? { ...p, image_url: imageUrl } : p)))
   }
 
   // Bulk: drop every doubtful auto-match back to unmatched for a clean slate.
@@ -616,6 +574,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); else setOpen(true) }}>
       <DialogTrigger asChild>{children}</DialogTrigger>
         <DialogContent
@@ -795,43 +754,18 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                   {/* Photos come AFTER mapping so each one lands on the right
                       inventory item. Products that already have a photo are
                       left alone. */}
-                  {(imageTargets.length > 0 || imageStats) && (
-                    <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
-                      <ImageIcon className="w-4 h-4 text-primary flex-shrink-0" />
+                  {imageTargets.length > 0 && (
+                    <div className="flex items-start gap-3 rounded-lg border p-3">
+                      <ImageIcon className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" />
                       <div className="flex-1 min-w-0 text-xs">
                         <div className="font-medium text-sm">Product photos from 1688</div>
                         <div className="text-muted-foreground">
-                          {imageTargets.length > 0
-                            ? `${imageTargets.length} mapped product${imageTargets.length === 1 ? '' : 's'} still need a photo and have a supplier link.`
-                            : 'All mapped products have a photo.'}
+                          {imageTargets.length} mapped product{imageTargets.length === 1 ? '' : 's'} still need a photo.
+                          Use the <strong>Choose media</strong> button on a row to browse every photo and video on that
+                          supplier&apos;s listing and pick what to keep.
                           {missingImageNoLink > 0 && ` ${missingImageNoLink} more need one but have no 1688 link.`}
                         </div>
-                        {imageStats && (
-                          <div className="mt-1 text-muted-foreground">
-                            Linked <strong className="text-foreground">{imageStats.fetched}</strong>,
-                            skipped <strong className="text-foreground">{imageStats.skipped}</strong> (already had one),
-                            failed <strong className="text-foreground">{imageStats.failed}</strong>.
-                          </div>
-                        )}
                       </div>
-                      <Button
-                        size="sm"
-                        onClick={fetchProductImages}
-                        disabled={fetchingImages || imageTargets.length === 0}
-                        className="gap-1.5"
-                      >
-                        {fetchingImages ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            Fetching photos...
-                          </>
-                        ) : (
-                          <>
-                            <ImageIcon className="w-3.5 h-3.5" />
-                            Fetch {imageTargets.length} photo{imageTargets.length === 1 ? '' : 's'}
-                          </>
-                        )}
-                      </Button>
                     </div>
                   )}
 
@@ -919,10 +853,20 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                         {/* Photo slot: existing inventory photo, or the one just
                             pulled from the supplier's 1688 listing. */}
                         {mapping.mappedId && (
-                          <div className="w-10 h-10 flex-shrink-0 rounded border bg-background overflow-hidden flex items-center justify-center">
-                            {mapping.imageStatus === 'fetching' ? (
-                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                            ) : rowImage ? (
+                          <button
+                            type="button"
+                            onClick={() => mapping.sourceLink && setMediaTarget(mapping)}
+                            disabled={!mapping.sourceLink}
+                            title={
+                              mapping.sourceLink
+                                ? 'Choose media from the 1688 listing'
+                                : 'No 1688 link for this product'
+                            }
+                            className={`group relative w-10 h-10 flex-shrink-0 rounded border bg-background overflow-hidden flex items-center justify-center ${
+                              mapping.sourceLink ? 'hover:border-primary cursor-pointer' : 'cursor-default'
+                            }`}
+                          >
+                            {rowImage ? (
                               <img
                                 src={rowImage || "/placeholder.svg"}
                                 alt={`${mapping.excelProduct} product photo`}
@@ -932,7 +876,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             ) : (
                               <ImageIcon className="w-4 h-4 text-muted-foreground/40" />
                             )}
-                          </div>
+                            {mapping.sourceLink && (
+                              <span className="absolute inset-0 hidden items-center justify-center bg-black/60 group-hover:flex">
+                                <Images className="w-4 h-4 text-white" />
+                              </span>
+                            )}
+                          </button>
                         )}
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate text-sm">{mapping.excelProduct}</div>
@@ -987,6 +936,18 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             ))}
                           </SelectContent>
                         </Select>
+                        {mapping.mappedId && mapping.sourceLink && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setMediaTarget(mapping)}
+                            title="Browse all photos and videos on the 1688 listing"
+                            className="flex-shrink-0 h-8 gap-1 text-xs"
+                          >
+                            <Images className="w-3.5 h-3.5" />
+                            {rowImage ? 'Change' : 'Choose'} media
+                          </Button>
+                        )}
                         {mapping.mappedId ? (
                           <button
                             type="button"
@@ -1112,5 +1073,17 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Rendered as a sibling so it is not nested inside the import dialog. */}
+    <PoMediaPicker
+      open={!!mediaTarget}
+      onOpenChange={o => !o && setMediaTarget(null)}
+      productId={mediaTarget?.mappedId ?? null}
+      productName={mediaTarget?.excelProduct ?? ''}
+      link={mediaTarget?.sourceLink ?? null}
+      currentImage={mediaTarget?.mappedId ? productImageById.get(mediaTarget.mappedId) : null}
+      onSaved={handleMediaSaved}
+    />
+    </>
   )
 }
