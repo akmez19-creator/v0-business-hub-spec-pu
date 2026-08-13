@@ -443,7 +443,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       <DialogTrigger asChild>{children}</DialogTrigger>
         <DialogContent
           className={`max-h-[90vh] overflow-y-auto ${
-            step === 'product_mapping' ? 'sm:max-w-4xl' : 'sm:max-w-2xl'
+            step === 'product_mapping' ? 'sm:max-w-4xl xl:max-w-6xl' : 'sm:max-w-2xl'
           }`}
         >
         <DialogHeader>
@@ -614,10 +614,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                     />
                   </div>
 
-                  <ScrollArea className="h-[420px] border rounded-lg">
-                  <div className="p-4 space-y-3">
+                  <ScrollArea className="h-[55vh] min-h-[360px] border rounded-lg">
+                  <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
                     {visibleMappings.length === 0 && (
-                      <div className="text-center py-8 text-sm text-muted-foreground">
+                      <div className="col-span-full text-center py-8 text-sm text-muted-foreground">
                         No products in this view.
                       </div>
                     )}
@@ -648,7 +648,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           value={mapping.mappedId || 'unmapped'}
                           onValueChange={(v) => updateProductMapping(mapping.excelProduct, v === 'unmapped' ? null : v)}
                         >
-                          <SelectTrigger className="w-[320px] flex-shrink-0">
+                          <SelectTrigger className="w-[220px] lg:w-[260px] flex-shrink-0">
                             <SelectValue placeholder="Select product..." />
                           </SelectTrigger>
                           <SelectContent>
