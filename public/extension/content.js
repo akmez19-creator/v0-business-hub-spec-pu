@@ -155,7 +155,7 @@ style.textContent = `
    never below 360px on small screens. Height stays bounded to the viewport so
    the sticky footer / Create Order button is always on-screen (no zoom, which
    would scale the height and push the footer off-screen). */
-#akmez-widget{position:fixed;top:40px;right:20px;width:clamp(360px,21vw,560px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:calc(100vh - 80px);background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
+#akmez-widget{color-scheme:dark;position:fixed;top:40px;right:20px;width:clamp(360px,21vw,560px);max-width:calc(100vw - 40px);height:calc(100vh - 80px);max-height:calc(100vh - 80px);background:linear-gradient(135deg,#0f0f1a 0%,#1a1a2e 100%);border-radius:16px;box-shadow:0 10px 50px rgba(0,0,0,0.6);border:2px solid #f97316;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:white;overflow:hidden;display:flex;flex-direction:column;}
 /* Accessibility: clear keyboard-focus ring on every interactive control */
 #akmez-widget button:focus-visible,#akmez-widget input:focus-visible,#akmez-widget select:focus-visible,#akmez-widget [tabindex]:focus-visible,#akmez-toggle:focus-visible{outline:3px solid #38bdf8;outline-offset:2px;border-radius:6px;}
 /* Respect users who prefer reduced motion */
@@ -223,6 +223,18 @@ style.textContent = `
 .akmez-input:focus{border-color:#f97316;background:rgba(249,115,22,0.06);box-shadow:0 0 0 3px rgba(249,115,22,0.18);}
 .akmez-input:hover:not(:focus){border-color:rgba(255,255,255,0.22);}
 .akmez-input::placeholder{color:#5b6172;}
+/* Native date inputs render their dd/mm/yyyy spinner text and calendar icon in
+   the browser's LIGHT colours by default. On this dark panel that is black on
+   near-black - the field looks empty/blacked out and the picker is unreadable.
+   color-scheme flips the whole native control to its dark variant. */
+.akmez-input[type=date],.akmez-cutoff-input[type=date]{color-scheme:dark;color:white;}
+.akmez-input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1) brightness(1.6);opacity:.75;cursor:pointer;}
+.akmez-input[type=date]::-webkit-calendar-picker-indicator:hover{opacity:1;}
+.akmez-input[type=date]::-webkit-datetime-edit{color:white;}
+.akmez-input[type=date]:invalid::-webkit-datetime-edit,
+.akmez-input[type=date]:not(:focus)::-webkit-datetime-edit-year-field:not([aria-valuenow]),
+.akmez-input[type=date]:not(:focus)::-webkit-datetime-edit-month-field:not([aria-valuenow]),
+.akmez-input[type=date]:not(:focus)::-webkit-datetime-edit-day-field:not([aria-valuenow]){color:#5b6172;}
 .akmez-paste{position:absolute;right:5px;top:50%;transform:translateY(-50%);background:rgba(249,115,22,0.25);border:1px solid rgba(249,115,22,0.35);border-radius:7px;padding:6px 10px;color:#fb923c;font-size:9px;font-weight:700;cursor:pointer;text-transform:uppercase;transition:all 0.15s;}
 .akmez-paste:hover{background:rgba(249,115,22,0.45);color:#fff;}
 .akmez-sel-list{margin-bottom:8px;}
@@ -2559,10 +2571,17 @@ function renderOrdersForm() {
       if (typeof window.__akmezApplyAdVisibility === 'function') window.__akmezApplyAdVisibility();
     });
   }
-  syncFields();
-  detectSourcePage();
+  // syncFields reads the page (name, phone, ad id) and runs BEFORE the product,
+  // region and date controls are wired further down. A bad DOM read here used
+  // to take the whole form with it, so it is guarded both on the first call and
+  // on every poll - one failed scan must never stop the next one.
+  akmezSafe('syncFields', syncFields);
+  akmezSafe('detectSourcePage', detectSourcePage);
   if (window.__akmezSyncTimer) clearInterval(window.__akmezSyncTimer);
-  window.__akmezSyncTimer = setInterval(() => { syncFields(); detectSourcePage(); }, 1200);
+  window.__akmezSyncTimer = setInterval(() => {
+    akmezSafe('syncFields', syncFields);
+    akmezSafe('detectSourcePage', detectSourcePage);
+  }, 1200);
 
   // Manual reload (header ↻ button). Sometimes Meta's re-render leaves a field
   // blank - the agent sees "no region / no ad" and assumes the order is broken.
@@ -3312,11 +3331,14 @@ function renderOrdersForm() {
     const host = document.getElementById('ak-livead');
     if (!host) return;
     const hide = () => { host.style.display = 'none'; host.innerHTML = ''; };
+    // This can be reached from a poll before the panel has finished building,
+    // so never assume the ad input (or the ad list) exists yet.
+    if (!fields || !fields.adid || !fields.adid.input) return hide();
     if (fields.adid.input.value.trim()) return hide();
 
     // Which products are on this order right now.
     const wanted = new Set();
-    Object.keys(cart).forEach(k => {
+    Object.keys(cart || {}).forEach(k => {
       if (!cart[k]) return;
       const r = akmezCartResolve(k);
       if (r && r.p) wanted.add(r.p.id);
@@ -3328,14 +3350,14 @@ function renderOrdersForm() {
 
     // Only ACTIVE ads: attributing a sale to a paused campaign would report
     // spend against an ad that is not running and skew the wall.
-    const live = adList.filter(a => a.active && a.productId && wanted.has(a.productId));
+    const live = (adList || []).filter(a => a && a.active && a.productId && wanted.has(a.productId));
     if (!live.length) return hide();
 
     // One entry per campaign (a campaign has many ad ids), biggest spender
     // first - that is the ad most likely to have produced the conversation.
     const seen = new Set();
     const picks = [];
-    for (const a of live.sort((x, y) => y.spend - x.spend)) {
+    for (const a of live.sort((x, y) => (y.spend || 0) - (x.spend || 0))) {
       if (seen.has(a.campaignId)) continue;
       seen.add(a.campaignId);
       picks.push(a);
@@ -3599,12 +3621,17 @@ function renderOrdersForm() {
 
   // If nothing was auto-captured, open the picker so the agent is prompted
   // to attribute the order instead of silently leaving it blank.
-  if (!fields.adid.input.value.trim()) {
-    adidRow.style.display = '';
-    adidToggle.textContent = 'Hide ad';
-    loadAdList();
-  }
-  renderPickedAd();
+  // Guarded: this whole block only runs when NO ad id was captured, which is
+  // precisely the state the agent reported the form breaking in. Region, date
+  // and product are wired below, so a throw here must not reach them.
+  akmezSafe('no-ad init', () => {
+    if (!fields.adid.input.value.trim()) {
+      adidRow.style.display = '';
+      adidToggle.textContent = 'Hide ad';
+      loadAdList();
+    }
+    renderPickedAd();
+  });
 
   // Region autocomplete - type-to-search with full keyboard navigation
   const regionInput = document.getElementById('ak-region');
@@ -3882,6 +3909,19 @@ function akmezThumb(p, cls) {
 // (e.g. a colour). Returns a pricing-ready product object: when the variant has
 // its own price_override we use it as the unit price and drop bundle/B1G1 offers
 // (variant-specific pricing), otherwise the base product pricing applies.
+// The order form is built by ONE long init function: the region, date and
+// product controls are wired up near the end of it, so anything that throws
+// earlier silently leaves those three dead - the exact "region and product
+// dropdowns stopped working" symptom. Ad attribution is a nice-to-have; the
+// ability to take an order is not. Every ad-related call made during init runs
+// through here so a failure can never cost the agent the form itself.
+function akmezSafe(label, fn) {
+  try { return fn(); } catch (e) {
+    console.log('[v0] non-fatal error in ' + label + ':', e && e.message);
+    return undefined;
+  }
+}
+
 // Teach the server the ad -> product link. Module scope on purpose: it is
 // called both from the suggestion chip inside the widget closure and from
 // submitOrder out here. Fire and forget - it must never interrupt the agent.
