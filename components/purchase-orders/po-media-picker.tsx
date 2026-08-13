@@ -11,6 +11,7 @@ import {
   Loader2,
   Play,
   SkipForward,
+  Star,
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -25,12 +26,23 @@ interface MediaItem {
   poster?: string | null
 }
 
+/**
+ * What the reviewer kept for one product. `images` and `videos` are only
+ * populated for rows that had no product yet - those still need attaching once
+ * the product master record exists.
+ */
+export interface MediaPicks {
+  cover: string | null
+  images: string[]
+  videos: string[]
+}
+
 /** One product to review. `productId` is null while the row is still unmatched. */
 export interface MediaQueueItem {
   excelProduct: string
   productName: string
   productId: string | null
-  link: string | null
+  link: string | null | undefined
   currentImage?: string | null
 }
 
@@ -73,7 +85,7 @@ export function PoMediaPicker({
   onOpenChange: (open: boolean) => void
   queue: MediaQueueItem[]
   startIndex?: number
-  onSaved: (excelProduct: string, imageUrl: string | null, videoUrls: string[]) => void
+  onSaved: (excelProduct: string, picks: MediaPicks) => void
   onSkipped: (excelProduct: string) => void
 }) {
   const [index, setIndex] = useState(startIndex)
@@ -85,7 +97,11 @@ export function PoMediaPicker({
   const [doneCount, setDoneCount] = useState(0)
 
   // Per-product selections, keyed by row, so Back restores earlier picks.
-  const [chosenImages, setChosenImages] = useState<Record<string, string>>({})
+  // Photos are a set rather than one url: the whole gallery is saved to the
+  // product master, with `chosenCover` naming the one that becomes the
+  // product's main image.
+  const [chosenImages, setChosenImages] = useState<Record<string, string[]>>({})
+  const [chosenCover, setChosenCover] = useState<Record<string, string>>({})
   const [chosenVideos, setChosenVideos] = useState<Record<string, string[]>>({})
 
   // Listing media cached by link, so revisiting never refetches.
@@ -94,8 +110,11 @@ export function PoMediaPicker({
   const current: MediaQueueItem | undefined = queue[index]
   const total = queue.length
   const isLast = index >= total - 1
-  const pickedImage = current ? chosenImages[current.excelProduct] || null : null
+  const pickedImages = current ? chosenImages[current.excelProduct] || [] : []
   const pickedVideos = current ? chosenVideos[current.excelProduct] || [] : []
+  // The cover falls back to the first pick, so a reviewer who never nominates
+  // one still ends up with a sensible product image.
+  const cover = current ? chosenCover[current.excelProduct] || pickedImages[0] || null : null
 
   useEffect(() => {
     if (open) {
@@ -104,7 +123,7 @@ export function PoMediaPicker({
     }
   }, [open, startIndex])
 
-  const show = useCallback(async (link: string | null, force = false) => {
+  const show = useCallback(async (link: string | null | undefined, force = false) => {
     setPlaying(null)
     setError('')
     if (!link) {
@@ -144,9 +163,46 @@ export function PoMediaPicker({
   const images = media.filter(m => m.kind === 'image')
   const videos = media.filter(m => m.kind === 'video')
 
-  function pickImage(url: string) {
+  function toggleImage(url: string) {
     if (!current) return
-    setChosenImages(prev => ({ ...prev, [current.excelProduct]: url }))
+    const key = current.excelProduct
+    setChosenImages(prev => {
+      const list = prev[key] || []
+      const next = list.includes(url) ? list.filter(u => u !== url) : [...list, url]
+      // Dropping the cover photo must hand the role to another pick, never
+      // leave the product pointing at an image that is no longer selected.
+      if (!next.includes(chosenCover[key])) {
+        setChosenCover(c => ({ ...c, [key]: next[0] || '' }))
+      }
+      return { ...prev, [key]: next }
+    })
+  }
+
+  /** Promote an already-selected photo to be the product's main image. */
+  function makeCover(url: string) {
+    if (!current) return
+    const key = current.excelProduct
+    setChosenImages(prev => {
+      const list = prev[key] || []
+      return list.includes(url) ? prev : { ...prev, [key]: [...list, url] }
+    })
+    setChosenCover(c => ({ ...c, [key]: url }))
+  }
+
+  function toggleAllImages() {
+    if (!current) return
+    const key = current.excelProduct
+    const all = images.map(m => m.url)
+    const takeAll = pickedImages.length < all.length
+    setChosenImages(prev => ({ ...prev, [key]: takeAll ? all : [] }))
+    setChosenCover(c => ({ ...c, [key]: takeAll ? chosenCover[key] || all[0] : '' }))
+  }
+
+  function toggleAllVideos() {
+    if (!current) return
+    const key = current.excelProduct
+    const all = videos.map(v => v.url)
+    setChosenVideos(prev => ({ ...prev, [key]: pickedVideos.length < all.length ? all : [] }))
   }
 
   function toggleVideo(url: string) {
@@ -180,18 +236,25 @@ export function PoMediaPicker({
     setSaving(true)
     setError('')
     try {
-      if (pickedImage) {
-        // An unmatched row has no product yet, so the choice is handed back to
-        // the import dialog and written once the product exists.
-        if (current.productId) {
-          const res = await fetch('/api/purchase-orders/product-media', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ productId: current.productId, imageUrl: pickedImage }),
-          })
-          const json = await res.json()
-          if (!json.success) throw new Error(json.error || 'Could not save the photo')
-        }
+      // The whole photo selection goes to the product's gallery, with the
+      // cover mirrored onto products.image_url by the route. An unmatched row
+      // has no product yet, so its picks are handed back to the import dialog
+      // and written once the product exists.
+      if (pickedImages.length > 0 && current.productId) {
+        const res = await fetch('/api/product-master/images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId: current.productId,
+            productName: current.productName,
+            images: pickedImages,
+            primaryUrl: cover,
+            source: '1688',
+            sourceUrl: current.link,
+          }),
+        })
+        const json = await res.json()
+        if (!json.success) throw new Error(json.error || 'Could not save the photos')
       }
 
       // Selected videos go to the shared clip library by URL. The route
@@ -221,8 +284,13 @@ export function PoMediaPicker({
       }
 
       // Always report the outcome so the row leaves the queue, even when the
-      // reviewer kept only videos, or nothing at all.
-      onSaved(current.excelProduct, pickedImage, current.productId ? [] : pickedVideos)
+      // reviewer kept only videos. Anything that could not be written yet
+      // (unmatched row) is handed back to be attached after the product exists.
+      onSaved(current.excelProduct, {
+        cover,
+        images: current.productId ? [] : pickedImages,
+        videos: current.productId ? [] : pickedVideos,
+      })
       setDoneCount(c => c + 1)
       advance()
     } catch (e) {
@@ -246,8 +314,8 @@ export function PoMediaPicker({
           </div>
           <Progress value={total ? ((index + (isLast ? 1 : 0)) / total) * 100 : 0} className="h-1" />
           <DialogDescription>
-            Everything on this supplier&apos;s 1688 listing. Pick one photo to use as the product image, tick any videos
-            worth keeping, then move to the next product.
+            Everything on this supplier&apos;s 1688 listing. Keep as many photos and videos as you want - they all go to
+            the product master for Poster and Reels Studio - then move to the next product.
           </DialogDescription>
         </DialogHeader>
 
@@ -300,6 +368,14 @@ export function PoMediaPicker({
                     <Badge variant="secondary" className="text-[10px]">
                       {videos.length}
                     </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleAllVideos}
+                      className="ml-auto h-6 text-[11px]"
+                    >
+                      {pickedVideos.length < videos.length ? 'Keep all' : 'Clear all'}
+                    </Button>
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
                     {videos.map(v => {
@@ -370,39 +446,77 @@ export function PoMediaPicker({
                       {images.length}
                     </Badge>
                     <span className="text-xs font-normal text-muted-foreground">
-                      Click one to use as the product image
+                      Tick every photo to keep - the starred one becomes the product image
                     </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleAllImages}
+                      className="ml-auto h-6 text-[11px]"
+                    >
+                      {pickedImages.length < images.length ? 'Select all' : 'Clear all'}
+                    </Button>
                   </h3>
                   <div className="grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 gap-3">
                     {images.map(m => {
-                      const picked = pickedImage === m.url
+                      const picked = pickedImages.includes(m.url)
+                      const isCover = cover === m.url
                       const isCurrent = current?.currentImage === m.url
                       return (
-                        <button
+                        <div
                           key={m.url}
-                          type="button"
-                          onClick={() => pickImage(m.url)}
                           className={`relative rounded-lg border overflow-hidden transition-colors ${
-                            picked ? 'border-primary ring-2 ring-primary' : 'border-border hover:border-primary/50'
+                            isCover
+                              ? 'border-primary ring-2 ring-primary'
+                              : picked
+                                ? 'border-primary/70 ring-1 ring-primary/60'
+                                : 'border-border hover:border-primary/50'
                           }`}
                         >
-                          <img
-                            src={proxied(m.url) || '/placeholder.svg'}
-                            alt="Listing photo"
-                            className="aspect-square w-full object-cover"
-                            loading="lazy"
-                          />
-                          {picked && (
-                            <span className="absolute right-1 top-1 rounded-full bg-primary p-0.5">
-                              <Check className="w-3 h-3 text-primary-foreground" />
+                          <button
+                            type="button"
+                            onClick={() => toggleImage(m.url)}
+                            className="block w-full"
+                            aria-label={picked ? 'Remove this photo' : 'Keep this photo'}
+                          >
+                            <img
+                              src={proxied(m.url) || '/placeholder.svg'}
+                              alt="Listing photo"
+                              className="aspect-square w-full object-cover"
+                              loading="lazy"
+                            />
+                            <span
+                              className={`absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded border ${
+                                picked ? 'bg-primary border-primary' : 'border-white/70 bg-black/40'
+                              }`}
+                            >
+                              {picked && <Check className="w-3 h-3 text-primary-foreground" />}
                             </span>
+                          </button>
+
+                          {/* Only a kept photo can be the cover, so this is
+                              offered once the photo is actually selected. */}
+                          {picked && (
+                            <button
+                              type="button"
+                              onClick={() => makeCover(m.url)}
+                              disabled={isCover}
+                              className={`flex w-full items-center justify-center gap-1 py-1 text-[10px] transition-colors ${
+                                isCover
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'hover:bg-accent text-muted-foreground'
+                              }`}
+                            >
+                              <Star className={`w-3 h-3 ${isCover ? 'fill-current' : ''}`} />
+                              {isCover ? 'Product image' : 'Make main'}
+                            </button>
                           )}
                           {isCurrent && !picked && (
-                            <span className="absolute left-1 top-1 rounded bg-background/90 px-1 text-[10px]">
+                            <span className="absolute right-1 top-1 rounded bg-background/90 px-1 text-[10px]">
                               Current
                             </span>
                           )}
-                        </button>
+                        </div>
                       )
                     })}
                   </div>
@@ -414,7 +528,9 @@ export function PoMediaPicker({
 
         <div className="flex items-center justify-between gap-3 border-t pt-3">
           <p className="text-xs text-muted-foreground">
-            {pickedImage ? '1 photo selected' : 'No photo selected'}
+            {pickedImages.length > 0
+              ? `${pickedImages.length} photo${pickedImages.length === 1 ? '' : 's'} selected`
+              : 'No photos selected'}
             {pickedVideos.length > 0 && ` - ${pickedVideos.length} video${pickedVideos.length === 1 ? '' : 's'} to keep`}
             {doneCount > 0 && ` - ${doneCount} saved so far`}
           </p>
@@ -432,7 +548,11 @@ export function PoMediaPicker({
             {isLast ? 'Finish' : 'Skip'}
               <SkipForward className="w-4 h-4" />
             </Button>
-            <Button onClick={saveAndNext} disabled={saving || (!pickedImage && pickedVideos.length === 0)} className="gap-1.5">
+            <Button
+              onClick={saveAndNext}
+              disabled={saving || (pickedImages.length === 0 && pickedVideos.length === 0)}
+              className="gap-1.5"
+            >
               {saving ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : isLast ? (

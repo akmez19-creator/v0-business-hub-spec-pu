@@ -125,6 +125,31 @@ export function PosterStudioTab({
     setCandidates(productImage ? [productImage] : [])
   }, [productName, productImage])
 
+  // Every photo kept for this product during the PO import, not just the one
+  // cover shot on the inventory record, so the studio can score the whole set.
+  useEffect(() => {
+    if (!productId) return
+    let alive = true
+    fetch(`/api/product-master/images?productId=${encodeURIComponent(productId)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive || !j?.success) return
+        const urls = (j.images || [])
+          .map((i: { image_url: string }) => i.image_url)
+          .filter(Boolean)
+        if (urls.length === 0) return
+        setCandidates((prev) => [...new Set([...prev, ...urls])])
+        // With no inventory photo the studio would otherwise sit empty even
+        // though saved photos exist.
+        setSourceImage((cur) => cur ?? urls[0])
+        setSourceLabel((cur) => cur || 'Saved product photo')
+      })
+      .catch(() => null)
+    return () => {
+      alive = false
+    }
+  }, [productId, productName])
+
   // A new photo deserves a fresh direct attempt - otherwise one proxied
   // marketplace image would force every later photo through the proxy too.
   useEffect(() => {

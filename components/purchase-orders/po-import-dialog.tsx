@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon, Images, Wand2 } from 'lucide-react'
-import { PoMediaPicker, type MediaQueueItem } from './po-media-picker'
+import { PoMediaPicker, type MediaQueueItem, type MediaPicks } from './po-media-picker'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -61,8 +61,9 @@ interface ProductMapping {
   imageStatus?: 'idle' | 'fetching' | 'done' | 'skipped' | 'failed'
   fetchedImage?: string | null
   imageNote?: string
-  // Clips chosen while the row was still unmatched. They are attached to the
-  // product master once the product is matched or created.
+  // Media chosen while the row was still unmatched. Attached to the product
+  // master once the product is matched or created.
+  pendingImages?: string[]
   pendingVideos?: string[]
 }
 
@@ -301,14 +302,30 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
    */
   async function attachPendingMedia(productId: string, row?: ProductMapping) {
     if (!row) return
-    if (row.fetchedImage && !productImageById.get(productId)) {
-      await fetch('/api/purchase-orders/product-media', {
-        method: 'PUT',
+
+    // The full photo selection goes to the product gallery, which also mirrors
+    // the cover onto products.image_url. Falling back to the single fetched
+    // image keeps rows that only ever had one photo working.
+    const gallery = row.pendingImages?.length
+      ? row.pendingImages
+      : row.fetchedImage
+        ? [row.fetchedImage]
+        : []
+    if (gallery.length > 0) {
+      await fetch('/api/product-master/images', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId, imageUrl: row.fetchedImage }),
+        body: JSON.stringify({
+          productId,
+          productName: row.suggestedName || row.excelProduct,
+          images: gallery,
+          primaryUrl: row.fetchedImage || gallery[0],
+          source: '1688',
+          sourceUrl: row.sourceLink,
+        }),
       }).catch(() => null)
       setSystemProducts(prev =>
-        prev.map(p => (p.id === productId ? { ...p, image_url: row.fetchedImage || null } : p)),
+        prev.map(p => (p.id === productId ? { ...p, image_url: row.fetchedImage || gallery[0] } : p)),
       )
     }
     for (const url of row.pendingVideos || []) {
@@ -847,23 +864,24 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   // Record the photo the reviewer picked in the media wizard. The row keeps it
   // even when unmatched; it reaches inventory once the product is chosen.
-  function handleMediaSaved(excelProduct: string, imageUrl: string | null, videoUrls: string[]) {
+  function handleMediaSaved(excelProduct: string, picks: MediaPicks) {
     const target = productMappings.find(m => m.excelProduct === excelProduct)
     setProductMappings(prev =>
       prev.map(m =>
         m.excelProduct === excelProduct
           ? {
               ...m,
-              fetchedImage: imageUrl || m.fetchedImage,
-              // Clips chosen before the product exists wait here.
-              pendingVideos: videoUrls.length ? videoUrls : m.pendingVideos,
+              fetchedImage: picks.cover || m.fetchedImage,
+              // Media chosen before the product exists waits here.
+              pendingImages: picks.images.length ? picks.images : m.pendingImages,
+              pendingVideos: picks.videos.length ? picks.videos : m.pendingVideos,
               imageStatus: 'done' as const,
             }
           : m,
       ),
     )
-    if (!target?.mappedId || !imageUrl) return
-    setSystemProducts(prev => prev.map(p => (p.id === target.mappedId ? { ...p, image_url: imageUrl } : p)))
+    if (!target?.mappedId || !picks.cover) return
+    setSystemProducts(prev => prev.map(p => (p.id === target.mappedId ? { ...p, image_url: picks.cover } : p)))
   }
 
   // Bulk: drop every doubtful auto-match back to unmatched for a clean slate.
