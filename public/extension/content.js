@@ -267,6 +267,13 @@ style.textContent = `
 .akmez-suggest-empty{padding:9px 12px;font-size:12px;color:#fcd34d;cursor:pointer;text-align:center;}
 .akmez-adprod-chip{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 8px;padding:10px 12px;font-size:12px;font-weight:600;color:#fde68a;background:rgba(249,115,22,0.14);border:1px dashed rgba(249,115,22,0.55);border-radius:8px;cursor:pointer;text-align:left;}
 .akmez-adprod-chip:hover{background:rgba(249,115,22,0.24);}
+.akmez-livead{margin:8px 0 0;}
+.akmez-livead-head{margin:0 0 6px;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#94a3b8;}
+.akmez-livead-chip{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 6px;padding:8px 10px;border-radius:8px;cursor:pointer;text-align:left;font-size:12px;font-weight:600;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.38);color:#86efac;}
+.akmez-livead-chip:hover{background:rgba(34,197,94,0.22);}
+.akmez-livead-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,0.20);}
+.akmez-livead-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.akmez-livead-tag{flex:none;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.75;}
 .akmez-adprod-head{margin:0 0 6px;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#94a3b8;display:flex;justify-content:space-between;gap:8px;}
 .akmez-adprod-head span{color:#fbbf24;opacity:.9;text-transform:none;letter-spacing:0;font-weight:500;}
 .akmez-adprod-chip.akmez-adprod-alt{background:rgba(148,163,184,0.10);border-color:rgba(148,163,184,0.35);color:#cbd5e1;font-weight:500;}
@@ -2217,9 +2224,11 @@ function renderOrdersForm() {
       <div id="ak-oldprod-hint" class="akmez-oldprod-hint"></div>
     </div>
     <div class="akmez-ad-missing" id="ak-ad-missing" style="display:none;">
-      No ad label on this chat &mdash; this order will be logged as
-      <b>unattributed</b>. Pick the ad below if you know it.
+      No ad label on this chat. Add the product and we&rsquo;ll offer the
+      <b>live ad</b> selling it &mdash; or pick one below. You can create the
+      order either way; without an ad it is logged as <b>unattributed</b>.
     </div>
+    <div class="akmez-livead" id="ak-livead" style="display:none;"></div>
     <div class="akmez-adid-toggle" id="ak-adid-toggle">Show Ad ID (auto-captured)</div>
     <div class="akmez-adid-row" id="ak-adid-row" style="display:none;">
       <div class="akmez-field akmez-autocomplete">
@@ -3011,22 +3020,6 @@ function renderOrdersForm() {
     });
   }
 
-  // Teach the server the ad -> product link. Fire and forget: this must never
-  // interrupt the agent. The server refuses to overwrite an existing mapping,
-  // so a wrong guess can only ever fill a gap that was empty anyway.
-  function akmezLearnAdProduct(adId, productId) {
-    if (!adId || !productId) return;
-    window.__akmezLearned = window.__akmezLearned || {};
-    const key = adId + ':' + productId;
-    if (window.__akmezLearned[key]) return;   // once per ad+product per session
-    window.__akmezLearned[key] = true;
-    try {
-      chrome.runtime.sendMessage({ action: 'learnAdProduct', adId, productId }, resp => {
-        if (chrome.runtime.lastError) return;
-        if (resp && resp.learned) toast('Ad linked to ' + (products.find(p => p.id === productId) || {}).name);
-      });
-    } catch (e) {}
-  }
   window.__akmezRenderAdProductHint = akmezRenderAdProductHint;
 
   // Given a captured Ad ID, resolve its linked product (ad -> campaign -> product)
@@ -3192,13 +3185,17 @@ function renderOrdersForm() {
     return fields.adid.input.value ? 'Change ad' : 'Choose the ad for this order';
   }
 
-  function loadAdList() {
+  // silent=true loads the list in the background to power the live-ad
+  // suggestion, without popping the picker dropdown open in the agent's face.
+  function loadAdList(silent) {
     if (adListLoaded) return;
     adListLoaded = true;
-    adPickSuggest.innerHTML = '<div class="akmez-suggest-item">Loading your ads...</div>';
-    adPickSuggest.style.display = 'block';
+    if (!silent) {
+      adPickSuggest.innerHTML = '<div class="akmez-suggest-item">Loading your ads...</div>';
+      adPickSuggest.style.display = 'block';
+    }
     chrome.runtime.sendMessage({ action: 'listAds' }, resp => {
-      adPickSuggest.style.display = 'none';
+      if (!silent) adPickSuggest.style.display = 'none';
       if (chrome.runtime.lastError || !resp || !resp.success) {
         adListLoaded = false;   // allow a retry on next open
         return;
@@ -3306,6 +3303,61 @@ function renderOrdersForm() {
     renderPickedAd();
   }
 
+  // REVERSE LINKAGE: no ad id was captured, but the agent has already chosen a
+  // product - so work backwards and offer the ad that is currently LIVE for
+  // that product. This is what keeps an order attributed when the chat carries
+  // no ad label at all (comment-created chats, expired labels), instead of
+  // banking it as "unattributed" and losing it on the Ads wall.
+  function renderLiveAdSuggestion() {
+    const host = document.getElementById('ak-livead');
+    if (!host) return;
+    const hide = () => { host.style.display = 'none'; host.innerHTML = ''; };
+    if (fields.adid.input.value.trim()) return hide();
+
+    // Which products are on this order right now.
+    const wanted = new Set();
+    Object.keys(cart).forEach(k => {
+      if (!cart[k]) return;
+      const r = akmezCartResolve(k);
+      if (r && r.p) wanted.add(r.p.id);
+    });
+    if (!wanted.size) return hide();
+
+    // Need the ad list to answer this - fetch it quietly on first use.
+    if (!adListLoaded) { loadAdList(true); return hide(); }
+
+    // Only ACTIVE ads: attributing a sale to a paused campaign would report
+    // spend against an ad that is not running and skew the wall.
+    const live = adList.filter(a => a.active && a.productId && wanted.has(a.productId));
+    if (!live.length) return hide();
+
+    // One entry per campaign (a campaign has many ad ids), biggest spender
+    // first - that is the ad most likely to have produced the conversation.
+    const seen = new Set();
+    const picks = [];
+    for (const a of live.sort((x, y) => y.spend - x.spend)) {
+      if (seen.has(a.campaignId)) continue;
+      seen.add(a.campaignId);
+      picks.push(a);
+      if (picks.length === 3) break;
+    }
+
+    host.style.display = 'block';
+    host.innerHTML = `<div class="akmez-livead-head">Live ad${picks.length > 1 ? 's' : ''} for this product</div>`
+      + picks.map(a => `
+        <button type="button" class="akmez-livead-chip" data-aklive="${esc(a.id)}">
+          <span class="akmez-livead-dot"></span>
+          <span class="akmez-livead-name">${esc(a.name)}</span>
+          <span class="akmez-livead-tag">attribute</span>
+        </button>`).join('');
+    host.querySelectorAll('[data-aklive]').forEach(b => {
+      b.onclick = () => {
+        applyAdId(b.getAttribute('data-aklive'));
+        renderPickedAd();
+      };
+    });
+  }
+
   // Confirmation line so the agent can see the order is attributed before
   // hitting submit - an unattributed order is invisible on the Ads wall.
   function renderPickedAd() {
@@ -3314,9 +3366,13 @@ function renderOrdersForm() {
     if (!id) {
       adPickPicked.style.display = 'none';
       adPick.placeholder = 'Search your ads by campaign or product...';
+      renderLiveAdSuggestion();
       renderAdFlag();
       return;
     }
+    // A real ad is attached, so the "attribute to live ad" prompt is moot.
+    const liveHost = document.getElementById('ak-livead');
+    if (liveHost) { liveHost.style.display = 'none'; liveHost.innerHTML = ''; }
     // Repaint the "+ Add <product>" chip once the linkage is available, so the
     // suggestion shows up for a hand-pasted ad id too, not just a picked one.
     ensureAdLinkage(id, akmezRenderAdProductHint);
@@ -3344,6 +3400,9 @@ function renderOrdersForm() {
 
   // Let submitOrder (defined outside this scope) read the current state.
   window.__akmezAdMatchState = adMatchState;
+  // updateCart lives at module scope but the suggestion depends on the cart,
+  // so let it repaint from there.
+  window.__akmezRenderLiveAd = renderLiveAdSuggestion;
 
   adPick.addEventListener('input', showAdSuggestions);
   adPick.addEventListener('focus', showAdSuggestions);
@@ -3823,6 +3882,27 @@ function akmezThumb(p, cls) {
 // (e.g. a colour). Returns a pricing-ready product object: when the variant has
 // its own price_override we use it as the unit price and drop bundle/B1G1 offers
 // (variant-specific pricing), otherwise the base product pricing applies.
+// Teach the server the ad -> product link. Module scope on purpose: it is
+// called both from the suggestion chip inside the widget closure and from
+// submitOrder out here. Fire and forget - it must never interrupt the agent.
+// The server refuses to overwrite an existing mapping, so this can only ever
+// fill a gap that was empty anyway.
+function akmezLearnAdProduct(adId, productId) {
+  if (!adId || !productId) return;
+  window.__akmezLearned = window.__akmezLearned || {};
+  const key = adId + ':' + productId;
+  if (window.__akmezLearned[key]) return;   // once per ad+product per session
+  window.__akmezLearned[key] = true;
+  try {
+    chrome.runtime.sendMessage({ action: 'learnAdProduct', adId, productId }, resp => {
+      if (chrome.runtime.lastError) return;
+      if (resp && resp.learned) {
+        toast('Ad linked to ' + ((products.find(p => p.id === productId) || {}).name || 'product'));
+      }
+    });
+  } catch (e) {}
+}
+
 function akmezCartResolve(key) {
   const str = String(key);
   const sep = str.indexOf('::');
@@ -3909,6 +3989,11 @@ function updateCart() {
   // product is in the cart and come back if the agent removes it again.
   if (typeof window.__akmezRenderAdProductHint === 'function') {
     setTimeout(window.__akmezRenderAdProductHint, 0);
+  }
+  // The "live ad for this product" offer is derived from the cart, so it has to
+  // be recomputed whenever the products change.
+  if (typeof window.__akmezRenderLiveAd === 'function') {
+    setTimeout(window.__akmezRenderLiveAd, 0);
   }
   const entries = Object.entries(cart).filter(([,q]) => q > 0);
   if (!entries.length) {
@@ -4127,6 +4212,19 @@ function submitOrder() {
       return;
     }
     
+    // AUTHORITATIVE LEARN. This is the only moment where the ad and the products
+    // are both final and confirmed by a real sale, so link them here regardless
+    // of the order the agent filled the form in. Learning only at "add product"
+    // time missed the common flows: adding the product before picking the ad,
+    // or picking the ad manually because none was auto-captured (exactly the
+    // "No ad label on this chat" case). Runs before the cart is cleared below.
+    if (adId) {
+      entries.forEach(([key]) => {
+        const r = akmezCartResolve(key);
+        if (r && r.p) akmezLearnAdProduct(adId, r.p.id);
+      });
+    }
+
     // The order is banked, so the cart is spent - empty it HERE rather than in
     // the "New Order" button. The agent normally just clicks the next chat in
     // Messenger instead of that button, and the products used to survive into
