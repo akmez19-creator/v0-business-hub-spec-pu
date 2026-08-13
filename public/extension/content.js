@@ -1351,6 +1351,108 @@ function scanAllAdIdsOnPage() {
 
 // Same scan, but keeps each chip's on-screen position so callers can compare it
 // against the "AI transferred" marker.
+// ---------------------------------------------------------------------------
+// Ad POST text -> product suggestion.
+// The ad_id linkage keeps failing (unmapped ads, history stacks, stalled
+// lookups), but Messenger always prints the ad's headline in plain sight:
+//   "This chat contains a reply to your ad. MINI TENSE MASSAGER - RELAX ..."
+//   "Manoj replied to your ad / Made By Moris / MINI TENSE MAS..."
+// That headline names the product the client actually wants, so we read it
+// straight off the page as an independent second source.
+// ---------------------------------------------------------------------------
+const AD_POST_MARKER_RE = /repl(?:y|ied)\s+to\s+your\s+ad/i;
+
+// Boilerplate that surrounds the headline and must not reach the matcher.
+const AD_POST_STRIP_RE = /(this chat contains a|repl(?:y|ied) to your ad|view ad|see more|sponsored|learn more|shop now|send message|about an hour ago|\d+\s*(?:minutes?|hours?|days?)\s*ago)/gi;
+
+function akmezScanAdPostText() {
+  const out = [];
+  const nodes = document.querySelectorAll('div, span, a, p, li, h1, h2, h3');
+  for (const el of nodes) {
+    if (el.closest('#akmez-widget, #akmez-toggle, .akmez-hover-card')) continue;
+    const text = (el.textContent || '').trim();
+    if (!text || text.length > 400) continue;
+    if (!AD_POST_MARKER_RE.test(text)) continue;
+    // Keep the smallest containers only: a huge ancestor drags in the whole
+    // conversation and every unrelated product word with it.
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;
+    out.push(text);
+  }
+  if (!out.length) return '';
+  // Shortest match is the tightest wrapper around the headline.
+  out.sort((a, b) => a.length - b.length);
+  return out.slice(0, 3).join(' \u00b7 ').replace(AD_POST_STRIP_RE, ' ');
+}
+
+// Words that appear in nearly every ad headline and carry no product meaning.
+const AD_POST_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'your', 'you', 'our', 'now', 'get', 'buy', 'new',
+  'free', 'off', 'sale', 'order', 'delivery', 'deliver', 'today', 'only', 'best',
+  'top', 'quality', 'anytime', 'anywhere', 'relax', 'say', 'goodbye', 'hello',
+  'to', 'a', 'an', 'of', 'in', 'on', 'at', 'is', 'it', 'this', 'that', 'from',
+  'made', 'by', 'moris', 'mbm', 'rs', 'price', 'promo', 'offer', 'limited',
+]);
+
+function akmezPostTokens(s) {
+  return (s || '')
+    .toLowerCase()
+    // Drop emoji and punctuation, keep letters/digits as word separators.
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter(t => t.length > 2 && !AD_POST_STOPWORDS.has(t));
+}
+
+// Score every product against the ad headline and return the clear winner.
+// Requires most of the product's own words to be present, so "Mini Tense
+// Massager" wins on "MINI TENSE MASSAGER" while a product that merely shares
+// the word "massager" is rejected.
+function akmezMatchProductFromPost(postText) {
+  if (!postText || !products.length) return null;
+  const hay = ' ' + akmezPostTokens(postText).join(' ') + ' ';
+  if (hay.trim().length < 3) return null;
+  const scored = [];
+  for (const p of products) {
+    const toks = akmezPostTokens(p.name);
+    if (!toks.length) continue;
+    let hit = 0, weight = 0, total = 0;
+    for (const t of toks) {
+      total += t.length >= 5 ? 2 : 1;
+      if (hay.includes(' ' + t + ' ')) { hit++; weight += t.length >= 5 ? 2 : 1; }
+    }
+    if (!hit) continue;
+    let ratio = weight / total;
+    // Exact phrase in the headline is the strongest possible signal.
+    const nameNorm = akmezPostTokens(p.name).join(' ');
+    if (nameNorm && hay.includes(' ' + nameNorm + ' ')) ratio = 1.2;
+    scored.push({ product: p, ratio, hit });
+  }
+  if (!scored.length) return null;
+  scored.sort((a, b) => (b.ratio - a.ratio) || (b.hit - a.hit));
+  const best = scored[0];
+  // Need a solid majority of the product's words, and at least two words unless
+  // the single word matched is the entire product name.
+  if (best.ratio < 0.6) return null;
+  if (best.hit < 2 && best.ratio < 1.2) return null;
+  // Refuse to guess when a runner-up is basically as good.
+  const second = scored[1];
+  if (second && best.ratio - second.ratio < 0.08 && best.ratio < 1.2) return null;
+  return best.product;
+}
+
+// Messenger paints the conversation (and its ad banner) in stages, and the
+// product catalog arrives separately, so one render is never enough. Repaint
+// the suggestion chip a few times instead of racing either of them.
+function akmezRepaintAdHint() {
+  const run = () => {
+    if (typeof window.__akmezRenderAdProductHint === 'function') {
+      try { window.__akmezRenderAdProductHint(); } catch (e) {}
+    }
+  };
+  run();
+  [500, 1200, 2500, 4000].forEach(ms => setTimeout(run, ms));
+}
+
 function scanAllAdIdsWithPos() {
   const hits = [];
   const seen = new Set();
@@ -1797,8 +1899,11 @@ async function loadData() {
         renderLogin('Session expired. Please sign in again.');
         return;
       }
-      products = data.products || [];
-      regions = data.regions || [];
+  products = data.products || [];
+  // The post-text matcher needs the catalog, so re-run the suggestion once the
+  // products actually arrive.
+  akmezRepaintAdHint();
+  regions = data.regions || [];
       regionDelivery = data.regionDelivery || {};
       worktimeData = data.worktime || worktimeData;
       // Mirror the shared, admin-configured settings into local storage so the
@@ -1999,6 +2104,9 @@ function renderOrdersForm() {
     <button class="akmez-submit" id="ak-submit">Create Order</button>
   `;
   
+  // The form was just rebuilt, so the suggestion host is empty again.
+  akmezRepaintAdHint();
+
   // Paste buttons
   body.querySelectorAll('.akmez-paste').forEach(b => {
   b.onclick = async () => {
@@ -2230,7 +2338,9 @@ function renderOrdersForm() {
   akmezDropAutoAdded(null);      // retire the previous ad's auto-added product
   akmezResetAdConfirm();         // new chat must earn its ad id from scratch
   window.__akmezAdProduct = null; // drop the previous ad's suggestion chip
-  if (typeof window.__akmezRenderAdProductHint === 'function') window.__akmezRenderAdProductHint();
+  // Repaint now and again once Messenger has painted the new conversation, so
+  // the post-text suggestion appears even when no ad id is ever captured.
+  akmezRepaintAdHint();
   }
 
   function syncFields() {
@@ -2688,7 +2798,19 @@ function renderOrdersForm() {
       if (known && known.productId) ap = { id: known.productId, name: known.productName || '', adId: cur };
       else if (cached && cached.id) ap = { id: cached.id, name: cached.name || '', adId: cur };
     }
-    if (!ap || ap.adId !== cur || cart[ap.id]) {
+    // SECOND SOURCE: when the ad id gives us nothing - not captured, not mapped
+    // to a product, or the lookup never came back - read the ad's headline off
+    // the conversation and match it against the catalog. The post names the
+    // product the client replied about, so it works with no ad id at all.
+    let source = 'from this ad';
+    if (!ap || ap.adId !== cur || !products.find(p => p.id === ap.id)) {
+      const fromPost = akmezMatchProductFromPost(akmezScanAdPostText());
+      if (fromPost) {
+        ap = { id: fromPost.id, name: fromPost.name, adId: cur, viaPost: true };
+        source = 'from the ad post';
+      }
+    }
+    if (!ap || (!ap.viaPost && ap.adId !== cur) || cart[ap.id]) {
       host.style.display = 'none';
       host.innerHTML = '';
       return;
@@ -2697,13 +2819,13 @@ function renderOrdersForm() {
     const label = (match && match.name) || ap.name || 'the ad product';
     host.style.display = 'block';
     host.innerHTML = `<button type="button" class="akmez-adprod-chip" id="ak-adprod-add">
-        + Add ${label.replace(/</g, '&lt;')}<span class="akmez-adprod-tag">from this ad</span>
+        + Add ${label.replace(/</g, '&lt;')}<span class="akmez-adprod-tag">${source}</span>
       </button>`;
     const btn = document.getElementById('ak-adprod-add');
     if (btn) btn.onclick = () => {
       if (!match) { toast('Linked product not in your product list'); return; }
       cart[match.id] = (cart[match.id] || 0) + 1;
-      cartFromAd[match.id] = ap.adId;
+      if (ap.adId) cartFromAd[match.id] = ap.adId;
       updateCart();
       akmezRenderAdProductHint();
     };
