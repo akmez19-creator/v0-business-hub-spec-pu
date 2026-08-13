@@ -622,9 +622,14 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     [productMappings, productImageById],
   )
 
-  // Stage 3 is "ready" once nothing is still waiting on a photo it could have
-  // pulled. Rows with no 1688 link can never get one, so they never block.
-  const photoReady = imageTargets.length === 0
+  // Rows that have never been attempted. Only these hold the workflow back:
+  // a listing with no photo, or one with no link at all, can never succeed, so
+  // letting them block naming would deadlock the whole import.
+  const pendingPhotos = useMemo(
+    () => imageTargets.filter(m => !m.imageStatus || m.imageStatus === 'idle'),
+    [imageTargets],
+  )
+  const photoReady = pendingPhotos.length === 0
 
   /**
    * Stage 2: give every linked product a photo automatically, taking the
@@ -671,10 +676,15 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
             return r?.image ? { ...p, image_url: r.image } : p
           }),
         )
+        // Record the outcome for EVERY attempted row, including failures.
+        // Without this a listing that has no usable photo stays queued forever
+        // and blocks the rest of the workflow.
         setProductMappings(prev =>
           prev.map(m => {
             const r = byKey.get(m.excelProduct)
-            return r?.image ? { ...m, fetchedImage: r.image, imageStatus: 'done' } : m
+            if (!r) return m
+            if (r.image) return { ...m, fetchedImage: r.image, imageStatus: 'done' as const }
+            return { ...m, imageStatus: 'failed' as const, imageNote: 'No photo on the listing' }
           }),
         )
         fetched += (data.results || []).filter(r => r.status === 'done').length
@@ -696,10 +706,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
    * Sent in pages of 40 so a 591-product import cannot blow the request limit.
    */
   async function suggestNames(scope: 'all' | 'unmatched') {
-    const pool = productMappings.filter(m => {
-      const hasPhoto = !!(m.fetchedImage || (m.mappedId && productImageById.get(m.mappedId)))
-      return hasPhoto && (scope === 'unmatched' ? !m.mappedId : true)
-    })
+    // Runs after the photo pass, so rows WITH a photo are named from it. Rows
+    // whose listing had none are still included and fall back to text, which
+    // beats leaving their raw Excel name to drive the inventory match.
+    const pool = productMappings.filter(m => (scope === 'unmatched' ? !m.mappedId : true))
     if (!pool.length) return
 
     setNamingBusy(true)
@@ -784,12 +794,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   const pendingNames = productMappings.filter(m => m.nameStatus === 'ready')
   const acceptedNames = productMappings.filter(m => m.nameStatus === 'accepted' && m.suggestedName)
-  const unnamedPhotoCount = productMappings.filter(
-    m =>
-      !!(m.fetchedImage || (m.mappedId && productImageById.get(m.mappedId))) &&
-      m.nameStatus !== 'accepted',
-  ).length
-  const readyForMatching = imageTargets.length === 0 && unnamedPhotoCount === 0
+  // Matching waits for the photo pass and for any suggestion still sitting in
+  // review - but never for names that were never requested. Requiring every
+  // row to be 'accepted' would lock the import behind 591 manual approvals.
+  const readyForMatching = photoReady && pendingNames.length === 0
 
   function acceptAllNames() {
     setProductMappings(prev =>
@@ -1008,7 +1016,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       the product from that photo, then match/create inventory. */}
                   <div className="grid gap-3 lg:grid-cols-3">
                     {/* Stage 3 - match/create only after visual naming. */}
-                    <div className="order-3 rounded-lg border p-3 flex flex-col gap-2">
+                    <div className={`order-3 rounded-lg border p-3 flex flex-col gap-2 ${readyForMatching ? '' : 'opacity-60'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           3. Match or create
@@ -1036,11 +1044,15 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                         ))}
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        {hasClassified
-                          ? needsReviewCount > 0
-                            ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below.`
-                            : 'Every product has a confident inventory match.'
-                          : `${tierCounts.exact} matched exactly by name or alias. After photo naming, match the remaining ${unmappedCount}.`}
+                        {!readyForMatching
+                          ? pendingPhotos.length > 0
+                            ? `Waiting on step 1 - ${pendingPhotos.length} photo${pendingPhotos.length === 1 ? '' : 's'} still to fetch.`
+                            : `Waiting on step 2 - ${pendingNames.length} name${pendingNames.length === 1 ? '' : 's'} still awaiting your approval.`
+                          : hasClassified
+                            ? needsReviewCount > 0
+                              ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below.`
+                              : 'Every product has a confident inventory match.'
+                            : `${tierCounts.exact} matched exactly by name or alias. Match the remaining ${unmappedCount}.`}
                       </p>
                     </div>
 
@@ -1061,9 +1073,11 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           ? `Fetching ${photoProgress.done} of ${photoProgress.total}...`
                           : photoStats
                             ? `Added ${photoStats.fetched} photo${photoStats.fetched === 1 ? '' : 's'}${photoStats.failed > 0 ? `, ${photoStats.failed} had none to pull` : ''}. Refine any of them with Choose media.`
-                            : imageTargets.length > 0
-                              ? `${imageTargets.length} can pull a photo from their 1688 listing. Do this before naming.`
-                              : 'Every product with a supplier link has a photo ready for naming.'}
+                            : pendingPhotos.length > 0
+                              ? `${pendingPhotos.length} can pull a photo from their 1688 listing. Do this before naming.`
+                              : imageTargets.length > 0
+                                ? `${imageTargets.length} listing${imageTargets.length === 1 ? '' : 's'} had no photo - retry, or set one with Choose media.`
+                                : 'Every product with a supplier link has a photo ready for naming.'}
                         {missingImageNoLink > 0 && ` ${missingImageNoLink} have no 1688 link.`}
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-auto">
@@ -1104,14 +1118,14 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             ? `${pendingNames.length} suggestion${pendingNames.length === 1 ? '' : 's'} waiting for your approval.`
                             : photoReady
                               ? 'Two-word names read from the product photo, matched to your existing naming style.'
-                              : `Fetch photos first - ${imageTargets.length} product${imageTargets.length === 1 ? '' : 's'} still have none, and the namer reads the photo.`}
+                              : `Fetch photos first - ${pendingPhotos.length} product${pendingPhotos.length === 1 ? '' : 's'} not yet checked, and the namer reads the photo.`}
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-auto">
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => suggestNames('all')}
-                          disabled={namingBusy || photoBusy || !photoReady || withPhotoCount === 0}
+                          disabled={namingBusy || photoBusy || !photoReady || productMappings.length === 0}
                           className="h-7 gap-1 text-xs bg-transparent"
                         >
                           {namingBusy ? (
@@ -1126,7 +1140,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             size="sm"
                             variant="ghost"
                             onClick={() => suggestNames('unmatched')}
-                            disabled={namingBusy || photoBusy || !photoReady || withPhotoCount === 0}
+                            disabled={namingBusy || photoBusy || !photoReady || unmappedCount === 0}
                             className="h-7 text-xs"
                           >
                             Unmatched only
