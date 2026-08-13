@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package } from 'lucide-react'
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -31,6 +31,10 @@ interface ProductMapping {
   excelProduct: string
   count: number
   mappedId: string | null
+  // Populated by the AI auto-match pass so the UI can flag low-confidence
+  // matches for a quick human glance-review.
+  matchConfidence?: number
+  matchMethod?: 'fuzzy' | 'ai' | 'manual'
 }
 
 interface SystemProduct {
@@ -88,6 +92,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [result, setResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
   const [creatingProduct, setCreatingProduct] = useState<string | null>(null)
   const [creatingAllProducts, setCreatingAllProducts] = useState(false)
+  const [aiMatching, setAiMatching] = useState(false)
+  const [aiMatchStats, setAiMatchStats] = useState<{ fuzzy: number; ai: number; unmatched: number } | null>(null)
 
   useEffect(() => {
     if (open) loadSystemData()
@@ -206,8 +212,55 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   function updateProductMapping(excelProduct: string, productId: string | null) {
     setProductMappings(prev =>
-      prev.map(m => m.excelProduct === excelProduct ? { ...m, mappedId: productId } : m)
+      prev.map(m =>
+        m.excelProduct === excelProduct
+          ? { ...m, mappedId: productId, matchMethod: 'manual', matchConfidence: undefined }
+          : m,
+      ),
     )
+  }
+
+  // AI auto-match: sends every still-unmatched product name to the cascade
+  // matcher (local fuzzy first, then gpt-4o-mini semantic) and applies the
+  // results with a confidence score so weak matches can be spot-checked.
+  async function handleAiMatch() {
+    const unmatched = productMappings.filter(m => !m.mappedId)
+    if (unmatched.length === 0 || systemProducts.length === 0) return
+    setAiMatching(true)
+    setAiMatchStats(null)
+    try {
+      const res = await fetch('/api/purchase-orders/ai-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          products: unmatched.map(m => ({ name: m.excelProduct })),
+          candidates: systemProducts.map(p => ({ id: p.id, name: p.name })),
+        }),
+      })
+      if (!res.ok) throw new Error('AI matching request failed')
+      const data = (await res.json()) as {
+        matches: { excelProduct: string; matchedId: string | null; confidence: number; method: string }[]
+        stats?: { fuzzy: number; ai: number; unmatched: number }
+      }
+      const byName = new Map(data.matches.map(m => [m.excelProduct, m]))
+      setProductMappings(prev =>
+        prev.map(m => {
+          const match = byName.get(m.excelProduct)
+          if (!match || !match.matchedId || m.mappedId) return m
+          return {
+            ...m,
+            mappedId: match.matchedId,
+            matchConfidence: match.confidence,
+            matchMethod: match.method === 'fuzzy' ? 'fuzzy' : 'ai',
+          }
+        }),
+      )
+      if (data.stats) setAiMatchStats(data.stats)
+    } catch (err) {
+      console.error('[v0] AI match failed:', err)
+    } finally {
+      setAiMatching(false)
+    }
   }
 
   async function handleCreateProduct(excelProduct: string) {
@@ -466,10 +519,21 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                   <Badge variant="secondary">{productMappings.length} products</Badge>
                   {unmappedCount > 0 && (
                     <Button
+                      size="sm"
+                      onClick={handleAiMatch}
+                      disabled={aiMatching || creatingAllProducts}
+                      className="gap-1"
+                    >
+                      {aiMatching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      {aiMatching ? 'Matching...' : `AI Match ${unmappedCount}`}
+                    </Button>
+                  )}
+                  {unmappedCount > 0 && (
+                    <Button
                       variant="outline"
                       size="sm"
                       onClick={handleCreateAllUnmappedProducts}
-                      disabled={creatingAllProducts}
+                      disabled={creatingAllProducts || aiMatching}
                       className="gap-1 bg-transparent"
                     >
                       {creatingAllProducts ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -491,7 +555,23 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       <div key={mapping.excelProduct} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate text-sm">{mapping.excelProduct}</div>
-                          <div className="text-xs text-muted-foreground">{mapping.count} rows</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{mapping.count} rows</span>
+                            {mapping.mappedId && mapping.matchMethod && mapping.matchMethod !== 'manual' && (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] px-1.5 py-0 h-4 ${
+                                  (mapping.matchConfidence ?? 0) >= 0.85
+                                    ? 'border-green-500/40 text-green-600'
+                                    : (mapping.matchConfidence ?? 0) >= 0.7
+                                      ? 'border-yellow-500/40 text-yellow-600'
+                                      : 'border-orange-500/40 text-orange-600'
+                                }`}
+                              >
+                                {mapping.matchMethod === 'ai' ? 'AI' : 'Fuzzy'} {Math.round((mapping.matchConfidence ?? 0) * 100)}%
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                         <Select
@@ -536,9 +616,17 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                 </ScrollArea>
               )}
 
-              <div className="text-xs text-muted-foreground bg-muted p-3 rounded-md">
+              <div className="text-xs text-muted-foreground bg-muted p-3 rounded-md space-y-1">
                 <p>Matched: <strong>{mappedCount}</strong> / {productMappings.length} products.
                   Mappings are saved as aliases for automatic matching in future imports.</p>
+                {aiMatchStats && (
+                  <p className="text-foreground">
+                    <Sparkles className="w-3 h-3 inline mr-1 text-primary" />
+                    AI auto-match: <strong>{aiMatchStats.fuzzy}</strong> by name similarity,{' '}
+                    <strong>{aiMatchStats.ai}</strong> by AI, <strong>{aiMatchStats.unmatched}</strong> left unmatched.
+                    Review the colored confidence badges and adjust any that look wrong.
+                  </p>
+                )}
               </div>
             </div>
           )}
