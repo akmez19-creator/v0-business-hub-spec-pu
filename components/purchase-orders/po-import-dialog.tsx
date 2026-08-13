@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon, Images } from 'lucide-react'
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon, Images, Wand2 } from 'lucide-react'
 import { PoMediaPicker } from './po-media-picker'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
@@ -44,8 +44,13 @@ interface ProductMapping {
   // Populated by the AI auto-match pass so the UI can classify each row by
   // confidence and route the reviewer to the ones that actually need a human.
   matchConfidence?: number
-  matchMethod?: 'fuzzy' | 'ai' | 'manual'
+  matchMethod?: 'fuzzy' | 'ai' | 'manual' | 'alias' | 'exact'
   tier?: MatchTier
+  // AI-proposed replacement name (2 words, based on the photo + inventory).
+  suggestedName?: string
+  suggestedReason?: string
+  suggestedSource?: 'vision' | 'text'
+  nameStatus?: 'idle' | 'thinking' | 'ready' | 'accepted'
   reason?: string
   alternatives?: Suggestion[]
   // Set once a human has explicitly signed off on the row.
@@ -66,10 +71,19 @@ const TIER_META: Record<MatchTier, { label: string; text: string; bar: string; r
   none: { label: 'No match', text: 'text-red-400', bar: 'bg-red-500', ring: 'border-red-500/40' },
 }
 
-// A row's tier: explicit human choices always outrank the classifier.
+/** Comparison key: casing, punctuation and spacing are noise, not meaning. */
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+// A row's tier: explicit human choices always outrank the classifier. A mapped
+// row that no classifier has scored yet is 'unscored' rather than a fake tier.
 function tierOf(m: ProductMapping): MatchTier {
   if (!m.mappedId) return 'none'
-  if (m.matchMethod === 'manual' || m.confirmed) return 'exact'
+  if (m.matchMethod === 'manual' || m.matchMethod === 'alias' || m.matchMethod === 'exact') return 'exact'
   return m.tier ?? 'high'
 }
 
@@ -135,6 +149,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [mapSort, setMapSort] = useState<'risk' | 'confidence_desc' | 'rows_desc' | 'name'>('risk')
   // Row whose 1688 listing is open in the media browser.
   const [mediaTarget, setMediaTarget] = useState<ProductMapping | null>(null)
+  const [namingBusy, setNamingBusy] = useState(false)
+  const [namingProgress, setNamingProgress] = useState<{ done: number; total: number } | null>(null)
+  const [applyingNames, setApplyingNames] = useState(false)
+  // Whether the classifier has been run at all - drives the honest empty state
+  // on the coverage meter instead of reporting a misleading percentage.
+  const [hasClassified, setHasClassified] = useState(false)
 
   useEffect(() => {
     if (open) loadSystemData()
@@ -239,29 +259,28 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // Auto-match: first check aliases, then exact product name
+    // Auto-match: aliases first, then the product name itself. Both are
+    // compared on a normalised key so casing, punctuation and double spaces
+    // ("Real to real" vs "real-to-real") still count as the same product.
     const productMaps: ProductMapping[] = []
+    const aliasByKey = new Map(productAliases.map(a => [normalizeName(a.alias_name), a.product_id]))
+    const productByKey = new Map(systemProducts.map(p => [normalizeName(p.name), p.id]))
+
     for (const [excelProduct, count] of productCounts.entries()) {
-      let matchedId: string | null = null
-      const searchName = excelProduct.toLowerCase().trim()
-
-      // Check aliases first
-      const alias = productAliases.find(a => a.alias_name.toLowerCase().trim() === searchName)
-      if (alias) {
-        matchedId = alias.product_id
-      }
-
-      // Fallback: exact product name match
-      if (!matchedId) {
-        const product = systemProducts.find(p => p.name.toLowerCase().trim() === searchName)
-        if (product) matchedId = product.id
-      }
+      const key = normalizeName(excelProduct)
+      const matchedId = aliasByKey.get(key) ?? productByKey.get(key) ?? null
 
       productMaps.push({
         excelProduct,
         count,
         mappedId: matchedId,
         sourceLink: productLinks.get(excelProduct) || null,
+        // These are certainties, not guesses - record them as such so the row
+        // shows 100% instead of an empty confidence.
+        matchConfidence: matchedId ? 1 : undefined,
+        tier: matchedId ? 'exact' : undefined,
+        matchMethod: matchedId ? (aliasByKey.has(key) ? 'alias' : 'exact') : undefined,
+        confirmed: !!matchedId,
       })
     }
 
@@ -277,7 +296,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
               ...m,
               mappedId: productId,
               matchMethod: productId ? 'manual' : undefined,
-              matchConfidence: undefined,
+              matchConfidence: productId ? 1 : undefined,
               tier: productId ? 'exact' : 'none',
               confirmed: !!productId,
             }
@@ -335,6 +354,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         }),
       )
       if (data.stats) setAiMatchStats(data.stats)
+      setHasClassified(true)
     } catch (err) {
       console.error('[v0] AI match failed:', err)
     } finally {
@@ -346,9 +366,14 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     setCreatingProduct(excelProduct)
     try {
       const supabase = createClient()
+      // If the reviewer accepted an AI name for this row, create the product
+      // under that clean name and keep the messy PO spelling as the alias.
+      const row = productMappings.find(m => m.excelProduct === excelProduct)
+      const createName =
+        row?.nameStatus === 'accepted' && row.suggestedName ? row.suggestedName : excelProduct.trim()
       const { data, error } = await supabase
         .from('products')
-        .insert({ name: excelProduct.trim(), is_active: true })
+        .insert({ name: createName, is_active: true })
         .select('id, name, image_url')
         .single()
 
@@ -550,6 +575,141 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     [productMappings, productImageById],
   )
 
+  /**
+   * Ask the AI for a better name for each row, using the product PHOTO as the
+   * primary signal and the existing inventory names as the house vocabulary.
+   * Sent in pages of 40 so a 591-product import cannot blow the request limit.
+   */
+  async function suggestNames(scope: 'all' | 'unmatched') {
+    const pool = productMappings.filter(m => (scope === 'unmatched' ? !m.mappedId : true))
+    if (!pool.length) return
+
+    setNamingBusy(true)
+    setNamingProgress({ done: 0, total: pool.length })
+    const poolKeys = new Set(pool.map(m => m.excelProduct))
+    setProductMappings(prev =>
+      prev.map(m => (poolKeys.has(m.excelProduct) ? { ...m, nameStatus: 'thinking' } : m)),
+    )
+
+    const inventoryNames = systemProducts.slice(0, 300).map(p => p.name)
+    const PAGE = 40
+    let done = 0
+
+    try {
+      for (let i = 0; i < pool.length; i += PAGE) {
+        const page = pool.slice(i, i + PAGE)
+        const res = await fetch('/api/purchase-orders/suggest-names', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inventoryNames,
+            items: page.map(m => ({
+              key: m.excelProduct,
+              // Mapped rows are judged on their inventory name, which is the
+              // one a rename would actually change.
+              currentName:
+                (m.mappedId ? systemProducts.find(p => p.id === m.mappedId)?.name : null) || m.excelProduct,
+              imageUrl: m.fetchedImage || (m.mappedId ? productImageById.get(m.mappedId) : null),
+            })),
+          }),
+        })
+        const data = (await res.json()) as {
+          success: boolean
+          error?: string
+          suggestions?: { key: string; suggested: string; reason: string; source: 'vision' | 'text' }[]
+        }
+        if (!data.success) throw new Error(data.error || 'Naming failed')
+
+        const byKey = new Map((data.suggestions || []).map(s => [s.key, s]))
+        setProductMappings(prev =>
+          prev.map(m => {
+            if (!poolKeys.has(m.excelProduct)) return m
+            const s = byKey.get(m.excelProduct)
+            if (!s) return m.nameStatus === 'thinking' ? { ...m, nameStatus: 'idle' } : m
+            return {
+              ...m,
+              suggestedName: s.suggested,
+              suggestedReason: s.reason,
+              suggestedSource: s.source,
+              nameStatus: 'ready',
+            }
+          }),
+        )
+        done += page.length
+        setNamingProgress({ done, total: pool.length })
+      }
+    } catch (err) {
+      console.error('[v0] suggest names failed:', err)
+      setProductMappings(prev =>
+        prev.map(m => (m.nameStatus === 'thinking' ? { ...m, nameStatus: 'idle' } : m)),
+      )
+    } finally {
+      setNamingBusy(false)
+    }
+  }
+
+  function acceptName(excelProduct: string) {
+    setProductMappings(prev =>
+      prev.map(m => (m.excelProduct === excelProduct ? { ...m, nameStatus: 'accepted' } : m)),
+    )
+  }
+
+  function rejectName(excelProduct: string) {
+    setProductMappings(prev =>
+      prev.map(m =>
+        m.excelProduct === excelProduct
+          ? { ...m, nameStatus: 'idle', suggestedName: undefined, suggestedReason: undefined }
+          : m,
+      ),
+    )
+  }
+
+  const pendingNames = productMappings.filter(m => m.nameStatus === 'ready')
+  const acceptedNames = productMappings.filter(m => m.nameStatus === 'accepted' && m.suggestedName)
+
+  function acceptAllNames() {
+    setProductMappings(prev =>
+      prev.map(m => (m.nameStatus === 'ready' ? { ...m, nameStatus: 'accepted' } : m)),
+    )
+  }
+
+  /** Persist accepted names for products that exist in inventory. */
+  async function applyAcceptedNames() {
+    const renames = acceptedNames.filter(m => m.mappedId)
+    if (!renames.length) return
+    setApplyingNames(true)
+    try {
+      const res = await fetch('/api/purchase-orders/rename-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: renames.map(m => ({
+            productId: m.mappedId,
+            newName: m.suggestedName,
+            oldName: m.excelProduct,
+          })),
+        }),
+      })
+      const data = (await res.json()) as { success: boolean; error?: string }
+      if (!data.success) throw new Error(data.error || 'Rename failed')
+
+      // Reflect the new names locally so the dropdown and rows agree.
+      const nameById = new Map(renames.map(m => [m.mappedId as string, m.suggestedName as string]))
+      setSystemProducts(prev => prev.map(p => (nameById.has(p.id) ? { ...p, name: nameById.get(p.id)! } : p)))
+      setProductMappings(prev =>
+        prev.map(m =>
+          m.nameStatus === 'accepted' && m.mappedId
+            ? { ...m, nameStatus: 'idle', suggestedName: undefined, suggestedReason: undefined }
+            : m,
+        ),
+      )
+    } catch (err) {
+      console.error('[v0] apply names failed:', err)
+    } finally {
+      setApplyingNames(false)
+    }
+  }
+
   // Record the photo the reviewer picked in the media browser.
   function handleMediaSaved(imageUrl: string) {
     const target = mediaTarget
@@ -720,52 +880,141 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                 </div>
               ) : (
                 <>
-                  {/* Coverage meter: the headline number for the whole step. */}
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-baseline justify-between mb-2">
-                      <span className="text-sm font-medium">Classification coverage</span>
-                      <span className="text-2xl font-bold tabular-nums">{coveragePct}%</span>
-                    </div>
-                    <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-                      {(['exact', 'high', 'medium', 'low'] as const).map((t) =>
-                        tierCounts[t] > 0 ? (
-                          <div
-                            key={t}
-                            className={TIER_META[t].bar}
-                            style={{ width: `${(tierCounts[t] / productMappings.length) * 100}%` }}
-                            title={`${TIER_META[t].label}: ${tierCounts[t]}`}
-                          />
-                        ) : null,
-                      )}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      {(['exact', 'high', 'medium', 'low', 'none'] as const).map((t) => (
-                        <span key={t} className="flex items-center gap-1.5">
-                          <span className={`inline-block w-2 h-2 rounded-full ${TIER_META[t].bar}`} />
-                          {TIER_META[t].label}: <strong className="text-foreground">{tierCounts[t]}</strong>
-                          <span className="opacity-60">
-                            ({Math.round((tierCounts[t] / productMappings.length) * 100)}%)
-                          </span>
+                  {/* The three stages run in order, because each one feeds the
+                      next: match to inventory, attach a photo, then let the AI
+                      name the product from that photo. */}
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    {/* Stage 1 - match */}
+                    <div className="rounded-lg border p-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          1. Match to inventory
                         </span>
-                      ))}
+                        <span className="text-xl font-bold tabular-nums">{coveragePct}%</span>
+                      </div>
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+                        {(['exact', 'high', 'medium', 'low'] as const).map((t) =>
+                          tierCounts[t] > 0 ? (
+                            <div
+                              key={t}
+                              className={TIER_META[t].bar}
+                              style={{ width: `${(tierCounts[t] / productMappings.length) * 100}%` }}
+                              title={`${TIER_META[t].label}: ${tierCounts[t]}`}
+                            />
+                          ) : null,
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                        {(['exact', 'high', 'medium', 'low', 'none'] as const).map((t) => (
+                          <span key={t} className="flex items-center gap-1">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${TIER_META[t].bar}`} />
+                            {TIER_META[t].label} <strong className="text-foreground">{tierCounts[t]}</strong>
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {hasClassified
+                          ? needsReviewCount > 0
+                            ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below.`
+                            : 'Every match is confident.'
+                          : `${tierCounts.exact} matched exactly by name or alias. Run AI Match for the remaining ${unmappedCount}.`}
+                      </p>
+                    </div>
+
+                    {/* Stage 2 - photos */}
+                    <div className="rounded-lg border p-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          2. Attach photos
+                        </span>
+                        <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                      <div className="text-xl font-bold tabular-nums">
+                        {mappedCount - imageTargets.length - missingImageNoLink}
+                        <span className="text-sm font-normal text-muted-foreground"> / {mappedCount} have a photo</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {imageTargets.length > 0 ? (
+                          <>
+                            {imageTargets.length} can pull media from their 1688 listing. Use{' '}
+                            <strong>Choose media</strong> on a row to pick the photos and videos to keep.
+                          </>
+                        ) : (
+                          'All mapped products with a supplier link have a photo.'
+                        )}
+                        {missingImageNoLink > 0 && ` ${missingImageNoLink} have no 1688 link.`}
+                      </p>
+                    </div>
+
+                    {/* Stage 3 - naming */}
+                    <div className="rounded-lg border p-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          3. Clean up names
+                        </span>
+                        <Wand2 className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {namingBusy && namingProgress
+                          ? `Naming ${namingProgress.done} of ${namingProgress.total}...`
+                          : pendingNames.length > 0
+                            ? `${pendingNames.length} suggestion${pendingNames.length === 1 ? '' : 's'} waiting for your approval.`
+                            : 'Two-word names from the product photo, matched to your existing naming style.'}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mt-auto">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => suggestNames('all')}
+                          disabled={namingBusy || productMappings.length === 0}
+                          className="h-7 gap-1 text-xs bg-transparent"
+                        >
+                          {namingBusy ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Wand2 className="w-3 h-3" />
+                          )}
+                          Suggest all
+                        </Button>
+                        {unmappedCount > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => suggestNames('unmatched')}
+                            disabled={namingBusy}
+                            className="h-7 text-xs"
+                          >
+                            Unmatched only
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Photos come AFTER mapping so each one lands on the right
-                      inventory item. Products that already have a photo are
-                      left alone. */}
-                  {imageTargets.length > 0 && (
-                    <div className="flex items-start gap-3 rounded-lg border p-3">
-                      <ImageIcon className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" />
-                      <div className="flex-1 min-w-0 text-xs">
-                        <div className="font-medium text-sm">Product photos from 1688</div>
-                        <div className="text-muted-foreground">
-                          {imageTargets.length} mapped product{imageTargets.length === 1 ? '' : 's'} still need a photo.
-                          Use the <strong>Choose media</strong> button on a row to browse every photo and video on that
-                          supplier&apos;s listing and pick what to keep.
-                          {missingImageNoLink > 0 && ` ${missingImageNoLink} more need one but have no 1688 link.`}
-                        </div>
-                      </div>
+                  {/* Bulk bar for name suggestions, only while there are some. */}
+                  {(pendingNames.length > 0 || acceptedNames.length > 0) && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                      <Wand2 className="w-4 h-4 text-primary flex-shrink-0" />
+                      <span className="text-xs flex-1 min-w-0">
+                        {pendingNames.length > 0 && (
+                          <><strong>{pendingNames.length}</strong> name suggestion{pendingNames.length === 1 ? '' : 's'} to review. </>
+                        )}
+                        {acceptedNames.length > 0 && (
+                          <><strong>{acceptedNames.length}</strong> accepted{acceptedNames.filter(m => m.mappedId).length > 0 ? ` (${acceptedNames.filter(m => m.mappedId).length} will rename an inventory product)` : ''}.</>
+                        )}
+                      </span>
+                      {pendingNames.length > 0 && (
+                        <Button size="sm" variant="outline" onClick={acceptAllNames} className="h-7 text-xs bg-transparent">
+                          Accept all {pendingNames.length}
+                        </Button>
+                      )}
+                      {acceptedNames.filter(m => m.mappedId).length > 0 && (
+                        <Button size="sm" onClick={applyAcceptedNames} disabled={applyingNames} className="h-7 gap-1 text-xs">
+                          {applyingNames && <Loader2 className="w-3 h-3 animate-spin" />}
+                          Save {acceptedNames.filter(m => m.mappedId).length} rename
+                          {acceptedNames.filter(m => m.mappedId).length === 1 ? '' : 's'}
+                        </Button>
+                      )}
                     </div>
                   )}
 
@@ -824,9 +1073,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                   </div>
 
                   <ScrollArea className="h-[55vh] min-h-[360px] border rounded-lg">
-                  <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  {/* Single column: the PO name, the target product and the
+                      actions all need real width, and two columns truncated
+                      every one of them. */}
+                  <div className="p-4 flex flex-col gap-2">
                     {visibleMappings.length === 0 && (
-                      <div className="col-span-full text-center py-8 text-sm text-muted-foreground">
+                      <div className="text-center py-8 text-sm text-muted-foreground">
                         No products in this view.
                       </div>
                     )}
@@ -839,7 +1091,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       return (
                       <div
                         key={mapping.excelProduct}
-                        className={`flex items-center gap-3 p-3 bg-muted/50 rounded-lg border-l-2 ${meta.ring}`}
+                        className={`flex items-center gap-3 p-3 bg-muted/50 rounded-lg border-l-2 ${meta.ring} ${
+                          mapping.nameStatus === 'accepted' ? 'ring-1 ring-green-500/30' : ''
+                        }`}
                       >
                         {/* Confidence read-out: percentage + a bar of the same color as the tier. */}
                         <div className="w-12 flex-shrink-0 text-center">
@@ -884,17 +1138,21 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           </button>
                         )}
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate text-sm">{mapping.excelProduct}</div>
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="font-medium text-sm break-words" title={mapping.excelProduct}>
+                            {mapping.excelProduct}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap mt-0.5">
                             <span className="text-xs text-muted-foreground">{mapping.count} rows</span>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${meta.ring} ${meta.text}`}>
                               {meta.label}
                               {mapping.matchMethod === 'ai' && ' - AI'}
                               {mapping.matchMethod === 'fuzzy' && ' - Name'}
                               {mapping.matchMethod === 'manual' && ' - Manual'}
+                              {mapping.matchMethod === 'alias' && ' - Alias'}
+                              {mapping.matchMethod === 'exact' && ' - Name'}
                             </Badge>
                             {mapping.reason && !mapping.mappedId && (
-                              <span className="text-[10px] text-muted-foreground truncate max-w-[220px]" title={mapping.reason}>
+                              <span className="text-[10px] text-muted-foreground truncate max-w-[280px]" title={mapping.reason}>
                                 {mapping.reason}
                               </span>
                             )}
@@ -908,12 +1166,64 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                                   key={alt.id}
                                   type="button"
                                   onClick={() => updateProductMapping(mapping.excelProduct, alt.id)}
-                                  className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground transition-colors max-w-[180px] truncate"
+                                  className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground transition-colors max-w-[200px] truncate"
                                   title={`${alt.name} (${Math.round(alt.score * 100)}% name similarity)`}
                                 >
                                   {alt.name} <span className="opacity-60">{Math.round(alt.score * 100)}%</span>
                                 </button>
                               ))}
+                            </div>
+                          )}
+                          {/* AI name proposal, accepted or rejected per row. */}
+                          {mapping.nameStatus === 'thinking' && (
+                            <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-muted-foreground">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Naming from photo...
+                            </div>
+                          )}
+                          {mapping.suggestedName && mapping.nameStatus === 'ready' && (
+                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                              <Wand2 className="w-3 h-3 text-primary flex-shrink-0" />
+                              <span className="text-[11px] text-muted-foreground">Rename to</span>
+                              <span className="text-[11px] font-semibold">{mapping.suggestedName}</span>
+                              {mapping.suggestedSource === 'vision' && (
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 border-primary/40 text-primary">
+                                  from photo
+                                </Badge>
+                              )}
+                              {mapping.suggestedReason && (
+                                <span className="text-[10px] text-muted-foreground truncate max-w-[200px]" title={mapping.suggestedReason}>
+                                  {mapping.suggestedReason}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => acceptName(mapping.excelProduct)}
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground hover:opacity-90"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => rejectName(mapping.excelProduct)}
+                                className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground"
+                              >
+                                Keep current
+                              </button>
+                            </div>
+                          )}
+                          {mapping.suggestedName && mapping.nameStatus === 'accepted' && (
+                            <div className="flex items-center gap-1.5 mt-1.5 text-[11px]">
+                              <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+                              <span className="text-muted-foreground">Will be named</span>
+                              <span className="font-semibold">{mapping.suggestedName}</span>
+                              <button
+                                type="button"
+                                onClick={() => rejectName(mapping.excelProduct)}
+                                className="text-[10px] text-muted-foreground underline hover:text-foreground"
+                              >
+                                undo
+                              </button>
                             </div>
                           )}
                         </div>
@@ -922,7 +1232,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           value={mapping.mappedId || 'unmapped'}
                           onValueChange={(v) => updateProductMapping(mapping.excelProduct, v === 'unmapped' ? null : v)}
                         >
-                          <SelectTrigger className="w-[220px] lg:w-[260px] flex-shrink-0">
+                          <SelectTrigger className="w-[260px] xl:w-[320px] flex-shrink-0">
                             <SelectValue placeholder="Select product..." />
                           </SelectTrigger>
                           <SelectContent>
