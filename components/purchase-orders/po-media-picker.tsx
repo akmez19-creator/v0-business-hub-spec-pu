@@ -1,16 +1,37 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, Check, CheckCircle, ImageIcon, Loader2, Play, Video } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CheckCircle,
+  ImageIcon,
+  Loader2,
+  Play,
+  SkipForward,
+  Video,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Progress } from '@/components/ui/progress'
 
 interface MediaItem {
   url: string
   kind: 'image' | 'video'
   poster?: string | null
+}
+
+/** One product to review. `productId` is null while the row is still unmatched. */
+export interface MediaQueueItem {
+  excelProduct: string
+  productName: string
+  productId: string | null
+  link: string | null
+  currentImage?: string | null
 }
 
 /**
@@ -21,107 +42,177 @@ interface MediaItem {
 const proxied = (url: string) =>
   `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(url)}`
 
+/** Fetch every photo and video on one listing. */
+async function loadMedia(link: string): Promise<MediaItem[]> {
+  const res = await fetch('/api/purchase-orders/product-media', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ link }),
+  })
+  const json = await res.json()
+  if (!json.success) throw new Error(json.error || 'Could not load listing media')
+  return (json.media || []) as MediaItem[]
+}
+
+/**
+ * Steps through the queue one product at a time: see every photo and video on
+ * that supplier listing, pick the ones to keep, then move to the next product.
+ *
+ * Choices are held per product so going Back restores what was already picked,
+ * and the next listing is prefetched so stepping through feels instant.
+ */
 export function PoMediaPicker({
   open,
   onOpenChange,
-  productId,
-  productName,
-  link,
-  currentImage,
+  queue,
+  startIndex = 0,
   onSaved,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  productId: string | null
-  productName: string
-  link: string | null
-  currentImage?: string | null
-  onSaved: (imageUrl: string) => void
+  queue: MediaQueueItem[]
+  startIndex?: number
+  onSaved: (excelProduct: string, imageUrl: string) => void
 }) {
+  const [index, setIndex] = useState(startIndex)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [media, setMedia] = useState<MediaItem[]>([])
-  const [chosenImage, setChosenImage] = useState<string | null>(null)
-  const [chosenVideos, setChosenVideos] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [playing, setPlaying] = useState<string | null>(null)
+  const [doneCount, setDoneCount] = useState(0)
 
-  const load = useCallback(async () => {
-    if (!link) return
-    setLoading(true)
+  // Per-product selections, keyed by row, so Back restores earlier picks.
+  const [chosenImages, setChosenImages] = useState<Record<string, string>>({})
+  const [chosenVideos, setChosenVideos] = useState<Record<string, string[]>>({})
+
+  // Listing media cached by link, so revisiting never refetches.
+  const cache = useRef<Map<string, MediaItem[]>>(new Map())
+
+  const current: MediaQueueItem | undefined = queue[index]
+  const total = queue.length
+  const isLast = index >= total - 1
+  const pickedImage = current ? chosenImages[current.excelProduct] || null : null
+  const pickedVideos = current ? chosenVideos[current.excelProduct] || [] : []
+
+  useEffect(() => {
+    if (open) {
+      setIndex(startIndex)
+      setDoneCount(0)
+    }
+  }, [open, startIndex])
+
+  const show = useCallback(async (link: string | null, force = false) => {
+    setPlaying(null)
     setError('')
+    if (!link) {
+      setMedia([])
+      return
+    }
+    const hit = cache.current.get(link)
+    if (hit && !force) {
+      setMedia(hit)
+      return
+    }
+    setLoading(true)
     setMedia([])
     try {
-      const res = await fetch('/api/purchase-orders/product-media', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ link }),
-      })
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error || 'Could not load listing media')
-      setMedia(json.media || [])
+      const items = await loadMedia(link)
+      cache.current.set(link, items)
+      setMedia(items)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load listing media')
     } finally {
       setLoading(false)
     }
-  }, [link])
+  }, [])
 
-  // Load once per opening, and reset the previous product's choices.
+  // Load the current listing, then warm the next one in the background.
   useEffect(() => {
-    if (!open) return
-    setChosenImage(null)
-    setChosenVideos([])
-    setPlaying(null)
-    void load()
-  }, [open, load])
+    if (!open || !current) return
+    void show(current.link)
+    const next = queue[index + 1]
+    if (next?.link && !cache.current.has(next.link)) {
+      void loadMedia(next.link)
+        .then(items => cache.current.set(next.link as string, items))
+        .catch(() => null)
+    }
+  }, [open, index, current, queue, show])
 
-  const images = media.filter((m) => m.kind === 'image')
-  const videos = media.filter((m) => m.kind === 'video')
+  const images = media.filter(m => m.kind === 'image')
+  const videos = media.filter(m => m.kind === 'video')
 
-  function toggleVideo(url: string) {
-    setChosenVideos((prev) => (prev.includes(url) ? prev.filter((v) => v !== url) : [...prev, url]))
+  function pickImage(url: string) {
+    if (!current) return
+    setChosenImages(prev => ({ ...prev, [current.excelProduct]: url }))
   }
 
-  async function save() {
-    if (!productId) return
+  function toggleVideo(url: string) {
+    if (!current) return
+    setChosenVideos(prev => {
+      const list = prev[current.excelProduct] || []
+      return {
+        ...prev,
+        [current.excelProduct]: list.includes(url) ? list.filter(v => v !== url) : [...list, url],
+      }
+    })
+  }
+
+  function advance() {
+    if (isLast) {
+      onOpenChange(false)
+      return
+    }
+    setIndex(i => i + 1)
+  }
+
+  /** Persist this product's picks, then step to the next one. */
+  async function saveAndNext() {
+    if (!current) return
     setSaving(true)
     setError('')
     try {
-      if (chosenImage) {
-        const res = await fetch('/api/purchase-orders/product-media', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productId, imageUrl: chosenImage }),
-        })
-        const json = await res.json()
-        if (!json.success) throw new Error(json.error || 'Could not save the photo')
-        onSaved(chosenImage)
+      if (pickedImage) {
+        // An unmatched row has no product yet, so the choice is handed back to
+        // the import dialog and written once the product exists.
+        if (current.productId) {
+          const res = await fetch('/api/purchase-orders/product-media', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId: current.productId, imageUrl: pickedImage }),
+          })
+          const json = await res.json()
+          if (!json.success) throw new Error(json.error || 'Could not save the photo')
+        }
+        onSaved(current.excelProduct, pickedImage)
       }
 
       // Selected videos go to the shared clip library by URL. The route
       // de-duplicates on source_id, so re-saving the same clip is harmless.
-      for (const url of chosenVideos) {
-        await fetch('/api/product-master/clips', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productId,
-            productName,
-            name: `${productName} - 1688 clip`,
-            fileUrl: url,
-            source: '1688',
-            sourceId: url,
-            sourceUrl: link,
-            duration: 0,
-            width: 0,
-            height: 0,
-            sizeBytes: 0,
-          }),
-        }).catch(() => null)
+      if (current.productId) {
+        for (const url of pickedVideos) {
+          await fetch('/api/product-master/clips', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productId: current.productId,
+              productName: current.productName,
+              name: `${current.productName} - 1688 clip`,
+              fileUrl: url,
+              source: '1688',
+              sourceId: url,
+              sourceUrl: current.link,
+              duration: 0,
+              width: 0,
+              height: 0,
+              sizeBytes: 0,
+            }),
+          }).catch(() => null)
+        }
       }
 
-      onOpenChange(false)
+      setDoneCount(c => c + 1)
+      advance()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save')
     } finally {
@@ -129,14 +220,22 @@ export function PoMediaPicker({
     }
   }
 
+  const stepLabel = total > 0 ? `Product ${Math.min(index + 1, total)} of ${total}` : 'No products'
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-4xl xl:max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="truncate">Choose media for {productName}</DialogTitle>
+        <DialogHeader className="gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle className="truncate">{current?.productName || 'Choose media'}</DialogTitle>
+            <Badge variant="secondary" className="flex-shrink-0 text-[11px] tabular-nums">
+              {stepLabel}
+            </Badge>
+          </div>
+          <Progress value={total ? ((index + (isLast ? 1 : 0)) / total) * 100 : 0} className="h-1" />
           <DialogDescription>
-            Everything on the supplier&apos;s 1688 listing. Pick one photo to use as the product image, and tick any
-            videos worth keeping.
+            Everything on this supplier&apos;s 1688 listing. Pick one photo to use as the product image, tick any videos
+            worth keeping, then move to the next product.
           </DialogDescription>
         </DialogHeader>
 
@@ -152,7 +251,12 @@ export function PoMediaPicker({
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
             <div className="flex-1">
               <p className="text-destructive">{error}</p>
-              <Button variant="outline" size="sm" onClick={() => void load()} className="mt-2 bg-transparent">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void show(current?.link ?? null, true)}
+                className="mt-2 bg-transparent"
+              >
                 Try again
               </Button>
             </div>
@@ -160,7 +264,17 @@ export function PoMediaPicker({
         )}
 
         {!loading && !error && media.length === 0 && (
-          <p className="py-12 text-center text-sm text-muted-foreground">This listing has no photos or videos.</p>
+          <div className="flex flex-col items-center gap-3 py-12">
+            <p className="text-center text-sm text-muted-foreground">
+              {current?.link
+                ? 'This listing has no photos or videos.'
+                : 'This product has no 1688 link, so there is nothing to browse.'}
+            </p>
+            <Button variant="outline" onClick={advance} className="gap-1.5 bg-transparent">
+              Skip to next
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </div>
         )}
 
         {!loading && media.length > 0 && (
@@ -176,8 +290,8 @@ export function PoMediaPicker({
                     </Badge>
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {videos.map((v) => {
-                      const picked = chosenVideos.includes(v.url)
+                    {videos.map(v => {
+                      const picked = pickedVideos.includes(v.url)
                       return (
                         <div
                           key={v.url}
@@ -202,7 +316,7 @@ export function PoMediaPicker({
                             >
                               {v.poster ? (
                                 <img
-                                  src={proxied(v.poster) || "/placeholder.svg"}
+                                  src={proxied(v.poster) || '/placeholder.svg'}
                                   alt=""
                                   className="aspect-square w-full object-cover"
                                 />
@@ -243,23 +357,25 @@ export function PoMediaPicker({
                     <Badge variant="secondary" className="text-[10px]">
                       {images.length}
                     </Badge>
-                    <span className="text-xs font-normal text-muted-foreground">Click one to use as the product image</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Click one to use as the product image
+                    </span>
                   </h3>
                   <div className="grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 gap-3">
-                    {images.map((m) => {
-                      const picked = chosenImage === m.url
-                      const isCurrent = currentImage === m.url
+                    {images.map(m => {
+                      const picked = pickedImage === m.url
+                      const isCurrent = current?.currentImage === m.url
                       return (
                         <button
                           key={m.url}
                           type="button"
-                          onClick={() => setChosenImage(m.url)}
+                          onClick={() => pickImage(m.url)}
                           className={`relative rounded-lg border overflow-hidden transition-colors ${
                             picked ? 'border-primary ring-2 ring-primary' : 'border-border hover:border-primary/50'
                           }`}
                         >
                           <img
-                            src={proxied(m.url) || "/placeholder.svg"}
+                            src={proxied(m.url) || '/placeholder.svg'}
                             alt="Listing photo"
                             className="aspect-square w-full object-cover"
                             loading="lazy"
@@ -286,16 +402,33 @@ export function PoMediaPicker({
 
         <div className="flex items-center justify-between gap-3 border-t pt-3">
           <p className="text-xs text-muted-foreground">
-            {chosenImage ? '1 photo selected' : 'No photo selected'}
-            {chosenVideos.length > 0 && ` - ${chosenVideos.length} video${chosenVideos.length === 1 ? '' : 's'} to keep`}
+            {pickedImage ? '1 photo selected' : 'No photo selected'}
+            {pickedVideos.length > 0 && ` - ${pickedVideos.length} video${pickedVideos.length === 1 ? '' : 's'} to keep`}
+            {doneCount > 0 && ` - ${doneCount} saved so far`}
           </p>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} className="bg-transparent">
-              Cancel
+            <Button
+              variant="ghost"
+              onClick={() => setIndex(i => Math.max(0, i - 1))}
+              disabled={index === 0 || saving}
+              className="gap-1.5"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
             </Button>
-            <Button onClick={save} disabled={saving || (!chosenImage && chosenVideos.length === 0)} className="gap-1.5">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-              Save selection
+            <Button variant="outline" onClick={advance} disabled={saving} className="gap-1.5 bg-transparent">
+              {isLast ? 'Finish' : 'Skip'}
+              <SkipForward className="w-4 h-4" />
+            </Button>
+            <Button onClick={saveAndNext} disabled={saving || (!pickedImage && pickedVideos.length === 0)} className="gap-1.5">
+              {saving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : isLast ? (
+                <CheckCircle className="w-4 h-4" />
+              ) : (
+                <ArrowRight className="w-4 h-4" />
+              )}
+              {isLast ? 'Save & finish' : 'Save & next'}
             </Button>
           </div>
         </div>

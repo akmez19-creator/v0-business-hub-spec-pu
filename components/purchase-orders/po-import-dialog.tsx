@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon, Images, Wand2 } from 'lucide-react'
-import { PoMediaPicker } from './po-media-picker'
+import { PoMediaPicker, type MediaQueueItem } from './po-media-picker'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -147,8 +147,11 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [mapFilter, setMapFilter] = useState<'all' | MatchTier>('all')
   const [mapSearch, setMapSearch] = useState('')
   const [mapSort, setMapSort] = useState<'risk' | 'confidence_desc' | 'rows_desc' | 'name'>('risk')
-  // Row whose 1688 listing is open in the media browser.
-  const [mediaTarget, setMediaTarget] = useState<ProductMapping | null>(null)
+  // The media wizard walks a queue of products one at a time. `mediaStart` is
+  // the product it opens on, so a single row can be reviewed without losing
+  // the ability to keep stepping through the rest.
+  const [mediaOpen, setMediaOpen] = useState(false)
+  const [mediaStart, setMediaStart] = useState(0)
   const [photoBusy, setPhotoBusy] = useState(false)
   const [photoProgress, setPhotoProgress] = useState<{ done: number; total: number } | null>(null)
   const [photoStats, setPhotoStats] = useState<{ fetched: number; failed: number } | null>(null)
@@ -631,6 +634,30 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   )
   const photoReady = pendingPhotos.length === 0
 
+  // Every row with a listing to browse, in table order, so the wizard steps
+  // through them predictably. Unmatched rows are included: their pick is held
+  // on the row and written to inventory once the product exists.
+  const mediaQueue: MediaQueueItem[] = useMemo(
+    () =>
+      productMappings
+        .filter(m => m.sourceLink)
+        .map(m => ({
+          excelProduct: m.excelProduct,
+          productName: m.suggestedName || m.excelProduct,
+          productId: m.mappedId,
+          link: m.sourceLink,
+          currentImage: m.fetchedImage || (m.mappedId ? productImageById.get(m.mappedId) : null),
+        })),
+    [productMappings, productImageById],
+  )
+
+  /** Open the wizard, starting at a given row (or the first one). */
+  function openMediaWizard(excelProduct?: string) {
+    const at = excelProduct ? mediaQueue.findIndex(q => q.excelProduct === excelProduct) : 0
+    setMediaStart(at < 0 ? 0 : at)
+    setMediaOpen(true)
+  }
+
   /**
    * Stage 2: give every linked product a photo automatically, taking the
    * listing's main image. This has to run BEFORE naming, because the namer
@@ -842,15 +869,16 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Record the photo the reviewer picked in the media browser.
-  function handleMediaSaved(imageUrl: string) {
-    const target = mediaTarget
-    if (!target?.mappedId) return
+  // Record the photo the reviewer picked in the media wizard. The row keeps it
+  // even when unmatched; it reaches inventory once the product is chosen.
+  function handleMediaSaved(excelProduct: string, imageUrl: string) {
+    const target = productMappings.find(m => m.excelProduct === excelProduct)
     setProductMappings(prev =>
       prev.map(m =>
-        m.excelProduct === target.excelProduct ? { ...m, fetchedImage: imageUrl, imageStatus: 'done' } : m,
+        m.excelProduct === excelProduct ? { ...m, fetchedImage: imageUrl, imageStatus: 'done' } : m,
       ),
     )
+    if (!target?.mappedId) return
     setSystemProducts(prev => prev.map(p => (p.id === target.mappedId ? { ...p, image_url: imageUrl } : p)))
   }
 
@@ -1095,6 +1123,18 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           Fetch {imageTargets.length > 0 ? imageTargets.length : ''} photo
                           {imageTargets.length === 1 ? '' : 's'}
                         </Button>
+                        {/* Manual pass: step through each listing to choose the
+                            exact photo and any videos worth keeping. */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openMediaWizard()}
+                          disabled={photoBusy || mediaQueue.length === 0}
+                          className="h-7 gap-1 text-xs bg-transparent"
+                        >
+                          <Images className="w-3 h-3" />
+                          Review {mediaQueue.length > 0 ? mediaQueue.length : ''} one by one
+                        </Button>
                       </div>
                     </div>
 
@@ -1268,7 +1308,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                         {mapping.mappedId && (
                           <button
                             type="button"
-                            onClick={() => mapping.sourceLink && setMediaTarget(mapping)}
+                              onClick={() => mapping.sourceLink && openMediaWizard(mapping.excelProduct)}
                             disabled={!mapping.sourceLink}
                             title={
                               mapping.sourceLink
@@ -1409,7 +1449,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setMediaTarget(mapping)}
+                            onClick={() => openMediaWizard(mapping.excelProduct)}
                             title="Browse all photos and videos on the 1688 listing"
                             className="flex-shrink-0 h-8 gap-1 text-xs"
                           >
@@ -1545,12 +1585,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
     {/* Rendered as a sibling so it is not nested inside the import dialog. */}
     <PoMediaPicker
-      open={!!mediaTarget}
-      onOpenChange={o => !o && setMediaTarget(null)}
-      productId={mediaTarget?.mappedId ?? null}
-      productName={mediaTarget?.excelProduct ?? ''}
-      link={mediaTarget?.sourceLink ?? null}
-      currentImage={mediaTarget?.mappedId ? productImageById.get(mediaTarget.mappedId) : null}
+      open={mediaOpen}
+      onOpenChange={o => !o && setMediaOpen(false)}
+      queue={mediaQueue}
+      startIndex={mediaStart}
       onSaved={handleMediaSaved}
     />
     </>
