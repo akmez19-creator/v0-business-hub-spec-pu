@@ -291,13 +291,16 @@ export function PurchaseOrdersContent({
   }, [initialOrders, statusFilter, supplierFilter, search])
 
   function handleExport(format: 'xlsx' | 'csv') {
-    if (filtered.length === 0) return
-    const rows = filtered.map(orderToExportRow)
+    // When there is nothing to export, fall back to the example row so the user
+    // can still download a correctly-formatted template to fill in and re-import.
+    const isTemplate = filtered.length === 0
+    const rows = (isTemplate ? [EXAMPLE_ORDER] : filtered).map(orderToExportRow)
     const worksheet = XLSX.utils.json_to_sheet(rows)
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Purchase Orders')
     const stamp = new Date().toISOString().slice(0, 10)
-    XLSX.writeFile(workbook, `purchase-orders-${stamp}.${format}`, { bookType: format })
+    const name = isTemplate ? `purchase-orders-template-${stamp}` : `purchase-orders-${stamp}`
+    XLSX.writeFile(workbook, `${name}.${format}`, { bookType: format })
   }
 
   async function handleDeleteAll() {
@@ -335,20 +338,24 @@ export function PurchaseOrdersContent({
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={filtered.length === 0}>
+              <Button variant="outline">
                 <Download className="w-4 h-4 mr-2" />
-                Export
+                {filtered.length === 0 ? 'Download Template' : 'Export'}
                 <ChevronDown className="w-4 h-4 ml-2 opacity-70" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => handleExport('xlsx')}>
                 <FileSpreadsheet className="w-4 h-4 mr-2" />
-                Export as Excel ({filtered.length})
+                {filtered.length === 0
+                  ? 'Template as Excel'
+                  : `Export as Excel (${filtered.length})`}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleExport('csv')}>
                 <FileSpreadsheet className="w-4 h-4 mr-2" />
-                Export as CSV ({filtered.length})
+                {filtered.length === 0
+                  ? 'Template as CSV'
+                  : `Export as CSV (${filtered.length})`}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
