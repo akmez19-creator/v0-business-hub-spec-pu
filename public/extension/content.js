@@ -3189,10 +3189,8 @@ function renderOrdersForm() {
   const adPick = document.getElementById('ak-adpick');
   const adPickSuggest = document.getElementById('ak-adpick-suggest');
   const adPickPicked = document.getElementById('ak-adpick-picked');
-  let adList = [];        // all selectable ads from the cache
-  let adMatches = [];     // currently shown
-  let adActive = -1;
-  let adListLoaded = false;
+  // adList / adMatches / adActive / adListLoaded are declared above, before
+  // applyAdVisibility(), to avoid the temporal-dead-zone crash described there.
 
   // Ad and product names come from Facebook, so they are untrusted text
   // going into innerHTML - escape before rendering.
