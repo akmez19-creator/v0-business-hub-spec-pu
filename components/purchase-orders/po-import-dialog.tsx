@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles } from 'lucide-react'
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, ArrowLeft, Plus, Package, Sparkles, ImageIcon } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -49,6 +49,12 @@ interface ProductMapping {
   alternatives?: Suggestion[]
   // Set once a human has explicitly signed off on the row.
   confirmed?: boolean
+  // 1688 listing URL from the Excel "Link" column - the photo source.
+  sourceLink?: string | null
+  // Result of the image pass, kept per row so the UI can show what happened.
+  imageStatus?: 'idle' | 'fetching' | 'done' | 'skipped' | 'failed'
+  fetchedImage?: string | null
+  imageNote?: string
 }
 
 const TIER_META: Record<MatchTier, { label: string; text: string; bar: string; ring: string }> = {
@@ -126,6 +132,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [mapFilter, setMapFilter] = useState<'all' | MatchTier>('all')
   const [mapSearch, setMapSearch] = useState('')
   const [mapSort, setMapSort] = useState<'risk' | 'confidence_desc' | 'rows_desc' | 'name'>('risk')
+  const [fetchingImages, setFetchingImages] = useState(false)
+  const [imageStats, setImageStats] = useState<{ fetched: number; skipped: number; failed: number } | null>(null)
 
   useEffect(() => {
     if (open) loadSystemData()
@@ -205,8 +213,10 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   }
 
   function proceedToProductMapping() {
-    // Extract unique product names
+    // Extract unique product names, remembering the first supplier link seen
+    // for each. That link is the 1688 listing the photo will be pulled from.
     const productCounts = new Map<string, number>()
+    const productLinks = new Map<string, string>()
     for (const row of parsedData) {
       const productCol = columnMap['product_name']
       if (!productCol) continue
@@ -214,6 +224,17 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       if (val && String(val).trim() !== '') {
         const name = String(val).trim()
         productCounts.set(name, (productCounts.get(name) || 0) + 1)
+        if (!productLinks.has(name)) {
+          // "link" is the primary source; "reorder" often holds the same URL.
+          for (const field of ['link', 'reorder']) {
+            const col = columnMap[field]
+            const raw = col ? String(row[col] ?? '').trim() : ''
+            if (/1688\.com/i.test(raw)) {
+              productLinks.set(name, raw)
+              break
+            }
+          }
+        }
       }
     }
 
@@ -235,7 +256,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         if (product) matchedId = product.id
       }
 
-      productMaps.push({ excelProduct, count, mappedId: matchedId })
+      productMaps.push({
+        excelProduct,
+        count,
+        mappedId: matchedId,
+        sourceLink: productLinks.get(excelProduct) || null,
+      })
     }
 
     setProductMappings(productMaps)
@@ -505,6 +531,79 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     )
   }
 
+  // Products that are mapped, still have no photo in inventory, and carry a
+  // 1688 link we can pull one from. Mapping deliberately happens first so the
+  // photo lands on the right inventory item.
+  const productImageById = useMemo(
+    () => new Map(systemProducts.map(p => [p.id, p.image_url])),
+    [systemProducts],
+  )
+
+  const imageTargets = useMemo(
+    () => productMappings.filter(m => m.mappedId && !productImageById.get(m.mappedId) && !!m.sourceLink),
+    [productMappings, productImageById],
+  )
+
+  const missingImageNoLink = useMemo(
+    () => productMappings.filter(m => m.mappedId && !productImageById.get(m.mappedId) && !m.sourceLink).length,
+    [productMappings, productImageById],
+  )
+
+  async function fetchProductImages() {
+    if (!imageTargets.length) return
+    setFetchingImages(true)
+    setImageStats(null)
+    const targetIds = new Set(imageTargets.map(m => m.excelProduct))
+    setProductMappings(prev =>
+      prev.map(m => (targetIds.has(m.excelProduct) ? { ...m, imageStatus: 'fetching' } : m)),
+    )
+
+    try {
+      const res = await fetch('/api/purchase-orders/fetch-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: imageTargets.map(m => ({ productId: m.mappedId, link: m.sourceLink })),
+        }),
+      })
+      const data = (await res.json()) as {
+        success: boolean
+        error?: string
+        results?: { productId: string; status: 'done' | 'skipped' | 'failed'; image: string | null; note: string }[]
+        stats?: { fetched: number; skipped: number; failed: number }
+      }
+      if (!data.success) throw new Error(data.error || 'Image fetch failed')
+
+      const byProduct = new Map((data.results || []).map(r => [r.productId, r]))
+      setProductMappings(prev =>
+        prev.map(m => {
+          const r = m.mappedId ? byProduct.get(m.mappedId) : undefined
+          if (!r) return m.imageStatus === 'fetching' ? { ...m, imageStatus: 'idle' } : m
+          return { ...m, imageStatus: r.status, fetchedImage: r.image, imageNote: r.note }
+        }),
+      )
+      // Reflect the new photos locally so the "needs a photo" count settles.
+      setSystemProducts(prev =>
+        prev.map(p => {
+          const r = byProduct.get(p.id)
+          return r?.status === 'done' && r.image ? { ...p, image_url: r.image } : p
+        }),
+      )
+      if (data.stats) setImageStats(data.stats)
+    } catch (err) {
+      console.error('[v0] fetch images failed:', err)
+      setProductMappings(prev =>
+        prev.map(m =>
+          m.imageStatus === 'fetching'
+            ? { ...m, imageStatus: 'failed', imageNote: 'Request failed' }
+            : m,
+        ),
+      )
+    } finally {
+      setFetchingImages(false)
+    }
+  }
+
   // Bulk: drop every doubtful auto-match back to unmatched for a clean slate.
   function clearWeakMatches() {
     setProductMappings(prev =>
@@ -693,6 +792,49 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                     </div>
                   </div>
 
+                  {/* Photos come AFTER mapping so each one lands on the right
+                      inventory item. Products that already have a photo are
+                      left alone. */}
+                  {(imageTargets.length > 0 || imageStats) && (
+                    <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+                      <ImageIcon className="w-4 h-4 text-primary flex-shrink-0" />
+                      <div className="flex-1 min-w-0 text-xs">
+                        <div className="font-medium text-sm">Product photos from 1688</div>
+                        <div className="text-muted-foreground">
+                          {imageTargets.length > 0
+                            ? `${imageTargets.length} mapped product${imageTargets.length === 1 ? '' : 's'} still need a photo and have a supplier link.`
+                            : 'All mapped products have a photo.'}
+                          {missingImageNoLink > 0 && ` ${missingImageNoLink} more need one but have no 1688 link.`}
+                        </div>
+                        {imageStats && (
+                          <div className="mt-1 text-muted-foreground">
+                            Linked <strong className="text-foreground">{imageStats.fetched}</strong>,
+                            skipped <strong className="text-foreground">{imageStats.skipped}</strong> (already had one),
+                            failed <strong className="text-foreground">{imageStats.failed}</strong>.
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={fetchProductImages}
+                        disabled={fetchingImages || imageTargets.length === 0}
+                        className="gap-1.5"
+                      >
+                        {fetchingImages ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Fetching photos...
+                          </>
+                        ) : (
+                          <>
+                            <ImageIcon className="w-3.5 h-3.5" />
+                            Fetch {imageTargets.length} photo{imageTargets.length === 1 ? '' : 's'}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="flex items-center gap-1 rounded-lg border p-1">
                       {([
@@ -758,6 +900,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       const tier = tierOf(mapping)
                       const meta = TIER_META[tier]
                       const pct = Math.round((mapping.matchConfidence ?? (mapping.confirmed ? 1 : 0)) * 100)
+                      const rowImage =
+                        mapping.fetchedImage || (mapping.mappedId ? productImageById.get(mapping.mappedId) : null)
                       return (
                       <div
                         key={mapping.excelProduct}
@@ -772,6 +916,24 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             <div className={`h-full ${meta.bar}`} style={{ width: `${mapping.mappedId ? pct : 0}%` }} />
                           </div>
                         </div>
+                        {/* Photo slot: existing inventory photo, or the one just
+                            pulled from the supplier's 1688 listing. */}
+                        {mapping.mappedId && (
+                          <div className="w-10 h-10 flex-shrink-0 rounded border bg-background overflow-hidden flex items-center justify-center">
+                            {mapping.imageStatus === 'fetching' ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                            ) : rowImage ? (
+                              <img
+                                src={rowImage || "/placeholder.svg"}
+                                alt={`${mapping.excelProduct} product photo`}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <ImageIcon className="w-4 h-4 text-muted-foreground/40" />
+                            )}
+                          </div>
+                        )}
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate text-sm">{mapping.excelProduct}</div>
                           <div className="flex items-center gap-2 flex-wrap">
