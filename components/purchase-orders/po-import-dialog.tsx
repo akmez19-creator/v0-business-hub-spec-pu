@@ -441,7 +441,11 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); else setOpen(true) }}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className={`max-h-[90vh] overflow-y-auto ${
+            step === 'product_mapping' ? 'sm:max-w-4xl' : 'sm:max-w-2xl'
+          }`}
+        >
         <DialogHeader>
           <DialogTitle>
             {step === 'upload' && 'Step 1: Upload Purchase Order Excel'}
