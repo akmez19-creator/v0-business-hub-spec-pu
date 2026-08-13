@@ -28,14 +28,42 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import * as XLSX from 'xlsx'
 
+type MatchTier = 'exact' | 'high' | 'medium' | 'low' | 'none'
+
+interface Suggestion {
+  id: string
+  name: string
+  score: number
+}
+
 interface ProductMapping {
   excelProduct: string
   count: number
   mappedId: string | null
-  // Populated by the AI auto-match pass so the UI can flag low-confidence
-  // matches for a quick human glance-review.
+  // Populated by the AI auto-match pass so the UI can classify each row by
+  // confidence and route the reviewer to the ones that actually need a human.
   matchConfidence?: number
   matchMethod?: 'fuzzy' | 'ai' | 'manual'
+  tier?: MatchTier
+  reason?: string
+  alternatives?: Suggestion[]
+  // Set once a human has explicitly signed off on the row.
+  confirmed?: boolean
+}
+
+const TIER_META: Record<MatchTier, { label: string; text: string; bar: string; ring: string }> = {
+  exact: { label: 'Exact', text: 'text-emerald-400', bar: 'bg-emerald-500', ring: 'border-emerald-500/40' },
+  high: { label: 'High', text: 'text-green-400', bar: 'bg-green-500', ring: 'border-green-500/40' },
+  medium: { label: 'Medium', text: 'text-yellow-400', bar: 'bg-yellow-500', ring: 'border-yellow-500/40' },
+  low: { label: 'Low', text: 'text-orange-400', bar: 'bg-orange-500', ring: 'border-orange-500/40' },
+  none: { label: 'No match', text: 'text-red-400', bar: 'bg-red-500', ring: 'border-red-500/40' },
+}
+
+// A row's tier: explicit human choices always outrank the classifier.
+function tierOf(m: ProductMapping): MatchTier {
+  if (!m.mappedId) return 'none'
+  if (m.matchMethod === 'manual' || m.confirmed) return 'exact'
+  return m.tier ?? 'high'
 }
 
 interface SystemProduct {
@@ -95,8 +123,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [creatingAllProducts, setCreatingAllProducts] = useState(false)
   const [aiMatching, setAiMatching] = useState(false)
   const [aiMatchStats, setAiMatchStats] = useState<{ fuzzy: number; ai: number; unmatched: number } | null>(null)
-  const [mapFilter, setMapFilter] = useState<'all' | 'review' | 'unmatched' | 'matched'>('all')
+  const [mapFilter, setMapFilter] = useState<'all' | MatchTier>('all')
   const [mapSearch, setMapSearch] = useState('')
+  const [mapSort, setMapSort] = useState<'risk' | 'confidence_desc' | 'rows_desc' | 'name'>('risk')
 
   useEffect(() => {
     if (open) loadSystemData()
@@ -217,7 +246,14 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     setProductMappings(prev =>
       prev.map(m =>
         m.excelProduct === excelProduct
-          ? { ...m, mappedId: productId, matchMethod: 'manual', matchConfidence: undefined }
+          ? {
+              ...m,
+              mappedId: productId,
+              matchMethod: productId ? 'manual' : undefined,
+              matchConfidence: undefined,
+              tier: productId ? 'exact' : 'none',
+              confirmed: !!productId,
+            }
           : m,
       ),
     )
@@ -242,19 +278,32 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       })
       if (!res.ok) throw new Error('AI matching request failed')
       const data = (await res.json()) as {
-        matches: { excelProduct: string; matchedId: string | null; confidence: number; method: string }[]
+        matches: {
+          excelProduct: string
+          matchedId: string | null
+          confidence: number
+          method: string
+          tier?: MatchTier
+          reason?: string
+          alternatives?: Suggestion[]
+        }[]
         stats?: { fuzzy: number; ai: number; unmatched: number }
       }
       const byName = new Map(data.matches.map(m => [m.excelProduct, m]))
       setProductMappings(prev =>
         prev.map(m => {
           const match = byName.get(m.excelProduct)
-          if (!match || !match.matchedId || m.mappedId) return m
+          if (!match || m.mappedId) return m
+          // Keep the suggestions even when nothing was matched: they power the
+          // one-click quick-pick chips on unmatched rows.
           return {
             ...m,
             mappedId: match.matchedId,
             matchConfidence: match.confidence,
-            matchMethod: match.method === 'fuzzy' ? 'fuzzy' : 'ai',
+            matchMethod: match.matchedId ? (match.method === 'fuzzy' ? 'fuzzy' : 'ai') : undefined,
+            tier: match.tier,
+            reason: match.reason,
+            alternatives: match.alternatives || [],
           }
         }),
       )
@@ -411,32 +460,61 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const mappedCount = productMappings.filter(m => m.mappedId).length
   const unmappedCount = productMappings.filter(m => !m.mappedId).length
 
-  // Review buckets. A confident match (manual pick, or >=85% auto) is trusted;
-  // an auto-match below that needs a human glance; no match at all is unmatched.
-  function categoryOf(m: ProductMapping): 'matched' | 'review' | 'unmatched' {
-    if (!m.mappedId) return 'unmatched'
-    if (m.matchMethod === 'manual' || (m.matchConfidence ?? 1) >= 0.85) return 'matched'
-    return 'review'
-  }
-  const reviewCount = productMappings.filter(m => categoryOf(m) === 'review').length
+  // Tier counts drive the classification tabs and the coverage read-out.
+  const tierCounts = useMemo(() => {
+    const acc: Record<MatchTier, number> = { exact: 0, high: 0, medium: 0, low: 0, none: 0 }
+    for (const m of productMappings) acc[tierOf(m)]++
+    return acc
+  }, [productMappings])
 
-  // Sorted + filtered view. Default sort surfaces the work: low-confidence
-  // matches to check first (weakest first), then unmatched, then trusted last.
+  const coveragePct = productMappings.length
+    ? Math.round((mappedCount / productMappings.length) * 100)
+    : 0
+  // Rows a human genuinely has to look at: anything matched below "high".
+  const needsReviewCount = tierCounts.medium + tierCounts.low
+  const autoAcceptable = productMappings.filter(
+    m => m.mappedId && !m.confirmed && m.matchMethod !== 'manual' && (m.tier === 'exact' || m.tier === 'high'),
+  ).length
+
+  // Sorted + filtered view. "risk" (default) front-loads the work: doubtful
+  // matches first (weakest %), then unmatched, then the safe ones last.
   const visibleMappings = useMemo(() => {
-    const rank = { review: 0, unmatched: 1, matched: 2 } as const
+    const risk: Record<MatchTier, number> = { low: 0, medium: 1, none: 2, high: 3, exact: 4 }
     const q = mapSearch.trim().toLowerCase()
     return productMappings
-      .filter(m => (mapFilter === 'all' ? true : categoryOf(m) === mapFilter))
+      .filter(m => (mapFilter === 'all' ? true : tierOf(m) === mapFilter))
       .filter(m => (q ? m.excelProduct.toLowerCase().includes(q) : true))
       .sort((a, b) => {
-        const ca = categoryOf(a)
-        const cb = categoryOf(b)
-        if (ca !== cb) return rank[ca] - rank[cb]
-        if (ca === 'review') return (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0)
+        if (mapSort === 'name') return a.excelProduct.localeCompare(b.excelProduct)
+        if (mapSort === 'rows_desc') return b.count - a.count
+        if (mapSort === 'confidence_desc') return (b.matchConfidence ?? 0) - (a.matchConfidence ?? 0)
+        const ra = risk[tierOf(a)]
+        const rb = risk[tierOf(b)]
+        if (ra !== rb) return ra - rb
+        if (ra <= 1) return (a.matchConfidence ?? 0) - (b.matchConfidence ?? 0)
         return b.count - a.count
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productMappings, mapFilter, mapSearch])
+  }, [productMappings, mapFilter, mapSearch, mapSort])
+
+  // Bulk: sign off every safe auto-match so only the doubtful rows remain.
+  function confirmAllConfident() {
+    setProductMappings(prev =>
+      prev.map(m =>
+        m.mappedId && (m.tier === 'exact' || m.tier === 'high') ? { ...m, confirmed: true } : m,
+      ),
+    )
+  }
+
+  // Bulk: drop every doubtful auto-match back to unmatched for a clean slate.
+  function clearWeakMatches() {
+    setProductMappings(prev =>
+      prev.map(m =>
+        m.mappedId && !m.confirmed && m.matchMethod !== 'manual' && (m.tier === 'low' || m.tier === 'medium')
+          ? { ...m, mappedId: null, matchConfidence: undefined, matchMethod: undefined, tier: 'none' }
+          : m,
+      ),
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); else setOpen(true) }}>
@@ -584,13 +662,46 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                 </div>
               ) : (
                 <>
+                  {/* Coverage meter: the headline number for the whole step. */}
+                  <div className="rounded-lg border p-3">
+                    <div className="flex items-baseline justify-between mb-2">
+                      <span className="text-sm font-medium">Classification coverage</span>
+                      <span className="text-2xl font-bold tabular-nums">{coveragePct}%</span>
+                    </div>
+                    <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+                      {(['exact', 'high', 'medium', 'low'] as const).map((t) =>
+                        tierCounts[t] > 0 ? (
+                          <div
+                            key={t}
+                            className={TIER_META[t].bar}
+                            style={{ width: `${(tierCounts[t] / productMappings.length) * 100}%` }}
+                            title={`${TIER_META[t].label}: ${tierCounts[t]}`}
+                          />
+                        ) : null,
+                      )}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {(['exact', 'high', 'medium', 'low', 'none'] as const).map((t) => (
+                        <span key={t} className="flex items-center gap-1.5">
+                          <span className={`inline-block w-2 h-2 rounded-full ${TIER_META[t].bar}`} />
+                          {TIER_META[t].label}: <strong className="text-foreground">{tierCounts[t]}</strong>
+                          <span className="opacity-60">
+                            ({Math.round((tierCounts[t] / productMappings.length) * 100)}%)
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="flex items-center gap-1 rounded-lg border p-1">
                       {([
-                        { key: 'all', label: `All (${productMappings.length})` },
-                        { key: 'review', label: `Needs review (${reviewCount})` },
-                        { key: 'unmatched', label: `Unmatched (${unmappedCount})` },
-                        { key: 'matched', label: `Matched (${mappedCount})` },
+                        { key: 'all', label: 'All', n: productMappings.length },
+                        { key: 'low', label: 'Low', n: tierCounts.low },
+                        { key: 'medium', label: 'Medium', n: tierCounts.medium },
+                        { key: 'none', label: 'No match', n: tierCounts.none },
+                        { key: 'high', label: 'High', n: tierCounts.high },
+                        { key: 'exact', label: 'Exact', n: tierCounts.exact },
                       ] as const).map((tab) => (
                         <button
                           key={tab.key}
@@ -602,7 +713,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                               : 'text-muted-foreground hover:text-foreground'
                           }`}
                         >
-                          {tab.label}
+                          {tab.label} ({tab.n})
                         </button>
                       ))}
                     </div>
@@ -610,8 +721,30 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       value={mapSearch}
                       onChange={(e) => setMapSearch(e.target.value)}
                       placeholder="Search product name..."
-                      className="h-8 w-full sm:w-64 text-sm"
+                      className="h-8 w-full sm:w-56 text-sm"
                     />
+                    <Select value={mapSort} onValueChange={(v) => setMapSort(v as typeof mapSort)}>
+                      <SelectTrigger className="h-8 w-[190px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="risk">Sort: Riskiest first</SelectItem>
+                        <SelectItem value="confidence_desc">Sort: Highest confidence</SelectItem>
+                        <SelectItem value="rows_desc">Sort: Most rows</SelectItem>
+                        <SelectItem value="name">Sort: Name (A-Z)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {autoAcceptable > 0 && (
+                      <Button variant="outline" size="sm" onClick={confirmAllConfident} className="h-8 gap-1 bg-transparent">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        Accept {autoAcceptable} confident
+                      </Button>
+                    )}
+                    {needsReviewCount > 0 && (
+                      <Button variant="ghost" size="sm" onClick={clearWeakMatches} className="h-8 text-xs">
+                        Clear {needsReviewCount} weak
+                      </Button>
+                    )}
                   </div>
 
                   <ScrollArea className="h-[55vh] min-h-[360px] border rounded-lg">
@@ -621,27 +754,57 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                         No products in this view.
                       </div>
                     )}
-                    {visibleMappings.map((mapping) => (
-                      <div key={mapping.excelProduct} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                    {visibleMappings.map((mapping) => {
+                      const tier = tierOf(mapping)
+                      const meta = TIER_META[tier]
+                      const pct = Math.round((mapping.matchConfidence ?? (mapping.confirmed ? 1 : 0)) * 100)
+                      return (
+                      <div
+                        key={mapping.excelProduct}
+                        className={`flex items-center gap-3 p-3 bg-muted/50 rounded-lg border-l-2 ${meta.ring}`}
+                      >
+                        {/* Confidence read-out: percentage + a bar of the same color as the tier. */}
+                        <div className="w-12 flex-shrink-0 text-center">
+                          <div className={`text-sm font-bold tabular-nums ${meta.text}`}>
+                            {mapping.mappedId ? `${pct}%` : '--'}
+                          </div>
+                          <div className="mt-1 h-1 w-full rounded-full bg-muted overflow-hidden">
+                            <div className={`h-full ${meta.bar}`} style={{ width: `${mapping.mappedId ? pct : 0}%` }} />
+                          </div>
+                        </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate text-sm">{mapping.excelProduct}</div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs text-muted-foreground">{mapping.count} rows</span>
-                            {mapping.mappedId && mapping.matchMethod && mapping.matchMethod !== 'manual' && (
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] px-1.5 py-0 h-4 ${
-                                  (mapping.matchConfidence ?? 0) >= 0.85
-                                    ? 'border-green-500/40 text-green-600'
-                                    : (mapping.matchConfidence ?? 0) >= 0.7
-                                      ? 'border-yellow-500/40 text-yellow-600'
-                                      : 'border-orange-500/40 text-orange-600'
-                                }`}
-                              >
-                                {mapping.matchMethod === 'ai' ? 'AI' : 'Fuzzy'} {Math.round((mapping.matchConfidence ?? 0) * 100)}%
-                              </Badge>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${meta.ring} ${meta.text}`}>
+                              {meta.label}
+                              {mapping.matchMethod === 'ai' && ' - AI'}
+                              {mapping.matchMethod === 'fuzzy' && ' - Name'}
+                              {mapping.matchMethod === 'manual' && ' - Manual'}
+                            </Badge>
+                            {mapping.reason && !mapping.mappedId && (
+                              <span className="text-[10px] text-muted-foreground truncate max-w-[220px]" title={mapping.reason}>
+                                {mapping.reason}
+                              </span>
                             )}
                           </div>
+                          {/* One-click corrections from the classifier's runner-ups. */}
+                          {!mapping.confirmed && (mapping.alternatives?.length ?? 0) > 0 && (
+                            <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                              <span className="text-[10px] text-muted-foreground">Suggestions:</span>
+                              {mapping.alternatives!.slice(0, 3).map((alt) => (
+                                <button
+                                  key={alt.id}
+                                  type="button"
+                                  onClick={() => updateProductMapping(mapping.excelProduct, alt.id)}
+                                  className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground transition-colors max-w-[180px] truncate"
+                                  title={`${alt.name} (${Math.round(alt.score * 100)}% name similarity)`}
+                                >
+                                  {alt.name} <span className="opacity-60">{Math.round(alt.score * 100)}%</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                         <Select
@@ -663,7 +826,19 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           </SelectContent>
                         </Select>
                         {mapping.mappedId ? (
-                          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                          <button
+                            type="button"
+                            onClick={() => setProductMappings(prev => prev.map(x =>
+                              x.excelProduct === mapping.excelProduct ? { ...x, confirmed: !x.confirmed } : x))}
+                            title={mapping.confirmed ? 'Confirmed - click to unconfirm' : 'Click to confirm this match'}
+                            className="flex-shrink-0"
+                          >
+                            <CheckCircle
+                              className={`w-5 h-5 transition-colors ${
+                                mapping.confirmed ? 'text-green-500' : 'text-muted-foreground/40 hover:text-green-500'
+                              }`}
+                            />
+                          </button>
                         ) : (
                           <Button
                             variant="outline"
@@ -681,7 +856,8 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           </Button>
                         )}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                   </ScrollArea>
                 </>
@@ -693,9 +869,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                 {aiMatchStats && (
                   <p className="text-foreground">
                     <Sparkles className="w-3 h-3 inline mr-1 text-primary" />
-                    AI auto-match: <strong>{aiMatchStats.fuzzy}</strong> by name similarity,{' '}
-                    <strong>{aiMatchStats.ai}</strong> by AI, <strong>{aiMatchStats.unmatched}</strong> left unmatched.
-                    Review the colored confidence badges and adjust any that look wrong.
+                    Classifier: <strong>{aiMatchStats.fuzzy}</strong> by name similarity,{' '}
+                    <strong>{aiMatchStats.ai}</strong> by AI, <strong>{aiMatchStats.unmatched}</strong> unresolved.
+                    Work the <strong>Low</strong> and <strong>Medium</strong> tabs first, then accept the confident ones in bulk.
                   </p>
                 )}
               </div>
