@@ -149,6 +149,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [mapSort, setMapSort] = useState<'risk' | 'confidence_desc' | 'rows_desc' | 'name'>('risk')
   // Row whose 1688 listing is open in the media browser.
   const [mediaTarget, setMediaTarget] = useState<ProductMapping | null>(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoProgress, setPhotoProgress] = useState<{ done: number; total: number } | null>(null)
+  const [photoStats, setPhotoStats] = useState<{ fetched: number; failed: number } | null>(null)
   const [namingBusy, setNamingBusy] = useState(false)
   const [namingProgress, setNamingProgress] = useState<{ done: number; total: number } | null>(null)
   const [applyingNames, setApplyingNames] = useState(false)
@@ -575,6 +578,81 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     [productMappings, productImageById],
   )
 
+  // Rows the namer can actually SEE. Naming quality depends on this, so it is
+  // surfaced in stage 3 rather than left implicit.
+  const withPhotoCount = useMemo(
+    () =>
+      productMappings.filter(m => m.fetchedImage || (m.mappedId && productImageById.get(m.mappedId))).length,
+    [productMappings, productImageById],
+  )
+
+  // Stage 3 is "ready" once nothing is still waiting on a photo it could have
+  // pulled. Rows with no 1688 link can never get one, so they never block.
+  const photoReady = imageTargets.length === 0
+
+  /**
+   * Stage 2: give every linked product a photo automatically, taking the
+   * listing's main image. This has to run BEFORE naming, because the namer
+   * reads the photo - without it stage 3 would be guessing from PO text alone.
+   * Individual photos can still be refined afterwards with "Choose media".
+   */
+  async function fetchAllPhotos() {
+    const targets = imageTargets.filter(m => m.mappedId && m.sourceLink)
+    if (!targets.length) return
+
+    setPhotoBusy(true)
+    setPhotoStats(null)
+    setPhotoProgress({ done: 0, total: targets.length })
+    const PAGE = 25
+    let done = 0
+    let fetched = 0
+    let failed = 0
+
+    try {
+      for (let i = 0; i < targets.length; i += PAGE) {
+        const page = targets.slice(i, i + PAGE)
+        const res = await fetch('/api/purchase-orders/product-media', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: page.map(m => ({ productId: m.mappedId, link: m.sourceLink })),
+          }),
+        })
+        const data = (await res.json()) as {
+          success: boolean
+          error?: string
+          results?: { productId: string; status: 'done' | 'skipped' | 'failed'; image: string | null }[]
+        }
+        if (!data.success) throw new Error(data.error || 'Photo fetch failed')
+
+        const byId = new Map((data.results || []).map(r => [r.productId, r]))
+        setSystemProducts(prev =>
+          prev.map(p => {
+            const r = byId.get(p.id)
+            return r?.status === 'done' && r.image ? { ...p, image_url: r.image } : p
+          }),
+        )
+        setProductMappings(prev =>
+          prev.map(m => {
+            const r = m.mappedId ? byId.get(m.mappedId) : undefined
+            return r?.status === 'done' && r.image
+              ? { ...m, fetchedImage: r.image, imageStatus: 'done' }
+              : m
+          }),
+        )
+        fetched += (data.results || []).filter(r => r.status === 'done').length
+        failed += (data.results || []).filter(r => r.status === 'failed').length
+        done += page.length
+        setPhotoProgress({ done, total: targets.length })
+      }
+      setPhotoStats({ fetched, failed })
+    } catch (err) {
+      console.error('[v0] bulk photo fetch failed:', err)
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
   /**
    * Ask the AI for a better name for each row, using the product PHOTO as the
    * primary signal and the existing inventory names as the house vocabulary.
@@ -915,58 +993,81 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                       <p className="text-[11px] text-muted-foreground">
                         {hasClassified
                           ? needsReviewCount > 0
-                            ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below.`
-                            : 'Every match is confident.'
+                            ? `${needsReviewCount} uncertain match${needsReviewCount === 1 ? '' : 'es'} to review below, then fetch photos.`
+                            : 'Every match is confident. Fetch photos next.'
                           : `${tierCounts.exact} matched exactly by name or alias. Run AI Match for the remaining ${unmappedCount}.`}
                       </p>
                     </div>
 
-                    {/* Stage 2 - photos */}
+                    {/* Stage 2 - photos. Bulk first, hand-picking second. */}
                     <div className="rounded-lg border p-3 flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          2. Attach photos
+                          2. Fetch photos
                         </span>
                         <ImageIcon className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <div className="text-xl font-bold tabular-nums">
-                        {mappedCount - imageTargets.length - missingImageNoLink}
+                        {withPhotoCount}
                         <span className="text-sm font-normal text-muted-foreground"> / {mappedCount} have a photo</span>
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        {imageTargets.length > 0 ? (
-                          <>
-                            {imageTargets.length} can pull media from their 1688 listing. Use{' '}
-                            <strong>Choose media</strong> on a row to pick the photos and videos to keep.
-                          </>
-                        ) : (
-                          'All mapped products with a supplier link have a photo.'
-                        )}
+                        {photoBusy && photoProgress
+                          ? `Fetching ${photoProgress.done} of ${photoProgress.total}...`
+                          : photoStats
+                            ? `Added ${photoStats.fetched} photo${photoStats.fetched === 1 ? '' : 's'}${photoStats.failed > 0 ? `, ${photoStats.failed} had none to pull` : ''}. Refine any of them with Choose media.`
+                            : imageTargets.length > 0
+                              ? `${imageTargets.length} can pull a photo from their 1688 listing. Do this before naming.`
+                              : 'All mapped products with a supplier link have a photo.'}
                         {missingImageNoLink > 0 && ` ${missingImageNoLink} have no 1688 link.`}
                       </p>
+                      <div className="flex flex-wrap gap-1.5 mt-auto">
+                        <Button
+                          size="sm"
+                          onClick={fetchAllPhotos}
+                          disabled={photoBusy || imageTargets.length === 0}
+                          className="h-7 gap-1 text-xs"
+                        >
+                          {photoBusy ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <ImageIcon className="w-3 h-3" />
+                          )}
+                          Fetch {imageTargets.length > 0 ? imageTargets.length : ''} photo
+                          {imageTargets.length === 1 ? '' : 's'}
+                        </Button>
+                      </div>
                     </div>
 
-                    {/* Stage 3 - naming */}
-                    <div className="rounded-lg border p-3 flex flex-col gap-2">
+                    {/* Stage 3 - naming. Deliberately gated on stage 2: the
+                        namer reads the photo, so running it first wastes calls
+                        on text-only guesses. */}
+                    <div className={`rounded-lg border p-3 flex flex-col gap-2 ${photoReady ? '' : 'opacity-60'}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           3. Clean up names
                         </span>
                         <Wand2 className="w-4 h-4 text-muted-foreground" />
                       </div>
+                      <div className="text-xl font-bold tabular-nums">
+                        {withPhotoCount}
+                        <span className="text-sm font-normal text-muted-foreground"> can be named from a photo</span>
+                      </div>
                       <p className="text-[11px] text-muted-foreground">
                         {namingBusy && namingProgress
                           ? `Naming ${namingProgress.done} of ${namingProgress.total}...`
                           : pendingNames.length > 0
                             ? `${pendingNames.length} suggestion${pendingNames.length === 1 ? '' : 's'} waiting for your approval.`
-                            : 'Two-word names from the product photo, matched to your existing naming style.'}
+                            : photoReady
+                              ? 'Two-word names read from the product photo, matched to your existing naming style.'
+                              : `Fetch photos first - ${imageTargets.length} product${imageTargets.length === 1 ? '' : 's'} still have none, and the namer reads the photo.`}
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-auto">
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => suggestNames('all')}
-                          disabled={namingBusy || productMappings.length === 0}
+                          disabled={namingBusy || photoBusy || productMappings.length === 0}
                           className="h-7 gap-1 text-xs bg-transparent"
                         >
                           {namingBusy ? (
@@ -981,7 +1082,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             size="sm"
                             variant="ghost"
                             onClick={() => suggestNames('unmatched')}
-                            disabled={namingBusy}
+                            disabled={namingBusy || photoBusy}
                             className="h-7 text-xs"
                           >
                             Unmatched only

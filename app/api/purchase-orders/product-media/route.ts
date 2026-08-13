@@ -171,6 +171,116 @@ export async function POST(request: Request) {
   }
 }
 
+/** One listing lookup, returning the parsed payload or null. */
+async function lookupOffer(link: string, token: string): Promise<Raw | null> {
+  const offerId = offerIdFrom(link)
+  if (!offerId) return null
+  try {
+    const res = await fetch(
+      `${TMAPI_BASE}/1688/item_detail?item_id=${encodeURIComponent(offerId)}&apiToken=${encodeURIComponent(token)}`,
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(25_000), cache: 'no-store' },
+    )
+    if (!res.ok) return null
+    const json = (await res.json().catch(() => null)) as Raw | null
+    if (!json || apiError(json)) return null
+    return (json.data ?? {}) as Raw
+  } catch {
+    return null
+  }
+}
+
+/**
+ * PATCH { items: [{ productId, link }] } -> first pass that gives every
+ * product a photo automatically.
+ *
+ * This exists because naming reads the photo: with hundreds of products,
+ * hand-picking media for each one before naming is not realistic. So this
+ * takes the listing's main image as a sensible default, and the reviewer
+ * refines individual ones with the media browser afterwards.
+ *
+ * It deliberately NEVER overwrites an existing photo - an automatic guess
+ * must not clobber a human choice.
+ */
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
+
+    const token = process.env.TMAPI_TOKEN
+    if (!token) {
+      return NextResponse.json({ success: false, error: 'TMAPI_TOKEN is not configured' }, { status: 500 })
+    }
+
+    const body = await request.json()
+    const raw = Array.isArray(body?.items) ? body.items : []
+    // Capped so one request cannot run past the function timeout.
+    const items = raw
+      .map((i: Raw) => ({ productId: String(i?.productId || '').trim(), link: String(i?.link || '').trim() }))
+      .filter((i: { productId: string; link: string }) => i.productId && i.link)
+      .slice(0, 25)
+
+    if (!items.length) {
+      return NextResponse.json({ success: false, error: 'No products with a supplier link' }, { status: 400 })
+    }
+
+    // Only fill genuine gaps, so re-running is safe and cheap.
+    const { data: existing } = await supabase
+      .from('products')
+      .select('id, image_url')
+      .in('id', items.map((i: { productId: string }) => i.productId))
+    const hasPhoto = new Set((existing || []).filter(p => p.image_url).map(p => p.id))
+
+    const results: { productId: string; status: 'done' | 'skipped' | 'failed'; image: string | null }[] = []
+
+    // Small concurrency: fast enough, but gentle on the upstream API.
+    const queue = [...items]
+    async function worker() {
+      for (;;) {
+        const item = queue.shift()
+        if (!item) return
+        if (hasPhoto.has(item.productId)) {
+          results.push({ productId: item.productId, status: 'skipped', image: null })
+          continue
+        }
+        const data = await lookupOffer(item.link, token!)
+        const image = data ? imagesFrom(data)[0] ?? null : null
+        if (!image) {
+          results.push({ productId: item.productId, status: 'failed', image: null })
+          continue
+        }
+        const { error } = await supabase
+          .from('products')
+          .update({ image_url: image })
+          .eq('id', item.productId)
+          .is('image_url', null)
+        results.push({
+          productId: item.productId,
+          status: error ? 'failed' : 'done',
+          image: error ? null : image,
+        })
+      }
+    }
+    await Promise.all([worker(), worker(), worker()])
+
+    return NextResponse.json({
+      success: true,
+      results,
+      stats: {
+        fetched: results.filter(r => r.status === 'done').length,
+        skipped: results.filter(r => r.status === 'skipped').length,
+        failed: results.filter(r => r.status === 'failed').length,
+      },
+    })
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Bulk photo fetch failed'
+    console.error('[v0] po bulk photo error:', msg)
+    return NextResponse.json({ success: false, error: msg }, { status: 500 })
+  }
+}
+
 /**
  * PUT { productId, imageUrl } -> attach the chosen photo to the inventory item.
  *
