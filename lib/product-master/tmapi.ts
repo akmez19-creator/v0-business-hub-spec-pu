@@ -104,6 +104,30 @@ export type MarketplaceHit = {
   price: string | null
   sold: number
   pageUrl: string | null
+  /** Who is selling it, for judging whether a supplier is worth buying from */
+  seller: SellerInfo
+  /** Combined sales-volume and reliability ranking, see scoreHit */
+  score: number
+}
+
+/**
+ * Supplier trust signals.
+ *
+ * Sales volume alone is a poor guide on 1688: a listing can show high volume
+ * and still come from a reseller who disappears next month. Years trading and
+ * repurchase rate are what separate a factory worth re-ordering from a churn
+ * account, so they are captured alongside the numbers.
+ */
+export type SellerInfo = {
+  name: string | null
+  /** Years the shop has traded on the platform */
+  years: number
+  /** Share of buyers who ordered again, 0-100 */
+  repurchaseRate: number
+  /** Gold supplier / verified factory / assessed supplier */
+  verified: boolean
+  /** Shop rating out of 5, when the platform gives one */
+  rating: number
 }
 
 /**
@@ -164,6 +188,56 @@ function priceOf(o: Raw): string | null {
   return str(p)
 }
 
+/** Truthy across the several shapes these APIs use for a boolean flag. */
+const flag = (v: unknown): boolean =>
+  v === true || v === 1 || v === '1' || (typeof v === 'string' && /^(true|yes|y)$/i.test(v))
+
+/**
+ * Pull supplier details out of a listing.
+ *
+ * 1688 sometimes nests these under seller_info/shop_info and sometimes puts
+ * them flat on the item, so both are searched before giving up.
+ */
+function sellerOf(o: Raw): SellerInfo {
+  const nestedRaw = pick(o, ['seller_info', 'shop_info', 'company_info', 'seller', 'shop', 'company'])
+  const nested = (nestedRaw && typeof nestedRaw === 'object' ? nestedRaw : {}) as Raw
+  // Flat keys win only when the nested record has nothing, since the nested
+  // block is the more specific of the two when both are present.
+  const from = (keys: string[]): unknown => pick(nested, keys) ?? pick(o, keys)
+
+  const rate = num(from(['repurchase_rate', 'repeat_rate', 'repurchaseRate', 'return_buyer_rate']))
+
+  return {
+    name: str(from(['company_name', 'shop_name', 'seller_nick', 'nick', 'name', 'supplier_name'])),
+    years: num(from(['tp_year', 'biz_years', 'years', 'shop_age', 'tp_member_year', 'gold_year'])),
+    // Some payloads express this as a 0-1 fraction rather than a percentage.
+    repurchaseRate: rate > 0 && rate <= 1 ? Math.round(rate * 100) : Math.round(rate),
+    verified:
+      flag(from(['is_gold_supplier', 'gold_supplier', 'is_verified', 'verified', 'is_tp', 'powerful_merchant'])) ||
+      num(from(['gold_year'])) > 0,
+    rating: num(from(['score', 'shop_score', 'rating', 'star', 'seller_score', 'composite_score'])),
+  }
+}
+
+/**
+ * Rank a listing by how safe it looks to buy from.
+ *
+ * Volume is scored on a log curve deliberately: the gap between 0 and 500
+ * units sold says far more about a product than the gap between 10k and 20k,
+ * and a linear score would let one runaway listing bury every other result.
+ * Reliability is then added on top so a proven supplier outranks a slightly
+ * higher-volume unknown.
+ */
+export function scoreHit(sold: number, seller: SellerInfo): number {
+  const volume = Math.log10(Math.max(0, sold) + 1) * 22 // ~0-100 by 10k sold
+  const tenure = Math.min(seller.years, 10) * 3 // a decade of trading caps out
+  const loyalty = Math.min(seller.repurchaseRate, 60) * 0.5
+  const badge = seller.verified ? 15 : 0
+  // Ratings are out of 5, and anything under 4 is a warning rather than a boost
+  const stars = seller.rating > 0 ? Math.max(0, seller.rating - 4) * 10 : 0
+  return Math.round(volume + tenure + loyalty + badge + stars)
+}
+
 export function normalizeHit(raw: Raw, platform: MarketplacePlatform): MarketplaceHit | null {
   const id = str(pick(raw, ['item_id', 'num_iid', 'product_id', 'id', 'goods_id', 'asin', 'itemId']))
   const title = str(pick(raw, ['title', 'name', 'product_name', 'subject', 'goods_name']))
@@ -173,6 +247,8 @@ export function normalizeHit(raw: Raw, platform: MarketplacePlatform): Marketpla
   const images = imageList(raw)
   const image = url(pick(raw, ['main_image', 'image', 'pic_url', 'img', 'main_img', 'cover', 'thumbnail'])) ?? images[0] ?? null
   const video = url(pick(raw, ['video', 'video_url', 'main_video', 'item_video', 'videoUrl']))
+  const sold = num(pick(raw, ['sold', 'sales', 'sold_count', 'volume', 'quantity_sold', 'sale_quantity', 'monthSold']))
+  const seller = sellerOf(raw)
 
   return {
     id: `${platform.id}:${id}`,
@@ -184,8 +260,10 @@ export function normalizeHit(raw: Raw, platform: MarketplacePlatform): Marketpla
     // Keep the main photo first so the Poster Studio default matches the tile
     images: image ? [image, ...images.filter((i) => i !== image)] : images,
     price: priceOf(raw),
-    sold: num(pick(raw, ['sold', 'sales', 'sold_count', 'volume', 'quantity_sold'])),
+    sold,
     pageUrl: url(pick(raw, ['detail_url', 'url', 'product_url', 'item_url', 'link'])),
+    seller,
+    score: scoreHit(sold, seller),
   }
 }
 

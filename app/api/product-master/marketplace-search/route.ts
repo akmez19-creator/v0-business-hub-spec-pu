@@ -230,7 +230,16 @@ export async function POST(request: Request) {
     // lookup is a paid call, so this runs only when the filter is actually on.
     const enriched = videoOnly ? await attachVideos(merged, token) : merged
 
-    const results = videoOnly ? enriched.filter((h) => h.video) : enriched
+    // "best" abandons the marketplace interleave in favour of a single ranked
+    // list. Sourcing a replacement supplier is a different job from browsing:
+    // there the spread across platforms matters, here only the strongest
+    // seller does. Ties break on raw volume so the order is never arbitrary.
+    const ordered =
+      String(body?.sort || '') === 'best'
+        ? [...enriched].sort((a, b) => b.score - a.score || b.sold - a.sold)
+        : enriched
+
+    const results = videoOnly ? ordered.filter((h) => h.video) : ordered
     const withVideo = enriched.filter((h) => h.video).length
 
     // Every source failing is an outage worth surfacing, not an empty result

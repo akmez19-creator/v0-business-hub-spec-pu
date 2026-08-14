@@ -12,12 +12,14 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  Search,
   SkipForward,
   Star,
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { SupplierFinder } from './po-supplier-finder'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -199,6 +201,7 @@ export function PoMediaPicker({
   const [linkDraft, setLinkDraft] = useState('')
   const [linkBusy, setLinkBusy] = useState(false)
   const [editingLink, setEditingLink] = useState(false)
+  const [finding, setFinding] = useState(false)
 
   // Listing media cached by link, so revisiting never refetches.
   const cache = useRef<Map<string, MediaItem[]>>(new Map())
@@ -300,6 +303,7 @@ export function PoMediaPicker({
     if (!open || !current) return
     setLinkDraft('')
     setEditingLink(false)
+    setFinding(false)
     void loadSavedLinks(current)
   }, [open, current, loadSavedLinks])
 
@@ -563,6 +567,16 @@ export function PoMediaPicker({
               >
                 {effectiveLink ? 'Change link' : 'Add link'}
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-6 gap-1 px-2 text-[11px]"
+                onClick={() => setFinding(v => !v)}
+              >
+                <Search className="h-3 w-3" />
+                Find by photo
+              </Button>
             </div>
 
             {savedLinks.length > 0 && (
@@ -627,6 +641,21 @@ export function PoMediaPicker({
           </div>
         )}
 
+        {current && finding && (
+          <SupplierFinder
+            // Remount per product so one product's results never linger on
+            // the next.
+            key={current.excelProduct}
+            productName={current.productName}
+            currentImage={current.currentImage}
+            onClose={() => setFinding(false)}
+            onPick={url => {
+              setFinding(false)
+              void applyLink(url)
+            }}
+          />
+        )}
+
         {loading && (
           <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -655,6 +684,12 @@ export function PoMediaPicker({
                 <Button size="sm" onClick={() => setEditingLink(true)} className="gap-1.5">
                   <Link2 className="h-3.5 w-3.5" />
                   Use a new link
+                </Button>
+                {/* The usual case for a dead listing: the photo survives even
+                    though the seller is gone, so search 1688 with it. */}
+                <Button size="sm" variant="secondary" onClick={() => setFinding(true)} className="gap-1.5">
+                  <Search className="h-3.5 w-3.5" />
+                  Find by photo
                 </Button>
               </div>
             </div>
