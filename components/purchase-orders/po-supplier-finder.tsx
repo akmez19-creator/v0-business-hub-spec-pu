@@ -120,8 +120,9 @@ export function SupplierFinder({
         body: JSON.stringify({
           imageUrl: reference,
           // 1688 is the only source with image search, and the only one these
-          // products are actually bought from.
-          platforms: ['1688'],
+          // products are actually bought from. Its platform id is 'alibaba' -
+          // '1688' matches no platform and the search is rejected outright.
+          platforms: ['alibaba'],
           sort: 'best',
           query: productName,
         }),
@@ -138,7 +139,9 @@ export function SupplierFinder({
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-3 rounded-lg border bg-card p-3">
+    // h-full so the results list gets every spare pixel of the overlay; the
+    // border lives on the overlay wrapper instead of being drawn twice.
+    <div className="flex h-full min-h-0 flex-col gap-3 bg-card p-3">
       <div className="flex items-center gap-2">
         <Search className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold">Find a supplier by photo</h3>
@@ -149,7 +152,7 @@ export function SupplierFinder({
       </div>
 
       <div
-        className="flex flex-wrap items-center gap-3 rounded-md border border-dashed p-3"
+        className="flex flex-shrink-0 flex-wrap items-center gap-3 rounded-md border border-dashed p-3"
         onDragOver={e => e.preventDefault()}
         onDrop={e => {
           e.preventDefault()

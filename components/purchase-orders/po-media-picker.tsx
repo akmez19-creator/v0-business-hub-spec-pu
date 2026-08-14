@@ -205,6 +205,8 @@ export function PoMediaPicker({
 
   // Listing media cached by link, so revisiting never refetches.
   const cache = useRef<Map<string, MediaItem[]>>(new Map())
+  // Incremented per load so a superseded request cannot write state, see show()
+  const loadTicket = useRef(0)
 
   const current: MediaQueueItem | undefined = queue[index]
   const total = queue.length
@@ -233,16 +235,28 @@ export function PoMediaPicker({
     }
   }, [open, startIndex])
 
-  /** Returns whether the listing loaded, so a dead link can be recorded. */
+  /**
+   * Returns whether the listing loaded, so a dead link can be recorded.
+   *
+   * Loads are versioned because several can be in flight at once - a dead
+   * Excel link followed by the saved replacement, say. Without this the slow
+   * failure lands after the fast success and paints "Item not found" over
+   * media that loaded perfectly well.
+   */
   const show = useCallback(async (link: string | null | undefined, force = false) => {
+    const ticket = ++loadTicket.current
+    const current = () => loadTicket.current === ticket
+
     setError('')
     if (!link) {
       setMedia([])
+      setLoading(false)
       return false
     }
     const hit = cache.current.get(link)
     if (hit && !force) {
       setMedia(hit)
+      setLoading(false)
       return true
     }
     setLoading(true)
@@ -250,13 +264,15 @@ export function PoMediaPicker({
     try {
       const items = await loadMedia(link)
       cache.current.set(link, items)
-      setMedia(items)
+      if (current()) setMedia(items)
       return true
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load listing media')
+      if (current()) setError(e instanceof Error ? e.message : 'Could not load listing media')
       return false
     } finally {
-      setLoading(false)
+      // Only the newest request owns the spinner: an older one clearing it
+      // would hide a load that is still running.
+      if (current()) setLoading(false)
     }
   }, [])
 
@@ -502,7 +518,7 @@ export function PoMediaPicker({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={`flex flex-col overflow-hidden ${
+        className={`relative flex flex-col overflow-hidden ${
           maximised
             ? 'h-[96vh] w-[98vw] max-w-none sm:max-w-none'
             : 'h-[90vh] sm:max-w-4xl xl:max-w-5xl'
@@ -641,19 +657,24 @@ export function PoMediaPicker({
           </div>
         )}
 
+        {/* An overlay rather than a block in the flow: inline it pushed the
+            photo grid off the bottom of the dialog, and comparing candidate
+            sellers needs the room anyway. */}
         {current && finding && (
-          <SupplierFinder
-            // Remount per product so one product's results never linger on
-            // the next.
-            key={current.excelProduct}
-            productName={current.productName}
-            currentImage={current.currentImage}
-            onClose={() => setFinding(false)}
-            onPick={url => {
-              setFinding(false)
-              void applyLink(url)
-            }}
-          />
+          <div className="absolute inset-x-4 bottom-16 top-24 z-20 flex flex-col overflow-hidden rounded-lg border bg-card shadow-lg">
+            <SupplierFinder
+              // Remount per product so one product's results never linger on
+              // the next.
+              key={current.excelProduct}
+              productName={current.productName}
+              currentImage={current.currentImage}
+              onClose={() => setFinding(false)}
+              onPick={url => {
+                setFinding(false)
+                void applyLink(url)
+              }}
+            />
+          </div>
         )}
 
         {loading && (
@@ -663,8 +684,10 @@ export function PoMediaPicker({
           </div>
         )}
 
-        {error && !loading && (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
+        {/* Only when there is nothing to show. A replacement link that loaded
+            fine must not sit under a failure notice for the dead one. */}
+        {error && !loading && media.length === 0 && (
+          <div className="flex flex-shrink-0 items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
             <div className="flex-1">
               <p className="text-destructive">{error}</p>
