@@ -521,7 +521,10 @@ export function PoMediaPicker({
         // Sized against the viewport, not a fixed max-w step. Judging product
         // photos is the whole job here, and a 1024px cap turned them into
         // thumbnails on a wide monitor while most of the screen sat empty.
-        className={`relative flex flex-col overflow-hidden ${
+        // Do NOT add `relative` here: it overrides the base dialog's `fixed`,
+        // which drops the dialog out of viewport centring and sends it halfway
+        // down the page. A fixed element already anchors absolute children.
+        className={`flex flex-col overflow-hidden ${
           maximised
             ? 'h-[96vh] w-[98vw] max-w-none sm:max-w-none'
             : 'h-[92vh] w-[94vw] max-w-[1800px] sm:max-w-[1800px]'
