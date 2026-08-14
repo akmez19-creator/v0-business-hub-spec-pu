@@ -1,7 +1,7 @@
 'use client'
 
 import React from "react"
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -145,6 +145,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   const [importProgress, setImportProgress] = useState(0)
   const [result, setResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
   const [creatingProduct, setCreatingProduct] = useState<string | null>(null)
+  // Why a create failed, keyed by row. Without this the + button just spun and
+  // went back to idle, so a blocked insert looked like a dead button.
+  const [createError, setCreateError] = useState<Record<string, string>>({})
   const [creatingAllProducts, setCreatingAllProducts] = useState(false)
   const [aiMatching, setAiMatching] = useState(false)
   const [aiMatchStats, setAiMatchStats] = useState<{ fuzzy: number; ai: number; unmatched: number } | null>(null)
@@ -296,6 +299,47 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   }
 
   /**
+   * Look a name up in inventory the same way the initial pass does: alias
+   * first, then product name, on a normalised key. Accepting an AI name has
+   * to re-run this - the whole point of the rename is that the clean name may
+   * match something the messy PO spelling never could.
+   */
+  const findLocalMatch = useCallback(
+    (name: string): { id: string; method: 'alias' | 'exact' } | null => {
+      const key = normalizeName(name)
+      if (!key) return null
+      const alias = productAliases.find(a => normalizeName(a.alias_name) === key)
+      if (alias) return { id: alias.product_id, method: 'alias' }
+      const product = systemProducts.find(p => normalizeName(p.name) === key)
+      return product ? { id: product.id, method: 'exact' } : null
+    },
+    [productAliases, systemProducts],
+  )
+
+  /**
+   * Apply an approved name to a row and immediately try to match on it, so the
+   * dropdown, tier and progress bar all move in one step instead of leaving
+   * the row sitting on "No match" with the new name shown underneath.
+   */
+  function applyAcceptedName(m: ProductMapping): ProductMapping {
+    const name = m.suggestedName
+    if (!name) return m
+    const next: ProductMapping = { ...m, nameStatus: 'accepted' }
+    if (m.mappedId) return next
+    const hit = findLocalMatch(name)
+    if (!hit) return next
+    void attachPendingMedia(hit.id, m)
+    return {
+      ...next,
+      mappedId: hit.id,
+      matchMethod: hit.method,
+      matchConfidence: 1,
+      tier: 'exact',
+      confirmed: true,
+    }
+  }
+
+  /**
    * Attach media the reviewer chose before this product existed. Runs when a
    * row is matched or created, which is the first moment the clips and photo
    * have an owner in the product master.
@@ -440,6 +484,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   async function handleCreateProduct(excelProduct: string) {
     setCreatingProduct(excelProduct)
+    // Drop any previous failure so a retry does not show a stale reason.
+    setCreateError(prev => {
+      if (!prev[excelProduct]) return prev
+      const { [excelProduct]: _removed, ...rest } = prev
+      return rest
+    })
     try {
       const supabase = createClient()
       // If the reviewer accepted an AI name for this row, create the product
@@ -463,14 +513,25 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
           source: 'po_import'
         }).select().maybeSingle()
       } else if (error) {
-        // Product might already exist, try to find it
+        // Most likely the product already exists. Look under BOTH names: the
+        // row may have been renamed, in which case the existing product is
+        // under the accepted name and the PO spelling would never find it.
         const { data: existing } = await supabase
           .from('products')
           .select('id, name, image_url')
-          .ilike('name', excelProduct.trim())
-          .single()
+          .or(`name.ilike.${createName},name.ilike.${excelProduct.trim()}`)
+          .limit(1)
+          .maybeSingle()
         if (existing) {
+          setSystemProducts(prev =>
+            prev.some(p => p.id === existing.id) ? prev : [...prev, existing],
+          )
           updateProductMapping(excelProduct, existing.id)
+        } else {
+          // Nothing created and nothing found - say so instead of resetting
+          // the button and leaving the reviewer guessing.
+          console.log('[v0] create product failed:', error.message)
+          setCreateError(prev => ({ ...prev, [excelProduct]: error.message }))
         }
       }
     } finally {
@@ -813,15 +874,16 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     setProductMappings(prev =>
       prev.map(m =>
         m.excelProduct === nameEdit.key
-          ? {
+          ? // Same accept path as the AI suggestion, so a hand-typed name that
+            // happens to name a real product matches it straight away.
+            applyAcceptedName({
               ...m,
               suggestedName: value,
-              nameStatus: 'accepted',
               // The reason and the "from photo" badge described the AI's guess.
               // Neither is true once a human has overridden it.
               suggestedReason: undefined,
               suggestedSource: undefined,
-            }
+            })
           : m,
       ),
     )
@@ -835,7 +897,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   function acceptName(excelProduct: string) {
     setProductMappings(prev =>
-      prev.map(m => (m.excelProduct === excelProduct ? { ...m, nameStatus: 'accepted' } : m)),
+      prev.map(m => (m.excelProduct === excelProduct ? applyAcceptedName(m) : m)),
     )
   }
 
@@ -858,7 +920,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
 
   function acceptAllNames() {
     setProductMappings(prev =>
-      prev.map(m => (m.nameStatus === 'ready' ? { ...m, nameStatus: 'accepted' } : m)),
+      prev.map(m => (m.nameStatus === 'ready' ? applyAcceptedName(m) : m)),
     )
   }
 
@@ -1520,6 +1582,14 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                                   Rename manually
                                 </button>
                               )}
+                              {createError[mapping.excelProduct] && (
+                                <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-destructive">
+                                  <AlertCircle className="w-3 h-3 flex-shrink-0 mt-px" />
+                                  <span>
+                                    Could not add to inventory: {createError[mapping.excelProduct]}
+                                  </span>
+                                </div>
+                              )}
                             </>
                           )}
                         </div>
@@ -1574,14 +1644,21 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                             size="sm"
                             onClick={() => handleCreateProduct(mapping.excelProduct)}
                             disabled={creatingProduct === mapping.excelProduct}
-                            title={`Add "${mapping.excelProduct}" to inventory`}
-                            className="flex-shrink-0 bg-transparent"
+                            // Name the actual outcome: after a rename the new
+                            // product uses the accepted name, not the PO text.
+                            title={`Create "${
+                              mapping.nameStatus === 'accepted' && mapping.suggestedName
+                                ? mapping.suggestedName
+                                : mapping.excelProduct
+                            }" in inventory`}
+                            className="flex-shrink-0 gap-1 bg-transparent"
                           >
                             {creatingProduct === mapping.excelProduct ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               <Plus className="w-4 h-4" />
                             )}
+                            <span className="text-[11px]">Create</span>
                           </Button>
                         )}
                       </div>
