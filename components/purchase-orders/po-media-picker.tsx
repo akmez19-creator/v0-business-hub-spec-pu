@@ -701,12 +701,29 @@ export function PoMediaPicker({
             <p className="text-center text-sm text-muted-foreground">
               {effectiveLink
                 ? 'This listing has no photos or videos.'
-                : 'This product has no 1688 link yet - add one above to browse a listing.'}
+                : 'No supplier listing on file for this product yet.'}
             </p>
-            <Button variant="outline" onClick={skipAndNext} className="gap-1.5 bg-transparent">
-              Skip to next
-              <ArrowRight className="w-4 h-4" />
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {/* These rows reach the wizard with nothing to show, so the two
+                  ways of getting a listing lead the way out - skipping is the
+                  fallback, not the first option offered. */}
+              {!effectiveLink && (
+                <>
+                  <Button size="sm" onClick={() => setEditingLink(true)} className="gap-1.5">
+                    <Link2 className="h-3.5 w-3.5" />
+                    Paste a link
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setFinding(true)} className="gap-1.5">
+                    <Search className="h-3.5 w-3.5" />
+                    Find by photo
+                  </Button>
+                </>
+              )}
+              <Button variant="outline" size="sm" onClick={skipAndNext} className="gap-1.5 bg-transparent">
+                Skip to next
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         )}
 

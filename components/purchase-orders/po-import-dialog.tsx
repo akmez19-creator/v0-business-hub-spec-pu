@@ -674,13 +674,15 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
   )
   const photoReady = pendingPhotos.length === 0
 
-  // Every row with a listing to browse, in table order, so the wizard steps
-  // through them predictably. Unmatched rows are included: their pick is held
-  // on the row and written to inventory once the product exists.
+  // Every row, in table order, so the wizard steps through them predictably.
+  // Rows with no Excel link are included too: the picker can now recover a
+  // listing from the product photo, so a missing link is something to fix in
+  // the wizard rather than a reason to hide the row from it.
+  // Unmatched rows are included as well - their pick is held on the row and
+  // written to inventory once the product exists.
   const mediaQueue: MediaQueueItem[] = useMemo(
     () =>
       productMappings
-        .filter(m => m.sourceLink)
         .map(m => ({
           excelProduct: m.excelProduct,
           productName: m.suggestedName || m.excelProduct,
