@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle,
   ImageIcon,
+  Link2,
   Loader2,
   Maximize2,
   Minimize2,
@@ -16,6 +17,7 @@ import {
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -39,6 +41,15 @@ export interface MediaPicks {
 }
 
 /** One product to review. `productId` is null while the row is still unmatched. */
+/** A supplier listing on file for a product, as stored in product_links. */
+interface SavedLink {
+  id: string
+  url: string
+  label: string | null
+  is_active: boolean
+  status: string
+}
+
 export interface MediaQueueItem {
   excelProduct: string
   productName: string
@@ -178,6 +189,17 @@ export function PoMediaPicker({
   const [chosenCover, setChosenCover] = useState<Record<string, string>>({})
   const [chosenVideos, setChosenVideos] = useState<Record<string, string[]>>({})
 
+  // Listings die and sellers rotate, so the spreadsheet link is only ever the
+  // first candidate. A replacement pasted here overrides it for this session
+  // and is saved against the product for every future import.
+  const [linkOverride, setLinkOverride] = useState<Record<string, string>>({})
+  // Keyed by row: without the key, links fetched for the previous product
+  // would briefly be applied to this one while the new request is in flight.
+  const [saved, setSaved] = useState<{ key: string; links: SavedLink[] }>({ key: '', links: [] })
+  const [linkDraft, setLinkDraft] = useState('')
+  const [linkBusy, setLinkBusy] = useState(false)
+  const [editingLink, setEditingLink] = useState(false)
+
   // Listing media cached by link, so revisiting never refetches.
   const cache = useRef<Map<string, MediaItem[]>>(new Map())
 
@@ -190,6 +212,17 @@ export function PoMediaPicker({
   // one still ends up with a sensible product image.
   const cover = current ? chosenCover[current.excelProduct] || pickedImages[0] || null : null
 
+  const savedLinks = current && saved.key === current.excelProduct ? saved.links : []
+  const activeSaved = savedLinks.find(l => l.is_active && l.status !== 'dead')?.url ?? null
+  const excelLink = current?.link ?? null
+  const excelDead = !!excelLink && savedLinks.some(l => l.url === excelLink && l.status === 'dead')
+  // What the reviewer just pasted wins. Otherwise the spreadsheet column is
+  // used, unless it is already known to be dead - then fall through to
+  // whichever seller was last marked active for this product.
+  const effectiveLink = current
+    ? (linkOverride[current.excelProduct] ?? (excelDead ? (activeSaved ?? excelLink) : (excelLink ?? activeSaved)))
+    : null
+
   useEffect(() => {
     if (open) {
       setIndex(startIndex)
@@ -197,16 +230,17 @@ export function PoMediaPicker({
     }
   }, [open, startIndex])
 
+  /** Returns whether the listing loaded, so a dead link can be recorded. */
   const show = useCallback(async (link: string | null | undefined, force = false) => {
     setError('')
     if (!link) {
       setMedia([])
-      return
+      return false
     }
     const hit = cache.current.get(link)
     if (hit && !force) {
       setMedia(hit)
-      return
+      return true
     }
     setLoading(true)
     setMedia([])
@@ -214,24 +248,106 @@ export function PoMediaPicker({
       const items = await loadMedia(link)
       cache.current.set(link, items)
       setMedia(items)
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load listing media')
+      return false
     } finally {
       setLoading(false)
     }
   }, [])
 
+  const loadSavedLinks = useCallback(async (item: MediaQueueItem) => {
+    const params = item.productId
+      ? `productId=${encodeURIComponent(item.productId)}`
+      : `productName=${encodeURIComponent(item.productName)}`
+    try {
+      const res = await fetch(`/api/product-master/links?${params}`)
+      const json = await res.json()
+      setSaved({ key: item.excelProduct, links: json.success ? json.links || [] : [] })
+    } catch {
+      setSaved({ key: item.excelProduct, links: [] })
+    }
+  }, [])
+
+  /** Save a link against the product, then refresh the history. */
+  const recordLink = useCallback(
+    async (item: MediaQueueItem, url: string, status: 'ok' | 'dead', makeActive: boolean) => {
+      try {
+        const res = await fetch('/api/product-master/links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId: item.productId,
+            productName: item.productName,
+            url,
+            status,
+            // A dead listing must never be left as the active seller.
+            makeActive: makeActive && status === 'ok',
+          }),
+        })
+        const json = await res.json()
+        if (json.success) void loadSavedLinks(item)
+      } catch {
+        // Keeping history is a convenience: never let it block the review.
+      }
+    },
+    [loadSavedLinks],
+  )
+
+  // Pull the link history whenever the product changes.
+  useEffect(() => {
+    if (!open || !current) return
+    setLinkDraft('')
+    setEditingLink(false)
+    void loadSavedLinks(current)
+  }, [open, current, loadSavedLinks])
+
   // Load the current listing, then warm the next one in the background.
   useEffect(() => {
     if (!open || !current) return
-    void show(current.link)
+    const item = current
+    const link = effectiveLink
+    void (async () => {
+      const ok = await show(link)
+      if (!link) return
+      // Record the outcome, but only when it changes. The spreadsheet link
+      // earns its place in the history the first time it works, and a 404 is
+      // remembered so the next import does not resurrect a dead listing.
+      const links = saved.key === item.excelProduct ? saved.links : []
+      const status = ok ? 'ok' : 'dead'
+      const known = links.find(l => l.url === link)
+      if (!known || known.status !== status) {
+        void recordLink(item, link, status, ok && !links.some(l => l.is_active))
+      }
+    })()
+
     const next = queue[index + 1]
     if (next?.link && !cache.current.has(next.link)) {
       void loadMedia(next.link)
         .then(items => cache.current.set(next.link as string, items))
         .catch(() => null)
     }
-  }, [open, index, current, queue, show])
+  }, [open, index, current, queue, show, effectiveLink, saved, recordLink])
+
+  /** Load a pasted or re-selected listing, and remember it for next time. */
+  async function applyLink(raw: string) {
+    const url = raw.trim()
+    if (!current) return
+    if (!/^https?:\/\//i.test(url)) {
+      setError('That does not look like a link')
+      return
+    }
+    setLinkBusy(true)
+    setLinkOverride(prev => ({ ...prev, [current.excelProduct]: url }))
+    const ok = await show(url, true)
+    await recordLink(current, url, ok ? 'ok' : 'dead', true)
+    if (ok) {
+      setLinkDraft('')
+      setEditingLink(false)
+    }
+    setLinkBusy(false)
+  }
 
   const images = media.filter(m => m.kind === 'image')
   const videos = media.filter(m => m.kind === 'video')
@@ -323,7 +439,7 @@ export function PoMediaPicker({
             images: pickedImages,
             primaryUrl: cover,
             source: '1688',
-            sourceUrl: current.link,
+            sourceUrl: effectiveLink,
           }),
         })
         const json = await res.json()
@@ -346,7 +462,7 @@ export function PoMediaPicker({
               fileUrl: url,
               source: '1688',
               sourceId: url,
-              sourceUrl: current.link,
+              sourceUrl: effectiveLink,
               duration: 0,
               width: 0,
               height: 0,
@@ -419,6 +535,98 @@ export function PoMediaPicker({
           </DialogDescription>
         </DialogHeader>
 
+        {/* Sellers rotate, so the listing behind a product is not fixed. Every
+            link tried is kept, and any of them can be made current again. */}
+        {current && (
+          <div className="flex flex-shrink-0 flex-col gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link2 className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+              {effectiveLink ? (
+                <a
+                  href={effectiveLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="max-w-[420px] truncate text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  title={effectiveLink}
+                >
+                  {effectiveLink}
+                </a>
+              ) : (
+                <span className="text-[11px] text-muted-foreground">No listing link for this product</span>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto h-6 bg-transparent px-2 text-[11px]"
+                onClick={() => setEditingLink(v => !v)}
+              >
+                {effectiveLink ? 'Change link' : 'Add link'}
+              </Button>
+            </div>
+
+            {savedLinks.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Sellers on file</span>
+                {savedLinks.map((l, i) => {
+                  const isCurrent = l.url === effectiveLink
+                  const dead = l.status === 'dead'
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      onClick={() => void applyLink(l.url)}
+                      disabled={linkBusy}
+                      title={l.url}
+                      className={`rounded border px-1.5 py-0.5 text-[10px] transition disabled:opacity-50 ${
+                        isCurrent
+                          ? 'border-primary bg-primary/10 text-foreground'
+                          : 'border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      } ${dead ? 'line-through opacity-60' : ''}`}
+                    >
+                      {l.label || `Link ${savedLinks.length - i}`}
+                      {dead && ' (dead)'}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {editingLink && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  autoFocus
+                  value={linkDraft}
+                  onChange={e => setLinkDraft(e.target.value)}
+                  onKeyDown={e => {
+                    // Enter can be confirming an IME candidate rather than
+                    // submitting, so never commit mid-composition.
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void applyLink(linkDraft)
+                    }
+                    if (e.key === 'Escape') setEditingLink(false)
+                  }}
+                  placeholder="Paste the new 1688 listing link"
+                  aria-label="New listing link"
+                  className="h-7 w-[420px] max-w-full text-[11px]"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  disabled={!linkDraft.trim() || linkBusy}
+                  onClick={() => void applyLink(linkDraft)}
+                >
+                  {linkBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  Load listing
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -431,14 +639,24 @@ export function PoMediaPicker({
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
             <div className="flex-1">
               <p className="text-destructive">{error}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void show(current?.link ?? null, true)}
-                className="mt-2 bg-transparent"
-              >
-                Try again
-              </Button>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                If the seller has pulled this listing, paste a replacement link above - retrying the same dead URL will
+                not bring it back.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void show(effectiveLink, true)}
+                  className="bg-transparent"
+                >
+                  Try again
+                </Button>
+                <Button size="sm" onClick={() => setEditingLink(true)} className="gap-1.5">
+                  <Link2 className="h-3.5 w-3.5" />
+                  Use a new link
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -446,9 +664,9 @@ export function PoMediaPicker({
         {!loading && !error && media.length === 0 && (
           <div className="flex flex-col items-center gap-3 py-12">
             <p className="text-center text-sm text-muted-foreground">
-              {current?.link
+              {effectiveLink
                 ? 'This listing has no photos or videos.'
-                : 'This product has no 1688 link, so there is nothing to browse.'}
+                : 'This product has no 1688 link yet - add one above to browse a listing.'}
             </p>
             <Button variant="outline" onClick={skipAndNext} className="gap-1.5 bg-transparent">
               Skip to next
