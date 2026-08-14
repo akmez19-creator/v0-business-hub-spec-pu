@@ -937,8 +937,13 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); else setOpen(true) }}>
       <DialogTrigger asChild>{children}</DialogTrigger>
         <DialogContent
-          className={`max-h-[90vh] overflow-y-auto ${
-            step === 'product_mapping' ? 'sm:max-w-4xl xl:max-w-6xl' : 'sm:max-w-2xl'
+          // The mapping step is a wide table of products, so it follows the
+          // viewport instead of a fixed max-w step. The upload and column
+          // steps are short forms that would only look stretched.
+          className={`max-h-[92vh] overflow-y-auto ${
+            step === 'product_mapping'
+              ? 'w-[94vw] max-w-[1800px] sm:max-w-[1800px]'
+              : 'sm:max-w-3xl'
           }`}
         >
         <DialogHeader>

@@ -518,10 +518,13 @@ export function PoMediaPicker({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        // Sized against the viewport, not a fixed max-w step. Judging product
+        // photos is the whole job here, and a 1024px cap turned them into
+        // thumbnails on a wide monitor while most of the screen sat empty.
         className={`relative flex flex-col overflow-hidden ${
           maximised
             ? 'h-[96vh] w-[98vw] max-w-none sm:max-w-none'
-            : 'h-[90vh] sm:max-w-4xl xl:max-w-5xl'
+            : 'h-[92vh] w-[94vw] max-w-[1800px] sm:max-w-[1800px]'
         }`}
       >
         {/* Fixed height rather than max-height: the footer then has a stable
