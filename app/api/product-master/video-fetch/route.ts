@@ -202,8 +202,24 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: `Upstream error ${upstream.status}` }, { status: 502 })
     }
 
+    // Some 1688 CDN nodes answer without a content-type. Falling back to
+    // octet-stream makes a <video> refuse to play, so guess from the path
+    // before resorting to it.
+    const fromExtension = (() => {
+      const path = new URL(src).pathname.toLowerCase()
+      if (path.endsWith('.webm')) return 'video/webm'
+      if (path.endsWith('.mov')) return 'video/quicktime'
+      if (path.endsWith('.mp4') || path.endsWith('.m4v')) return 'video/mp4'
+      if (path.endsWith('.png')) return 'image/png'
+      if (path.endsWith('.webp')) return 'image/webp'
+      if (path.endsWith('.gif')) return 'image/gif'
+      if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg'
+      return null
+    })()
+
     const headers = new Headers({
-      'Content-Type': upstream.headers.get('content-type') || (inline ? 'application/octet-stream' : 'video/mp4'),
+      'Content-Type':
+        upstream.headers.get('content-type') || fromExtension || (inline ? 'application/octet-stream' : 'video/mp4'),
       'Content-Disposition': inline ? 'inline' : `attachment; filename="${filename}"`,
       'Cache-Control': inline ? 'public, max-age=3600' : 'no-store',
     })

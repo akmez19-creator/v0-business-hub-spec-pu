@@ -9,7 +9,6 @@ import {
   CheckCircle,
   ImageIcon,
   Loader2,
-  Play,
   SkipForward,
   Star,
   Video,
@@ -67,6 +66,80 @@ async function loadMedia(link: string): Promise<MediaItem[]> {
 }
 
 /**
+ * Where playback starts. 1688 clips nearly always open on a logo card or a
+ * blank frame, so the opening seconds show nothing worth judging.
+ */
+const VIDEO_START_AT = 3
+
+/**
+ * A listing video that loads and plays on its own.
+ *
+ * It never waits for a click: the reviewer is deciding keep-or-skip on dozens
+ * of products, and a click per clip is the slowest part of that loop.
+ */
+function ListingVideo({ item }: { item: MediaItem }) {
+  const [status, setStatus] = useState<'loading' | 'playing' | 'error'>('loading')
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const seeked = useRef(false)
+
+  return (
+    <div className="relative">
+      <video
+        ref={videoRef}
+        // The `#t=` fragment tells the browser to begin at that offset. Paired
+        // with the Range support in the proxy it pulls bytes from around the
+        // 3s mark instead of dragging the whole clip down from 1688 first.
+        src={`${proxied(item.url)}#t=${VIDEO_START_AT}`}
+        poster={item.poster ? proxied(item.poster) : undefined}
+        controls
+        // Muted is what makes autoplay legal in every browser; without it the
+        // clip silently refuses to start.
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="auto"
+        onLoadedMetadata={e => {
+          // Safari ignores the media fragment often enough to need a manual
+          // seek. Skipped on short clips, where 3s would land past the end.
+          const el = e.currentTarget
+          if (!seeked.current && Number.isFinite(el.duration) && el.duration > VIDEO_START_AT + 0.5) {
+            el.currentTime = VIDEO_START_AT
+          }
+          seeked.current = true
+        }}
+        onPlaying={() => setStatus('playing')}
+        onError={() => setStatus('error')}
+        className="aspect-square w-full bg-black object-contain"
+      />
+      {status === 'loading' && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 text-[11px] text-white">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading from 1688...
+        </div>
+      )}
+      {status === 'error' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 px-3 text-center text-[11px] text-white">
+          <span>This clip would not load.</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-6 text-[11px]"
+            onClick={() => {
+              setStatus('loading')
+              seeked.current = false
+              videoRef.current?.load()
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Steps through the queue one product at a time: see every photo and video on
  * that supplier listing, pick the ones to keep, then move to the next product.
  *
@@ -93,7 +166,6 @@ export function PoMediaPicker({
   const [error, setError] = useState('')
   const [media, setMedia] = useState<MediaItem[]>([])
   const [saving, setSaving] = useState(false)
-  const [playing, setPlaying] = useState<string | null>(null)
   const [doneCount, setDoneCount] = useState(0)
 
   // Per-product selections, keyed by row, so Back restores earlier picks.
@@ -124,7 +196,6 @@ export function PoMediaPicker({
   }, [open, startIndex])
 
   const show = useCallback(async (link: string | null | undefined, force = false) => {
-    setPlaying(null)
     setError('')
     if (!link) {
       setMedia([])
@@ -387,35 +458,10 @@ export function PoMediaPicker({
                             picked ? 'border-primary ring-1 ring-primary' : 'border-border'
                           }`}
                         >
-                          {playing === v.url ? (
-                            <video
-                              src={proxied(v.url)}
-                              poster={v.poster ? proxied(v.poster) : undefined}
-                              controls
-                              autoPlay
-                              className="aspect-square w-full bg-black object-contain"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setPlaying(v.url)}
-                              className="relative block w-full"
-                              aria-label="Play video"
-                            >
-                              {v.poster ? (
-                                <img
-                                  src={proxied(v.poster) || '/placeholder.svg'}
-                                  alt=""
-                                  className="aspect-square w-full object-cover"
-                                />
-                              ) : (
-                                <div className="aspect-square w-full bg-muted" />
-                              )}
-                              <span className="absolute inset-0 flex items-center justify-center bg-black/40">
-                                <Play className="w-8 h-8 text-white" />
-                              </span>
-                            </button>
-                          )}
+                          {/* Keyed on the URL so moving to the next product
+                              mounts a fresh element instead of reusing the
+                              previous product's clip. */}
+                          <ListingVideo key={v.url} item={v} />
                           <button
                             type="button"
                             onClick={() => toggleVideo(v.url)}
