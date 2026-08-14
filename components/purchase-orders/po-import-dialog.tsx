@@ -796,6 +796,41 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Which row is being typed into, plus the draft text. Kept apart from the
+  // mapping so abandoning a half-typed edit cannot damage the row behind it.
+  const [nameEdit, setNameEdit] = useState<{ key: string; value: string } | null>(null)
+
+  /**
+   * Commit a hand-typed name. It lands in the same field the AI writes to, so
+   * renaming, product creation and media attach all consume it unchanged.
+   */
+  function saveCustomName() {
+    if (!nameEdit) return
+    const value = nameEdit.value.trim()
+    if (!value) return
+    setProductMappings(prev =>
+      prev.map(m =>
+        m.excelProduct === nameEdit.key
+          ? {
+              ...m,
+              suggestedName: value,
+              nameStatus: 'accepted',
+              // The reason and the "from photo" badge described the AI's guess.
+              // Neither is true once a human has overridden it.
+              suggestedReason: undefined,
+              suggestedSource: undefined,
+            }
+          : m,
+      ),
+    )
+    setNameEdit(null)
+  }
+
+  /** Open the inline editor seeded with the best name currently on the row. */
+  function startNameEdit(m: ProductMapping) {
+    setNameEdit({ key: m.excelProduct, value: m.suggestedName || m.excelProduct })
+  }
+
   function acceptName(excelProduct: string) {
     setProductMappings(prev =>
       prev.map(m => (m.excelProduct === excelProduct ? { ...m, nameStatus: 'accepted' } : m)),
@@ -1361,57 +1396,124 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                               ))}
                             </div>
                           )}
-                          {/* AI name proposal, accepted or rejected per row. */}
-                          {mapping.nameStatus === 'thinking' && (
-                            <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-muted-foreground">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              Naming from photo...
-                            </div>
-                          )}
-                          {mapping.suggestedName && mapping.nameStatus === 'ready' && (
+                          {/* AI name proposal: accept it, keep the old name, or
+                              overrule it with one typed by hand. */}
+                          {nameEdit?.key === mapping.excelProduct ? (
                             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                              <Wand2 className="w-3 h-3 text-primary flex-shrink-0" />
-                              <span className="text-[11px] text-muted-foreground">Rename to</span>
-                              <span className="text-[11px] font-semibold">{mapping.suggestedName}</span>
-                              {mapping.suggestedSource === 'vision' && (
-                                <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 border-primary/40 text-primary">
-                                  from photo
-                                </Badge>
-                              )}
-                              {mapping.suggestedReason && (
-                                <span className="text-[10px] text-muted-foreground truncate max-w-[200px]" title={mapping.suggestedReason}>
-                                  {mapping.suggestedReason}
-                                </span>
-                              )}
+                              <Input
+                                autoFocus
+                                value={nameEdit.value}
+                                onChange={e => setNameEdit({ key: mapping.excelProduct, value: e.target.value })}
+                                onKeyDown={e => {
+                                  // A CJK IME uses Enter to confirm a candidate,
+                                  // so committing on it would truncate typing.
+                                  if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    saveCustomName()
+                                  }
+                                  if (e.key === 'Escape') setNameEdit(null)
+                                }}
+                                placeholder="Type a product name"
+                                aria-label="Product name"
+                                className="h-7 w-[240px] text-[11px]"
+                              />
                               <button
                                 type="button"
-                                onClick={() => acceptName(mapping.excelProduct)}
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground hover:opacity-90"
+                                onClick={saveCustomName}
+                                disabled={!nameEdit.value.trim()}
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
                               >
-                                Accept
+                                Save name
                               </button>
                               <button
                                 type="button"
-                                onClick={() => rejectName(mapping.excelProduct)}
+                                onClick={() => setNameEdit(null)}
                                 className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground"
                               >
-                                Keep current
+                                Cancel
                               </button>
                             </div>
-                          )}
-                          {mapping.suggestedName && mapping.nameStatus === 'accepted' && (
-                            <div className="flex items-center gap-1.5 mt-1.5 text-[11px]">
-                              <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
-                              <span className="text-muted-foreground">Will be named</span>
-                              <span className="font-semibold">{mapping.suggestedName}</span>
-                              <button
-                                type="button"
-                                onClick={() => rejectName(mapping.excelProduct)}
-                                className="text-[10px] text-muted-foreground underline hover:text-foreground"
-                              >
-                                undo
-                              </button>
-                            </div>
+                          ) : (
+                            <>
+                              {mapping.nameStatus === 'thinking' && (
+                                <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-muted-foreground">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Naming from photo...
+                                </div>
+                              )}
+                              {mapping.suggestedName && mapping.nameStatus === 'ready' && (
+                                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                  <Wand2 className="w-3 h-3 text-primary flex-shrink-0" />
+                                  <span className="text-[11px] text-muted-foreground">Rename to</span>
+                                  <span className="text-[11px] font-semibold">{mapping.suggestedName}</span>
+                                  {mapping.suggestedSource === 'vision' && (
+                                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 border-primary/40 text-primary">
+                                      from photo
+                                    </Badge>
+                                  )}
+                                  {mapping.suggestedReason && (
+                                    <span className="text-[10px] text-muted-foreground truncate max-w-[200px]" title={mapping.suggestedReason}>
+                                      {mapping.suggestedReason}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => acceptName(mapping.excelProduct)}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground hover:opacity-90"
+                                  >
+                                    Accept
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => startNameEdit(mapping)}
+                                    className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => rejectName(mapping.excelProduct)}
+                                    className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-accent-foreground"
+                                  >
+                                    Keep current
+                                  </button>
+                                </div>
+                              )}
+                              {mapping.suggestedName && mapping.nameStatus === 'accepted' && (
+                                <div className="flex items-center gap-1.5 mt-1.5 text-[11px]">
+                                  <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+                                  <span className="text-muted-foreground">Will be named</span>
+                                  <span className="font-semibold">{mapping.suggestedName}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => startNameEdit(mapping)}
+                                    className="text-[10px] text-muted-foreground underline hover:text-foreground"
+                                  >
+                                    edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => rejectName(mapping.excelProduct)}
+                                    className="text-[10px] text-muted-foreground underline hover:text-foreground"
+                                  >
+                                    undo
+                                  </button>
+                                </div>
+                              )}
+                              {/* Rows the AI never named still need a way in,
+                                  otherwise naming depends on a suggestion
+                                  existing first. */}
+                              {!mapping.suggestedName && mapping.nameStatus !== 'thinking' && (
+                                <button
+                                  type="button"
+                                  onClick={() => startNameEdit(mapping)}
+                                  className="mt-1.5 w-fit text-[10px] text-muted-foreground underline hover:text-foreground"
+                                >
+                                  Rename manually
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                         <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
