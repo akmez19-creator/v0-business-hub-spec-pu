@@ -15,6 +15,7 @@ import {
   Search,
   SkipForward,
   Star,
+  Upload,
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -40,6 +41,12 @@ export interface MediaPicks {
   cover: string | null
   images: string[]
   videos: string[]
+  /**
+   * Which of the above are your own uploads rather than listing media. Carried
+   * through so a row that is still unmatched records them as uploads when the
+   * product finally exists, instead of crediting them to a 1688 listing.
+   */
+  uploaded: string[]
 }
 
 /** One product to review. `productId` is null while the row is still unmatched. */
@@ -202,6 +209,15 @@ export function PoMediaPicker({
   const [linkBusy, setLinkBusy] = useState(false)
   const [editingLink, setEditingLink] = useState(false)
   const [finding, setFinding] = useState(false)
+
+  // Your own photos and clips, keyed by row. Kept apart from `media` because
+  // that holds the listing and is wiped on every (re)load - an upload stored
+  // there would vanish the moment a link was pasted or retried. Some products
+  // are simply not on 1688, and for those this is the only source of a photo.
+  const [ownMedia, setOwnMedia] = useState<Record<string, MediaItem[]>>({})
+  const [uploading, setUploading] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
 
   // Listing media cached by link, so revisiting never refetches.
   const cache = useRef<Map<string, MediaItem[]>>(new Map())
@@ -369,8 +385,85 @@ export function PoMediaPicker({
     setLinkBusy(false)
   }
 
-  const images = media.filter(m => m.kind === 'image')
-  const videos = media.filter(m => m.kind === 'video')
+  // Your uploads lead, because when a product has no listing they are the only
+  // media there is. Everything downstream - the grids, select all, the cover
+  // fallback, the counts - reads these two lists, so uploads behave exactly
+  // like listing media without touching any of that logic.
+  const own = current ? ownMedia[current.excelProduct] ?? [] : []
+  const shown = [...own, ...media]
+  const ownUrls = new Set(own.map(m => m.url))
+  const images = shown.filter(m => m.kind === 'image')
+  const videos = shown.filter(m => m.kind === 'video')
+
+  /**
+   * Upload your own photos or clips for this product and keep them straight
+   * away. Files go to blob storage first: everything downstream (the gallery
+   * POST, the deferred attach for an unmatched row) works in URLs, not Files.
+   */
+  const takeFiles = useCallback(
+    async (files: File[]) => {
+      if (!current || files.length === 0) return
+      const usable = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'))
+      if (usable.length === 0) {
+        setError('Those files are not images or videos')
+        return
+      }
+      const key = current.excelProduct
+      setError('')
+      setUploading(true)
+      try {
+        for (const file of usable) {
+          const form = new FormData()
+          form.append('file', file)
+          const res = await fetch('/api/upload', { method: 'POST', body: form })
+          const json = await res.json()
+          if (!res.ok || !json.url) throw new Error(json.error || 'Upload failed')
+
+          const kind: MediaItem['kind'] = file.type.startsWith('video/') ? 'video' : 'image'
+          setOwnMedia(prev => {
+            const list = prev[key] ?? []
+            if (list.some(m => m.url === json.url)) return prev
+            return { ...prev, [key]: [...list, { url: json.url, kind }] }
+          })
+
+          // Auto-keep it. You went to the trouble of uploading it, so having
+          // to then tick it would just be a second step for the same decision.
+          if (kind === 'video') {
+            setChosenVideos(prev => {
+              const list = prev[key] ?? []
+              return list.includes(json.url) ? prev : { ...prev, [key]: [...list, json.url] }
+            })
+          } else {
+            setChosenImages(prev => {
+              const list = prev[key] ?? []
+              return list.includes(json.url) ? prev : { ...prev, [key]: [...list, json.url] }
+            })
+            setChosenCover(prev => (prev[key] ? prev : { ...prev, [key]: json.url }))
+          }
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Upload failed')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [current],
+  )
+
+  // Paste a screenshot straight in. For a product with no listing this is the
+  // quickest route from "photo on my screen" to "photo on the product".
+  useEffect(() => {
+    if (!open || finding) return
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? [])
+      if (files.length > 0) {
+        e.preventDefault()
+        void takeFiles(files)
+      }
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [open, finding, takeFiles])
 
   function toggleImage(url: string) {
     if (!current) return
@@ -450,20 +543,39 @@ export function PoMediaPicker({
       // has no product yet, so its picks are handed back to the import dialog
       // and written once the product exists.
       if (pickedImages.length > 0 && current.productId) {
-        const res = await fetch('/api/product-master/images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productId: current.productId,
-            productName: current.productName,
-            images: pickedImages,
-            primaryUrl: cover,
+        // Your own photos are recorded as uploads, not as 1688 media: they have
+        // no listing behind them, and mislabelling them would point a later
+        // re-source at a supplier page that never showed this photo.
+        const batches = [
+          {
+            images: pickedImages.filter(u => !ownUrls.has(u)),
             source: '1688',
             sourceUrl: effectiveLink,
-          }),
-        })
-        const json = await res.json()
-        if (!json.success) throw new Error(json.error || 'Could not save the photos')
+          },
+          { images: pickedImages.filter(u => ownUrls.has(u)), source: 'upload', sourceUrl: null },
+        ].filter(b => b.images.length > 0)
+
+        // The cover's batch must go LAST. The route falls back to the first
+        // photo of whatever it is given when no primaryUrl matches, so a batch
+        // running after the cover's would silently take the product image.
+        batches.sort((a, b) => Number(!!cover && a.images.includes(cover)) - Number(!!cover && b.images.includes(cover)))
+
+        for (const batch of batches) {
+          const res = await fetch('/api/product-master/images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productId: current.productId,
+              productName: current.productName,
+              images: batch.images,
+              primaryUrl: cover && batch.images.includes(cover) ? cover : undefined,
+              source: batch.source,
+              sourceUrl: batch.sourceUrl,
+            }),
+          })
+          const json = await res.json()
+          if (!json.success) throw new Error(json.error || 'Could not save the photos')
+        }
       }
 
       // Selected videos go to the shared clip library by URL. The route
@@ -478,11 +590,11 @@ export function PoMediaPicker({
             body: JSON.stringify({
               productId: current.productId,
               productName: current.productName,
-              name: `${current.productName} - 1688 clip`,
+              name: `${current.productName} - ${ownUrls.has(url) ? 'uploaded clip' : '1688 clip'}`,
               fileUrl: url,
-              source: '1688',
+              source: ownUrls.has(url) ? 'upload' : '1688',
               sourceId: url,
-              sourceUrl: effectiveLink,
+              sourceUrl: ownUrls.has(url) ? null : effectiveLink,
               duration: 0,
               width: 0,
               height: 0,
@@ -499,6 +611,7 @@ export function PoMediaPicker({
         cover,
         images: current.productId ? [] : pickedImages,
         videos: current.productId ? [] : pickedVideos,
+        uploaded: current.productId ? [] : [...pickedImages, ...pickedVideos].filter(u => ownUrls.has(u)),
       })
       setDoneCount(c => c + 1)
       advance()
@@ -529,7 +642,45 @@ export function PoMediaPicker({
             ? 'h-[96vh] w-[98vw] max-w-none sm:max-w-none'
             : 'h-[92vh] w-[94vw] max-w-[1800px] sm:max-w-[1800px]'
         }`}
+        // Drop anywhere in the dialog rather than onto a small target - with a
+        // photo already dragged from a folder, the whole window is the aim.
+        onDragOver={e => {
+          if (!e.dataTransfer.types.includes('Files')) return
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={e => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+          setDragging(false)
+        }}
+        onDrop={e => {
+          if (!e.dataTransfer.types.includes('Files')) return
+          e.preventDefault()
+          setDragging(false)
+          void takeFiles(Array.from(e.dataTransfer.files))
+        }}
       >
+        {/* One input for every upload entry point in this dialog. */}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          hidden
+          onChange={e => {
+            void takeFiles(Array.from(e.target.files ?? []))
+            // Reset so re-picking the same file still fires a change event.
+            e.target.value = ''
+          }}
+        />
+        {dragging && (
+          <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/85">
+            <p className="flex items-center gap-2 text-sm font-medium text-primary">
+              <Upload className="h-4 w-4" />
+              Drop to add to {current?.productName || 'this product'}
+            </p>
+          </div>
+        )}
         {/* Fixed height rather than max-height: the footer then has a stable
             place to sit, instead of being pushed off-screen by a long grid. */}
         <DialogHeader className="flex-shrink-0 gap-2">
@@ -692,7 +843,7 @@ export function PoMediaPicker({
 
         {/* Only when there is nothing to show. A replacement link that loaded
             fine must not sit under a failure notice for the dead one. */}
-        {error && !loading && media.length === 0 && (
+        {error && !loading && shown.length === 0 && (
           <div className="flex flex-shrink-0 items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
             <div className="flex-1">
@@ -720,12 +871,24 @@ export function PoMediaPicker({
                   <Search className="h-3.5 w-3.5" />
                   Find by photo
                 </Button>
+                {/* If the product was never on 1688, no link and no image
+                    search will help - your own photo is the only way through. */}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => fileInput.current?.click()}
+                  disabled={uploading}
+                  className="gap-1.5"
+                >
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Upload your own
+                </Button>
               </div>
             </div>
           </div>
         )}
 
-        {!loading && !error && media.length === 0 && (
+        {!loading && !error && shown.length === 0 && (
           <div className="flex flex-col items-center gap-3 py-12">
             <p className="text-center text-sm text-muted-foreground">
               {effectiveLink
@@ -733,12 +896,22 @@ export function PoMediaPicker({
                 : 'No supplier listing on file for this product yet.'}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              {/* These rows reach the wizard with nothing to show, so the two
-                  ways of getting a listing lead the way out - skipping is the
-                  fallback, not the first option offered. */}
+              {/* Not every product is on 1688. Uploading your own photo is a
+                  first-class way out of this screen, not a consolation prize:
+                  for those products it is the only photo that will ever exist,
+                  and it still becomes the product image for Poster and Reels. */}
+              <Button size="sm" onClick={() => fileInput.current?.click()} disabled={uploading} className="gap-1.5">
+                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Upload your own photo
+              </Button>
               {!effectiveLink && (
                 <>
-                  <Button size="sm" onClick={() => setEditingLink(true)} className="gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setEditingLink(true)}
+                    className="gap-1.5"
+                  >
                     <Link2 className="h-3.5 w-3.5" />
                     Paste a link
                   </Button>
@@ -753,10 +926,13 @@ export function PoMediaPicker({
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </div>
+            <p className="text-center text-[11px] text-muted-foreground">
+              Drag a file in or press Ctrl+V to paste a screenshot.
+            </p>
           </div>
         )}
 
-        {!loading && media.length > 0 && (
+        {!loading && shown.length > 0 && (
           // min-h-0 is what actually makes this scroll: a flex child defaults
           // to min-height:auto and so refuses to shrink under its content,
           // pushing the footer off-screen instead of overflowing internally.

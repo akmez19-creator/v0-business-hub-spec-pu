@@ -65,6 +65,9 @@ interface ProductMapping {
   // master once the product is matched or created.
   pendingImages?: string[]
   pendingVideos?: string[]
+  // Which of the pending media are your own uploads rather than listing media,
+  // so they are credited correctly once the product exists.
+  pendingUploaded?: string[]
 }
 
 const TIER_META: Record<MatchTier, { label: string; text: string; bar: string; ring: string }> = {
@@ -355,22 +358,36 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       : row.fetchedImage
         ? [row.fetchedImage]
         : []
+    // Photos you uploaded yourself have no listing behind them, so they are
+    // recorded as uploads. Products that are not sold on 1688 at all reach
+    // this point with a gallery made up entirely of your own photos.
+    const uploaded = new Set(row.pendingUploaded || [])
+    const cover = row.fetchedImage || gallery[0]
     if (gallery.length > 0) {
-      await fetch('/api/product-master/images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId,
-          productName: row.suggestedName || row.excelProduct,
-          images: gallery,
-          primaryUrl: row.fetchedImage || gallery[0],
-          source: '1688',
-          sourceUrl: row.sourceLink,
-        }),
-      }).catch(() => null)
-      setSystemProducts(prev =>
-        prev.map(p => (p.id === productId ? { ...p, image_url: row.fetchedImage || gallery[0] } : p)),
-      )
+      // The cover's batch goes last: the route falls back to the first photo
+      // it is handed, so a later batch would otherwise take the product image.
+      const batches = [
+        { images: gallery.filter(u => !uploaded.has(u)), source: '1688', sourceUrl: row.sourceLink },
+        { images: gallery.filter(u => uploaded.has(u)), source: 'upload', sourceUrl: null },
+      ]
+        .filter(b => b.images.length > 0)
+        .sort((a, b) => Number(a.images.includes(cover)) - Number(b.images.includes(cover)))
+
+      for (const batch of batches) {
+        await fetch('/api/product-master/images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId,
+            productName: row.suggestedName || row.excelProduct,
+            images: batch.images,
+            primaryUrl: batch.images.includes(cover) ? cover : undefined,
+            source: batch.source,
+            sourceUrl: batch.sourceUrl,
+          }),
+        }).catch(() => null)
+      }
+      setSystemProducts(prev => prev.map(p => (p.id === productId ? { ...p, image_url: cover } : p)))
     }
     for (const url of row.pendingVideos || []) {
       await fetch('/api/product-master/clips', {
@@ -379,11 +396,11 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({
           productId,
           productName: row.suggestedName || row.excelProduct,
-          name: `${row.suggestedName || row.excelProduct} - 1688 clip`,
+          name: `${row.suggestedName || row.excelProduct} - ${uploaded.has(url) ? 'uploaded clip' : '1688 clip'}`,
           fileUrl: url,
-          source: '1688',
+          source: uploaded.has(url) ? 'upload' : '1688',
           sourceId: url,
-          sourceUrl: row.sourceLink,
+          sourceUrl: uploaded.has(url) ? null : row.sourceLink,
           duration: 0,
           width: 0,
           height: 0,
@@ -974,6 +991,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
               // Media chosen before the product exists waits here.
               pendingImages: picks.images.length ? picks.images : m.pendingImages,
               pendingVideos: picks.videos.length ? picks.videos : m.pendingVideos,
+              pendingUploaded: picks.uploaded.length ? picks.uploaded : m.pendingUploaded,
               imageStatus: 'done' as const,
             }
           : m,
