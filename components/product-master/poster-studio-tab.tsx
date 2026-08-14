@@ -285,6 +285,54 @@ export function PosterStudioTab({
             </Button>
           </div>
         </div>
+
+        {/* Every saved photo for this product, right where the source is
+            chosen. Without this the whole set sits out of sight in the ranker
+            far below, so the studio looks like it only has the cover shot. */}
+        {candidates.length > 1 && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <p className="text-[11px] text-muted-foreground">
+              {candidates.length} saved photos {'\u00b7'} tap to use one
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {candidates.map((url) => {
+                const isActive = url === sourceImage
+                return (
+                  <button
+                    key={url}
+                    type="button"
+                    onClick={() => {
+                      setSourceImage(url)
+                      setSourceLabel('Saved product photo')
+                    }}
+                    aria-label="Use this photo for the poster"
+                    aria-pressed={isActive}
+                    className={`h-14 w-14 overflow-hidden rounded-md border-2 transition ${
+                      isActive
+                        ? 'border-amber-500'
+                        : 'border-transparent opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img
+                      src={url || '/placeholder.svg'}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        // Supplier CDNs often block hotlinking, so retry once
+                        // through the proxy before giving up on the thumbnail.
+                        const img = e.currentTarget
+                        if (!url.startsWith('data:') && !img.dataset.proxied) {
+                          img.dataset.proxied = '1'
+                          img.src = inlineUrl(url)
+                        }
+                      }}
+                    />
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ---- Model ---- */}
