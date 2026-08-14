@@ -9,6 +9,8 @@ import {
   CheckCircle,
   ImageIcon,
   Loader2,
+  Maximize2,
+  Minimize2,
   SkipForward,
   Star,
   Video,
@@ -373,15 +375,42 @@ export function PoMediaPicker({
 
   const stepLabel = total > 0 ? `Product ${Math.min(index + 1, total)} of ${total}` : 'No products'
 
+  // Reviewing an 18-photo listing is far easier edge to edge, but the smaller
+  // dialog keeps the table behind it visible. Let the reviewer choose.
+  const [maximised, setMaximised] = useState(false)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl xl:max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader className="gap-2">
+      <DialogContent
+        className={`flex flex-col overflow-hidden ${
+          maximised
+            ? 'h-[96vh] w-[98vw] max-w-none sm:max-w-none'
+            : 'h-[90vh] sm:max-w-4xl xl:max-w-5xl'
+        }`}
+      >
+        {/* Fixed height rather than max-height: the footer then has a stable
+            place to sit, instead of being pushed off-screen by a long grid. */}
+        <DialogHeader className="flex-shrink-0 gap-2">
           <div className="flex items-center justify-between gap-3">
             <DialogTitle className="truncate">{current?.productName || 'Choose media'}</DialogTitle>
-            <Badge variant="secondary" className="flex-shrink-0 text-[11px] tabular-nums">
-              {stepLabel}
-            </Badge>
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <Badge variant="secondary" className="text-[11px] tabular-nums">
+                {stepLabel}
+              </Badge>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                // Sits clear of the dialog's own close button in the corner.
+                className="mr-6 h-7 w-7"
+                onClick={() => setMaximised(v => !v)}
+                aria-pressed={maximised}
+                title={maximised ? 'Shrink the window' : 'Fill the screen'}
+              >
+                {maximised ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                <span className="sr-only">{maximised ? 'Shrink the window' : 'Fill the screen'}</span>
+              </Button>
+            </div>
           </div>
           <Progress value={total ? ((index + (isLast ? 1 : 0)) / total) * 100 : 0} className="h-1" />
           <DialogDescription>
@@ -429,7 +458,10 @@ export function PoMediaPicker({
         )}
 
         {!loading && media.length > 0 && (
-          <ScrollArea className="flex-1 -mx-2 px-2">
+          // min-h-0 is what actually makes this scroll: a flex child defaults
+          // to min-height:auto and so refuses to shrink under its content,
+          // pushing the footer off-screen instead of overflowing internally.
+          <ScrollArea className="-mx-2 min-h-0 flex-1 px-2">
             <div className="flex flex-col gap-5 pb-2">
               {videos.length > 0 && (
                 <section className="flex flex-col gap-2">
@@ -503,7 +535,15 @@ export function PoMediaPicker({
                       {pickedImages.length < images.length ? 'Select all' : 'Clear all'}
                     </Button>
                   </h3>
-                  <div className="grid grid-cols-3 md:grid-cols-5 xl:grid-cols-6 gap-3">
+                  <div
+                  className={`grid gap-3 ${
+                    // More columns once maximised, so the extra width shows
+                    // more of the listing rather than just larger thumbnails.
+                    maximised
+                      ? 'grid-cols-4 md:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10'
+                      : 'grid-cols-3 md:grid-cols-5 xl:grid-cols-6'
+                  }`}
+                >
                     {images.map(m => {
                       const picked = pickedImages.includes(m.url)
                       const isCover = cover === m.url
@@ -572,7 +612,7 @@ export function PoMediaPicker({
           </ScrollArea>
         )}
 
-        <div className="flex items-center justify-between gap-3 border-t pt-3">
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t pt-3">
           <p className="text-xs text-muted-foreground">
             {pickedImages.length > 0
               ? `${pickedImages.length} photo${pickedImages.length === 1 ? '' : 's'} selected`
