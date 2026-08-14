@@ -9,16 +9,15 @@ import {
   CheckCircle,
   ImageIcon,
   Loader2,
-  Plus,
+  Play,
   SkipForward,
-  Sparkles,
   Star,
   Video,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 
 interface MediaItem {
@@ -36,10 +35,6 @@ export interface MediaPicks {
   cover: string | null
   images: string[]
   videos: string[]
-  /** The name the reviewer confirmed for this product on the same screen. */
-  name?: string | null
-  /** The inventory product this row ended up pointing at. */
-  productId?: string | null
 }
 
 /** One product to review. `productId` is null while the row is still unmatched. */
@@ -49,12 +44,6 @@ export interface MediaQueueItem {
   productId: string | null
   link: string | null | undefined
   currentImage?: string | null
-}
-
-/** Minimal inventory record needed to offer a match. */
-export interface PickerProduct {
-  id: string
-  name: string
 }
 
 /**
@@ -89,32 +78,22 @@ export function PoMediaPicker({
   onOpenChange,
   queue,
   startIndex = 0,
-  products,
   onSaved,
   onSkipped,
-  onSuggestName,
-  onMatch,
-  onCreate,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   queue: MediaQueueItem[]
   startIndex?: number
-  /** Inventory to match against, searched inline on this screen. */
-  products: PickerProduct[]
   onSaved: (excelProduct: string, picks: MediaPicks) => void
   onSkipped: (excelProduct: string) => void
-  /** Ask the AI to read the chosen photo and return a clean product name. */
-  onSuggestName: (excelProduct: string, imageUrl: string | null) => Promise<string | null>
-  onMatch: (excelProduct: string, productId: string | null) => void
-  /** Create the inventory product and return its new id. */
-  onCreate: (excelProduct: string, name: string) => Promise<string | null>
 }) {
   const [index, setIndex] = useState(startIndex)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [media, setMedia] = useState<MediaItem[]>([])
   const [saving, setSaving] = useState(false)
+  const [playing, setPlaying] = useState<string | null>(null)
   const [doneCount, setDoneCount] = useState(0)
 
   // Per-product selections, keyed by row, so Back restores earlier picks.
@@ -124,14 +103,6 @@ export function PoMediaPicker({
   const [chosenImages, setChosenImages] = useState<Record<string, string[]>>({})
   const [chosenCover, setChosenCover] = useState<Record<string, string>>({})
   const [chosenVideos, setChosenVideos] = useState<Record<string, string[]>>({})
-
-  // Naming and inventory matching happen on this same screen, so they are also
-  // held per row: stepping Back must show what was already decided.
-  const [nameDraft, setNameDraft] = useState<Record<string, string>>({})
-  const [matchChoice, setMatchChoice] = useState<Record<string, string | null>>({})
-  const [naming, setNaming] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [productSearch, setProductSearch] = useState('')
 
   // Listing media cached by link, so revisiting never refetches.
   const cache = useRef<Map<string, MediaItem[]>>(new Map())
@@ -145,24 +116,6 @@ export function PoMediaPicker({
   // one still ends up with a sensible product image.
   const cover = current ? chosenCover[current.excelProduct] || pickedImages[0] || null : null
 
-  const key = current?.excelProduct ?? ''
-  const nameValue = current ? (nameDraft[key] ?? current.productName) : ''
-  // An explicit choice wins, but an untouched row shows whatever the row is
-  // already mapped to, so an existing match is never silently dropped.
-  const selectedId = current ? (key in matchChoice ? matchChoice[key] : current.productId) : null
-  const selectedProduct = products.find(p => p.id === selectedId) || null
-  // Naming reads the photo the reviewer starred, falling back to the photo the
-  // product already has.
-  const nameImage = cover || current?.currentImage || null
-
-  // Inventory hits for the search box. Seeded from the product name so the
-  // likely match is already on screen before the reviewer types anything.
-  const matchQuery = (productSearch.trim() || nameValue.trim()).toLowerCase()
-  const matches =
-    matchQuery.length < 2
-      ? []
-      : products.filter(p => p.name.toLowerCase().includes(matchQuery)).slice(0, 6)
-
   useEffect(() => {
     if (open) {
       setIndex(startIndex)
@@ -170,12 +123,8 @@ export function PoMediaPicker({
     }
   }, [open, startIndex])
 
-  // A search typed for one product must never leak into the next.
-  useEffect(() => {
-    setProductSearch('')
-  }, [index])
-
   const show = useCallback(async (link: string | null | undefined, force = false) => {
+    setPlaying(null)
     setError('')
     if (!link) {
       setMedia([])
@@ -267,39 +216,6 @@ export function PoMediaPicker({
     })
   }
 
-  /** Read the starred photo and drop the suggested name into the field. */
-  async function nameFromPhoto() {
-    if (!current) return
-    setNaming(true)
-    try {
-      const suggested = await onSuggestName(current.excelProduct, nameImage)
-      if (suggested) setNameDraft(prev => ({ ...prev, [key]: suggested }))
-    } finally {
-      setNaming(false)
-    }
-  }
-
-  /**
-   * Create the inventory product immediately and select it, so the photos and
-   * clips saved by this same screen have a real owner to attach to.
-   */
-  async function createAndSelect() {
-    if (!current) return
-    setCreating(true)
-    setError('')
-    try {
-      const id = await onCreate(current.excelProduct, nameValue)
-      if (id) {
-        setMatchChoice(prev => ({ ...prev, [key]: id }))
-        setProductSearch('')
-      } else {
-        setError('Could not create that product')
-      }
-    } finally {
-      setCreating(false)
-    }
-  }
-
   /** Move on without keeping anything, recording the row as reviewed. */
   function skipAndNext() {
     if (current) onSkipped(current.excelProduct)
@@ -324,20 +240,13 @@ export function PoMediaPicker({
       // cover mirrored onto products.image_url by the route. An unmatched row
       // has no product yet, so its picks are handed back to the import dialog
       // and written once the product exists.
-      // The match chosen on this screen decides where the media lands, so it
-      // is applied before anything is written.
-      const targetId = selectedId || null
-      // Covers clearing a match too, so the row never stays mapped to a
-      // product the reviewer just rejected.
-      if (targetId !== current.productId) onMatch(current.excelProduct, targetId)
-
-      if (pickedImages.length > 0 && targetId) {
+      if (pickedImages.length > 0 && current.productId) {
         const res = await fetch('/api/product-master/images', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            productId: targetId,
-            productName: nameValue || current.productName,
+            productId: current.productId,
+            productName: current.productName,
             images: pickedImages,
             primaryUrl: cover,
             source: '1688',
@@ -352,15 +261,15 @@ export function PoMediaPicker({
       // de-duplicates on source_id, so re-saving the same clip is harmless.
       // An unmatched row has no owner yet, so its clips are handed back and
       // attached once the product master record exists.
-      if (targetId) {
+      if (current.productId) {
         for (const url of pickedVideos) {
           await fetch('/api/product-master/clips', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              productId: targetId,
-              productName: nameValue || current.productName,
-              name: `${nameValue || current.productName} - 1688 clip`,
+              productId: current.productId,
+              productName: current.productName,
+              name: `${current.productName} - 1688 clip`,
               fileUrl: url,
               source: '1688',
               sourceId: url,
@@ -379,10 +288,8 @@ export function PoMediaPicker({
       // (unmatched row) is handed back to be attached after the product exists.
       onSaved(current.excelProduct, {
         cover,
-        images: targetId ? [] : pickedImages,
-        videos: targetId ? [] : pickedVideos,
-        name: nameValue.trim() || null,
-        productId: targetId,
+        images: current.productId ? [] : pickedImages,
+        videos: current.productId ? [] : pickedVideos,
       })
       setDoneCount(c => c + 1)
       advance()
@@ -407,8 +314,8 @@ export function PoMediaPicker({
           </div>
           <Progress value={total ? ((index + (isLast ? 1 : 0)) / total) * 100 : 0} className="h-1" />
           <DialogDescription>
-            Everything on this supplier&apos;s 1688 listing. Keep as many photos and videos as you want, name the
-            product from the photo, and match it to inventory - all before moving to the next product.
+            Everything on this supplier&apos;s 1688 listing. Keep as many photos and videos as you want - they all go to
+            the product master for Poster and Reels Studio - then move to the next product.
           </DialogDescription>
         </DialogHeader>
 
@@ -451,10 +358,7 @@ export function PoMediaPicker({
         )}
 
         {!loading && media.length > 0 && (
-          <div className="flex-1 min-h-0 -mx-2 overflow-y-auto overscroll-contain px-2">
-            {/* `min-h-0` above is what makes this scroll: without it a flex
-                child grows to its content height, pushing the name panel and
-                footer off screen instead of overflowing internally. */}
+          <ScrollArea className="flex-1 -mx-2 px-2">
             <div className="flex flex-col gap-5 pb-2">
               {videos.length > 0 && (
                 <section className="flex flex-col gap-2">
@@ -483,23 +387,35 @@ export function PoMediaPicker({
                             picked ? 'border-primary ring-1 ring-primary' : 'border-border'
                           }`}
                         >
-                          {/* Plays on its own: muted autoplay is allowed by
-                              browsers, so the reviewer judges the clip without
-                              a click. `key` forces a fresh element per product,
-                              otherwise React reuses the node and keeps showing
-                              the previous product's clip. */}
-                          <video
-                            key={v.url}
-                            src={proxied(v.url)}
-                            poster={v.poster ? proxied(v.poster) : undefined}
-                            controls
-                            autoPlay
-                            muted
-                            loop
-                            playsInline
-                            preload="auto"
-                            className="aspect-square w-full bg-black object-contain"
-                          />
+                          {playing === v.url ? (
+                            <video
+                              src={proxied(v.url)}
+                              poster={v.poster ? proxied(v.poster) : undefined}
+                              controls
+                              autoPlay
+                              className="aspect-square w-full bg-black object-contain"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPlaying(v.url)}
+                              className="relative block w-full"
+                              aria-label="Play video"
+                            >
+                              {v.poster ? (
+                                <img
+                                  src={proxied(v.poster) || '/placeholder.svg'}
+                                  alt=""
+                                  className="aspect-square w-full object-cover"
+                                />
+                              ) : (
+                                <div className="aspect-square w-full bg-muted" />
+                              )}
+                              <span className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                <Play className="w-8 h-8 text-white" />
+                              </span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => toggleVideo(v.url)}
@@ -607,107 +523,7 @@ export function PoMediaPicker({
                 </section>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Naming and matching live on the same screen as the photos, so one
-            pass through the queue finishes a product completely. */}
-        {current && (
-          <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 md:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="po-name" className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Product name
-              </label>
-              <div className="flex gap-1.5">
-                <Input
-                  id="po-name"
-                  value={nameValue}
-                  onChange={e => setNameDraft(prev => ({ ...prev, [key]: e.target.value }))}
-                  placeholder="Two-word name"
-                  className="h-8 text-sm"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={nameFromPhoto}
-                  disabled={naming || !nameImage}
-                  title={nameImage ? 'Read the starred photo' : 'Pick a photo first'}
-                  className="h-8 flex-shrink-0 gap-1 bg-transparent"
-                >
-                  {naming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                  From photo
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground truncate">
-                PO called it &ldquo;{current.excelProduct}&rdquo;
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="po-match" className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Inventory match
-              </label>
-              {selectedProduct ? (
-                <div className="flex h-8 items-center gap-2 rounded-md border border-primary/50 bg-primary/10 px-2">
-                  <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 text-primary" />
-                  <span className="flex-1 truncate text-sm">{selectedProduct.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setMatchChoice(prev => ({ ...prev, [key]: null }))}
-                    className="text-[11px] text-muted-foreground hover:text-foreground"
-                  >
-                    Change
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex gap-1.5">
-                    <Input
-                      id="po-match"
-                      value={productSearch}
-                      onChange={e => setProductSearch(e.target.value)}
-                      placeholder="Search inventory..."
-                      className="h-8 text-sm"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={createAndSelect}
-                      disabled={creating || !nameValue.trim()}
-                      className="h-8 flex-shrink-0 gap-1 bg-transparent"
-                    >
-                      {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                      Create
-                    </Button>
-                  </div>
-                  {/* Only a handful of hits are listed: the reviewer is
-                      confirming one product, not browsing the catalogue. */}
-                  {matches.length > 0 && (
-                    <div className="flex flex-col gap-0.5 rounded-md border bg-background p-1">
-                      {matches.map(p => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            setMatchChoice(prev => ({ ...prev, [key]: p.id }))
-                            setProductSearch('')
-                          }}
-                          className="truncate rounded px-2 py-1 text-left text-xs hover:bg-accent hover:text-accent-foreground"
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {productSearch.trim() !== '' && matches.length === 0 && (
-                    <p className="text-[11px] text-muted-foreground">
-                      No inventory product matches - use Create to add it.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          </ScrollArea>
         )}
 
         <div className="flex items-center justify-between gap-3 border-t pt-3">
@@ -716,7 +532,6 @@ export function PoMediaPicker({
               ? `${pickedImages.length} photo${pickedImages.length === 1 ? '' : 's'} selected`
               : 'No photos selected'}
             {pickedVideos.length > 0 && ` - ${pickedVideos.length} video${pickedVideos.length === 1 ? '' : 's'} to keep`}
-            {selectedProduct ? ` - matched to ${selectedProduct.name}` : ' - no inventory match yet'}
             {doneCount > 0 && ` - ${doneCount} saved so far`}
           </p>
           <div className="flex gap-2">
@@ -735,7 +550,7 @@ export function PoMediaPicker({
             </Button>
             <Button
               onClick={saveAndNext}
-              disabled={saving || creating}
+              disabled={saving || (pickedImages.length === 0 && pickedVideos.length === 0)}
               className="gap-1.5"
             >
               {saving ? (

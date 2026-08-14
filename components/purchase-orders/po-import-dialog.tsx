@@ -438,52 +438,41 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     }
   }
 
-  /**
-   * Create one inventory product under an explicit name and map the row to it.
-   * Returns the id so callers that need to write media straight away (the
-   * media wizard) have an owner to attach it to.
-   */
-  async function createProductWithName(excelProduct: string, name: string): Promise<string | null> {
-    const supabase = createClient()
-    const row = productMappings.find(m => m.excelProduct === excelProduct)
-    const createName = name.trim() || excelProduct.trim()
-    const { data, error } = await supabase
-      .from('products')
-      .insert({ name: createName, image_url: row?.fetchedImage || null, is_active: true })
-      .select('id, name, image_url')
-      .single()
-
-    let productId: string | null = data?.id ?? null
-    if (data) {
-      setSystemProducts(prev => [...prev, data])
-      // Keep the messy PO spelling as an alias so the next import matches it.
-      await supabase.from('product_aliases').insert({
-        alias_name: excelProduct.trim(),
-        product_id: data.id,
-        source: 'po_import',
-      }).select().maybeSingle()
-    } else if (error) {
-      // The name is already taken - reuse that product rather than failing.
-      const { data: existing } = await supabase
-        .from('products')
-        .select('id, name, image_url')
-        .ilike('name', createName)
-        .maybeSingle()
-      productId = existing?.id ?? null
-    }
-    if (productId) updateProductMapping(excelProduct, productId)
-    return productId
-  }
-
   async function handleCreateProduct(excelProduct: string) {
     setCreatingProduct(excelProduct)
     try {
+      const supabase = createClient()
       // If the reviewer accepted an AI name for this row, create the product
       // under that clean name and keep the messy PO spelling as the alias.
       const row = productMappings.find(m => m.excelProduct === excelProduct)
       const createName =
         row?.nameStatus === 'accepted' && row.suggestedName ? row.suggestedName : excelProduct.trim()
-      await createProductWithName(excelProduct, createName)
+      const { data, error } = await supabase
+        .from('products')
+        .insert({ name: createName, image_url: row?.fetchedImage || null, is_active: true })
+        .select('id, name, image_url')
+        .single()
+
+      if (data) {
+        setSystemProducts(prev => [...prev, data])
+        updateProductMapping(excelProduct, data.id)
+        // Also create alias
+        await supabase.from('product_aliases').insert({
+          alias_name: excelProduct.trim(),
+          product_id: data.id,
+          source: 'po_import'
+        }).select().maybeSingle()
+      } else if (error) {
+        // Product might already exist, try to find it
+        const { data: existing } = await supabase
+          .from('products')
+          .select('id, name, image_url')
+          .ilike('name', excelProduct.trim())
+          .single()
+        if (existing) {
+          updateProductMapping(excelProduct, existing.id)
+        }
+      }
     } finally {
       setCreatingProduct(null)
     }
@@ -736,42 +725,6 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
    * primary signal and the existing inventory names as the house vocabulary.
    * Sent in pages of 40 so a 591-product import cannot blow the request limit.
    */
-  /**
-   * Name a single product from the photo the reviewer just starred. Used by
-   * the media wizard, where naming happens on the same screen as the photos.
-   */
-  async function suggestOneName(excelProduct: string, imageUrl: string | null): Promise<string | null> {
-    const row = productMappings.find(m => m.excelProduct === excelProduct)
-    try {
-      const res = await fetch('/api/purchase-orders/suggest-names', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: [
-            {
-              key: excelProduct,
-              currentName: row?.suggestedName || excelProduct,
-              imageUrl,
-            },
-          ],
-          inventoryNames: systemProducts.slice(0, 300).map(p => p.name),
-        }),
-      })
-      const json = await res.json()
-      const suggested: string | undefined = json?.suggestions?.[0]?.suggested
-      if (!suggested) return null
-      setProductMappings(prev =>
-        prev.map(m =>
-          m.excelProduct === excelProduct ? { ...m, suggestedName: suggested, nameStatus: 'ready' } : m,
-        ),
-      )
-      return suggested
-    } catch (err) {
-      console.error('[v0] single name failed:', err)
-      return null
-    }
-  }
-
   async function suggestNames(scope: 'all' | 'unmatched') {
     // Runs after the photo pass, so rows WITH a photo are named from it. Rows
     // whose listing had none are still included and fall back to text, which
@@ -923,20 +876,12 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
               pendingImages: picks.images.length ? picks.images : m.pendingImages,
               pendingVideos: picks.videos.length ? picks.videos : m.pendingVideos,
               imageStatus: 'done' as const,
-              // The wizard names and matches on the same screen, so a name
-              // that came back with the picks is a human decision.
-              suggestedName: picks.name || m.suggestedName,
-              nameStatus: picks.name ? ('accepted' as const) : m.nameStatus,
-              // mappedId is owned by onMatch/onCreate, which the wizard calls
-              // before this - touching it here would undo a cleared match.
             }
           : m,
       ),
     )
-    // Reflect the new cover on whichever product the row ended up pointing at.
-    const ownerId = picks.productId ?? target?.mappedId
-    if (!ownerId || !picks.cover) return
-    setSystemProducts(prev => prev.map(p => (p.id === ownerId ? { ...p, image_url: picks.cover } : p)))
+    if (!target?.mappedId || !picks.cover) return
+    setSystemProducts(prev => prev.map(p => (p.id === target.mappedId ? { ...p, image_url: picks.cover } : p)))
   }
 
   // Bulk: drop every doubtful auto-match back to unmatched for a clean slate.
@@ -1632,13 +1577,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
       onOpenChange={o => !o && setMediaOpen(false)}
       queue={mediaQueue}
       startIndex={mediaStart}
-        products={systemProducts}
-        onSaved={handleMediaSaved}
-        onSkipped={handleMediaSkipped}
-        onSuggestName={suggestOneName}
-        onMatch={updateProductMapping}
-        onCreate={createProductWithName}
-      />
+      onSaved={handleMediaSaved}
+      onSkipped={handleMediaSkipped}
+    />
     </>
   )
 }
