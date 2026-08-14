@@ -9,7 +9,6 @@ import {
   CheckCircle,
   ImageIcon,
   Loader2,
-  Play,
   Plus,
   SkipForward,
   Sparkles,
@@ -20,7 +19,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 
 interface MediaItem {
@@ -117,7 +115,6 @@ export function PoMediaPicker({
   const [error, setError] = useState('')
   const [media, setMedia] = useState<MediaItem[]>([])
   const [saving, setSaving] = useState(false)
-  const [playing, setPlaying] = useState<string | null>(null)
   const [doneCount, setDoneCount] = useState(0)
 
   // Per-product selections, keyed by row, so Back restores earlier picks.
@@ -179,7 +176,6 @@ export function PoMediaPicker({
   }, [index])
 
   const show = useCallback(async (link: string | null | undefined, force = false) => {
-    setPlaying(null)
     setError('')
     if (!link) {
       setMedia([])
@@ -455,7 +451,10 @@ export function PoMediaPicker({
         )}
 
         {!loading && media.length > 0 && (
-          <ScrollArea className="flex-1 -mx-2 px-2">
+          <div className="flex-1 min-h-0 -mx-2 overflow-y-auto overscroll-contain px-2">
+            {/* `min-h-0` above is what makes this scroll: without it a flex
+                child grows to its content height, pushing the name panel and
+                footer off screen instead of overflowing internally. */}
             <div className="flex flex-col gap-5 pb-2">
               {videos.length > 0 && (
                 <section className="flex flex-col gap-2">
@@ -484,35 +483,23 @@ export function PoMediaPicker({
                             picked ? 'border-primary ring-1 ring-primary' : 'border-border'
                           }`}
                         >
-                          {playing === v.url ? (
-                            <video
-                              src={proxied(v.url)}
-                              poster={v.poster ? proxied(v.poster) : undefined}
-                              controls
-                              autoPlay
-                              className="aspect-square w-full bg-black object-contain"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setPlaying(v.url)}
-                              className="relative block w-full"
-                              aria-label="Play video"
-                            >
-                              {v.poster ? (
-                                <img
-                                  src={proxied(v.poster) || '/placeholder.svg'}
-                                  alt=""
-                                  className="aspect-square w-full object-cover"
-                                />
-                              ) : (
-                                <div className="aspect-square w-full bg-muted" />
-                              )}
-                              <span className="absolute inset-0 flex items-center justify-center bg-black/40">
-                                <Play className="w-8 h-8 text-white" />
-                              </span>
-                            </button>
-                          )}
+                          {/* Plays on its own: muted autoplay is allowed by
+                              browsers, so the reviewer judges the clip without
+                              a click. `key` forces a fresh element per product,
+                              otherwise React reuses the node and keeps showing
+                              the previous product's clip. */}
+                          <video
+                            key={v.url}
+                            src={proxied(v.url)}
+                            poster={v.poster ? proxied(v.poster) : undefined}
+                            controls
+                            autoPlay
+                            muted
+                            loop
+                            playsInline
+                            preload="auto"
+                            className="aspect-square w-full bg-black object-contain"
+                          />
                           <button
                             type="button"
                             onClick={() => toggleVideo(v.url)}
@@ -620,7 +607,7 @@ export function PoMediaPicker({
                 </section>
               )}
             </div>
-          </ScrollArea>
+          </div>
         )}
 
         {/* Naming and matching live on the same screen as the photos, so one
