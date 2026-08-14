@@ -423,7 +423,42 @@ export function ReelsStudioTab({
   // default (opt-in) and only offered when the product actually has a photo.
   // Background removal is optional here - unlike the logo, a raw catalogue
   // shot on its white card often reads fine, and cutting it out is a choice.
-  const hasProductImage = Boolean(productImage && productImage.trim())
+  // Every photo kept off the supplier listing, not just the single cover on
+  // products.image_url. Loaded on open so 1688 pictures saved during PO import
+  // are usable here instead of being invisible.
+  const [gallery, setGallery] = useState<string[]>([])
+  const [chosenPhoto, setChosenPhoto] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const params = new URLSearchParams()
+    if (productId) params.set('productId', productId)
+    else if (productName) params.set('productName', productName)
+    else return
+
+    fetch(`/api/product-master/images?${params}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json.success) return
+        const urls = (json.images as { image_url: string }[])
+          .map((i) => i.image_url)
+          .filter(Boolean)
+        setGallery(Array.from(new Set(urls)))
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [productId, productName])
+
+  // The cover stays the default; the gallery is the fallback for products whose
+  // inventory row never got a cover written to it.
+  const activeProductImage = chosenPhoto || productImage || gallery[0] || null
+  const hasProductImage = Boolean(activeProductImage && activeProductImage.trim())
+  // Cover first, then the rest of the listing. Deduped because the cover is
+  // mirrored into the gallery table when it is saved.
+  const photoChoices = Array.from(new Set([productImage, ...gallery].filter(Boolean) as string[]))
   const [productOn, setProductOn] = useState(false)
   const [productXY, setProductXY] = useState({ x: 50, y: 50 })
   const [productSize, setProductSize] = useState(40) // % of video width
@@ -895,7 +930,7 @@ export function ReelsStudioTab({
   // matting route the logo uses. On any failure we simply keep the original
   // photo rather than blocking - a product on its white card is still usable.
   useEffect(() => {
-    if (!productRemoveBg || !hasProductImage || !productImage) {
+    if (!productRemoveBg || !hasProductImage || !activeProductImage) {
       setProductProcessed(null)
       return
     }
@@ -903,7 +938,7 @@ export function ReelsStudioTab({
     setProductRemovingBg(true)
     ;(async () => {
       try {
-        let payload = productImage
+        let payload = activeProductImage
         if (payload.startsWith('/')) {
           const r = await fetch(payload)
           const blob = await r.blob()
@@ -931,9 +966,9 @@ export function ReelsStudioTab({
     return () => {
       cancelled = true
     }
-  }, [productRemoveBg, productImage, hasProductImage])
+  }, [productRemoveBg, activeProductImage, hasProductImage])
 
-  const effectiveProductSrc = productRemoveBg && productProcessed ? productProcessed : productImage
+  const effectiveProductSrc = productRemoveBg && productProcessed ? productProcessed : activeProductImage
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
   const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
@@ -2183,9 +2218,9 @@ export function ReelsStudioTab({
   return (
     <div className="flex flex-col gap-5">
       {/* ---- Find a product video: video search + marketplace listings ---- */}
-      <SourceFinderPanel
-        defaultQuery={productName}
-        productImage={productImage}
+          <SourceFinderPanel
+            defaultQuery={productName}
+            productImage={activeProductImage}
         onUseClip={(file, origin) =>
           addFiles([file], {
             source: 'search',
@@ -2832,6 +2867,34 @@ export function ReelsStudioTab({
                 <span>Placed on the video</span>
                 <span className="text-amber-500"> {'\u00b7'} edit on video</span>
               </button>
+            )}
+            {/* Saved listing photos. Only worth showing when there is a real
+                choice to make, so a product with one picture stays uncluttered. */}
+            {productOn && photoChoices.length > 1 && (
+              <div className="ml-6 flex flex-col gap-1.5">
+                <span className="text-[11px] text-muted-foreground">
+                  {photoChoices.length} saved photos {'\u00b7'} tap to swap
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {photoChoices.map((url) => {
+                    const isActive = url === activeProductImage
+                    return (
+                      <button
+                        key={url}
+                        type="button"
+                        onClick={() => setChosenPhoto(url)}
+                        aria-label="Use this photo on the video"
+                        aria-pressed={isActive}
+                        className={`h-11 w-11 overflow-hidden rounded border-2 transition ${
+                          isActive ? 'border-amber-500' : 'border-transparent opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        <img src={url || '/placeholder.svg'} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             )}
           </div>
         )}
