@@ -347,7 +347,7 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
             </Link>
           </Button>
           <Button variant="outline" size="sm" asChild>
-            <Link href="/dashboard/deliveries/purchase-orders">
+            <Link href="/dashboard/purchasing">
               Purchase Orders <ExternalLink className="ml-1 h-3 w-3" />
             </Link>
           </Button>

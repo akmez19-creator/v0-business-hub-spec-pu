@@ -75,8 +75,17 @@ const navItems: NavItem[] = [
       { href: '/dashboard/deliveries/collections', label: 'Collections', icon: Banknote },
       { href: '/dashboard/deliveries/payments', label: 'Payments', icon: Wallet },
       { href: '/dashboard/deliveries/inventory', label: 'Products', icon: BoxesIcon },
-      { href: '/dashboard/deliveries/purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
       { href: '/dashboard/deliveries/stock', label: 'Stock In/Out', icon: Package },
+    ],
+  },
+  {
+    href: '/dashboard/purchasing',
+    label: 'Purchasing',
+    icon: ShoppingCart,
+    roles: ['admin', 'manager'],
+    subItems: [
+      { href: '/dashboard/purchasing', label: 'Orders', icon: ShoppingCart },
+      { href: '/dashboard/purchasing/suppliers', label: 'Suppliers', icon: Building2 },
     ],
   },
   {

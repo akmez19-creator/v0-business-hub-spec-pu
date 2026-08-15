@@ -104,8 +104,18 @@ const navItems: NavItem[] = [
     color: '#8b5cf6',
     subItems: [
       { href: '/dashboard/deliveries/inventory', label: 'Products', icon: BoxesIcon },
-      { href: '/dashboard/deliveries/purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
       { href: '/dashboard/deliveries/stock', label: 'Stock In/Out', icon: Package },
+    ],
+  },
+  {
+    href: '/dashboard/purchasing',
+    label: 'Purchasing',
+    icon: ShoppingCart,
+    roles: ['admin', 'manager'],
+    color: '#14b8a6',
+    subItems: [
+      { href: '/dashboard/purchasing', label: 'Orders', icon: ShoppingCart },
+      { href: '/dashboard/purchasing/suppliers', label: 'Suppliers', icon: Building2 },
     ],
   },
   {
@@ -269,8 +279,11 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
   const getDefaultExpanded = () => {
     if (pathname.startsWith('/dashboard/marketing-back-office')) return '/dashboard/marketing-back-office'
     if (pathname.startsWith('/dashboard/marketing-front-office')) return '/dashboard/marketing-front-office'
+    // Purchasing owns its own route tree, so it matches before the
+    // /deliveries-based groups below.
+    if (pathname.startsWith('/dashboard/purchasing')) return '/dashboard/purchasing'
     // Check inventory/finance pages first (they're under /deliveries URL)
-    if (pathname.includes('/inventory') || pathname.includes('/purchase-orders') || (pathname.includes('/stock') && pathname.includes('/deliveries'))) return '/dashboard/inventory'
+    if (pathname.includes('/inventory') || (pathname.includes('/stock') && pathname.includes('/deliveries'))) return '/dashboard/inventory'
     if (pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll') || pathname.includes('/deductions')) return '/dashboard/finance'
     // Then check deliveries
     if (pathname.startsWith('/dashboard/deliveries')) return '/dashboard/deliveries'
@@ -328,7 +341,7 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
           <div className="space-y-1">
             {filteredNavItems.map((item, index) => {
               // Smart active detection - inventory/finance pages are under /deliveries URL but belong to different sections
-              const isInventoryPage = pathname.includes('/inventory') || pathname.includes('/purchase-orders') || (pathname.includes('/stock') && pathname.includes('/deliveries'))
+              const isInventoryPage = pathname.includes('/inventory') || (pathname.includes('/stock') && pathname.includes('/deliveries'))
               const isFinancePage = pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll') || pathname.includes('/deductions')
               
               let isActive = false

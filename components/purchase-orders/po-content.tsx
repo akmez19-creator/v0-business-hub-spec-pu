@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
-import { ProductThumb } from '@/components/ui/product-thumb'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -41,11 +40,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 import {
   Package,
   Search,
   Upload,
-  ExternalLink,
   TruckIcon,
   DollarSign,
   BoxesIcon,
@@ -57,38 +56,14 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { POImportDialog } from './po-import-dialog'
-
-interface PurchaseOrder {
-  id: string
-  status: string | null
-  reorder: string | null
-  link: string | null
-  supplier_name: string | null
-  index_no: string | null
-  carton: string | null
-  image_url: string | null
-  product_name: string | null
-  product_id: string | null
-  products?: { id: string; name: string; image_url: string | null } | null
-  qty: number
-  unit_price: number
-  discounted_unit_price: number
-  shipment_to_warehouse: number
-  discounted_shipment_to_warehouse: number
-  discounted_percentage: number
-  total_payment_supplier_yuan: number
-  total_payment_supplier: number
-  payment_link: string | null
-  weight_kg: number
-  cbm: number
-  boxes: number
-  cbm_cost: number
-  import_cp: number
-  total_cp_import: number
-  tracking_number: string | null
-  batch_id: string | null
-  created_at: string
-}
+import {
+  VIEWS,
+  columnsForView,
+  formatCurrency,
+  statusColor,
+  type PurchaseOrder,
+  type ViewKey,
+} from './po-columns'
 
 interface Stats {
   totalOrders: number
@@ -97,35 +72,10 @@ interface Stats {
   byStatus: Record<string, number>
 }
 
-function statusColor(status: string | null): string {
-  switch (status?.toLowerCase()) {
-    case 'ordered':
-    case 'confirmed': return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-    case 'shipped':
-    case 'in transit': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-    case 'delivered':
-    case 'received': return 'bg-green-500/20 text-green-400 border-green-500/30'
-    case 'pending': return 'bg-muted text-muted-foreground border-border'
-    case 'cancelled': return 'bg-red-500/20 text-red-400 border-red-500/30'
-    default: return 'bg-muted text-muted-foreground border-border'
-  }
-}
-
-function formatCurrency(value: number, currency = 'Rs') {
-  if (!value) return '-'
-  return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-// Order date is the created_at timestamp - there is no separate PO date field.
-function formatDate(value: string | null): string {
-  if (!value) return '-'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '-'
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
 // Export headers deliberately mirror the import column aliases (see
 // PO_COLUMN_ALIASES in po-import-dialog) so an exported file re-imports cleanly.
+// This always writes every field, independent of the column view on screen -
+// the view is a reading aid, not a filter on the data.
 function orderToExportRow(o: PurchaseOrder): Record<string, string | number> {
   return {
     'Date': o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) : '',
@@ -190,95 +140,31 @@ const EXAMPLE_ORDER: PurchaseOrder = {
   created_at: new Date().toISOString(),
 }
 
-function OrderRow({ order, example = false }: { order: PurchaseOrder; example?: boolean }) {
-  return (
-    <TableRow className={example ? 'opacity-60 italic pointer-events-none' : undefined}>
-      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-        {formatDate(order.created_at)}
-      </TableCell>
-      <TableCell className="text-sm font-mono text-muted-foreground">
-        {order.index_no || '-'}
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline" className={statusColor(order.status)}>
-          {order.status || 'pending'}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          {/* Always rendered, so the column keeps its alignment whether or not
-              a photo exists - and 1688 photos are proxied so they load at all. */}
-          <ProductThumb
-            src={order.products?.image_url || order.image_url}
-            className="w-8 h-8 flex-shrink-0 rounded"
-          />
-          <span className="font-medium truncate max-w-[150px]">
-            {order.product_name || '-'}
-          </span>
-        </div>
-      </TableCell>
-      <TableCell>
-        {order.products ? (
-          <Badge variant="secondary" className="text-xs truncate max-w-[100px]">
-            {order.products.name}
-          </Badge>
-        ) : (
-          <span className="text-xs text-muted-foreground">Unmatched</span>
-        )}
-      </TableCell>
-      <TableCell className="truncate max-w-[140px]">{order.supplier_name || '-'}</TableCell>
-      <TableCell className="text-right font-medium">{order.qty || 0}</TableCell>
-      <TableCell className="text-right">{formatCurrency(order.unit_price)}</TableCell>
-      <TableCell className="text-right">{formatCurrency(order.discounted_unit_price)}</TableCell>
-      <TableCell className="text-right">{formatCurrency(order.shipment_to_warehouse)}</TableCell>
-      <TableCell className="text-right">{order.discounted_percentage ? `${order.discounted_percentage}%` : '-'}</TableCell>
-      <TableCell className="text-right">{order.total_payment_supplier_yuan ? `¥ ${Number(order.total_payment_supplier_yuan).toLocaleString()}` : '-'}</TableCell>
-      <TableCell className="text-right font-medium">{formatCurrency(order.total_payment_supplier)}</TableCell>
-      <TableCell className="text-right">{order.weight_kg ? `${order.weight_kg} kg` : '-'}</TableCell>
-      <TableCell className="text-right">{order.cbm || '-'}</TableCell>
-      <TableCell className="text-right">{order.boxes || '-'}</TableCell>
-      <TableCell className="text-right">{formatCurrency(order.import_cp)}</TableCell>
-      <TableCell className="text-right font-medium">{formatCurrency(order.total_cp_import)}</TableCell>
-      <TableCell>
-        <span className="truncate max-w-[120px] text-xs font-mono">
-          {order.tracking_number || '-'}
-        </span>
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1">
-          {order.link && (
-            <a href={order.link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-              <ExternalLink className="w-4 h-4" />
-            </a>
-          )}
-          {order.payment_link && (
-            <a href={order.payment_link} target="_blank" rel="noopener noreferrer" className="text-green-500 hover:underline">
-              <DollarSign className="w-4 h-4" />
-            </a>
-          )}
-        </div>
-      </TableCell>
-    </TableRow>
-  )
-}
-
 export function PurchaseOrdersContent({
   initialOrders,
   stats,
   suppliers,
+  initialSupplier,
 }: {
   initialOrders: PurchaseOrder[]
   stats: Stats
   suppliers: string[]
+  /** Set by ?supplier= so the Suppliers page can deep-link into this table. */
+  initialSupplier?: string
 }) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [supplierFilter, setSupplierFilter] = useState<string>('all')
+  const [supplierFilter, setSupplierFilter] = useState<string>(
+    initialSupplier && suppliers.includes(initialSupplier) ? initialSupplier : 'all',
+  )
+  const [view, setView] = useState<ViewKey>('overview')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [, startTransition] = useTransition()
+
+  const columns = useMemo(() => columnsForView(view), [view])
 
   const allStatuses = useMemo(() => {
     const set = new Set<string>()
@@ -304,6 +190,20 @@ export function PurchaseOrdersContent({
       return true
     })
   }, [initialOrders, statusFilter, supplierFilter, search])
+
+  // Totals reflect the current filters, so narrowing to one supplier answers
+  // "what did I spend with them" without a separate report.
+  const filteredTotals = useMemo(() => {
+    let qty = 0
+    let supplierValue = 0
+    let landed = 0
+    for (const o of filtered) {
+      qty += o.qty || 0
+      supplierValue += Number(o.total_payment_supplier) || 0
+      landed += Number(o.total_cp_import) || 0
+    }
+    return { qty, supplierValue, landed }
+  }, [filtered])
 
   function handleExport(format: 'xlsx' | 'csv') {
     // When there is nothing to export, fall back to the example row so the user
@@ -341,6 +241,8 @@ export function PurchaseOrdersContent({
       setDeleting(false)
     }
   }
+
+  const colCount = columns.length
 
   return (
     <div className="space-y-6">
@@ -522,37 +424,74 @@ export function PurchaseOrdersContent({
 
       {/* Table */}
       <Card>
+        {/* Column-group switcher. 20 columns will not fit any screen at once,
+            so each view shows one job's worth of them; "All columns" keeps the
+            old scrolling behaviour for when everything really is needed. */}
+        <div className="flex flex-wrap items-center gap-3 border-b border-border p-3">
+          <div
+            role="tablist"
+            aria-label="Column view"
+            className="flex flex-wrap items-center gap-1 rounded-lg bg-muted/50 p-1"
+          >
+            {VIEWS.map(v => (
+              <button
+                key={v.key}
+                role="tab"
+                type="button"
+                aria-selected={view === v.key}
+                title={v.hint}
+                onClick={() => setView(v.key)}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  view === v.key
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {VIEWS.find(v => v.key === view)?.hint}
+          </p>
+          {filtered.length > 0 && (
+            <div className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
+              <span>
+                Qty <span className="font-medium text-foreground">{filteredTotals.qty.toLocaleString()}</span>
+              </span>
+              <span>
+                Supplier{' '}
+                <span className="font-medium text-foreground">
+                  {formatCurrency(filteredTotals.supplierValue)}
+                </span>
+              </span>
+              <span>
+                Landed{' '}
+                <span className="font-medium text-foreground">
+                  {formatCurrency(filteredTotals.landed)}
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
+
         <ScrollArea className="w-full">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-[110px]">Date</TableHead>
-                <TableHead className="min-w-[70px]">Index</TableHead>
-                <TableHead className="min-w-[60px]">Status</TableHead>
-                <TableHead className="min-w-[180px]">Product</TableHead>
-                <TableHead className="min-w-[100px]">Inventory Match</TableHead>
-                <TableHead className="min-w-[140px]">Supplier</TableHead>
-                <TableHead className="min-w-[50px] text-right">Qty</TableHead>
-                <TableHead className="min-w-[100px] text-right">Unit Price</TableHead>
-                <TableHead className="min-w-[100px] text-right">Disc. Price</TableHead>
-                <TableHead className="min-w-[100px] text-right">Shipment</TableHead>
-                <TableHead className="min-w-[80px] text-right">Disc %</TableHead>
-                <TableHead className="min-w-[120px] text-right">Total (Yuan)</TableHead>
-                <TableHead className="min-w-[120px] text-right">Total Supplier</TableHead>
-                <TableHead className="min-w-[80px] text-right">Weight</TableHead>
-                <TableHead className="min-w-[60px] text-right">CBM</TableHead>
-                <TableHead className="min-w-[60px] text-right">Boxes</TableHead>
-                <TableHead className="min-w-[100px] text-right">Import CP</TableHead>
-                <TableHead className="min-w-[100px] text-right">Total CP</TableHead>
-                <TableHead className="min-w-[140px]">Tracking</TableHead>
-                <TableHead className="min-w-[60px]">Links</TableHead>
+                {columns.map(c => (
+                  <TableHead key={c.key} className={c.className}>
+                    {c.label}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {initialOrders.length === 0 ? (
                 <>
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={20} className="py-4 text-center">
+                    <TableCell colSpan={colCount} className="py-4 text-center">
                       <div className="flex flex-col items-center gap-1">
                         <Package className="w-8 h-8 opacity-50" />
                         <p className="font-medium text-foreground">No purchase orders yet</p>
@@ -565,25 +504,37 @@ export function PurchaseOrdersContent({
                     </TableCell>
                   </TableRow>
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={20} className="py-1 pl-2">
+                    <TableCell colSpan={colCount} className="py-1 pl-2">
                       <Badge variant="outline" className="text-[10px] uppercase tracking-wide text-muted-foreground border-dashed">
                         Example row
                       </Badge>
                     </TableCell>
                   </TableRow>
-                  <OrderRow order={EXAMPLE_ORDER} example />
+                  <TableRow className="opacity-60 italic pointer-events-none">
+                    {columns.map(c => (
+                      <TableCell key={c.key} className={c.className}>
+                        {c.render(EXAMPLE_ORDER)}
+                      </TableCell>
+                    ))}
+                  </TableRow>
                 </>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={20} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={colCount} className="text-center py-12 text-muted-foreground">
                     <Search className="w-10 h-10 mx-auto mb-2 opacity-50" />
                     <p>No orders match your filters.</p>
                     <p className="text-sm">Try clearing the search or status/supplier filters.</p>
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((order) => (
-                  <OrderRow key={order.id} order={order} />
+                filtered.map(order => (
+                  <TableRow key={order.id}>
+                    {columns.map(c => (
+                      <TableCell key={c.key} className={c.className}>
+                        {c.render(order)}
+                      </TableCell>
+                    ))}
+                  </TableRow>
                 ))
               )}
             </TableBody>
