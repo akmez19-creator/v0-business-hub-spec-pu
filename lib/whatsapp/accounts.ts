@@ -36,8 +36,14 @@ export type WaNumber = {
   oursSubscribed: boolean
 }
 
+/** Our Meta app. Webhooks only reach this inbox if this id is subscribed. */
+export const OUR_APP_ID = '1284520097159203'
+
 type BizList = { data?: { id: string; name: string }[] }
 type WabaList = { data?: { id: string; name: string }[] }
+type SubList = {
+  data?: { whatsapp_business_api_data?: { id?: string; name?: string } }[]
+}
 type PhoneList = {
   data?: {
     id: string
@@ -91,6 +97,23 @@ export async function listWhatsAppNumbers(token: string): Promise<WaNumber[]> {
           continue
         }
 
+        // Who receives this WABA's webhooks. Asked once per WABA, not per
+        // phone. A number can be live in respond.io and still deliver nothing
+        // here, so "nobody is listening" must not look like "not connected".
+        let subscribedApps: string[] = []
+        let oursSubscribed = false
+        try {
+          const subs = await fbGet<SubList>(
+            `${GRAPH}/${wa.id}/subscribed_apps?access_token=${enc}`,
+            { cacheTtl: 10 * 60 * 1000 },
+          )
+          const entries = (subs.data ?? []).map((s) => s.whatsapp_business_api_data ?? {})
+          subscribedApps = entries.map((a) => a.name?.trim()).filter((n): n is string => Boolean(n))
+          oursSubscribed = entries.some((a) => a.id === OUR_APP_ID)
+        } catch {
+          // Not fatal: the number is still listed, just without routing info.
+        }
+
         for (const p of phones.data ?? []) {
           const displayPhone = p.display_phone_number ?? ''
           const verifiedName = (p.verified_name ?? '').trim()
@@ -107,6 +130,8 @@ export async function listWhatsAppNumbers(token: string): Promise<WaNumber[]> {
             businessName: b.name.trim(),
             platform,
             usable: platform === 'CLOUD_API',
+            subscribedApps,
+            oursSubscribed,
           })
         }
       }
