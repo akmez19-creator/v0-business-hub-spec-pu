@@ -35,7 +35,10 @@ const HOTLINK_PROTECTED = [
 export function isHotlinkProtected(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase()
-    return HOTLINK_PROTECTED.some(d => host === d || host.endsWith(`.${d}`))
+    // Subdomains only, deliberately: the proxy's allowlist is anchored on a
+    // leading dot, so rewriting a bare apex host would swap a CDN 403 for a
+    // proxy 403 and gain nothing. These CDNs only ever serve from subdomains.
+    return HOTLINK_PROTECTED.some(d => host.endsWith(`.${d}`))
   } catch {
     return false
   }

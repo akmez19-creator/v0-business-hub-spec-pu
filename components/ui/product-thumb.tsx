@@ -10,7 +10,7 @@ import { mediaSrc } from '@/lib/media-url'
  *
  * Two things it handles that a bare <img> does not:
  *  - supplier CDNs (1688/Taobao) 403 browser requests, so those URLs are routed
- *    through /api/image-proxy and fetched server-side instead;
+ *    through the authenticated proxy and fetched server-side instead;
  *  - when a photo genuinely cannot load, it falls back to a muted icon rather
  *    than the browser's broken-image glyph, which reads as "the app is broken"
  *    when the real meaning is "no photo yet".
@@ -26,10 +26,13 @@ export function ProductThumb({
   className?: string
   iconClassName?: string
 }) {
-  const [failed, setFailed] = useState(false)
+  // Remember WHICH url failed, not merely that one did: rows get recycled as
+  // the table re-sorts or paginates, and a plain boolean would leave a later
+  // product stuck showing the previous row's fallback.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const resolved = mediaSrc(src)
 
-  if (!resolved || failed) {
+  if (!resolved || failedSrc === resolved) {
     return (
       <div
         className={cn(
@@ -46,11 +49,11 @@ export function ProductThumb({
 
   return (
     <img
-      src={resolved || '/placeholder.svg'}
+      src={resolved}
       alt={alt}
       loading="lazy"
       decoding="async"
-      onError={() => setFailed(true)}
+      onError={() => setFailedSrc(resolved)}
       className={cn('object-cover', className)}
     />
   )
