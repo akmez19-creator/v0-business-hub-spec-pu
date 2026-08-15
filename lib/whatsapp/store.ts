@@ -187,6 +187,109 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
   return { inserted: true }
 }
 
+export type CallOutcome = 'ringing' | 'missed' | 'completed' | 'rejected' | 'failed'
+
+type CallArgs = {
+  callId: string
+  waId: string
+  profileName?: string | null
+  phoneNumberId: string
+  displayPhone?: string | null
+  direction: 'in' | 'out'
+  outcome: CallOutcome
+  durationSec: number | null
+  timestamp: string
+  raw: unknown
+}
+
+function callLabel(direction: 'in' | 'out', outcome: CallOutcome, durationSec: number | null): string {
+  if (outcome === 'ringing') return direction === 'in' ? 'Incoming call…' : 'Calling…'
+  if (outcome === 'missed') return direction === 'in' ? 'Missed call' : 'No answer'
+  if (outcome === 'rejected') return direction === 'in' ? 'Call declined' : 'Call declined by customer'
+  if (outcome === 'failed') return 'Call failed'
+  if (durationSec && durationSec > 0) {
+    const m = Math.floor(durationSec / 60)
+    const s = durationSec % 60
+    return `Call · ${m > 0 ? `${m}m ` : ''}${s}s`
+  }
+  return 'Call ended'
+}
+
+/**
+ * Persist a call event.
+ *
+ * A single call arrives as MULTIPLE webhooks (connect, then terminate) sharing
+ * one call id, so this keeps ONE row per call and updates it in place rather
+ * than stacking a "ringing" and an "ended" entry in the thread.
+ *
+ * Unread is incremented only when an inbound call is first seen as missed:
+ * a customer who rang and got nothing is a lead, and re-delivery of the same
+ * terminate event must not inflate the badge.
+ */
+export async function saveCall(a: CallArgs): Promise<{ stored: boolean }> {
+  const db = createAdminClient()
+  const rowId = `call:${a.callId}`
+  const body = callLabel(a.direction, a.outcome, a.durationSec)
+
+  const { data: existing } = await db
+    .from('whatsapp_messages')
+    .select('id,status')
+    .eq('id', rowId)
+    .maybeSingle()
+
+  // A terminated call must never regress to "ringing" if Meta redelivers the
+  // earlier connect event out of order.
+  if (existing && (existing.status as string | null) !== 'ringing' && a.outcome === 'ringing') {
+    return { stored: false }
+  }
+
+  const wasMissed = (existing?.status as string | null) === 'missed'
+  const countsAsUnread = a.direction === 'in' && a.outcome === 'missed' && !wasMissed
+
+  if (existing) {
+    await db
+      .from('whatsapp_messages')
+      .update({ body, status: a.outcome, raw: a.raw as never })
+      .eq('id', rowId)
+  } else {
+    const { error } = await db.from('whatsapp_messages').insert({
+      id: rowId,
+      wa_id: a.waId,
+      phone_number_id: a.phoneNumberId,
+      direction: a.direction,
+      type: 'call',
+      body,
+      status: a.outcome,
+      created_at: a.timestamp,
+      raw: a.raw as never,
+    })
+    if (error) throw new Error(error.message)
+  }
+
+  const { data: contact } = await db
+    .from('whatsapp_contacts')
+    .select('unread_count')
+    .eq('wa_id', a.waId)
+    .maybeSingle()
+
+  await db.from('whatsapp_contacts').upsert(
+    {
+      wa_id: a.waId,
+      profile_name: a.profileName ?? null,
+      phone_number_id: a.phoneNumberId,
+      display_phone: a.displayPhone ?? null,
+      last_message_at: a.timestamp,
+      last_snippet: body,
+      unread_count: ((contact?.unread_count as number | undefined) ?? 0) + (countsAsUnread ? 1 : 0),
+      // A call does NOT open the 24h free-form messaging window - only an
+      // actual message does - so last_inbound_at is deliberately untouched.
+    },
+    { onConflict: 'wa_id' },
+  )
+
+  return { stored: true }
+}
+
 /** Record a delivery/read receipt for an outbound message. */
 export async function updateStatus(messageId: string, status: string, error?: string) {
   const db = createAdminClient()
