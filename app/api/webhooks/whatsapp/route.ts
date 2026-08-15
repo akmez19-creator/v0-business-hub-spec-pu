@@ -70,55 +70,6 @@ type WaValue = {
     interactive?: { list_reply?: { title?: string }; button_reply?: { title?: string } }
   }[]
   statuses?: { id: string; status: string; errors?: { title?: string; message?: string }[] }[]
-  /**
-   * Calling API events. Only delivered when the "calls" webhook field is
-   * subscribed, which is separate from "messages".
-   */
-  calls?: {
-    id: string
-    to?: string
-    from?: string
-    event?: string
-    timestamp?: string
-    direction?: string
-    status?: string
-    duration?: number
-    start_time?: string
-    end_time?: string
-  }[]
-}
-
-type WaCall = NonNullable<WaValue['calls']>[number]
-
-/**
- * Reduce a call event to a direction and an outcome.
- *
- * Meta's field names here vary by event and are documented loosely, so this
- * reads defensively: an unrecognised status falls back to a neutral outcome
- * rather than silently labelling a real call "missed".
- */
-function readCall(c: WaCall, businessNumber: string | null) {
-  const dir = (c.direction ?? '').toUpperCase()
-  const direction: 'in' | 'out' =
-    dir.includes('BUSINESS') ? 'out' : dir.includes('USER') ? 'in' : c.from && c.from === businessNumber ? 'out' : 'in'
-
-  // The customer is whichever side is not the business number.
-  const waId = (direction === 'in' ? c.from : c.to) ?? c.from ?? c.to ?? null
-
-  const event = (c.event ?? '').toLowerCase()
-  const status = (c.status ?? '').toUpperCase()
-  const duration = typeof c.duration === 'number' ? c.duration : null
-
-  let outcome: 'ringing' | 'missed' | 'completed' | 'rejected' | 'failed'
-  if (event === 'connect' && !status) outcome = 'ringing'
-  else if (status === 'COMPLETED' || status === 'ACCEPTED') outcome = duration === 0 ? 'missed' : 'completed'
-  else if (status === 'REJECTED' || status === 'DECLINED') outcome = 'rejected'
-  else if (status === 'MISSED' || status === 'NO_ANSWER' || status === 'UNANSWERED') outcome = 'missed'
-  else if (status === 'FAILED' || status === 'ERROR') outcome = 'failed'
-  else if (event === 'terminate') outcome = duration && duration > 0 ? 'completed' : 'missed'
-  else outcome = 'ringing'
-
-  return { waId, direction, outcome, duration }
 }
 
 /** Pull a human-readable body out of whichever message shape arrived. */
@@ -191,31 +142,6 @@ export async function POST(request: Request) {
           // Swallow per-message so one bad row cannot block the whole batch
           // and trigger endless Meta retries.
           console.log('[v0] whatsapp webhook: save failed', m.id, e instanceof Error ? e.message : e)
-        }
-      }
-
-      for (const c of value.calls ?? []) {
-        if (!phoneNumberId) continue
-        const { waId, direction, outcome, duration } = readCall(c, displayPhone?.replace(/\D/g, '') ?? null)
-        if (!waId) continue
-        try {
-          const { stored } = await saveCall({
-            callId: c.id,
-            waId,
-            profileName,
-            phoneNumberId,
-            displayPhone,
-            direction,
-            outcome,
-            durationSec: duration,
-            timestamp: c.timestamp
-              ? new Date(Number(c.timestamp) * 1000).toISOString()
-              : new Date().toISOString(),
-            raw: c,
-          })
-          if (stored) calls++
-        } catch (e) {
-          console.log('[v0] whatsapp webhook: call save failed', c.id, e instanceof Error ? e.message : e)
         }
       }
 

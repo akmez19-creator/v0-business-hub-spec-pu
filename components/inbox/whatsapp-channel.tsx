@@ -26,9 +26,73 @@ type WaMessage = {
   direction: 'in' | 'out'
   type: string
   body: string | null
+  mediaId: string | null
+  mediaMime: string | null
   status: string | null
   error: string | null
   createdAt: string
+}
+
+/**
+ * Renders WhatsApp media through the authenticated proxy.
+ *
+ * The media id is NOT a URL: Cloud API media needs a server-side token
+ * exchange, so everything is loaded via /api/inbox/whatsapp/media/[id].
+ * Meta deletes media after 30 days, so a failure is expected over time and is
+ * reported as expired rather than as a broken attachment.
+ */
+function WaMedia({ message }: { message: WaMessage }) {
+  const [failed, setFailed] = useState(false)
+  if (!message.mediaId) return null
+
+  const src = `/api/inbox/whatsapp/media/${message.mediaId}`
+  const mime = message.mediaMime ?? ''
+  const kind = message.type
+
+  if (failed) {
+    return (
+      <p className="text-xs opacity-70">
+        Attachment unavailable — WhatsApp deletes media about 30 days after it is sent.
+      </p>
+    )
+  }
+
+  if (kind === 'image' || mime.startsWith('image/')) {
+    return (
+      // Not next/image: this is authenticated, non-optimizable proxied content.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src || '/placeholder.svg'}
+        alt={message.body ?? 'Photo sent on WhatsApp'}
+        onError={() => setFailed(true)}
+        className="max-h-80 w-full rounded-lg object-contain"
+      />
+    )
+  }
+
+  if (kind === 'video' || mime.startsWith('video/')) {
+    return (
+      <video
+        src={src}
+        controls
+        preload="metadata"
+        onError={() => setFailed(true)}
+        className="max-h-80 w-full rounded-lg bg-black"
+      >
+        Your browser cannot play this video.
+      </video>
+    )
+  }
+
+  if (kind === 'audio' || kind === 'voice' || mime.startsWith('audio/')) {
+    return <audio src={src} controls preload="metadata" onError={() => setFailed(true)} className="w-64 max-w-full" />
+  }
+
+  return (
+    <a href={src} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-2">
+      {message.body ?? 'Download attachment'}
+    </a>
+  )
 }
 
 type WaNumber = {
@@ -322,9 +386,14 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
                         m.direction === 'out' ? 'bg-primary text-primary-foreground' : 'bg-muted'
                       }`}
                     >
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-pretty">
-                        {m.body ?? `[${m.type}]`}
-                      </p>
+                      {m.mediaId ? <WaMedia message={m} /> : null}
+                      {/* Media often arrives with no caption, so an empty
+                          paragraph would add a blank line under the player. */}
+                      {m.body ? (
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-pretty">{m.body}</p>
+                      ) : m.mediaId ? null : (
+                        <p className="text-sm italic opacity-70">{m.type} message</p>
+                      )}
                       <span className="text-[11px] opacity-70">
                         {relative(m.createdAt)}
                         {m.direction === 'out' && m.status ? ` · ${m.status}` : ''}
