@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import type { Conversation } from './inbox-content'
+import type { Conversation } from './messenger-channel'
 
 type Message = {
   id: string
@@ -118,7 +118,11 @@ export function InboxThread({
         ) : messages.length === 0 ? (
           <p className="text-sm text-muted-foreground">No messages in this conversation.</p>
         ) : (
-          <ul className="flex flex-col gap-3">
+          <ul
+            // Centre the conversation column: bubbles stranded at the edge of
+            // a 2000px pane are much harder to scan.
+            className="mx-auto flex w-full max-w-[1100px] flex-col gap-3"
+          >
             {messages.map((m) => (
               <li key={m.id} className={`flex ${m.fromPage ? 'justify-end' : 'justify-start'}`}>
                 <div

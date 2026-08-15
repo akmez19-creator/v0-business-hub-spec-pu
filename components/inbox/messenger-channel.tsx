@@ -57,7 +57,7 @@ const relative = (iso: string) => {
   return formatDistanceToNow(t, { addSuffix: true })
 }
 
-export function InboxContent() {
+export function MessengerChannel() {
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [query, setQuery] = useState('')
   // Default to every Page merged and sorted by recency, so the newest customer
@@ -86,7 +86,7 @@ export function InboxContent() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-3 p-6">
+      <div className="flex flex-1 flex-col gap-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-16 w-full" />
         ))}
@@ -108,8 +108,8 @@ export function InboxContent() {
 
   if (!data?.success) {
     return (
-      <div className="p-6">
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-6">
+      <div className="flex flex-1 items-start">
+        <div className="w-full rounded-lg border border-destructive/40 bg-destructive/5 p-6">
           <p className="font-medium">Could not load the inbox</p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{data?.error ?? 'Unknown error'}</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => mutate()}>
@@ -137,9 +137,13 @@ export function InboxContent() {
   const unreadChats = all.reduce((n, c) => n + (c.unreadCount > 0 ? 1 : 0), 0)
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] gap-4 p-6 pt-0">
+    // The workspace shell owns height and padding so every channel aligns.
+    <div className="flex min-h-0 flex-1 gap-4">
       {/* Thread list */}
-      <div className="flex w-[380px] shrink-0 flex-col rounded-xl border border-border bg-card">
+      {/* Fixed 380px left a cramped list beside a near-empty thread pane on a
+          2870px screen. Scale the list with the viewport, capped so it cannot
+          swallow the thread. */}
+      <div className="flex w-[380px] shrink-0 flex-col rounded-xl border border-border bg-card xl:w-[26vw] xl:max-w-[520px]">
         <div className="flex flex-col gap-3 border-b border-border p-4">
           {pages.length > 1 ? (
             <Select value={scope} onValueChange={switchScope}>
