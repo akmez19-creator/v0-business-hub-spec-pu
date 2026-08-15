@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { ManagePosts } from '@/components/product-master/manage-posts'
 import { BulkPosterDialog, type BulkProduct } from '@/components/product-master/bulk-poster-dialog'
+import { mediaSrc } from '@/lib/media-url'
 
 // A row tool click: which tool, for which product.
 // 'reels' is the single entry point from the table - Studio covers titles,
@@ -441,8 +442,10 @@ export function ProductsTab({ onOpenTool }: { onOpenTool?: (req: ToolRequest) =>
                   {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   <span className="flex items-center gap-2 truncate">
                     {p.image_url ? (
+                      // Supplier CDNs refuse browser requests, so those photos
+                      // are streamed through the proxy instead.
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.image_url || "/placeholder.svg"} alt="" className="h-7 w-7 shrink-0 rounded object-cover" />
+                      <img src={mediaSrc(p.image_url) || "/placeholder.svg"} alt="" className="h-7 w-7 shrink-0 rounded object-cover" />
                     ) : (
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-bold text-muted-foreground">
                         {p.name.slice(0, 1)}

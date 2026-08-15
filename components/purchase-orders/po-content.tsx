@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
+import { ProductThumb } from '@/components/ui/product-thumb'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -205,13 +206,12 @@ function OrderRow({ order, example = false }: { order: PurchaseOrder; example?: 
       </TableCell>
       <TableCell>
         <div className="flex items-center gap-2">
-          {(order.products?.image_url || order.image_url) && (
-            <img
-              src={order.products?.image_url || order.image_url || ''}
-              alt=""
-              className="w-8 h-8 rounded object-cover"
-            />
-          )}
+          {/* Always rendered, so the column keeps its alignment whether or not
+              a photo exists - and 1688 photos are proxied so they load at all. */}
+          <ProductThumb
+            src={order.products?.image_url || order.image_url}
+            className="w-8 h-8 flex-shrink-0 rounded"
+          />
           <span className="font-medium truncate max-w-[150px]">
             {order.product_name || '-'}
           </span>

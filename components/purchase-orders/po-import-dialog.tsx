@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import * as XLSX from 'xlsx'
+import { mediaSrc } from '@/lib/media-url'
 
 type MatchTier = 'exact' | 'high' | 'medium' | 'low' | 'none'
 
@@ -1431,7 +1432,9 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
                           >
                             {rowImage ? (
                               <img
-                                src={rowImage || "/placeholder.svg"}
+                                // 1688 photos 403 when a browser asks for them
+                                // directly, so they go through the proxy.
+                                src={mediaSrc(rowImage) || '/placeholder.svg'}
                                 alt={`${mapping.excelProduct} product photo`}
                                 className="w-full h-full object-cover"
                                 loading="lazy"

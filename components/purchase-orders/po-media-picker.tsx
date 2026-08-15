@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
+import { mediaSrc } from '@/lib/media-url'
 
 interface MediaItem {
   url: string
@@ -69,11 +70,11 @@ export interface MediaQueueItem {
 
 /**
  * Marketplace CDNs block hotlinking, so listing media is streamed through the
- * existing authenticated proxy (which already allowlists the alicdn/taobao
- * hosts 1688 serves from).
+ * authenticated proxy. mediaSrc only rewrites those hosts: your own uploads
+ * live on Vercel Blob, which the proxy does not allowlist, so sending them
+ * through it would turn a working photo into a 403.
  */
-const proxied = (url: string) =>
-  `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(url)}`
+const proxied = (url: string) => mediaSrc(url)
 
 /** Fetch every photo and video on one listing. */
 async function loadMedia(link: string): Promise<MediaItem[]> {

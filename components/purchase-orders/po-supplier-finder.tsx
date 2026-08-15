@@ -5,6 +5,7 @@ import { Clipboard, ImageIcon, Loader2, Search, ShieldCheck, Upload, X } from 'l
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { mediaSrc } from '@/lib/media-url'
 
 /** A ranked 1688 listing, as returned by the marketplace search. */
 interface SupplierHit {
@@ -29,10 +30,13 @@ const compact = (n: number) =>
   n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '')}k` : String(n)
 
 /**
- * Marketplace CDNs block hotlinking, so thumbnails go through the same
- * authenticated proxy the rest of the picker uses.
+ * Marketplace CDNs block hotlinking, so their thumbnails go through the same
+ * authenticated proxy the rest of the picker uses. mediaSrc rewrites only those
+ * hosts: a reference photo you just uploaded sits on Vercel Blob, which the
+ * proxy does not allowlist, so proxying it would 403 the very photo you are
+ * searching with.
  */
-const proxied = (url: string) => `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(url)}`
+const proxied = (url: string) => mediaSrc(url)
 
 /**
  * Finds a replacement 1688 supplier from a photo of the product.
@@ -162,7 +166,7 @@ export function SupplierFinder({
       >
         {preview ? (
           <img
-            src={preview.startsWith('blob:') ? preview : proxied(preview)}
+            src={proxied(preview)}
             alt="Reference product photo"
             className="h-20 w-20 flex-shrink-0 rounded border object-cover"
           />

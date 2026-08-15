@@ -77,6 +77,7 @@ import {
 import Image from 'next/image'
 import { Product } from '@/lib/types'
 import { InventoryImportDialog } from './inventory-import-dialog'
+import { mediaSrc } from '@/lib/media-url'
 
 type ViewMode = 'table' | 'grid'
 type SortKey = 'name' | 'category' | 'quantity' | 'price'
@@ -824,7 +825,9 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                       <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted/50 flex items-center justify-center border border-border/50">
                         {product.image_url ? (
                           <Image
-                            src={product.image_url}
+                            // 1688-hosted photos 403 a direct browser request,
+                            // so they are served through the proxy.
+                            src={mediaSrc(product.image_url)}
                             alt={product.name}
                             width={40}
                             height={40}
@@ -944,7 +947,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
               <div className="relative aspect-square bg-muted">
                 {product.image_url ? (
                   <Image
-                    src={product.image_url}
+                    src={mediaSrc(product.image_url)}
                     alt={product.name}
                     fill
                     className="object-cover"
