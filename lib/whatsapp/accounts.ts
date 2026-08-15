@@ -26,6 +26,14 @@ export type WaNumber = {
    */
   platform: string
   usable: boolean
+  /**
+   * Apps receiving this WABA's webhooks. A number can be live in a third-party
+   * inbox (respond.io, n8n) while invisible here, so the distinction between
+   * "nobody is listening" and "someone else is listening" has to be shown.
+   */
+  subscribedApps: string[]
+  /** True when THIS app is subscribed, i.e. messages can reach this inbox. */
+  oursSubscribed: boolean
 }
 
 type BizList = { data?: { id: string; name: string }[] }
