@@ -37,7 +37,16 @@ export async function middleware(request: NextRequest) {
   // passage on those prefixes - it is still verified by the route itself.
   // Unauthenticated API calls get a 401 JSON response, never a redirect.
   if (pathname.startsWith('/api') && !user) {
-    const tokenAuthPrefixes = ['/api/extension', '/api/clients/rating', '/api/clients/last-delivered']
+    const tokenAuthPrefixes = [
+      '/api/extension',
+      '/api/clients/rating',
+      '/api/clients/last-delivered',
+      // Inbound provider webhooks. Meta has no Supabase session, so a session
+      // gate here silently 401s the handshake and no message can ever arrive.
+      // These routes are NOT open: GET checks hub.verify_token and POST
+      // verifies Meta's SHA-256 body signature before storing anything.
+      '/api/webhooks/',
+    ]
     const isTokenAuthRoute = tokenAuthPrefixes.some((p) => pathname.startsWith(p))
     if (!isTokenAuthRoute) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
