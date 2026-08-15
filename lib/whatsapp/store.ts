@@ -48,13 +48,13 @@ export function whatsappToken(): string | undefined {
   return process.env.WHATSAPP_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN
 }
 
+/**
+ * Optional pinned number. The business has four live Cloud API numbers, so the
+ * sending number is normally taken from the contact - it must be the number
+ * the customer actually messaged, or the reply arrives from a stranger.
+ */
 export function whatsappPhoneNumberId(): string | undefined {
   return process.env.WHATSAPP_PHONE_NUMBER_ID
-}
-
-/** True when this deployment can actually send WhatsApp messages. */
-export function hasWhatsAppConfig(): boolean {
-  return Boolean(whatsappToken() && whatsappPhoneNumberId())
 }
 
 type ContactRow = {
@@ -199,8 +199,18 @@ export async function updateStatus(messageId: string, status: string, error?: st
 /** Send a free-form text message and record it locally. */
 export async function sendText(waId: string, body: string): Promise<{ id: string }> {
   const token = whatsappToken()
-  const phoneNumberId = whatsappPhoneNumberId()
-  if (!token || !phoneNumberId) throw new Error('WhatsApp is not configured on this deployment.')
+  if (!token) throw new Error('WhatsApp is not configured on this deployment.')
+
+  // Reply from the number the customer messaged. Falling back to a global
+  // default would answer a Buildeco customer from the Made By Moris number.
+  const db0 = createAdminClient()
+  const { data: contact } = await db0
+    .from('whatsapp_contacts')
+    .select('phone_number_id')
+    .eq('wa_id', waId)
+    .maybeSingle()
+  const phoneNumberId = (contact?.phone_number_id as string | undefined) ?? whatsappPhoneNumberId()
+  if (!phoneNumberId) throw new Error('No WhatsApp number is associated with this conversation.')
 
   const res = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',

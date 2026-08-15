@@ -31,11 +31,22 @@ type WaMessage = {
   createdAt: string
 }
 
+type WaNumber = {
+  id: string
+  displayPhone: string
+  verifiedName: string
+  businessName: string
+  platform: string
+  usable: boolean
+}
+
 type ListResponse = {
   success: boolean
-  configured?: boolean
   canSend?: boolean
   capability?: { available: boolean; missing: string[]; reason?: string } | null
+  numbers?: WaNumber[]
+  signatureVerified?: boolean
+  hasVerifyToken?: boolean
   contacts?: Contact[]
   webhookPath?: string
   error?: string
@@ -78,29 +89,53 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
   }
 
   const scopeMissing = data?.capability && !data.capability.available
-  const notConfigured = !data?.configured
+  const numbers = data?.numbers ?? []
+  const usableNumbers = numbers.filter((n) => n.usable)
+  // The webhook is what makes messages arrive at all; the scope only governs
+  // sending. Report them apart so the fix points at the right thing.
+  const webhookReady = Boolean(data?.hasVerifyToken)
 
-  // Two independent failures with different fixes: the token can lack the
-  // scope, and the deployment can lack a phone number / webhook. Saying
-  // "WhatsApp unavailable" for both would send the user to fix the wrong one.
-  if (scopeMissing || notConfigured) {
+  if (scopeMissing || !webhookReady) {
     return (
       <ChannelUnavailable
-        title={scopeMissing ? 'WhatsApp needs Cloud API access' : 'WhatsApp is not connected yet'}
+        title={scopeMissing ? 'WhatsApp needs Cloud API access' : 'Connect the WhatsApp webhook'}
         description={
           scopeMissing
             ? data?.capability?.reason
-            : 'The token looks usable, but this deployment has no WhatsApp phone number configured, so no messages can arrive or be sent.'
+            : `The token can reach ${usableNumbers.length} Cloud API number${usableNumbers.length === 1 ? '' : 's'}, but no webhook is receiving messages yet, so nothing can arrive.`
         }
         missing={data?.capability?.missing ?? []}
         steps={[
-          'Confirm the number is on the WhatsApp Cloud API, not the WhatsApp Business phone app — the phone app has no API access at all, and migrating a number removes it from that app.',
-          'In Meta Business Settings, open WhatsApp Accounts and copy the Phone number ID.',
-          'Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN (any random string you choose) and FACEBOOK_APP_SECRET in the project settings.',
-          `Add the webhook URL ${origin}/api/webhooks/whatsapp in the app's WhatsApp configuration, using the same verify token, and subscribe to the "messages" field.`,
-          'Regenerate FACEBOOK_ACCESS_TOKEN with whatsapp_business_messaging, keeping every existing scope including ads_management.',
+          'Set WHATSAPP_VERIFY_TOKEN in the project settings to any random string you choose.',
+          `In the Meta app dashboard open WhatsApp > Configuration, set the callback URL to ${origin}/api/webhooks/whatsapp and paste the same verify token.`,
+          'Subscribe to the "messages" webhook field, then click Verify and save.',
+          'Repeat the subscription for each WhatsApp Business Account you want in this inbox — they are configured per account, not per app.',
         ]}
       >
+        {usableNumbers.length > 0 ? (
+          <div className="rounded-lg border border-border bg-muted/40 p-4">
+            <p className="text-sm font-medium">
+              {usableNumbers.length} number{usableNumbers.length === 1 ? '' : 's'} ready on the Cloud API
+            </p>
+            <ul className="mt-2 flex flex-col gap-1">
+              {usableNumbers.map((n) => (
+                <li key={n.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-muted-foreground">
+                    {n.verifiedName} · {n.displayPhone}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{n.businessName}</span>
+                </li>
+              ))}
+            </ul>
+            {numbers.length > usableNumbers.length ? (
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                {numbers.length - usableNumbers.length} other number
+                {numbers.length - usableNumbers.length === 1 ? ' is' : 's are'} not on the Cloud API and cannot be
+                used here.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="rounded-lg border border-border bg-muted/40 p-4">
           <p className="text-sm font-medium">Why WhatsApp starts empty</p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground text-pretty">

@@ -139,6 +139,11 @@ export function CommentsChannel() {
   }
 
   const all = data.comments ?? []
+  // Meta withholds `from` on comments left by the public unless the app has
+  // passed App Review for Page Public Content Access, so a name is genuinely
+  // unavailable rather than missing by mistake. Replying still works, because
+  // that only needs the comment id.
+  const anonymous = all.length > 0 && all.every((c) => !c.from?.name)
   const pages = data.pages ?? []
   const stats: Stat[] = data.pageStats ?? []
   const combined = scope === ALL_PAGES
@@ -249,6 +254,13 @@ export function CommentsChannel() {
               Could not load {failed.map((p) => p.name).join(', ')}. Other pages are up to date.
             </p>
           ) : null}
+
+          {anonymous ? (
+            <p className="text-xs leading-relaxed text-muted-foreground text-pretty">
+              Facebook hides commenter names until the app passes App Review for Page Public Content Access.
+              Replying, hiding and deleting all still work.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -282,7 +294,7 @@ export function CommentsChannel() {
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-medium">{c.from?.name ?? 'Unknown'}</span>
+                        <span className="truncate font-medium">{c.from?.name ?? 'Facebook user'}</span>
                         <span className="shrink-0 text-xs text-muted-foreground">{relative(c.createdTime)}</span>
                       </div>
                       <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground text-pretty">
@@ -325,7 +337,7 @@ export function CommentsChannel() {
           <>
             <div className="flex items-start justify-between gap-4 border-b border-border p-4">
               <div className="flex min-w-0 flex-col gap-1">
-                <h3 className="font-semibold">{selected.from?.name ?? 'Unknown'}</h3>
+                <h3 className="font-semibold">{selected.from?.name ?? 'Facebook user'}</h3>
                 <p className="text-xs text-muted-foreground">
                   {relative(selected.createdTime)}
                   {combined ? ` · via ${selected.pageName}` : ''}
@@ -420,7 +432,7 @@ export function CommentsChannel() {
                       }`}
                     >
                       <p className="text-xs font-medium">
-                        {r.from?.name ?? 'Unknown'}
+                            {r.from?.name ?? 'Facebook user'}
                         {r.fromPage ? ' (you)' : ''}
                         <span className="ml-2 font-normal text-muted-foreground">{relative(r.createdTime)}</span>
                       </p>

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCapabilities } from '@/lib/facebook/capabilities'
-import { hasWhatsAppConfig, listContacts, listMessages, markRead, sendText } from '@/lib/whatsapp/store'
+import { listContacts, listMessages, markRead, sendText, whatsappToken } from '@/lib/whatsapp/store'
+import { listWhatsAppNumbers } from '@/lib/whatsapp/accounts'
 
 /**
  * WhatsApp conversations, served from Postgres rather than Graph.
@@ -27,11 +28,6 @@ export async function GET(request: Request) {
     }
 
     const waId = new URL(request.url).searchParams.get('waId')
-    const configured = hasWhatsAppConfig()
-
-    const token = process.env.FACEBOOK_ACCESS_TOKEN
-    const caps = token ? await getCapabilities(token) : null
-    const channel = caps?.channels.whatsapp
 
     // A single thread was asked for.
     if (waId) {
@@ -40,15 +36,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, messages })
     }
 
+    const token = whatsappToken()
+    const caps = token ? await getCapabilities(token) : null
+    const channel = caps?.channels.whatsapp
+
+    // Numbers come from Meta, not an env var: the business runs four of them.
+    let numbers: Awaited<ReturnType<typeof listWhatsAppNumbers>> = []
+    if (token && channel?.available) {
+      try {
+        numbers = await listWhatsAppNumbers(token)
+      } catch (e) {
+        console.log('[v0] whatsapp number discovery failed:', e instanceof Error ? e.message : e)
+      }
+    }
+    const usable = numbers.filter((n) => n.usable)
     const contacts = await listContacts()
 
     return NextResponse.json({
       success: true,
-      configured,
       capability: channel ?? null,
-      // Both must be true before a message can ever appear, and they fail for
-      // different reasons - report them separately.
-      canSend: configured && (channel?.available ?? false),
+      numbers,
+      // Scope granted AND at least one Cloud API number. These fail for
+      // different reasons, so the UI reports them separately.
+      canSend: Boolean(token) && (channel?.available ?? false) && usable.length > 0,
+      signatureVerified: Boolean(process.env.WHATSAPP_APP_SECRET || process.env.FACEBOOK_APP_SECRET),
+      hasVerifyToken: Boolean(process.env.WHATSAPP_VERIFY_TOKEN),
       contacts,
       webhookPath: '/api/webhooks/whatsapp',
     })
@@ -70,9 +82,9 @@ export async function POST(request: Request) {
     if (!waId || !text) {
       return NextResponse.json({ success: false, error: 'waId and message are required' }, { status: 400 })
     }
-    if (!hasWhatsAppConfig()) {
+    if (!whatsappToken()) {
       return NextResponse.json(
-        { success: false, error: 'WhatsApp is not configured. Set WHATSAPP_PHONE_NUMBER_ID and a token.' },
+        { success: false, error: 'WhatsApp is not configured: no access token.' },
         { status: 400 },
       )
     }

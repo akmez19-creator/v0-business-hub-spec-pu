@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCapabilities } from '@/lib/facebook/capabilities'
-import { hasWhatsAppConfig } from '@/lib/whatsapp/store'
 
 /**
  * What each inbox channel can actually do right now.
@@ -31,7 +30,9 @@ export async function GET() {
     // WhatsApp needs a webhook wired up as well as the scope, so report the
     // two independently - "scope granted but no messages will arrive" is a
     // different problem from "scope missing".
-    const whatsappConfigured = hasWhatsAppConfig()
+    const whatsappConfigured = Boolean(
+      process.env.WHATSAPP_VERIFY_TOKEN && (process.env.WHATSAPP_APP_SECRET || process.env.FACEBOOK_APP_SECRET),
+    )
 
     return NextResponse.json({
       success: true,
