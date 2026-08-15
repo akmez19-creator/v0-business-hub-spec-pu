@@ -39,6 +39,7 @@ import {
   Banknote,
   BoxesIcon,
   ShoppingCart,
+  MessageSquare,
 } from 'lucide-react'
 
 interface SubNavItem {
@@ -61,6 +62,12 @@ const navItems: NavItem[] = [
     label: 'Overview',
     icon: LayoutDashboard,
     roles: ['admin', 'manager', 'marketing_agent', 'contractor', 'rider'],
+  },
+  {
+    href: '/dashboard/inbox',
+    label: 'Inbox',
+    icon: MessageSquare,
+    roles: ['admin', 'manager'],
   },
   {
     href: '/dashboard/deliveries',
@@ -141,8 +148,11 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   // Auto-expand based on current path
   const getDefaultMobileExpanded = () => {
+    // Purchasing owns a real route tree, so it matches before the
+    // /deliveries-based virtual groups below.
+    if (pathname.startsWith('/dashboard/purchasing')) return ['/dashboard/purchasing']
     // Check inventory/finance pages first (they're under /deliveries URL)
-    if (pathname.includes('/inventory') || pathname.includes('/purchase-orders') || (pathname.includes('/stock') && pathname.includes('/deliveries'))) return ['/dashboard/inventory']
+    if (pathname.includes('/inventory') || (pathname.includes('/stock') && pathname.includes('/deliveries'))) return ['/dashboard/inventory']
     if (pathname.includes('/collections') || pathname.includes('/payments') || pathname.includes('/payroll')) return ['/dashboard/finance']
     if (pathname.startsWith('/dashboard/deliveries')) return ['/dashboard/deliveries']
     if (pathname.startsWith('/dashboard/contractors')) return ['/dashboard/contractors']
@@ -176,7 +186,8 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
     // Check for specific pages first
     if (pathname.includes('/ads')) return 'Ads Manager'
     if (pathname.includes('/inventory')) return 'Products'
-    if (pathname.includes('/purchase-orders')) return 'Purchase Orders'
+    if (pathname.startsWith('/dashboard/purchasing/suppliers')) return 'Suppliers'
+    if (pathname.startsWith('/dashboard/purchasing')) return 'Purchase Orders'
     if (pathname.includes('/stock') && !pathname.includes('/contractors') && !pathname.includes('/riders')) return 'Stock In/Out'
     if (pathname.includes('/collections')) return 'Collections'
     if (pathname.includes('/payments')) return 'Payments'

@@ -1,6 +1,17 @@
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
-export type FbPage = { id: string; name: string; access_token: string }
+export type FbPage = {
+  id: string
+  name: string
+  access_token: string
+  /**
+   * True when the Page came from /me/accounts, i.e. it was explicitly granted
+   * to the app during login. Pages found only through ad-account discovery are
+   * manageable but were never deliberately connected, so anything that has to
+   * pick ONE Page on the user's behalf should prefer a granted one.
+   */
+  direct?: boolean
+}
 
 // Discovery costs 10+ Graph calls, and Facebook enforces an app-wide hourly
 // request limit (error #4). Page lists change rarely, so cache per token for
@@ -26,7 +37,7 @@ export async function getManageablePages(token: string): Promise<FbPage[]> {
     const res = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&limit=100&access_token=${enc}`)
     const json = (await res.json()) as { data?: FbPage[] }
     for (const p of json.data ?? []) {
-      if (p.access_token) byId.set(p.id, p)
+      if (p.access_token) byId.set(p.id, { ...p, direct: true })
     }
   } catch {
     // fall through to discovery

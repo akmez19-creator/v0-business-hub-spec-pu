@@ -23,6 +23,7 @@ import {
   Banknote,
   BoxesIcon,
   ShoppingCart,
+  MessageSquare,
   TrendingDown,
   FileText,
   MapPin,
@@ -62,6 +63,13 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
     roles: ['admin', 'manager', 'marketing_agent', 'contractor', 'rider'],
     color: '#f97316',
+  },
+  {
+    href: '/dashboard/inbox',
+    label: 'Inbox',
+    icon: MessageSquare,
+    roles: ['admin', 'manager'],
+    color: '#3b82f6',
   },
   {
     href: '/dashboard/product-master',
