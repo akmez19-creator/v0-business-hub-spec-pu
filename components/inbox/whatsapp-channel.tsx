@@ -38,6 +38,8 @@ type WaNumber = {
   businessName: string
   platform: string
   usable: boolean
+  subscribedApps: string[]
+  oursSubscribed: boolean
 }
 
 type ListResponse = {
@@ -117,13 +119,27 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
             <p className="text-sm font-medium">
               {usableNumbers.length} number{usableNumbers.length === 1 ? '' : 's'} ready on the Cloud API
             </p>
-            <ul className="mt-2 flex flex-col gap-1">
+            <ul className="mt-3 flex flex-col gap-2">
               {usableNumbers.map((n) => (
                 <li key={n.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="truncate text-muted-foreground">
+                  <span className="min-w-0 truncate text-muted-foreground">
                     {n.verifiedName} · {n.displayPhone}
                   </span>
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{n.businessName}</span>
+                  {/* Routing truth, not a guess: a number can be live in
+                      another tool and still deliver nothing here. */}
+                  <span
+                    className={
+                      n.oursSubscribed
+                        ? 'shrink-0 text-xs font-medium text-emerald-500'
+                        : 'shrink-0 text-xs text-muted-foreground'
+                    }
+                  >
+                    {n.oursSubscribed
+                      ? 'delivering here'
+                      : n.subscribedApps.length > 0
+                        ? `goes to ${n.subscribedApps.join(', ')}`
+                        : 'not delivering here'}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -134,6 +150,10 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
                 used here.
               </p>
             ) : null}
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground text-pretty">
+              Subscribing this app is additive: WhatsApp delivers each message to every subscribed app, so an
+              existing inbox such as respond.io keeps receiving exactly as it does now.
+            </p>
           </div>
         ) : null}
         <div className="rounded-lg border border-border bg-muted/40 p-4">
