@@ -116,7 +116,9 @@ export function InboxThread({
             {messages.map((m) => (
               <li key={m.id} className={`flex ${m.fromPage ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`flex max-w-[70%] flex-col gap-1 rounded-xl px-4 py-2.5 ${
+                  // 70% of a 2000px-wide pane is an unreadable 1400px line, so
+                  // cap on measure (ch) as well as on the percentage.
+                  className={`flex max-w-[70%] flex-col gap-1 rounded-xl px-4 py-2.5 lg:max-w-[68ch] ${
                     m.fromPage ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
                   }`}
                 >
