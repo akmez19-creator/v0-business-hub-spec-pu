@@ -26,6 +26,13 @@ export type InboxConversation = {
   customer: InboxParticipant | null
   /** True when the last activity is older than the 24h reply window. */
   outsideWindow: boolean
+  /**
+   * The Page that owns this conversation. Carried on every row - not just
+   * inferred from the current selection - because the combined view mixes
+   * Pages, and a reply must go out as the Page that received the message.
+   */
+  pageId: string
+  pageName: string
 }
 
 export type InboxMessage = {
@@ -129,8 +136,64 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
       messageCount: c.message_count ?? 0,
       customer,
       outsideWindow: now - new Date(updatedTime).getTime() > MESSAGING_WINDOW_MS,
+      pageId: page.id,
+      pageName: page.name,
     }
   })
+}
+
+export type PageStat = {
+  id: string
+  name: string
+  /** Total unread messages, or null when this Page could not be read. */
+  unread: number | null
+  conversations: number
+  /** Populated only when the Page failed, so the UI can say which and why. */
+  error?: string
+}
+
+/**
+ * Every Page's conversations merged into one recency-sorted list.
+ *
+ * Uses allSettled rather than all: with six Pages, one losing its role or
+ * hitting a throttle would otherwise blank the entire inbox. A failed Page is
+ * reported in `pages` with a null unread count and simply contributes no rows.
+ */
+export async function listAllConversations(
+  pages: FbPage[],
+  // Must match the single-Page limit. Depth costs nothing extra - it is one
+  // request per Page either way - and a shallower merged fetch made the
+  // dropdown's unread counts change when you switched views.
+  limit = 40,
+): Promise<{ conversations: InboxConversation[]; pageStats: PageStat[]; allFailed: boolean }> {
+  const settled = await Promise.allSettled(pages.map((p) => listConversations(p, limit)))
+
+  const conversations: InboxConversation[] = []
+  const pageStats: PageStat[] = []
+  let failures = 0
+
+  settled.forEach((r, i) => {
+    const page = pages[i]
+    if (r.status === 'fulfilled') {
+      conversations.push(...r.value)
+      pageStats.push({
+        id: page.id,
+        name: page.name,
+        unread: r.value.reduce((n, c) => n + c.unreadCount, 0),
+        conversations: r.value.length,
+      })
+    } else {
+      failures++
+      const message = r.reason instanceof Error ? r.reason.message : String(r.reason)
+      console.log('[v0] inbox: page failed', page.name, message)
+      pageStats.push({ id: page.id, name: page.name, unread: null, conversations: 0, error: message })
+    }
+  })
+
+  conversations.sort((a, b) => new Date(b.updatedTime).getTime() - new Date(a.updatedTime).getTime())
+  pageStats.sort((a, b) => a.name.localeCompare(b.name))
+
+  return { conversations, pageStats, allFailed: pages.length > 0 && failures === pages.length }
 }
 
 type RawMessage = {

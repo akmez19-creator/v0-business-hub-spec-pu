@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getInboxPage, getInboxPages, listConversations, MessagingPermissionError } from '@/lib/facebook/messages'
+import {
+  getInboxPage,
+  getInboxPages,
+  listAllConversations,
+  listConversations,
+  MessagingPermissionError,
+} from '@/lib/facebook/messages'
 
 /**
- * Messenger conversations for the business Page.
+ * Messenger conversations.
+ *
+ * Defaults to every Page merged into one recency-sorted list, because five of
+ * the six Pages carry live traffic and a single-Page default silently hides
+ * the rest. `?pageId=<id>` narrows to one Page.
  *
  * The missing-permission case is returned as a 200 with `needsPermission`
  * rather than an error status: it is a setup state, not a fault, and the UI
@@ -17,10 +27,43 @@ export async function GET(request: Request) {
     } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
 
-    const requestedPageId = new URL(request.url).searchParams.get('pageId') ?? undefined
+    const requested = new URL(request.url).searchParams.get('pageId') ?? 'all'
+    const pages = await getInboxPages()
     // Never leak page access tokens to the client - only id and name.
-    const pages = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
-    const page = await getInboxPage(requestedPageId)
+    const pageRefs = pages.map((p) => ({ id: p.id, name: p.name }))
+
+    if (pages.length === 0) {
+      return NextResponse.json({
+        success: false,
+        needsPermission: true,
+        reason: 'no-page',
+        error: 'No Facebook Page is reachable with the configured access token.',
+      })
+    }
+
+    // ---- Combined view -----------------------------------------------------
+    if (requested === 'all') {
+      const { conversations, pageStats, allFailed } = await listAllConversations(pages)
+      if (allFailed) {
+        return NextResponse.json({
+          success: false,
+          needsPermission: true,
+          reason: 'scope',
+          pages: pageRefs,
+          error: pageStats.find((p) => p.error)?.error ?? 'Every Page failed to load.',
+        })
+      }
+      return NextResponse.json({
+        success: true,
+        scope: 'all',
+        pages: pageRefs,
+        pageStats,
+        conversations,
+      })
+    }
+
+    // ---- Single Page -------------------------------------------------------
+    const page = await getInboxPage(requested)
     if (!page) {
       return NextResponse.json({
         success: false,
@@ -31,11 +74,20 @@ export async function GET(request: Request) {
     }
 
     try {
-      const conversations = await listConversations(page)
+      const conversations = await listConversations(page, 40)
       return NextResponse.json({
         success: true,
+        scope: page.id,
         page: { id: page.id, name: page.name },
-        pages,
+        pages: pageRefs,
+        pageStats: [
+          {
+            id: page.id,
+            name: page.name,
+            unread: conversations.reduce((n, c) => n + c.unreadCount, 0),
+            conversations: conversations.length,
+          },
+        ],
         conversations,
       })
     } catch (e) {
@@ -45,7 +97,7 @@ export async function GET(request: Request) {
           needsPermission: true,
           reason: 'scope',
           page: { id: page.id, name: page.name },
-          pages,
+          pages: pageRefs,
           error: e.message,
         })
       }

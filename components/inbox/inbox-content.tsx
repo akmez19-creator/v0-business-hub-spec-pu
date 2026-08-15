@@ -20,19 +20,34 @@ export type Conversation = {
   messageCount: number
   customer: { id: string; name?: string } | null
   outsideWindow: boolean
+  pageId: string
+  pageName: string
 }
 
 type PageRef = { id: string; name: string }
+
+type PageStat = {
+  id: string
+  name: string
+  unread: number | null
+  conversations: number
+  error?: string
+}
 
 type ListResponse = {
   success: boolean
   needsPermission?: boolean
   reason?: string
+  scope?: string
   page?: PageRef
   pages?: PageRef[]
+  pageStats?: PageStat[]
   conversations?: Conversation[]
   error?: string
 }
+
+/** Sentinel for the merged, all-Pages view. */
+const ALL = 'all'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -45,24 +60,28 @@ const relative = (iso: string) => {
 export function InboxContent() {
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [query, setQuery] = useState('')
-  // Which Page's inbox to show. Undefined lets the server pick the Page that
-  // was actually granted to the app rather than the alphabetically first one.
-  const [pageId, setPageId] = useState<string | undefined>(undefined)
+  // Default to every Page merged and sorted by recency, so the newest customer
+  // message is on top no matter which business it came to.
+  const [scope, setScope] = useState<string>(ALL)
 
   // Poll so new customer messages appear without a manual refresh. The Graph
   // client caches for 30s, so this costs no extra Facebook quota.
   const { data, isLoading, mutate, isValidating } = useSWR<ListResponse>(
-    pageId ? `/api/inbox?pageId=${encodeURIComponent(pageId)}` : '/api/inbox',
+    `/api/inbox?pageId=${encodeURIComponent(scope)}`,
     fetcher,
     { refreshInterval: 60_000, revalidateOnFocus: true },
   )
 
-  const activePageId = data?.page?.id
   const pages = data?.pages ?? []
+  const pageStats = data?.pageStats ?? []
+  const statById = new Map(pageStats.map((s) => [s.id, s]))
+  const combined = scope === ALL
+  const failedPages = pageStats.filter((s) => s.error)
+  const totalUnread = pageStats.reduce((n, s) => n + (s.unread ?? 0), 0)
 
-  const switchPage = (id: string) => {
+  const switchScope = (next: string) => {
     setSelected(null) // a thread belongs to one Page; clear it on switch
-    setPageId(id)
+    setScope(next)
   }
 
   if (isLoading) {
@@ -81,8 +100,8 @@ export function InboxContent() {
         pageName={data.page?.name}
         reason={data.reason}
         pages={pages}
-        activePageId={activePageId}
-        onSelectPage={switchPage}
+        activePageId={combined ? undefined : scope}
+        onSelectPage={switchScope}
       />
     )
   }
@@ -105,10 +124,17 @@ export function InboxContent() {
   const q = query.trim().toLowerCase()
   const conversations = q
     ? all.filter(
-        (c) => (c.customer?.name ?? '').toLowerCase().includes(q) || c.snippet.toLowerCase().includes(q),
+        (c) =>
+          (c.customer?.name ?? '').toLowerCase().includes(q) ||
+          c.snippet.toLowerCase().includes(q) ||
+          // In the merged view the Page name is a useful filter of its own.
+          (combined && c.pageName.toLowerCase().includes(q)),
       )
     : all
-  const unread = all.reduce((n, c) => n + (c.unreadCount > 0 ? 1 : 0), 0)
+  // Count CHATS needing a reply, not raw messages: the dropdown already shows
+  // message totals, and two different numbers both labelled "unread" side by
+  // side read as a bug.
+  const unreadChats = all.reduce((n, c) => n + (c.unreadCount > 0 ? 1 : 0), 0)
 
   return (
     <div className="flex h-[calc(100vh-9rem)] gap-4 p-6 pt-0">
@@ -116,25 +142,35 @@ export function InboxContent() {
       <div className="flex w-[380px] shrink-0 flex-col rounded-xl border border-border bg-card">
         <div className="flex flex-col gap-3 border-b border-border p-4">
           {pages.length > 1 ? (
-            <Select value={activePageId} onValueChange={switchPage}>
+            <Select value={scope} onValueChange={switchScope}>
               <SelectTrigger aria-label="Facebook Page">
                 <SelectValue placeholder="Select a Page" />
               </SelectTrigger>
               <SelectContent>
-                {pages.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
+                <SelectItem value={ALL}>All pages{totalUnread > 0 ? ` (${totalUnread} unread)` : ''}</SelectItem>
+                {pages.map((p) => {
+                  const stat = statById.get(p.id)
+                  // Unread counts come free from the combined fetch, so the
+                  // dropdown shows where messages are piling up without
+                  // switching Page to find out.
+                  const suffix =
+                    stat?.error != null ? ' (unavailable)' : stat?.unread ? ` (${stat.unread})` : ''
+                  return (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                      {suffix}
+                    </SelectItem>
+                  )
+                })}
               </SelectContent>
             </Select>
           ) : null}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <h2 className="font-semibold">Conversations</h2>
-              {unread > 0 ? (
+              <h2 className="font-semibold">{combined ? 'All conversations' : 'Conversations'}</h2>
+              {unreadChats > 0 ? (
                 <Badge variant="default" className="tabular-nums">
-                  {unread} unread
+                  {unreadChats} to reply
                 </Badge>
               ) : null}
             </div>
@@ -161,6 +197,13 @@ export function InboxContent() {
               aria-label="Search conversations"
             />
           </div>
+          {failedPages.length > 0 ? (
+            // A partial failure must be visible: silently showing 5 of 6
+            // Pages looks identical to a quiet day.
+            <p className="text-xs leading-relaxed text-amber-500">
+              Could not load {failedPages.map((p) => p.name).join(', ')}. Other pages are up to date.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -190,7 +233,14 @@ export function InboxContent() {
                         <span className="shrink-0 text-xs text-muted-foreground">{relative(c.updatedTime)}</span>
                       </div>
                       <span className="truncate text-sm text-muted-foreground">{c.snippet || 'No preview'}</span>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {combined ? (
+                          <Badge variant="secondary" className="h-5 max-w-full font-normal">
+                            {/* Badge centres its text, so a bare truncate
+                                would clip both ends of a long Page name. */}
+                            <span className="block w-full truncate text-left">{c.pageName}</span>
+                          </Badge>
+                        ) : null}
                         {c.unreadCount > 0 ? (
                           <Badge variant="default" className="h-5 tabular-nums">
                             {c.unreadCount}
@@ -214,7 +264,15 @@ export function InboxContent() {
       {/* Thread */}
       <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-border bg-card">
         {selected ? (
-          <InboxThread conversation={selected} pageId={activePageId} onSent={() => mutate()} />
+          <InboxThread
+            key={selected.id}
+            conversation={selected}
+            // The Page comes from the conversation, never from the current
+            // selection - in the merged view they are usually different.
+            pageId={selected.pageId}
+            showPageName={combined}
+            onSent={() => mutate()}
+          />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
             <MessageSquare className="h-10 w-10 text-muted-foreground" aria-hidden="true" />

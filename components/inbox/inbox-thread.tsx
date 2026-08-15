@@ -25,10 +25,13 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json())
 export function InboxThread({
   conversation,
   pageId,
+  showPageName = false,
   onSent,
 }: {
   conversation: Conversation
   pageId?: string
+  /** In the merged view, make it obvious which business you are replying as. */
+  showPageName?: boolean
   onSent: () => void
 }) {
   const [draft, setDraft] = useState('')
@@ -90,7 +93,10 @@ export function InboxThread({
       <div className="flex items-center justify-between gap-3 border-b border-border p-4">
         <div className="flex flex-col gap-0.5">
           <h3 className="font-semibold">{conversation.customer?.name ?? 'Unknown customer'}</h3>
-          <p className="text-xs text-muted-foreground tabular-nums">{conversation.messageCount} messages</p>
+          <p className="text-xs text-muted-foreground">
+            <span className="tabular-nums">{conversation.messageCount} messages</span>
+            {showPageName ? <span> · via {conversation.pageName}</span> : null}
+          </p>
         </div>
         {conversation.outsideWindow ? (
           <Badge variant="outline" className="gap-1.5 border-amber-500/40 text-amber-500">
@@ -167,6 +173,7 @@ export function InboxThread({
         />
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
+            {showPageName ? `Replying as ${conversation.pageName} · ` : ''}
             Enter to send, Shift+Enter for a new line
           </p>
           <Button onClick={send} disabled={!draft.trim() || sending} size="sm">
