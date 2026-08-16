@@ -27,6 +27,17 @@ export type WaContact = {
   unreadCount: number
   /** True when the 24h free-form window has closed. */
   outsideWindow: boolean
+  /**
+   * First-touch Click-to-WhatsApp attribution: the ad that originally brought
+   * this customer in. Null means they messaged organically.
+   */
+  firstAdId: string | null
+  /** Real ad name, e.g. "MBM - Mini Massager - 1". Preferred for display. */
+  firstAdName: string | null
+  /** Meta's referral headline - the page name, so a weak fallback only. */
+  firstAdHeadline: string | null
+  firstAdSourceUrl: string | null
+  firstAdAt: string | null
 }
 
 export type WaMessage = {
@@ -66,6 +77,11 @@ type ContactRow = {
   last_inbound_at: string | null
   last_snippet: string | null
   unread_count: number
+  first_ad_id: string | null
+  first_ad_name: string | null
+  first_ad_headline: string | null
+  first_ad_source_url: string | null
+  first_ad_at: string | null
 }
 
 function toContact(r: ContactRow): WaContact {
@@ -80,6 +96,11 @@ function toContact(r: ContactRow): WaContact {
     lastSnippet: r.last_snippet,
     unreadCount: r.unread_count ?? 0,
     outsideWindow: !inbound || Date.now() - inbound > WA_WINDOW_MS,
+    firstAdId: r.first_ad_id ?? null,
+    firstAdName: r.first_ad_name ?? null,
+    firstAdHeadline: r.first_ad_headline ?? null,
+    firstAdSourceUrl: r.first_ad_source_url ?? null,
+    firstAdAt: r.first_ad_at ?? null,
   }
 }
 
@@ -167,6 +188,61 @@ type IncomingArgs = {
    * to 'in' so existing inbound callers are unaffected.
    */
   direction?: 'in' | 'out'
+  /**
+   * Backfill of an already-seen conversation (Coexistence history sync).
+   * Must not raise the unread badge: importing 180 days of chats would
+   * otherwise flag every thread as hundreds of unread messages, and must not
+   * move last_message_at either, or old threads would jump to the top of the
+   * list as if they were fresh.
+   */
+  historical?: boolean
+}
+
+/**
+ * Resolve a Click-to-WhatsApp ad id to its real ad name, cached in Postgres.
+ *
+ * The `headline` on the referral payload is the PAGE name ("Made By Moris")
+ * on every single ad, so it cannot tell two products apart. The useful name
+ * ("MBM - Mini Massager - 1") lives on the ad object in the Marketing API.
+ * Cached permanently: ad names effectively never change, and this must not
+ * add a Graph call to the inbox poll.
+ */
+async function resolveAdName(adId: string): Promise<string | null> {
+  const db = createAdminClient()
+  const { data: hit } = await db.from('whatsapp_ad_names').select('ad_name').eq('ad_id', adId).maybeSingle()
+  if (hit) return (hit.ad_name as string | null) ?? null
+
+  const token = whatsappToken()
+  if (!token) return null
+  try {
+    const res = await fetch(`${GRAPH}/${adId}?fields=name,campaign{name},adset{name}&access_token=${token}`)
+    const j = (await res.json()) as {
+      name?: string
+      campaign?: { name?: string }
+      adset?: { name?: string }
+      error?: unknown
+    }
+    if (!res.ok || j.error || !j.name) return null
+    await db.from('whatsapp_ad_names').upsert(
+      {
+        ad_id: adId,
+        ad_name: j.name,
+        campaign_name: j.campaign?.name ?? null,
+        adset_name: j.adset?.name ?? null,
+      },
+      { onConflict: 'ad_id' },
+    )
+    return j.name
+  } catch {
+    // Never let ad naming break message storage - the message matters more.
+    return null
+  }
+}
+
+/** Later of two timestamps, so a backfill can never move a marker backwards. */
+function maxTime(current: string | null | undefined, incoming: string): string {
+  if (!current) return incoming
+  return new Date(incoming) > new Date(current) ? incoming : current
 }
 
 /** The `referral` object Meta attaches to a Click-to-WhatsApp message. */
@@ -213,13 +289,14 @@ export function readReferral(raw: unknown) {
 export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean }> {
   const db = createAdminClient()
   const outbound = a.direction === 'out'
+  const historical = a.historical === true
 
   const { data: existing } = await db.from('whatsapp_messages').select('id').eq('id', a.messageId).maybeSingle()
   if (existing) return { inserted: false }
 
   const { data: contact } = await db
     .from('whatsapp_contacts')
-    .select('unread_count, profile_name, first_ad_id')
+    .select('unread_count, profile_name, first_ad_id, last_message_at, last_inbound_at')
     .eq('wa_id', a.waId)
     .maybeSingle()
 
@@ -236,6 +313,8 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
           first_ad_headline: ad.ad_headline,
           first_ad_source_url: ad.ad_source_url,
           first_ad_at: a.timestamp,
+          // The product name, not the page name - this is what agents read.
+          first_ad_name: await resolveAdName(ad.ad_id),
         }
       : {}
 
@@ -249,14 +328,30 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
         : (a.profileName ?? null),
       phone_number_id: a.phoneNumberId,
       display_phone: a.displayPhone ?? null,
-      last_message_at: a.timestamp,
-      // last_inbound_at drives the 24h free-form reply window, so only a real
-      // customer message may move it - never one of our own replies.
-      ...(outbound ? {} : { last_inbound_at: a.timestamp }),
-      last_snippet: a.body?.slice(0, 200) ?? `[${a.type}]`,
+      // A backfilled message is older than whatever is already recorded, so
+      // it must never claim to be the latest activity or reset the snippet -
+      // that would drag 180-day-old threads to the top of the inbox.
+      ...(historical
+        ? {
+            last_message_at: maxTime(contact?.last_message_at as string | null, a.timestamp),
+            ...(outbound ? {} : { last_inbound_at: maxTime(contact?.last_inbound_at as string | null, a.timestamp) }),
+            ...(contact ? {} : { last_snippet: a.body?.slice(0, 200) ?? `[${a.type}]` }),
+          }
+        : {
+            last_message_at: a.timestamp,
+            // last_inbound_at drives the 24h free-form reply window, so only
+            // a real customer message may move it - never one of our replies.
+            ...(outbound ? {} : { last_inbound_at: a.timestamp }),
+            last_snippet: a.body?.slice(0, 200) ?? `[${a.type}]`,
+          }),
       // An agent already handled this thread elsewhere, so an echo clears the
-      // unread badge instead of raising it.
-      unread_count: outbound ? 0 : ((contact?.unread_count as number | undefined) ?? 0) + 1,
+      // unread badge instead of raising it. Imported history was read long
+      // ago and must leave the badge exactly as it found it.
+      unread_count: historical
+        ? ((contact?.unread_count as number | undefined) ?? 0)
+        : outbound
+          ? 0
+          : ((contact?.unread_count as number | undefined) ?? 0) + 1,
       ...firstTouch,
     },
     { onConflict: 'wa_id' },

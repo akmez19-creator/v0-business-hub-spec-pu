@@ -80,6 +80,16 @@ type WaValue = {
    */
   message_echoes?: WaMessagePayload[]
   smb_message_echoes?: WaMessagePayload[]
+  /**
+   * Coexistence history sync: up to 180 days of past 1:1 chats, delivered in
+   * chunks after a number is onboarded from the WhatsApp Business phone app.
+   * Shape differs from `messages` - threads are batched, and each message
+   * carries both `from` and `to` so direction has to be derived.
+   */
+  history?: {
+    metadata?: { phase?: string; chunk_order?: number; progress?: number }
+    threads?: { id?: string; messages?: WaMessagePayload[] }[]
+  }[]
   statuses?: { id: string; status: string; errors?: { title?: string; message?: string }[] }[]
 }
 
@@ -133,13 +143,41 @@ export async function POST(request: Request) {
       // Inbound customer messages, plus echoes of replies agents sent from
       // Business Suite / respond.io / the phone app. Meta names the echo
       // field differently depending on how the number was onboarded.
-      const batches: { items: WaMessagePayload[]; direction: 'in' | 'out' }[] = [
+      const batches: { items: WaMessagePayload[]; direction: 'in' | 'out'; historical?: boolean }[] = [
         { items: value.messages ?? [], direction: 'in' },
         { items: value.message_echoes ?? [], direction: 'out' },
         { items: value.smb_message_echoes ?? [], direction: 'out' },
       ]
 
-      for (const { items, direction } of batches) {
+      // Coexistence history arrives as batched threads rather than a flat
+      // list. Each message carries `from` and `to`, so direction is derived
+      // by comparing against our own number: anything not sent by the
+      // customer is a past agent reply.
+      const ownNumber = displayPhone?.replace(/\D/g, '') ?? null
+      for (const chunk of value.history ?? []) {
+        for (const thread of chunk.threads ?? []) {
+          const customer = thread.id?.replace(/\D/g, '')
+          if (!customer) continue
+          for (const m of thread.messages ?? []) {
+            const fromDigits = m.from?.replace(/\D/g, '')
+            batches.push({
+              items: [{ ...m, from: customer, to: customer }],
+              // A history message from anyone other than the customer is one
+              // of ours. Falling back to `in` keeps an unknown sender visible
+              // rather than silently mislabelling it as an agent reply.
+              direction: fromDigits && fromDigits !== customer && fromDigits === ownNumber ? 'out' : 'in',
+              historical: true,
+            })
+          }
+        }
+        if (chunk.metadata?.progress != null) {
+          console.log(
+            `[v0] whatsapp history: phase ${chunk.metadata.phase ?? '?'} chunk ${chunk.metadata.chunk_order ?? '?'} ${chunk.metadata.progress}%`,
+          )
+        }
+      }
+
+      for (const { items, direction, historical } of batches) {
         for (const m of items) {
           if (!phoneNumberId) continue
           // On an echo `from` is our own business number, so the thread is
@@ -164,6 +202,7 @@ export async function POST(request: Request) {
               timestamp: new Date(Number(m.timestamp) * 1000).toISOString(),
               raw: m,
               direction,
+              historical,
             })
             if (inserted) saved++
           } catch (e) {

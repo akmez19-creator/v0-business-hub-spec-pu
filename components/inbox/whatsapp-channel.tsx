@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { formatDistanceToNow } from 'date-fns'
-import { Clock, Phone, RefreshCw, Search, Send } from 'lucide-react'
+import { Clock, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,13 @@ type Contact = {
   lastSnippet: string | null
   unreadCount: number
   outsideWindow: boolean
+  /** First-touch ad attribution; null when the customer messaged organically. */
+  firstAdId: string | null
+  /** Real ad name. Preferred over firstAdHeadline, which is just the page name. */
+  firstAdName: string | null
+  firstAdHeadline: string | null
+  firstAdSourceUrl: string | null
+  firstAdAt: string | null
 }
 
 type WaMessage = {
@@ -118,6 +125,14 @@ type ListResponse = {
   error?: string
 }
 
+type SyncResponse = {
+  success: boolean
+  summary?: string
+  requested?: number
+  results?: { id: string; displayPhone: string; verifiedName: string; requested: boolean; detail: string }[]
+  error?: string
+}
+
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 const relative = (iso: string | null) => {
@@ -132,6 +147,8 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<SyncResponse | null>(null)
 
   // Two requests against one route, deliberately.
   //
@@ -375,6 +392,15 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
                             {c.unreadCount}
                           </Badge>
                         ) : null}
+                        {/* Which ad won this customer. Business Suite shows
+                            the same thing as a thread label, and it is the
+                            difference between a cold number and a known lead. */}
+                        {c.firstAdId ? (
+                          <Badge variant="outline" className="h-5 max-w-full gap-1 border-primary/40 text-primary">
+                            <Megaphone className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="block truncate">{c.firstAdName ?? c.firstAdHeadline ?? 'From ad'}</span>
+                          </Badge>
+                        ) : null}
                         {c.outsideWindow ? (
                           <Badge variant="outline" className="h-5 border-amber-500/40 text-amber-500">
                             24h window closed
@@ -394,9 +420,20 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
         {selected ? (
           <>
             <div className="flex items-center justify-between gap-4 border-b border-border p-4">
-              <div className="flex min-w-0 flex-col">
+              <div className="flex min-w-0 flex-col gap-1">
                 <h3 className="truncate font-semibold">{selected.profileName ?? `+${selected.waId}`}</h3>
                 <p className="text-xs tabular-nums text-muted-foreground">+{selected.waId}</p>
+                {/* The agent's most useful context: what this person clicked
+                    before writing. Without it every lead reads identically. */}
+                {selected.firstAdId ? (
+                  <p className="flex min-w-0 items-center gap-1.5 text-xs text-primary">
+                    <Megaphone className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">
+                      {selected.firstAdName ?? selected.firstAdHeadline ?? 'Clicked an ad'}
+                      {selected.firstAdAt ? ` · ${relative(selected.firstAdAt)}` : ''}
+                    </span>
+                  </p>
+                ) : null}
               </div>
               {selected.outsideWindow ? (
                 <Badge variant="outline" className="shrink-0 gap-1 border-amber-500/40 text-amber-500">
