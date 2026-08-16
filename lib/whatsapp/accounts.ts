@@ -4,9 +4,12 @@ import { fbGet } from '@/lib/facebook/graph'
  * Discovers the business's WhatsApp numbers from Meta rather than requiring a
  * WHATSAPP_PHONE_NUMBER_ID env var.
  *
- * There are four live Cloud API numbers across four Business Manager accounts
- * (Destockage, Hot Sales, Made By Moris, Buildeco), so a single env var could
- * only ever have served one of them.
+ * There are five live Cloud API numbers across four Business Manager accounts
+ * (Destockage, Hot Sales, Buildeco, and TWO under Made By Moris), so a single
+ * env var could only ever have served one of them.
+ *
+ * Discovery is deliberately dynamic rather than a hardcoded list: numbers get
+ * added in Business Suite without anyone touching this code.
  */
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
