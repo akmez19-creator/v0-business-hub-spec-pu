@@ -138,35 +138,53 @@ type IncomingArgs = {
   mediaMime?: string | null
   timestamp: string
   raw: unknown
+  /**
+   * 'out' marks an ECHO - a reply an agent sent from Business Suite,
+   * respond.io or the phone app, which Meta mirrors back to us. Defaults
+   * to 'in' so existing inbound callers are unaffected.
+   */
+  direction?: 'in' | 'out'
 }
 
 /**
- * Persist an inbound message. Idempotent on Meta's wamid, because Meta retries
- * webhook delivery until it gets a 200 and a duplicate must not double-count
- * unread or reorder the thread.
+ * Persist a message delivered by webhook. Idempotent on Meta's wamid, because
+ * Meta retries delivery until it gets a 200 and a duplicate must not
+ * double-count unread or reorder the thread.
+ *
+ * Handles both directions: inbound customer messages, and echoes of replies
+ * sent from other tools.
  */
 export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean }> {
   const db = createAdminClient()
+  const outbound = a.direction === 'out'
 
   const { data: existing } = await db.from('whatsapp_messages').select('id').eq('id', a.messageId).maybeSingle()
   if (existing) return { inserted: false }
 
   const { data: contact } = await db
     .from('whatsapp_contacts')
-    .select('unread_count')
+    .select('unread_count, profile_name')
     .eq('wa_id', a.waId)
     .maybeSingle()
 
   await db.from('whatsapp_contacts').upsert(
     {
       wa_id: a.waId,
-      profile_name: a.profileName ?? null,
+      // An echo carries OUR profile name, not the customer's, so writing it
+      // would rename the thread after the business. Keep the known name.
+      profile_name: outbound
+        ? ((contact?.profile_name as string | null | undefined) ?? null)
+        : (a.profileName ?? null),
       phone_number_id: a.phoneNumberId,
       display_phone: a.displayPhone ?? null,
       last_message_at: a.timestamp,
-      last_inbound_at: a.timestamp,
+      // last_inbound_at drives the 24h free-form reply window, so only a real
+      // customer message may move it - never one of our own replies.
+      ...(outbound ? {} : { last_inbound_at: a.timestamp }),
       last_snippet: a.body?.slice(0, 200) ?? `[${a.type}]`,
-      unread_count: ((contact?.unread_count as number | undefined) ?? 0) + 1,
+      // An agent already handled this thread elsewhere, so an echo clears the
+      // unread badge instead of raising it.
+      unread_count: outbound ? 0 : ((contact?.unread_count as number | undefined) ?? 0) + 1,
     },
     { onConflict: 'wa_id' },
   )
@@ -175,7 +193,7 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
     id: a.messageId,
     wa_id: a.waId,
     phone_number_id: a.phoneNumberId,
-    direction: 'in',
+    direction: outbound ? 'out' : 'in',
     type: a.type,
     body: a.body,
     media_id: a.mediaId ?? null,
