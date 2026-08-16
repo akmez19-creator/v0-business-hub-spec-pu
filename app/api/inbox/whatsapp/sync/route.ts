@@ -83,6 +83,12 @@ export async function POST() {
         // 131000 is Meta stating the number is already on the Cloud API, so
         // its phone-app history can never be pulled. Report that plainly
         // instead of as a generic failure - it is a permanent answer.
+        // Two distinct permanent answers, worth telling apart:
+        //   131000 - number is already on the Cloud API, so the phone-app
+        //            history window closed when it was migrated. Nothing to do.
+        //   133010 - number was never registered on the platform, so history
+        //            can still come in, but only via Coexistence onboarding,
+        //            and only within 24h of that onboarding.
         const code = json.error?.code
         results.push({
           ...base,
@@ -90,7 +96,9 @@ export async function POST() {
           detail:
             code === 131000
               ? 'Already on the Cloud API — its earlier phone-app history can no longer be synced.'
-              : (json.error?.message ?? `Request failed (HTTP ${res.status})`),
+              : code === 133010
+                ? 'Not registered yet. Onboard it via Coexistence in Meta Business Suite to pull up to 180 days of chats — the sync must be started within 24 hours of onboarding.'
+                : (json.error?.message ?? `Request failed (HTTP ${res.status})`),
         })
       } catch (e) {
         results.push({

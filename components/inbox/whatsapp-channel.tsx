@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { formatDistanceToNow } from 'date-fns'
-import { Clock, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
+import { Clock, History, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -305,6 +305,25 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
       )
     : all
 
+  // Ask Meta to sync past conversations for every reachable number. Only
+  // Coexistence numbers can ever succeed, so the per-number answers matter
+  // more than the overall result - they say exactly why each one can or
+  // cannot be recovered.
+  const syncHistory = async () => {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const res = await fetch('/api/inbox/whatsapp/sync', { method: 'POST' })
+      const json = (await res.json()) as SyncResponse
+      setSyncResult(json)
+      if (json.requested) await mutate()
+    } catch (e) {
+      setSyncResult({ success: false, error: e instanceof Error ? e.message : 'Sync failed' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const send = async () => {
     if (!selected || !draft.trim()) return
     setSending(true)
@@ -334,9 +353,21 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
         <div className="flex flex-col gap-3 border-b border-border p-4">
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-semibold">WhatsApp</h2>
-            <Button variant="ghost" size="icon" onClick={() => mutate()} aria-label="Refresh" className="h-8 w-8">
-              <RefreshCw className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} aria-hidden="true" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={syncHistory}
+                disabled={syncing}
+                className="h-8 gap-1.5 bg-transparent"
+              >
+                <History className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                {syncing ? 'Checking...' : 'Sync history'}
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => mutate()} aria-label="Refresh" className="h-8 w-8">
+                <RefreshCw className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} aria-hidden="true" />
+              </Button>
+            </div>
           </div>
           <div className="relative">
             <Search
@@ -351,6 +382,42 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
               aria-label="Search WhatsApp conversations"
             />
           </div>
+
+          {/* Meta's own verdict per number, not our guess. Most will say the
+              history window has closed, which is the honest answer. */}
+          {syncResult ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3">
+              <p className="text-xs leading-relaxed text-pretty">
+                {syncResult.success ? syncResult.summary : (syncResult.error ?? 'Sync failed')}
+              </p>
+              {syncResult.results?.length ? (
+                <ul className="flex flex-col gap-1.5">
+                  {syncResult.results.map((r) => (
+                    <li key={r.id} className="flex flex-col">
+                      <span className="text-xs font-medium">
+                        {r.verifiedName} · {r.displayPhone}
+                      </span>
+                      <span
+                        className={`text-xs leading-relaxed text-pretty ${
+                          r.requested ? 'text-emerald-500' : 'text-muted-foreground'
+                        }`}
+                      >
+                        {r.detail}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 self-start px-2 text-xs"
+                onClick={() => setSyncResult(null)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex-1 overflow-y-auto">
