@@ -169,6 +169,39 @@ type IncomingArgs = {
   direction?: 'in' | 'out'
 }
 
+/** The `referral` object Meta attaches to a Click-to-WhatsApp message. */
+type WaReferral = {
+  source_id?: string
+  source_type?: string
+  source_url?: string
+  headline?: string
+  media_type?: string
+  image_url?: string
+  video_url?: string
+  ctwa_clid?: string
+}
+
+/**
+ * Lift Click-to-WhatsApp ad attribution out of the raw webhook payload.
+ *
+ * Meta attaches `referral` only to the message that immediately follows an ad
+ * click, so this is the single moment the ad is knowable - if it is not
+ * captured here, which ad produced the customer is lost for good.
+ */
+export function readReferral(raw: unknown) {
+  const ref = (raw as { referral?: WaReferral } | null)?.referral
+  if (!ref?.source_id) return null
+  return {
+    ad_id: ref.source_id,
+    ad_headline: ref.headline ?? null,
+    ad_source_url: ref.source_url ?? null,
+    ad_source_type: ref.source_type ?? null,
+    ad_media_type: ref.media_type ?? null,
+    ad_thumbnail_url: ref.image_url ?? ref.video_url ?? null,
+    ctwa_clid: ref.ctwa_clid ?? null,
+  }
+}
+
 /**
  * Persist a message delivered by webhook. Idempotent on Meta's wamid, because
  * Meta retries delivery until it gets a 200 and a duplicate must not
@@ -186,9 +219,25 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
 
   const { data: contact } = await db
     .from('whatsapp_contacts')
-    .select('unread_count, profile_name')
+    .select('unread_count, profile_name, first_ad_id')
     .eq('wa_id', a.waId)
     .maybeSingle()
+
+  // Only an inbound message can carry an ad click - an echo of our own reply
+  // never does.
+  const ad = outbound ? null : readReferral(a.raw)
+
+  // First-touch only: once a contact has an acquiring ad, a later click must
+  // not rewrite it, or the record of who originally won the customer is lost.
+  const firstTouch =
+    ad && !contact?.first_ad_id
+      ? {
+          first_ad_id: ad.ad_id,
+          first_ad_headline: ad.ad_headline,
+          first_ad_source_url: ad.ad_source_url,
+          first_ad_at: a.timestamp,
+        }
+      : {}
 
   await db.from('whatsapp_contacts').upsert(
     {
@@ -208,6 +257,7 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
       // An agent already handled this thread elsewhere, so an echo clears the
       // unread badge instead of raising it.
       unread_count: outbound ? 0 : ((contact?.unread_count as number | undefined) ?? 0) + 1,
+      ...firstTouch,
     },
     { onConflict: 'wa_id' },
   )
@@ -223,6 +273,9 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
     media_mime: a.mediaMime ?? null,
     created_at: a.timestamp,
     raw: a.raw as never,
+    // Null on organic messages, which is exactly how ad-sourced leads are
+    // told apart from people who messaged on their own.
+    ...(ad ?? {}),
   })
   if (error) throw new Error(error.message)
   return { inserted: true }
