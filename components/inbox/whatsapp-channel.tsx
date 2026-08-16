@@ -377,6 +377,18 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
 
             <div className="flex-1 overflow-y-auto p-4">
               <div className="flex flex-col gap-3">
+                {/* Meta only delivers INBOUND messages to us: replies an agent
+                    sent from Business Suite, respond.io or the phone app are
+                    never mirrored back. A thread of purely inbound messages
+                    therefore looks unanswered even when it was handled, so say
+                    so - otherwise someone replies to the same customer twice. */}
+                {messages.length > 0 && messages.every((m) => m.direction === 'in') ? (
+                  <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-pretty text-muted-foreground">
+                    Only messages from the customer are shown. Replies sent from Business Suite, respond.io or the
+                    WhatsApp Business app aren&apos;t visible here, so this conversation may already have been answered.
+                    Reply below to keep the full thread in this inbox.
+                  </p>
+                ) : null}
                 {messages.map((m) => (
                   <div key={m.id} className={`flex ${m.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
                     <div
