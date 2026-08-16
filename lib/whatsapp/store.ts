@@ -83,25 +83,48 @@ function toContact(r: ContactRow): WaContact {
   }
 }
 
-export async function listContacts(limit = 100): Promise<WaContact[]> {
+/**
+ * Most recently active contacts.
+ *
+ * `search` is applied in Postgres rather than in the browser: once the list
+ * runs past the limit, filtering only what was already downloaded would
+ * silently fail to find any older customer, which is exactly when search
+ * matters most.
+ */
+export async function listContacts(limit = 100, search?: string): Promise<WaContact[]> {
   const db = createAdminClient()
-  const { data, error } = await db
-    .from('whatsapp_contacts')
-    .select('*')
+  let q = db.from('whatsapp_contacts').select('*')
+
+  const term = search?.trim()
+  if (term) {
+    // Escape PostgREST's or() delimiters so a stray comma or paren in a name
+    // cannot break out of the filter expression.
+    const safe = term.replace(/[,()\\]/g, ' ').trim()
+    if (safe) q = q.or(`profile_name.ilike.%${safe}%,wa_id.ilike.%${safe}%`)
+  }
+
+  const { data, error } = await q
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(limit)
   if (error) throw new Error(error.message)
   return (data ?? []).map((r) => toContact(r as ContactRow))
 }
 
-export async function listMessages(waId: string, limit = 100): Promise<WaMessage[]> {
+/**
+ * One page of a thread, newest first, then flipped for display.
+ *
+ * `before` is the created_at of the oldest message already on screen, so a
+ * long-running customer thread can be walked backwards a page at a time
+ * rather than loading thousands of rows into the browser at once.
+ */
+export async function listMessages(waId: string, limit = 100, before?: string): Promise<WaMessage[]> {
   const db = createAdminClient()
-  const { data, error } = await db
+  let q = db
     .from('whatsapp_messages')
     .select('id,wa_id,direction,type,body,media_id,media_mime,status,error,created_at')
     .eq('wa_id', waId)
-    .order('created_at', { ascending: false })
-    .limit(limit)
+  if (before) q = q.lt('created_at', before)
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(limit)
   if (error) throw new Error(error.message)
 
   // Query newest-first so the LIMIT keeps recent messages, then flip for display.

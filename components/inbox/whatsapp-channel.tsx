@@ -133,10 +133,39 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
-  const { data, isLoading, mutate, isValidating } = useSWR<ListResponse>('/api/inbox/whatsapp', fetcher, {
+  // Two requests against one route, deliberately.
+  //
+  // `?meta=1` triggers ~6 Graph calls (business + WABA + phone-number
+  // discovery, debug_token) to learn which numbers can send. Those answers
+  // change about monthly, but polling them every 30s burned over a thousand
+  // API calls a day against the app's rate limit. So capability is fetched
+  // once per page load and never refreshed on a timer, while the contact
+  // list - which is pure Postgres and free - keeps polling.
+  const { data: meta } = useSWR<ListResponse>('/api/inbox/whatsapp?meta=1', fetcher, {
+    revalidateOnFocus: false,
+    revalidateIfStale: false,
+    refreshInterval: 0,
+  })
+
+  const { data: list, isLoading, mutate, isValidating } = useSWR<ListResponse>('/api/inbox/whatsapp', fetcher, {
     refreshInterval: 30_000,
     revalidateOnFocus: true,
+    keepPreviousData: true,
   })
+
+  // Capability fields come from the meta request only, contacts from the
+  // polling one. Spreading `list` over `meta` wholesale would overwrite
+  // capability with the undefined keys the contacts response omits.
+  const data: ListResponse | undefined =
+    meta || list
+      ? {
+          success: true,
+          ...(list ?? {}),
+          capability: meta?.capability ?? null,
+          numbers: meta?.numbers,
+          canSend: meta?.canSend,
+        }
+      : undefined
 
   const { data: thread, mutate: mutateThread } = useSWR<{ success: boolean; messages?: WaMessage[] }>(
     selected ? `/api/inbox/whatsapp?waId=${encodeURIComponent(selected.waId)}` : null,
@@ -144,7 +173,9 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
     { refreshInterval: 20_000 },
   )
 
-  if (isLoading) {
+  // Wait for capability as well as contacts: judging "scope missing" before
+  // the meta request lands would flash the unavailable screen on every load.
+  if (isLoading || !meta) {
     return (
       <div className="flex flex-1 flex-col gap-3 p-6">
         {Array.from({ length: 5 }).map((_, i) => (

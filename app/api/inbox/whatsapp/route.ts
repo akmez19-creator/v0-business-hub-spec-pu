@@ -27,13 +27,40 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
     }
 
-    const waId = new URL(request.url).searchParams.get('waId')
+    const params = new URL(request.url).searchParams
+    const waId = params.get('waId')
 
-    // A single thread was asked for.
+    // A single thread was asked for. `before` pages backwards through long
+    // histories: a busy customer can run to thousands of messages, and the
+    // thread loads the newest page first.
     if (waId) {
-      const messages = await listMessages(waId)
-      await markRead(waId)
-      return NextResponse.json({ success: true, messages })
+      const before = params.get('before')
+      const messages = await listMessages(waId, 100, before ?? undefined)
+      // Paging backwards must not clear the badge - only opening the thread
+      // (the first, uncursored request) counts as reading it.
+      if (!before) await markRead(waId)
+      return NextResponse.json({ success: true, messages, hasMore: messages.length === 100 })
+    }
+
+    // Env-only flags, free to compute on every poll.
+    const envFlags = {
+      signatureVerified: Boolean(process.env.WHATSAPP_APP_SECRET || process.env.FACEBOOK_APP_SECRET),
+      hasVerifyToken: Boolean(process.env.WHATSAPP_VERIFY_TOKEN),
+      webhookPath: '/api/webhooks/whatsapp',
+    }
+
+    // Contacts live in Postgres, so the 30s poll costs no Graph quota.
+    // Search runs in the database so it can reach past the newest page.
+    const contacts = await listContacts(100, params.get('q') ?? undefined)
+
+    // Number/scope discovery costs ~6 Graph calls (businesses, owned + client
+    // WABAs, phone_numbers and subscribed_apps per WABA, debug_token) and the
+    // answers change maybe monthly. The in-memory cache cannot help because
+    // each serverless instance starts cold, so polling it every 30s burned
+    // over a thousand calls a day against the app's rate limit. It is now
+    // opt-in: the client asks once per page load, not on every refresh.
+    if (!params.has('meta')) {
+      return NextResponse.json({ success: true, contacts, ...envFlags })
     }
 
     const token = whatsappToken()
@@ -50,7 +77,6 @@ export async function GET(request: Request) {
       }
     }
     const usable = numbers.filter((n) => n.usable)
-    const contacts = await listContacts()
 
     return NextResponse.json({
       success: true,
@@ -59,10 +85,8 @@ export async function GET(request: Request) {
       // Scope granted AND at least one Cloud API number. These fail for
       // different reasons, so the UI reports them separately.
       canSend: Boolean(token) && (channel?.available ?? false) && usable.length > 0,
-      signatureVerified: Boolean(process.env.WHATSAPP_APP_SECRET || process.env.FACEBOOK_APP_SECRET),
-      hasVerifyToken: Boolean(process.env.WHATSAPP_VERIFY_TOKEN),
       contacts,
-      webhookPath: '/api/webhooks/whatsapp',
+      ...envFlags,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to load WhatsApp'
