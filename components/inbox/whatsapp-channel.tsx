@@ -640,7 +640,13 @@ export function WhatsAppChannel({
                           paragraph would add a blank line under the player. */}
                       {m.body ? (
                         <p className="whitespace-pre-wrap text-sm leading-relaxed text-pretty">{m.body}</p>
-                      ) : m.mediaId ? null : (
+                      ) : m.mediaId ? null : m.type === 'external' ? (
+                        /* Reply sent from Business Suite / respond.io / the
+                           phone. Meta's status webhook proves it happened but
+                           carries no content, so say that rather than render
+                           an empty bubble that reads as a bug. */
+                        <p className="text-sm italic opacity-70">Replied from another app</p>
+                      ) : (
                         <p className="text-sm italic opacity-70">{m.type} message</p>
                       )}
                       <span className="text-[11px] opacity-70">

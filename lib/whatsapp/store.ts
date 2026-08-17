@@ -491,13 +491,59 @@ export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean
   return { inserted: true }
 }
 
-/** Record a delivery/read receipt for an outbound message. */
-export async function updateStatus(messageId: string, status: string, error?: string) {
+/**
+ * Record a delivery/read receipt for an outbound message.
+ *
+ * A status for a wamid we have never stored means the message was sent from
+ * SOMEWHERE ELSE - Business Suite, the phone, or respond.io. Meta fans status
+ * webhooks out to every subscribed app, so those receipts reach us even though
+ * the message content does not (`message_echoes` is Tech-Provider only).
+ * Previously this was a bare UPDATE that matched no row and vanished, which is
+ * why the inbox showed 773 inbound against 2 outbound and every thread looked
+ * unanswered. We now insert a placeholder so the reply is at least VISIBLE.
+ */
+export async function updateStatus(
+  messageId: string,
+  status: string,
+  error?: string,
+  external?: { waId: string; phoneNumberId: string | null; at: string | null },
+) {
   const db = createAdminClient()
-  await db
+  const { data } = await db
     .from('whatsapp_messages')
     .update({ status, ...(error ? { error } : {}) })
     .eq('id', messageId)
+    .select('id')
+
+  if (data?.length || !external?.waId) return
+
+  // Content is genuinely unavailable from a status webhook - store null rather
+  // than inventing a body, and let the UI say where the reply came from.
+  const at = external.at ?? new Date().toISOString()
+  const { error: insErr } = await db.from('whatsapp_messages').insert({
+    id: messageId,
+    wa_id: external.waId,
+    phone_number_id: external.phoneNumberId,
+    direction: 'out',
+    type: 'external',
+    body: null,
+    status,
+    created_at: at,
+  })
+  // Racing status webhooks (sent/delivered/read) for one new message: the first
+  // inserts, the rest collide on the wamid primary key. That is expected.
+  if (insErr && !/duplicate|unique/i.test(insErr.message)) {
+    console.log('[v0] whatsapp external send record failed:', insErr.message)
+    return
+  }
+
+  // Only advance the thread clock, never last_inbound_at: a reply sent
+  // elsewhere does not reopen the customer's 24h window.
+  await db
+    .from('whatsapp_contacts')
+    .update({ last_message_at: at })
+    .eq('wa_id', external.waId)
+    .lt('last_message_at', at)
 }
 
 /** Send a free-form text message and record it locally. */

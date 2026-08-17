@@ -90,7 +90,18 @@ type WaValue = {
     metadata?: { phase?: string; chunk_order?: number; progress?: number }
     threads?: { id?: string; messages?: WaMessagePayload[] }[]
   }[]
-  statuses?: { id: string; status: string; errors?: { title?: string; message?: string }[] }[]
+  /**
+   * `recipient_id` and `timestamp` matter for replies sent from Business Suite
+   * or respond.io: the status webhook is the ONLY trace of them we receive, so
+   * it has to carry enough to attach the reply to the right thread.
+   */
+  statuses?: {
+    id: string
+    status: string
+    recipient_id?: string
+    timestamp?: string
+    errors?: { title?: string; message?: string }[]
+  }[]
 }
 
 /** Pull a human-readable body out of whichever message shape arrived. */
@@ -215,7 +226,12 @@ export async function POST(request: Request) {
 
       for (const s of value.statuses ?? []) {
         try {
-          await updateStatus(s.id, s.status, s.errors?.[0]?.message)
+          await updateStatus(s.id, s.status, s.errors?.[0]?.message, {
+            waId: s.recipient_id ?? '',
+            phoneNumberId: value.metadata?.phone_number_id ?? null,
+            // Meta sends unix seconds; the column is a timestamptz.
+            at: s.timestamp ? new Date(Number(s.timestamp) * 1000).toISOString() : null,
+          })
         } catch (e) {
           console.log('[v0] whatsapp webhook: status failed', s.id, e instanceof Error ? e.message : e)
         }
