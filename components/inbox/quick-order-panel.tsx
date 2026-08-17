@@ -80,6 +80,7 @@ export function QuickOrderPanel({
     products?: QuickOrderProduct[]
     regions?: string[]
     regionDelivery?: Record<string, { contractor: string; rider: string | null }>
+    pageMappings?: { match: string; code: string; pageId?: string }[]
   }>('/api/extension', fetcher, { revalidateOnFocus: false })
 
   const products = data?.products ?? []
@@ -101,6 +102,26 @@ export function QuickOrderPanel({
   const saved = unit - amount
 
   const routing = draft.region ? data?.regionDelivery?.[draft.region] : undefined
+
+  /**
+   * Which business the order belongs to (MBM, DBM, HSM...).
+   *
+   * `medium` is NOT a channel column: every existing row holds a business code,
+   * and reports group by it. The extension endpoint falls back to the literal
+   * string "Extension" when no code is sent, which would quietly add a bogus
+   * business to those reports - so resolve it from the same admin-configured
+   * mappings the extension uses, matching on Page id first and only then on
+   * the display name.
+   */
+  const pageCode = useMemo(() => {
+    const mappings = data?.pageMappings ?? []
+    const byId = thread.pageId
+      ? mappings.find((m) => m.pageId && m.pageId === thread.pageId)
+      : undefined
+    if (byId) return byId.code
+    const source = thread.source.toLowerCase()
+    return mappings.find((m) => source.includes(m.match.toLowerCase()))?.code
+  }, [data?.pageMappings, thread.pageId, thread.source])
 
   const set = <K extends keyof OrderDraft>(key: K, value: OrderDraft[K]) =>
     onChange({ ...draft, [key]: value })
@@ -131,6 +152,7 @@ export function QuickOrderPanel({
           // Ties the order back to the ad that produced the lead, so the
           // campaign gets credit for the sale without anyone typing an id.
           adId: thread.adId ?? undefined,
+          pageCode,
           salesType: 'sale',
         }),
       })
