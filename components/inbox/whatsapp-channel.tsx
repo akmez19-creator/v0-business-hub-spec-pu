@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { formatDistanceToNow } from 'date-fns'
-import { Clock, History, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
+import { Clock, ExternalLink, History, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -144,6 +144,12 @@ const relative = (iso: string | null) => {
 export function WhatsAppChannel({ origin }: { origin: string }) {
   const [selected, setSelected] = useState<Contact | null>(null)
   const [query, setQuery] = useState('')
+  /**
+   * Business-Suite-style ad filter. 'all' shows everything, 'ads' shows only
+   * ad-sourced threads, and any other value is a specific ad id so a campaign
+   * can be reviewed on its own.
+   */
+  const [adFilter, setAdFilter] = useState<'all' | 'ads' | string>('all')
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -296,14 +302,36 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
 
   const all = data.contacts ?? []
   const q = query.trim().toLowerCase()
-  const contacts = q
-    ? all.filter(
-        (c) =>
-          (c.profileName ?? '').toLowerCase().includes(q) ||
-          c.waId.includes(q) ||
-          (c.lastSnippet ?? '').toLowerCase().includes(q),
-      )
-    : all
+
+  // Distinct ads present in the inbox, most leads first, so the busiest
+  // campaigns are the easiest to jump to.
+  const adCounts = new Map<string, { name: string; count: number }>()
+  for (const c of all) {
+    if (!c.firstAdId) continue
+    const entry = adCounts.get(c.firstAdId) ?? {
+      name: c.firstAdName ?? c.firstAdHeadline ?? c.firstAdId,
+      count: 0,
+    }
+    entry.count += 1
+    adCounts.set(c.firstAdId, entry)
+  }
+  const ads = [...adCounts.entries()].sort((a, b) => b[1].count - a[1].count)
+  const adSourced = all.filter((c) => c.firstAdId).length
+
+  const contacts = all.filter((c) => {
+    if (adFilter === 'ads' && !c.firstAdId) return false
+    if (adFilter !== 'all' && adFilter !== 'ads' && c.firstAdId !== adFilter) return false
+    if (!q) return true
+    // Searching the ad name too, so typing a product finds everyone who
+    // clicked that ad - not just people whose message mentioned it.
+    return (
+      (c.profileName ?? '').toLowerCase().includes(q) ||
+      c.waId.includes(q) ||
+      (c.lastSnippet ?? '').toLowerCase().includes(q) ||
+      (c.firstAdName ?? '').toLowerCase().includes(q) ||
+      (c.firstAdId ?? '').includes(q)
+    )
+  })
 
   // Ask Meta to sync past conversations for every reachable number. Only
   // Coexistence numbers can ever succeed, so the per-number answers matter
@@ -377,11 +405,60 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name or number..."
+              placeholder="Search name, number or ad..."
               className="pl-9"
               aria-label="Search WhatsApp conversations"
             />
           </div>
+
+          {/* Ad filters, mirroring Business Suite's "Ad replies" tab. The
+              per-ad chips are what turn attribution into something usable:
+              pick a product and see only the people who clicked it. */}
+          {adSourced > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAdFilter('all')}
+                aria-pressed={adFilter === 'all'}
+                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                  adFilter === 'all'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                All ({all.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdFilter('ads')}
+                aria-pressed={adFilter === 'ads'}
+                className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                  adFilter === 'ads'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                <Megaphone className="h-3 w-3" aria-hidden="true" />
+                Ad replies ({adSourced})
+              </button>
+              {ads.map(([id, meta]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setAdFilter(adFilter === id ? 'all' : id)}
+                  aria-pressed={adFilter === id}
+                  title={`${meta.name} · ad_id.${id}`}
+                  className={`max-w-[220px] truncate rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    adFilter === id
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {meta.name} ({meta.count})
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {/* Meta's own verdict per number, not our guess. Most will say the
               history window has closed, which is the honest answer. */}
@@ -512,6 +589,39 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
 
             <div className="flex-1 overflow-y-auto p-4">
               <div className="flex flex-col gap-3">
+                {/* The ad this conversation started from, the way Business
+                    Suite shows it: what they clicked, plus a way to open the
+                    actual creative so an agent can see what was promised. */}
+                {selected.firstAdId ? (
+                  <div className="flex flex-col gap-1 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+                    <p className="text-xs font-medium">
+                      This chat started from an ad
+                      {selected.firstAdAt ? ` · ${relative(selected.firstAdAt)}` : ''}
+                    </p>
+                    <p className="text-xs leading-relaxed text-pretty text-muted-foreground">
+                      {selected.firstAdName ?? selected.firstAdHeadline ?? 'Click-to-WhatsApp ad'}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* The raw label Business Suite writes on the thread,
+                          kept verbatim so the two inboxes can be reconciled. */}
+                      <code className="rounded bg-muted px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                        ad_id.{selected.firstAdId}
+                      </code>
+                      <a
+                        href={
+                          selected.firstAdSourceUrl ??
+                          `https://www.facebook.com/ads/library/?id=${selected.firstAdId}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      >
+                        View ad
+                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      </a>
+                    </div>
+                  </div>
+                ) : null}
                 {/* Meta only delivers INBOUND messages to us: replies an agent
                     sent from Business Suite, respond.io or the phone app are
                     never mirrored back. A thread of purely inbound messages
