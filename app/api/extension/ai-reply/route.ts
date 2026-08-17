@@ -1,9 +1,17 @@
+import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
 // Do NOT use the edge runtime with the AI SDK.
 export const runtime = 'nodejs'
+
+/**
+ * Uses the project's own OpenAI key. Routing through the AI Gateway made this
+ * fail with a 429 on the free tier, so the extension's "AI reply" button would
+ * intermittently do nothing. Keep this in step with /api/inbox/ai-assist.
+ */
+const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -78,7 +86,7 @@ export async function POST(request: NextRequest) {
     ].filter(Boolean).join(' ')
 
     const { text } = await generateText({
-      model: 'openai/gpt-4o',
+      model: openai('gpt-4.1'),
       system,
       messages: [
         {

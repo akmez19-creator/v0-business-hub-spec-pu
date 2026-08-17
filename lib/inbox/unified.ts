@@ -26,6 +26,17 @@ export type UnifiedThread = {
   outsideWindow: boolean
   /** Which business this came to - Page name, or WhatsApp display number. */
   source: string
+  /**
+   * Owning Page, needed to reply as the right business. Null on WhatsApp,
+   * which is addressed by phone number instead.
+   */
+  pageId: string | null
+  /**
+   * Who to address a reply to: the PSID on Messenger, the wa_id on WhatsApp,
+   * the comment id on a comment. Null when the channel gave us no addressable
+   * id, in which case the UI must not offer a reply box.
+   */
+  recipientId: string | null
   /** Click-to-WhatsApp attribution. Messenger threads never carry this. */
   adId: string | null
   adName: string | null
@@ -91,8 +102,9 @@ export type MessengerRow = AttributedRow & {
   snippet?: string
   updatedTime?: string
   unreadCount?: number
-  customer?: { name?: string } | null
+  customer?: { id?: string; name?: string } | null
   outsideWindow?: boolean
+  pageId?: string
   pageName?: string
   adId?: string | null
   adName?: string | null
@@ -124,6 +136,8 @@ export function fromMessenger(c: MessengerRow): UnifiedThread {
     unreadCount: c.unreadCount ?? 0,
     outsideWindow: c.outsideWindow ?? false,
     source: c.pageName ?? 'Page',
+    pageId: c.pageId ?? null,
+    recipientId: c.customer?.id ?? null,
     // Populated from the page webhook (messenger_ad_refs). Null on every
     // thread that predates the subscription - Graph cannot backfill it.
     adId: c.adId ?? null,
@@ -144,6 +158,9 @@ export function fromWhatsApp(c: WhatsAppRow): UnifiedThread {
     unreadCount: c.unreadCount ?? 0,
     outsideWindow: c.outsideWindow ?? false,
     source: c.displayPhone ?? 'WhatsApp',
+    // WhatsApp is addressed by number, not by Page.
+    pageId: null,
+    recipientId: c.waId,
     adId: c.firstAdId ?? null,
     // The headline Meta sends is the PAGE name on every ad, so it is only a
     // last resort - never preferred over the resolved ad name.
@@ -157,6 +174,7 @@ export type CommentRow = AttributedRow & {
   message?: string | null
   createdTime?: string | null
   authorName?: string | null
+  pageId?: string | null
   pageName?: string | null
   /** True when the page has not replied to this comment. */
   needsReply?: boolean
@@ -181,6 +199,9 @@ export function fromComment(c: CommentRow): UnifiedThread {
     // Comment replies have no 24h window the way messaging does.
     outsideWindow: false,
     source: c.pageName ?? 'Page',
+    pageId: c.pageId ?? null,
+    // A comment is replied to by its own id, not by addressing the author.
+    recipientId: c.id,
     // A comment belongs to a POST, not to one specific ad, so there is no
     // single ad id to show. Campaign context still comes through attribution.
     adId: null,

@@ -11,6 +11,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "3.0.66",
     "@ai-sdk/google": "^3.0.101",
+    "@ai-sdk/openai": "^3.0.97",
     "@distube/ytdl-core": "^4.16.12",
     "@emotion/is-prop-valid": "latest",
     "@fal-ai/serverless-client": "0.15.0",
