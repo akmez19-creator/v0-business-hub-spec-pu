@@ -25,6 +25,10 @@ export type Conversation = {
   /** From the page webhook (messenger_ad_refs); null on pre-webhook threads. */
   adId?: string | null
   adName?: string | null
+  /** Product the thread is about, however it was determined. */
+  product?: string | null
+  /** 'ad-click' is exact; 'comment' is inferred from a private-reply notice. */
+  productSource?: 'ad-click' | 'comment' | null
 }
 
 type PageRef = { id: string; name: string }
@@ -140,26 +144,28 @@ export function MessengerChannel({
 
   const all = data.conversations ?? []
 
-  // Distinct ads seen in this list, for the filter dropdown.
-  const adCounts = new Map<string, { name: string; count: number }>()
+  // Group by PRODUCT rather than ad id: the same product is often promoted by
+  // several creatives, and "who wants the Mandolin Slicer" is the real question.
+  const productCounts = new Map<string, number>()
   for (const c of all) {
-    if (!c.adId) continue
-    const prev = adCounts.get(c.adId)
-    adCounts.set(c.adId, { name: c.adName ?? c.adId, count: (prev?.count ?? 0) + 1 })
+    if (!c.product) continue
+    productCounts.set(c.product, (productCounts.get(c.product) ?? 0) + 1)
   }
-  const ads = [...adCounts.entries()].sort((a, b) => b[1].count - a[1].count)
-  const adSourced = all.reduce((n, c) => n + (c.adId ? 1 : 0), 0)
+  const products = [...productCounts.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  )
+  const productKnown = all.reduce((n, c) => n + (c.product ? 1 : 0), 0)
 
   const q = query.trim().toLowerCase()
   const conversations = all.filter((c) => {
-    if (adFilter === 'ads' && !c.adId) return false
-    if (adFilter !== 'all' && adFilter !== 'ads' && c.adId !== adFilter) return false
+    if (adFilter === 'known' && !c.product) return false
+    if (adFilter !== 'all' && adFilter !== 'known' && c.product !== adFilter) return false
     if (!q) return true
     return (
       (c.customer?.name ?? '').toLowerCase().includes(q) ||
       c.snippet.toLowerCase().includes(q) ||
+      (c.product ?? '').toLowerCase().includes(q) ||
       (c.adName ?? '').toLowerCase().includes(q) ||
-      (c.adId ?? '').includes(q) ||
       // In the merged view the Page name is a useful filter of its own.
       (combined && c.pageName.toLowerCase().includes(q))
     )
@@ -204,17 +210,17 @@ export function MessengerChannel({
           ) : null}
           {/* Only shown once attribution exists, so pre-webhook inboxes are
               not given a filter that can only ever return nothing. */}
-          {adSourced > 0 ? (
+          {productKnown > 0 ? (
             <Select value={adFilter} onValueChange={setAdFilter}>
-              <SelectTrigger aria-label="Filter by ad">
+              <SelectTrigger aria-label="Filter by product">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-[320px]">
-                <SelectItem value="all">Any source ({all.length})</SelectItem>
-                <SelectItem value="ads">Ad clicks only ({adSourced})</SelectItem>
-                {ads.map(([id, meta]) => (
-                  <SelectItem key={id} value={id}>
-                    {meta.name} ({meta.count})
+                <SelectItem value="all">Any product ({all.length})</SelectItem>
+                <SelectItem value="known">Product known ({productKnown})</SelectItem>
+                {products.map(([name, count]) => (
+                  <SelectItem key={name} value={name}>
+                    {name} ({count})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -296,14 +302,26 @@ export function MessengerChannel({
                             <span className="block w-full truncate text-left">{c.pageName}</span>
                           </Badge>
                         ) : null}
-                        {c.adName ? (
+                        {c.product ? (
                           <Badge
                             variant="outline"
-                            className="h-5 max-w-full gap-1 border-primary/40 font-normal text-primary"
-                            title={`${c.adName} · ad_id.${c.adId}`}
+                            className={
+                              c.productSource === 'comment'
+                                ? 'h-5 max-w-full gap-1 border-muted-foreground/30 font-normal text-muted-foreground'
+                                : 'h-5 max-w-full gap-1 border-primary/40 font-normal text-primary'
+                            }
+                            title={
+                              c.productSource === 'comment'
+                                ? `Likely — commented on the post for "${c.adName}"`
+                                : `Clicked the ad "${c.adName}"`
+                            }
                           >
-                            <Megaphone className="h-3 w-3 shrink-0" aria-hidden="true" />
-                            <span className="block w-full truncate text-left">{c.adName}</span>
+                            {c.productSource === 'comment' ? (
+                              <MessageSquare className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            ) : (
+                              <Megaphone className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            )}
+                            <span className="block w-full truncate text-left">{c.product}</span>
                           </Badge>
                         ) : null}
                         {c.unreadCount > 0 ? (

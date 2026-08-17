@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { format } from 'date-fns'
-import { AlertTriangle, Megaphone, Send } from 'lucide-react'
+import { AlertTriangle, Megaphone, MessageSquare, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -97,15 +97,26 @@ export function InboxThread({
             <span className="tabular-nums">{conversation.messageCount} messages</span>
             {showPageName ? <span> · via {conversation.pageName}</span> : null}
           </p>
-          {/* Which ad brought this person in - only set for threads that
-              started after the page webhook went live. */}
-          {conversation.adName ? (
+          {/* What this person is asking about. Either an exact ad click (post-
+              webhook threads) or a product inferred from the comment they
+              privately replied to - the wording distinguishes the two. */}
+          {conversation.product ? (
             <p
-              className="flex items-center gap-1.5 text-xs text-primary"
-              title={`ad_id.${conversation.adId}`}
+              className={`flex items-center gap-1.5 text-xs ${
+                conversation.productSource === 'comment' ? 'text-muted-foreground' : 'text-primary'
+              }`}
+              title={conversation.adName ?? undefined}
             >
-              <Megaphone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">Came from {conversation.adName}</span>
+              {conversation.productSource === 'comment' ? (
+                <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <Megaphone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              )}
+              <span className="truncate">
+                {conversation.productSource === 'comment' ? 'Likely asking about' : 'Came from ad'}
+                {': '}
+                {conversation.product}
+              </span>
             </p>
           ) : null}
         </div>

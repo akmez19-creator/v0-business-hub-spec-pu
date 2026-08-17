@@ -1,5 +1,6 @@
 import { fbGet, fbWrite } from './graph'
 import type { FbPage } from './pages'
+import { getPostAds } from './post-ads'
 
 /**
  * Page comments as an inbox channel.
@@ -40,6 +41,14 @@ export type CommentItem = {
   postPermalink?: string
   pageId: string
   pageName: string
+  /**
+   * The ad promoting this comment's post, via `effective_object_story_id`.
+   * EXACT, not inferred - the comment is physically attached to the post.
+   */
+  adId?: string | null
+  adName?: string | null
+  /** Readable product label derived from the ad name. */
+  product?: string | null
 }
 
 export type CommentPageStat = {
@@ -127,6 +136,22 @@ export async function listPageComments(page: FbPage, postLimit = 15): Promise<Co
   for (const post of json.data ?? []) {
     for (const c of post.comments?.data ?? []) out.push(toItem(page, post, c))
   }
+
+  // Attach the promoting ad. Done here (not in listAllComments) so the
+  // single-Page view gets it too.
+  try {
+    const ads = await getPostAds(out.map((c) => c.postId))
+    for (const c of out) {
+      const ad = ads.get(c.postId)
+      if (!ad) continue
+      c.adId = ad.adId
+      c.adName = ad.adName
+      c.product = ad.product
+    }
+  } catch (error) {
+    console.log('[v0] comments: ad lookup failed', error)
+  }
+
   out.sort((a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime())
   return out
 }

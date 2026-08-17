@@ -1,5 +1,7 @@
 import { getAdRefs } from '@/lib/messenger/ad-refs'
+import { findNotice, resolveCommentOrigins } from './comment-origin'
 import { fbGet, fbWrite, FbGraphError } from './graph'
+import { productFromAdName } from './post-ads'
 import { getManageablePages, type FbPage } from './pages'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
@@ -41,6 +43,15 @@ export type InboxConversation = {
    */
   adId?: string | null
   adName?: string | null
+  /**
+   * Product the thread is about. Either EXACT (from the ad-click webhook) or
+   * INFERRED by matching a comment private-reply notice to its post -
+   * `productSource` says which, so the UI never overstates certainty.
+   */
+  product?: string | null
+  productSource?: 'ad-click' | 'comment' | null
+  /** Post the customer commented on, when the thread began as a reply. */
+  postId?: string | null
 }
 
 export type InboxMessage = {
@@ -115,12 +126,18 @@ type RawConversation = {
   unread_count?: number
   message_count?: number
   participants?: { data?: InboxParticipant[] }
+  messages?: { data?: { message?: string; created_time?: string }[] }
 }
 
 export async function listConversations(page: FbPage, limit = 40): Promise<InboxConversation[]> {
+  // messages{} rides along on the same call so we can spot the "X commented
+  // on your post" notice without a second round trip per thread. Graph
+  // returns messages newest-first, so the FIRST notice found is the latest
+  // one - which is exactly the product the customer is asking about now.
   const url =
     `${GRAPH}/${page.id}/conversations` +
-    `?fields=id,snippet,updated_time,unread_count,message_count,participants` +
+    `?fields=id,snippet,updated_time,unread_count,message_count,participants,` +
+    `${encodeURIComponent('messages.limit(15){message,created_time}')}` +
     `&limit=${limit}&access_token=${encodeURIComponent(page.access_token)}`
 
   let json: { data?: RawConversation[] }
@@ -131,7 +148,10 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
   }
 
   const now = Date.now()
+  const noticeByConversation = new Map<string, string>()
   const conversations: InboxConversation[] = (json.data ?? []).map((c) => {
+    const notice = findNotice(c.messages?.data)
+    if (notice) noticeByConversation.set(c.id, notice)
     const participants = c.participants?.data ?? []
     // The Page is always a participant; the customer is whoever else is there.
     const customer = participants.find((p) => p.id !== page.id) ?? null
@@ -162,10 +182,36 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
       if (!ref) continue
       c.adId = ref.adId
       c.adName = ref.adName
+      c.product = productFromAdName(ref.adName)
+      c.productSource = 'ad-click'
     }
   } catch (error) {
     // Attribution is decoration; never let it take down the inbox.
     console.log('[v0] inbox: ad attribution lookup failed', error)
+  }
+
+  // Fallback for threads that began as a comment private-reply. Only fills
+  // gaps - a real ad click always wins over this inference.
+  try {
+    const pending = conversations
+      .filter((c) => !c.product)
+      .map((c) => ({ id: c.id, noticeTime: noticeByConversation.get(c.id) }))
+      .filter((t): t is { id: string; noticeTime: string } => Boolean(t.noticeTime))
+
+    if (pending.length > 0) {
+      const origins = await resolveCommentOrigins(page, pending)
+      for (const c of conversations) {
+        const origin = origins.get(c.id)
+        if (!origin?.ad?.product) continue
+        c.postId = origin.postId
+        c.adId = origin.ad.adId
+        c.adName = origin.ad.adName
+        c.product = origin.ad.product
+        c.productSource = 'comment'
+      }
+    }
+  } catch (error) {
+    console.log('[v0] inbox: comment-origin lookup failed', error)
   }
 
   return conversations

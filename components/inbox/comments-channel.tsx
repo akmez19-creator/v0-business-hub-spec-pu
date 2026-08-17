@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Heart,
+  Megaphone,
   MessageSquareText,
   RefreshCw,
   Search,
@@ -46,6 +47,10 @@ export type CommentItem = {
   permalink?: string
   postId: string
   postMessage: string
+  /** Ad promoting this comment's post - exact, via effective_object_story_id. */
+  adId?: string | null
+  adName?: string | null
+  product?: string | null
   postPermalink?: string
   pageId: string
   pageName: string
@@ -159,6 +164,9 @@ export function CommentsChannel() {
       (c.from?.name ?? '').toLowerCase().includes(q) ||
       c.message.toLowerCase().includes(q) ||
       c.postMessage.toLowerCase().includes(q) ||
+      // Searching by product is the practical way to find enquiries, since
+      // Meta withholds commenter names.
+      (c.product ?? '').toLowerCase().includes(q) ||
       (combined && c.pageName.toLowerCase().includes(q))
     )
   })
@@ -309,6 +317,19 @@ export function CommentsChannel() {
                         {c.needsReply ? (
                           <Badge variant="default" className="h-5">
                             Needs reply
+                          </Badge>
+                        ) : null}
+                        {/* Exact, not inferred: the comment hangs off the post
+                            the ad promotes. With commenter names withheld by
+                            Meta, this is the strongest identifier we have. */}
+                        {c.product ? (
+                          <Badge
+                            variant="outline"
+                            className="h-5 max-w-full gap-1 border-primary/40 font-normal text-primary"
+                            title={c.adName ?? undefined}
+                          >
+                            <Megaphone className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="block w-full truncate text-left">{c.product}</span>
                           </Badge>
                         ) : null}
                         {c.replies.length > 0 ? (
