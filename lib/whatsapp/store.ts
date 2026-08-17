@@ -28,6 +28,21 @@ export type WaContact = {
   /** True when the 24h free-form window has closed. */
   outsideWindow: boolean
   /**
+   * True when the customer spoke last and is still waiting on a reply.
+   *
+   * Derived by comparing the two markers this table already keeps: an
+   * outbound message advances last_message_at but deliberately leaves
+   * last_inbound_at alone, so the two being equal means the newest message
+   * came from the customer. Lead staging depends on this - without it every
+   * WhatsApp thread claims "you replied last".
+   */
+  lastFromCustomer: boolean
+  /**
+   * Stored messages in the thread, which separates a first-ever enquiry from
+   * an ongoing conversation.
+   */
+  messageCount: number
+  /**
    * First-touch Click-to-WhatsApp attribution: the ad that originally brought
    * this customer in. Null means they messaged organically.
    */
@@ -84,8 +99,9 @@ type ContactRow = {
   first_ad_at: string | null
 }
 
-function toContact(r: ContactRow): WaContact {
+function toContact(r: ContactRow, messageCount = 0): WaContact {
   const inbound = r.last_inbound_at ? new Date(r.last_inbound_at).getTime() : 0
+  const latest = r.last_message_at ? new Date(r.last_message_at).getTime() : 0
   return {
     waId: r.wa_id,
     profileName: r.profile_name,
@@ -96,12 +112,48 @@ function toContact(r: ContactRow): WaContact {
     lastSnippet: r.last_snippet,
     unreadCount: r.unread_count ?? 0,
     outsideWindow: !inbound || Date.now() - inbound > WA_WINDOW_MS,
+    // Tolerate equal-or-newer rather than strict equality: the two columns are
+    // written from the same webhook timestamp, and a stray millisecond of
+    // clock skew must not flip a waiting customer into "already answered".
+    lastFromCustomer: inbound > 0 && inbound >= latest,
+    messageCount,
     firstAdId: r.first_ad_id ?? null,
     firstAdName: r.first_ad_name ?? null,
     firstAdHeadline: r.first_ad_headline ?? null,
     firstAdSourceUrl: r.first_ad_source_url ?? null,
     firstAdAt: r.first_ad_at ?? null,
   }
+}
+
+/**
+ * Messages per contact, for the page of contacts being listed.
+ *
+ * Scoped with `.in()` rather than scanning the whole table so the cost tracks
+ * the page size, not the lifetime message volume. Counted in memory because
+ * PostgREST cannot GROUP BY; only the wa_id column is fetched, so the rows are
+ * tiny. If this thread history ever grows large enough to matter, replace it
+ * with a Postgres view rather than paging it here.
+ */
+async function messageCounts(
+  db: ReturnType<typeof createAdminClient>,
+  waIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+  if (!waIds.length) return counts
+
+  const { data, error } = await db.from('whatsapp_messages').select('wa_id').in('wa_id', waIds)
+  // A failed count must not blank the inbox: fall back to zero, which at worst
+  // labels a thread "new enquiry" instead of "awaiting reply".
+  if (error) {
+    console.log('[v0] whatsapp message counts failed:', error.message)
+    return counts
+  }
+
+  for (const row of data ?? []) {
+    const id = row.wa_id as string
+    counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  return counts
 }
 
 /**
@@ -128,7 +180,10 @@ export async function listContacts(limit = 100, search?: string): Promise<WaCont
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(limit)
   if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => toContact(r as ContactRow))
+
+  const rows = (data ?? []) as ContactRow[]
+  const counts = await messageCounts(db, rows.map((r) => r.wa_id))
+  return rows.map((r) => toContact(r, counts.get(r.wa_id) ?? 0))
 }
 
 /**
