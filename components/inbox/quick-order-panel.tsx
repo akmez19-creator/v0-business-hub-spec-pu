@@ -80,7 +80,7 @@ export function QuickOrderPanel({
     products?: QuickOrderProduct[]
     regions?: string[]
     regionDelivery?: Record<string, { contractor: string; rider: string | null }>
-    pageMappings?: { match: string; code: string; pageId?: string }[]
+    settings?: { pageMappings?: { match: string; code: string; pageId?: string }[] }
   }>('/api/extension', fetcher, { revalidateOnFocus: false })
 
   const products = data?.products ?? []
@@ -113,15 +113,31 @@ export function QuickOrderPanel({
    * mappings the extension uses, matching on Page id first and only then on
    * the display name.
    */
+  const pageMappings = data?.settings?.pageMappings
+
+  const businesses = useMemo(() => {
+    const codes = (pageMappings ?? []).map((m) => m.code).filter(Boolean)
+    return Array.from(new Set(codes))
+  }, [pageMappings])
+
   const pageCode = useMemo(() => {
-    const mappings = data?.pageMappings ?? []
+    const mappings = pageMappings ?? []
     const byId = thread.pageId
       ? mappings.find((m) => m.pageId && m.pageId === thread.pageId)
       : undefined
     if (byId) return byId.code
+    // WhatsApp threads carry a phone number as their source, never a Page name,
+    // so this match only ever succeeds for Messenger and comments.
     const source = thread.source.toLowerCase()
     return mappings.find((m) => source.includes(m.match.toLowerCase()))?.code
-  }, [data?.pageMappings, thread.pageId, thread.source])
+  }, [pageMappings, thread.pageId, thread.source])
+
+  // Seeded from the mapping but kept editable, because auto-detection cannot
+  // work for WhatsApp and an unmapped Page would otherwise be filed silently.
+  const [business, setBusiness] = useState('')
+  useEffect(() => {
+    setBusiness(pageCode ?? '')
+  }, [pageCode, thread.key])
 
   const set = <K extends keyof OrderDraft>(key: K, value: OrderDraft[K]) =>
     onChange({ ...draft, [key]: value })
@@ -131,6 +147,7 @@ export function QuickOrderPanel({
   if (!draft.contact1.trim()) missing.push('phone')
   if (!draft.region.trim()) missing.push('locality')
   if (!product) missing.push('product')
+  if (!business) missing.push('business')
 
   const submit = async () => {
     if (missing.length || saving || !product) return
@@ -152,7 +169,7 @@ export function QuickOrderPanel({
           // Ties the order back to the ad that produced the lead, so the
           // campaign gets credit for the sale without anyone typing an id.
           adId: thread.adId ?? undefined,
-          pageCode,
+          pageCode: business,
           salesType: 'sale',
         }),
       })
@@ -289,6 +306,29 @@ export function QuickOrderPanel({
               onChange={(e) => set('deliveryDate', e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="qo-business">Business</Label>
+          <Select value={business} onValueChange={setBusiness}>
+            <SelectTrigger id="qo-business">
+              <SelectValue placeholder="Which business is this order for?" />
+            </SelectTrigger>
+            <SelectContent>
+              {businesses.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {code}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!pageCode ? (
+            <p className="text-xs text-muted-foreground">
+              {thread.channel === 'whatsapp'
+                ? 'WhatsApp numbers are not mapped to a business, so pick one.'
+                : `No mapping for ${thread.source} - pick the business.`}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-1.5">
