@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { formatDistanceToNow } from 'date-fns'
 import { Inbox, MessageSquare, RefreshCw, Search } from 'lucide-react'
@@ -57,7 +57,12 @@ const relative = (iso: string) => {
   return formatDistanceToNow(t, { addSuffix: true })
 }
 
-export function MessengerChannel() {
+export function MessengerChannel({
+  initialConversationId = null,
+}: {
+  /** Thread to open on mount, set when arriving from the unified inbox. */
+  initialConversationId?: string | null
+} = {}) {
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [query, setQuery] = useState('')
   // Default to every Page merged and sorted by recency, so the newest customer
@@ -71,6 +76,14 @@ export function MessengerChannel() {
     fetcher,
     { refreshInterval: 60_000, revalidateOnFocus: true },
   )
+
+  // Open the thread the unified inbox asked for, once conversations load.
+  // Guarded on `selected` so it never overrides a later manual click.
+  useEffect(() => {
+    if (!initialConversationId || selected) return
+    const match = (data?.conversations ?? []).find((c) => c.id === initialConversationId)
+    if (match) setSelected(match)
+  }, [initialConversationId, data, selected])
 
   const pages = data?.pages ?? []
   const pageStats = data?.pageStats ?? []

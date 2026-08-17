@@ -1,12 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { formatDistanceToNow } from 'date-fns'
 import { Clock, ExternalLink, History, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { ChannelUnavailable } from './channel-unavailable'
@@ -141,7 +148,14 @@ const relative = (iso: string | null) => {
   return t ? formatDistanceToNow(t, { addSuffix: true }) : ''
 }
 
-export function WhatsAppChannel({ origin }: { origin: string }) {
+export function WhatsAppChannel({
+  origin,
+  initialWaId = null,
+}: {
+  origin: string
+  /** Thread to open on mount, set when arriving from the unified inbox. */
+  initialWaId?: string | null
+}) {
   const [selected, setSelected] = useState<Contact | null>(null)
   const [query, setQuery] = useState('')
   /**
@@ -189,6 +203,14 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
           canSend: meta?.canSend,
         }
       : undefined
+
+  // Open the thread the unified inbox asked for, once contacts have loaded.
+  // Guarded on `selected` so it never fights a manual click afterwards.
+  useEffect(() => {
+    if (!initialWaId || selected) return
+    const match = (list?.contacts ?? []).find((c) => c.waId === initialWaId)
+    if (match) setSelected(match)
+  }, [initialWaId, list, selected])
 
   const { data: thread, mutate: mutateThread } = useSWR<{ success: boolean; messages?: WaMessage[] }>(
     selected ? `/api/inbox/whatsapp?waId=${encodeURIComponent(selected.waId)}` : null,
@@ -411,53 +433,23 @@ export function WhatsAppChannel({ origin }: { origin: string }) {
             />
           </div>
 
-          {/* Ad filters, mirroring Business Suite's "Ad replies" tab. The
-              per-ad chips are what turn attribution into something usable:
-              pick a product and see only the people who clicked it. */}
+          {/* One picker, not a chip per ad: with 30+ ads the chip row grew
+              taller than the conversation list it was meant to filter. */}
           {adSourced > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setAdFilter('all')}
-                aria-pressed={adFilter === 'all'}
-                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  adFilter === 'all'
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border text-muted-foreground hover:bg-muted'
-                }`}
-              >
-                All ({all.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdFilter('ads')}
-                aria-pressed={adFilter === 'ads'}
-                className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  adFilter === 'ads'
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border text-muted-foreground hover:bg-muted'
-                }`}
-              >
-                <Megaphone className="h-3 w-3" aria-hidden="true" />
-                Ad replies ({adSourced})
-              </button>
-              {ads.map(([id, meta]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setAdFilter(adFilter === id ? 'all' : id)}
-                  aria-pressed={adFilter === id}
-                  title={`${meta.name} · ad_id.${id}`}
-                  className={`max-w-[220px] truncate rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                    adFilter === id
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  {meta.name} ({meta.count})
-                </button>
-              ))}
-            </div>
+            <Select value={adFilter} onValueChange={setAdFilter}>
+              <SelectTrigger aria-label="Filter by ad">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="max-h-[320px]">
+                <SelectItem value="all">Any source ({all.length})</SelectItem>
+                <SelectItem value="ads">Ad replies only ({adSourced})</SelectItem>
+                {ads.map(([id, meta]) => (
+                  <SelectItem key={id} value={id}>
+                    {meta.name} ({meta.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : null}
 
           {/* Meta's own verdict per number, not our guess. Most will say the

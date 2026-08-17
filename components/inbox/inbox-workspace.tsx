@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { MessageCircle, MessageSquareText, Phone } from 'lucide-react'
+import { Inbox, MessageCircle, MessageSquareText, Phone } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { AllMessagesChannel } from './all-messages-channel'
 import { MessengerChannel } from './messenger-channel'
 import { CommentsChannel } from './comments-channel'
 import { WhatsAppChannel } from './whatsapp-channel'
 
-type ChannelId = 'messenger' | 'comments' | 'whatsapp'
+type ChannelId = 'all' | 'messenger' | 'comments' | 'whatsapp'
 
 type CapabilityState = { id: string; label: string; available: boolean; missing: string[]; reason?: string }
 
@@ -24,13 +25,18 @@ type CapabilitiesResponse = {
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 const CHANNELS: { id: ChannelId; label: string; icon: typeof MessageCircle; hint: string }[] = [
+  { id: 'all', label: 'All messages', icon: Inbox, hint: 'Messenger + WhatsApp' },
   { id: 'messenger', label: 'Messenger', icon: MessageCircle, hint: 'Page inbox' },
   { id: 'comments', label: 'Comments', icon: MessageSquareText, hint: 'Post replies' },
   { id: 'whatsapp', label: 'WhatsApp', icon: Phone, hint: 'Cloud API' },
 ]
 
 export function InboxWorkspace({ origin }: { origin: string }) {
-  const [active, setActive] = useState<ChannelId>('messenger')
+  const [active, setActive] = useState<ChannelId>('all')
+  /** Thread to preselect after jumping out of the unified list. */
+  const [jumpTo, setJumpTo] = useState<{ channel: 'messenger' | 'whatsapp'; id: string } | null>(
+    null,
+  )
 
   const { data: caps } = useSWR<CapabilitiesResponse>('/api/inbox/capabilities', fetcher, {
     refreshInterval: 5 * 60_000,
@@ -54,7 +60,13 @@ export function InboxWorkspace({ origin }: { origin: string }) {
     refreshInterval: 60_000,
   })
 
+  const messengerUnread = (messenger?.conversations ?? []).filter((c) => c.unreadCount > 0).length
+  const whatsappUnread = (whatsapp?.contacts ?? []).filter((c) => c.unreadCount > 0).length
+
   const counts: Record<ChannelId, number> = {
+    // "All" counts the two message channels only - comments are a different
+    // surface and already have their own badge.
+    all: messengerUnread + whatsappUnread,
     messenger: (messenger?.conversations ?? []).filter((c) => c.unreadCount > 0).length,
     comments: (comments?.comments ?? []).filter((c) => c.needsReply).length,
     whatsapp: (whatsapp?.contacts ?? []).filter((c) => c.unreadCount > 0).length,
@@ -114,9 +126,26 @@ export function InboxWorkspace({ origin }: { origin: string }) {
       </nav>
 
       {/* Active channel. Each channel owns its own list + detail panes. */}
-      {active === 'messenger' ? <MessengerChannel /> : null}
+      {active === 'all' ? (
+        <AllMessagesChannel
+          onOpen={(channel, nativeId) => {
+            // Hand off to the owning channel, which has the reply box and the
+            // channel-specific rules (24h window, media proxy, page token).
+            setJumpTo({ channel, id: nativeId })
+            setActive(channel)
+          }}
+        />
+      ) : null}
+      {active === 'messenger' ? (
+        <MessengerChannel initialConversationId={jumpTo?.channel === 'messenger' ? jumpTo.id : null} />
+      ) : null}
       {active === 'comments' ? <CommentsChannel /> : null}
-      {active === 'whatsapp' ? <WhatsAppChannel origin={origin} /> : null}
+      {active === 'whatsapp' ? (
+        <WhatsAppChannel
+          origin={origin}
+          initialWaId={jumpTo?.channel === 'whatsapp' ? jumpTo.id : null}
+        />
+      ) : null}
     </div>
   )
 }
