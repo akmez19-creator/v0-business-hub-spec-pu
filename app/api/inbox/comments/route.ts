@@ -3,14 +3,15 @@ import { createClient } from '@/lib/supabase/server'
 import { getInboxPage, getInboxPages } from '@/lib/facebook/messages'
 import { getCapabilities } from '@/lib/facebook/capabilities'
 import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
+import { deleteComment, likeComment, replyToComment, setCommentHidden } from '@/lib/facebook/comments'
 import {
-  deleteComment,
-  likeComment,
-  listAllComments,
-  listPageComments,
-  replyToComment,
-  setCommentHidden,
-} from '@/lib/facebook/comments'
+  cachedCommentStats,
+  commentCacheIsEmpty,
+  listCachedComments,
+  syncComments,
+} from '@/lib/facebook/comment-cache'
+import { markCommentDeleted, markCommentHidden } from '@/lib/facebook/comment-store'
+import { createAdminClient } from '@/lib/supabase/server'
 
 /**
  * Page comments as an inbox channel.
@@ -58,60 +59,41 @@ export async function GET(request: Request) {
       })
     }
 
-    const requested = new URL(request.url).searchParams.get('pageId') ?? 'all'
-    const pages = await getInboxPages()
-    const pageRefs = pages.map((p) => ({ id: p.id, name: p.name }))
+    const params = new URL(request.url).searchParams
+    const requested = params.get('pageId') ?? 'all'
+    const wantsRefresh = params.get('refresh') === '1'
 
-    if (pages.length === 0) {
-      return NextResponse.json({
-        success: false,
-        needsPermission: true,
-        reason: 'no-page',
-        error: 'No Facebook Page is reachable with the configured access token.',
-      })
-    }
-
-    if (requested === 'all') {
-      const { comments, pageStats, allFailed } = await listAllComments(pages)
-      if (allFailed) {
-        return NextResponse.json({
-          success: false,
-          needsPermission: true,
-          reason: 'scope',
-          pages: pageRefs,
-          capability: channel,
-          error: pageStats.find((p) => p.error)?.error ?? 'Every Page failed to load.',
-        })
+    // Graph is touched only on an explicit refresh, or to fill an empty cache.
+    let rateLimited = false
+    let syncError: string | undefined
+    if (wantsRefresh || (await commentCacheIsEmpty())) {
+      const result = await syncComments()
+      rateLimited = result.rateLimited
+      syncError = result.error
+      if (!result.ok && result.rateLimited && (await commentCacheIsEmpty())) {
+        return rateLimitResponse(new Error(result.error ?? 'rate limited'))
       }
-      return NextResponse.json({
-        success: true,
-        scope: 'all',
-        pages: pageRefs,
-        pageStats,
-        capability: channel,
-        comments,
-      })
     }
 
-    const page = await getInboxPage(requested)
-    if (!page) {
-      return NextResponse.json({ success: false, needsPermission: true, reason: 'no-page', error: 'Page not found.' })
-    }
+    const comments = await listCachedComments(requested === 'all' ? undefined : requested)
+    const stats = await cachedCommentStats()
 
-    const comments = await listPageComments(page)
+    let pageRefs: { id: string; name: string }[] = []
+    try {
+      pageRefs = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
+    } catch {
+      pageRefs = stats.map((p) => ({ id: p.id, name: p.name }))
+    }
+    if (pageRefs.length === 0) pageRefs = stats.map((p) => ({ id: p.id, name: p.name }))
+
     return NextResponse.json({
       success: true,
-      scope: page.id,
-      page: { id: page.id, name: page.name },
+      scope: requested,
+      source: 'cache',
+      rateLimited,
+      syncError: rateLimited ? syncError : undefined,
       pages: pageRefs,
-      pageStats: [
-        {
-          id: page.id,
-          name: page.name,
-          needsReply: comments.filter((c) => c.needsReply).length,
-          total: comments.length,
-        },
-      ],
+      pageStats: requested === 'all' ? stats : stats.filter((p) => p.id === requested),
       capability: channel,
       comments,
     })
@@ -153,20 +135,31 @@ export async function POST(request: Request) {
     if (!page) return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 })
 
     switch (action) {
+      // Each action writes through to the cache as well as Graph. The `feed`
+      // webhook will report the same change moments later and simply overwrite
+      // with identical data, but doing it here means the UI updates at once
+      // instead of appearing to do nothing until the webhook lands.
       case 'reply': {
         const message = (body.message ?? '').trim()
         if (!message) return NextResponse.json({ success: false, error: 'Message is empty' }, { status: 400 })
         const res = await replyToComment(page, commentId, message)
+        await createAdminClient()
+          .from('page_comments')
+          .update({ replied_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('comment_id', commentId)
         return NextResponse.json({ success: true, id: res.id })
       }
       case 'hide':
         await setCommentHidden(page, commentId, true)
+        await markCommentHidden(commentId, true)
         return NextResponse.json({ success: true })
       case 'unhide':
         await setCommentHidden(page, commentId, false)
+        await markCommentHidden(commentId, false)
         return NextResponse.json({ success: true })
       case 'delete':
         await deleteComment(page, commentId)
+        await markCommentDeleted(commentId)
         return NextResponse.json({ success: true })
       case 'like':
         await likeComment(page, commentId)

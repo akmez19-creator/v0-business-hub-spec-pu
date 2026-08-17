@@ -366,7 +366,7 @@ export async function sendReply(
   page: FbPage,
   recipientId: string,
   text: string,
-): Promise<{ ok: true; usedHumanAgentTag: boolean }> {
+): Promise<{ ok: true; usedHumanAgentTag: boolean; messageId: string | null }> {
   const url = `${GRAPH}/${page.id}/messages?access_token=${encodeURIComponent(page.access_token)}`
 
   const send = async (tag?: string) => {
@@ -380,15 +380,21 @@ export async function sendReply(
     return fbWrite(url, { body })
   }
 
+  // Meta returns the message_id it assigned. Surfacing it lets the caller cache
+  // the sent reply under Meta's OWN id, so when the echo of this same message
+  // arrives moments later it collides on the primary key and is ignored rather
+  // than showing the reply twice.
+  const idOf = (r: unknown) => (r as { message_id?: string } | undefined)?.message_id ?? null
+
   try {
-    await send()
-    return { ok: true, usedHumanAgentTag: false }
+    const res = await send()
+    return { ok: true, usedHumanAgentTag: false, messageId: idOf(res) }
   } catch (e) {
     const err = e as FbGraphError
     // 10 = outside allowed window / policy violation for untagged sends
     if (err?.code === 10 || /outside.*window|24.*hour|message tag/i.test(err?.message ?? '')) {
-      await send('HUMAN_AGENT')
-      return { ok: true, usedHumanAgentTag: true }
+      const res = await send('HUMAN_AGENT')
+      return { ok: true, usedHumanAgentTag: true, messageId: idOf(res) }
     }
     asPermissionError(e)
   }

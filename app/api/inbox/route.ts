@@ -1,24 +1,25 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import {
-  getInboxPage,
-  getInboxPages,
-  listAllConversations,
-  listConversations,
-  MessagingPermissionError,
-} from '@/lib/facebook/messages'
+import { getInboxPages } from '@/lib/facebook/messages'
 import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
+import { cachedPageStats, cacheIsEmpty, listCachedConversations } from '@/lib/messenger/cache'
+import { syncConversations } from '@/lib/messenger/sync'
 
 /**
- * Messenger conversations.
+ * Messenger conversations, served from Postgres.
+ *
+ * Reads no longer touch the Graph API. Every load used to re-walk
+ * /conversations across all six Pages, which exhausted Meta's app-wide hourly
+ * cap and surfaced as "(#4) Application request limit reached" - misread as a
+ * dead token. Threads now arrive by webhook and are read back from the cache,
+ * so browsing is free.
+ *
+ * Graph is contacted only when explicitly asked (`?refresh=1`) or when the
+ * cache has never been populated.
  *
  * Defaults to every Page merged into one recency-sorted list, because five of
  * the six Pages carry live traffic and a single-Page default silently hides
  * the rest. `?pageId=<id>` narrows to one Page.
- *
- * The missing-permission case is returned as a 200 with `needsPermission`
- * rather than an error status: it is a setup state, not a fault, and the UI
- * renders instructions for it. Real failures still surface as 5xx.
  */
 export async function GET(request: Request) {
   try {
@@ -28,82 +29,52 @@ export async function GET(request: Request) {
     } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
 
-    const requested = new URL(request.url).searchParams.get('pageId') ?? 'all'
-    const pages = await getInboxPages()
-    // Never leak page access tokens to the client - only id and name.
-    const pageRefs = pages.map((p) => ({ id: p.id, name: p.name }))
+    const params = new URL(request.url).searchParams
+    const requested = params.get('pageId') ?? 'all'
+    const wantsRefresh = params.get('refresh') === '1'
 
-    if (pages.length === 0) {
-      return NextResponse.json({
-        success: false,
-        needsPermission: true,
-        reason: 'no-page',
-        error: 'No Facebook Page is reachable with the configured access token.',
-      })
-    }
+    const empty = await cacheIsEmpty()
+    let rateLimited = false
+    let syncError: string | undefined
 
-    // ---- Combined view -----------------------------------------------------
-    if (requested === 'all') {
-      const { conversations, pageStats, allFailed } = await listAllConversations(pages)
-      if (allFailed) {
-        return NextResponse.json({
-          success: false,
-          needsPermission: true,
-          reason: 'scope',
-          pages: pageRefs,
-          error: pageStats.find((p) => p.error)?.error ?? 'Every Page failed to load.',
-        })
+    if (wantsRefresh || empty) {
+      const result = await syncConversations()
+      rateLimited = result.rateLimited
+      syncError = result.error
+      // A throttle with nothing cached is the only case with nothing to show.
+      if (!result.ok && result.rateLimited && (await cacheIsEmpty())) {
+        return rateLimitResponse(new Error(result.error ?? 'rate limited'))
       }
-      return NextResponse.json({
-        success: true,
-        scope: 'all',
-        pages: pageRefs,
-        pageStats,
-        conversations,
-      })
     }
 
-    // ---- Single Page -------------------------------------------------------
-    const page = await getInboxPage(requested)
-    if (!page) {
-      return NextResponse.json({
-        success: false,
-        needsPermission: true,
-        reason: 'no-page',
-        error: 'No Facebook Page is reachable with the configured access token.',
-      })
-    }
+    const conversations = await listCachedConversations({
+      pageId: requested === 'all' ? undefined : requested,
+      limit: 200,
+    })
 
+    // Page list for the rail. Cheap and cached upstream, but the cache is a
+    // sufficient fallback if Graph is throttled - a stale rail beats an error.
+    let pageRefs: { id: string; name: string }[] = []
     try {
-      const conversations = await listConversations(page, 40)
-      return NextResponse.json({
-        success: true,
-        scope: page.id,
-        page: { id: page.id, name: page.name },
-        pages: pageRefs,
-        pageStats: [
-          {
-            id: page.id,
-            name: page.name,
-            unread: conversations.reduce((n, c) => n + c.unreadCount, 0),
-            conversations: conversations.length,
-          },
-        ],
-        conversations,
-      })
-    } catch (e) {
-      if (e instanceof MessagingPermissionError) {
-        return NextResponse.json({
-          success: false,
-          needsPermission: true,
-          reason: 'scope',
-          page: { id: page.id, name: page.name },
-          pages: pageRefs,
-          error: e.message,
-        })
-      }
-      throw e
+      pageRefs = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
+    } catch {
+      pageRefs = (await cachedPageStats()).map((p) => ({ id: p.id, name: p.name }))
     }
+    if (pageRefs.length === 0) pageRefs = (await cachedPageStats()).map((p) => ({ id: p.id, name: p.name }))
+
+    const stats = await cachedPageStats()
+    const pageStats = requested === 'all' ? stats : stats.filter((p) => p.id === requested)
+
+    return NextResponse.json({
+      success: true,
+      scope: requested,
+      source: 'cache',
+      rateLimited,
+      syncError: rateLimited ? syncError : undefined,
+      pages: pageRefs,
+      pageStats,
+      conversations,
+    })
   } catch (e) {
     // Throttling is transient and must never be reported as a token problem.
     if (isRateLimit(e)) return rateLimitResponse(e)

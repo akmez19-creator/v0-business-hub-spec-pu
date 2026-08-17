@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getInboxPage, sendReply, MessagingPermissionError } from '@/lib/facebook/messages'
+import { recordMessengerMessage } from '@/lib/messenger/store'
 
 /** Send a reply to a customer on Messenger. */
 export async function POST(request: Request) {
@@ -31,6 +32,21 @@ export async function POST(request: Request) {
 
     try {
       const result = await sendReply(page, recipientId, body)
+
+      // Write through so the reply appears instantly and the thread stops
+      // being flagged as awaiting us. Stored under Meta's own message id, so
+      // the echo that follows collides on the primary key and is ignored
+      // rather than duplicating the message.
+      await recordMessengerMessage({
+        pageId: page.id,
+        psid: recipientId,
+        mid: result.messageId ?? `local:${page.id}:${recipientId}:${Date.now()}`,
+        direction: 'out',
+        body,
+        isEcho: false,
+        createdAt: new Date().toISOString(),
+      })
+
       return NextResponse.json({ success: true, usedHumanAgentTag: result.usedHumanAgentTag })
     } catch (e) {
       if (e instanceof MessagingPermissionError) {
