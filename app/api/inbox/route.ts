@@ -7,6 +7,7 @@ import {
   listConversations,
   MessagingPermissionError,
 } from '@/lib/facebook/messages'
+import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
 
 /**
  * Messenger conversations.
@@ -104,6 +105,8 @@ export async function GET(request: Request) {
       throw e
     }
   } catch (e) {
+    // Throttling is transient and must never be reported as a token problem.
+    if (isRateLimit(e)) return rateLimitResponse(e)
     const message = e instanceof Error ? e.message : 'Failed to load conversations'
     console.log('[v0] inbox list failed:', message)
     return NextResponse.json({ success: false, error: message }, { status: 500 })

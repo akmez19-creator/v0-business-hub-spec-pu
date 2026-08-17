@@ -44,6 +44,9 @@ type PageStat = {
 type ListResponse = {
   success: boolean
   needsPermission?: boolean
+  /** Transient Graph throttle - a wait, not a setup task. */
+  rateLimited?: boolean
+  usagePct?: number | null
   reason?: string
   scope?: string
   page?: PageRef
@@ -116,11 +119,12 @@ export function MessengerChannel({
     )
   }
 
-  if (data?.needsPermission) {
+  if (data?.needsPermission || data?.rateLimited) {
     return (
       <InboxSetup
         pageName={data.page?.name}
         reason={data.reason}
+        usagePct={data.usagePct}
         pages={pages}
         activePageId={combined ? undefined : scope}
         onSelectPage={switchScope}

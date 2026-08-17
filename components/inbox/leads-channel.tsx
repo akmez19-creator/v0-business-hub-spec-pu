@@ -70,15 +70,24 @@ export function LeadsChannel({
   // issuing extra Graph calls.
   const { data: mData, isValidating: mv, mutate: mMutate } = useSWR<{
     conversations?: Parameters<typeof fromMessenger>[0][]
+    rateLimited?: boolean
+    usagePct?: number | null
   }>('/api/inbox?pageId=all', fetcher, { refreshInterval: 60_000 })
 
   const { data: wData, isValidating: wv, mutate: wMutate } = useSWR<{
     contacts?: Parameters<typeof fromWhatsApp>[0][]
+    rateLimited?: boolean
   }>('/api/inbox/whatsapp', fetcher, { refreshInterval: 60_000 })
 
   const { data: cData, isValidating: cv, mutate: cMutate } = useSWR<{
     comments?: (Parameters<typeof fromComment>[0] & { fromPage?: boolean })[]
+    rateLimited?: boolean
   }>('/api/inbox/comments?pageId=all', fetcher, { refreshInterval: 120_000 })
+
+  // Messenger and comments both come from Graph, so they throttle together.
+  // WhatsApp is read from Supabase and keeps working, so only claim a full
+  // outage when nothing at all came back.
+  const throttled = Boolean(mData?.rateLimited || cData?.rateLimited)
 
   const all = useMemo<UnifiedThread[]>(
     () => [
@@ -244,6 +253,16 @@ export function LeadsChannel({
           ) : null}
         </div>
       </div>
+
+      {/* Partial outage: say which leads are missing and why, rather than
+          quietly under-reporting the list. Never blames the token. */}
+      {throttled ? (
+        <p className="border-b border-sky-500/20 bg-sky-500/10 px-4 py-2 text-xs leading-relaxed text-pretty">
+          Facebook is rate limiting this app, so Messenger and comment leads are missing right now.
+          WhatsApp is unaffected. This clears on its own, usually within the hour — your access
+          token is fine and does not need regenerating.
+        </p>
+      ) : null}
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (

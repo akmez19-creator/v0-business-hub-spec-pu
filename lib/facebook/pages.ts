@@ -1,4 +1,17 @@
+import { FbGraphError } from './graph'
+
 const GRAPH = 'https://graph.facebook.com/v21.0'
+
+/** The error envelope Graph returns inside a 200-status body. */
+type FbErrorBody = { message?: string; code?: number; is_transient?: boolean }
+
+function toGraphError(e: FbErrorBody): FbGraphError {
+  const err = new FbGraphError(e.message ?? 'Facebook request failed', e.code)
+  // Graph flags some throttles only via is_transient, so trust it too rather
+  // than relying solely on the known-codes list.
+  if (e.is_transient) err.isRateLimit = true
+  return err
+}
 
 export type FbPage = {
   id: string
@@ -31,11 +44,22 @@ export async function getManageablePages(token: string): Promise<FbPage[]> {
 
   const enc = encodeURIComponent(token)
   const byId = new Map<string, FbPage>()
+  // A transient failure (rate limit) looks EXACTLY like "this token sees no
+  // pages" once the body is discarded, and the UI turns that into a "your
+  // token is broken, regenerate it" errand. That advice is actively harmful:
+  // a Graph Explorer token is short-lived, so following it would replace a
+  // working never-expiring token with one that dies in ~2 hours. Remember
+  // why the list was empty so the caller can tell the two apart.
+  let transient: FbGraphError | null = null
 
   // 1. The straightforward path: pages granted to the app
   try {
     const res = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&limit=100&access_token=${enc}`)
-    const json = (await res.json()) as { data?: FbPage[] }
+    const json = (await res.json()) as { data?: FbPage[]; error?: FbErrorBody }
+    if (json.error) {
+      const err = toGraphError(json.error)
+      if (err.isRateLimit || json.error.is_transient) transient = err
+    }
     for (const p of json.data ?? []) {
       if (p.access_token) byId.set(p.id, { ...p, direct: true })
     }
@@ -88,6 +112,9 @@ export async function getManageablePages(token: string): Promise<FbPage[]> {
   }
 
   const pages = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name))
+  // Empty AND we know Facebook throttled us: report the throttle rather than
+  // letting it masquerade as a permissions problem.
+  if (pages.length === 0 && transient) throw transient
   // Don't cache empty results - a rate-limited or failed pass shouldn't
   // stick for 10 minutes and hide every page
   if (pages.length > 0) cache.set(cacheKey, { pages, at: Date.now() })

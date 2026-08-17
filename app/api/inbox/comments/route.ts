@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getInboxPage, getInboxPages } from '@/lib/facebook/messages'
 import { getCapabilities } from '@/lib/facebook/capabilities'
+import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
 import {
   deleteComment,
   likeComment,
@@ -115,6 +116,8 @@ export async function GET(request: Request) {
       comments,
     })
   } catch (e) {
+    // Throttling is transient and must never be reported as a token problem.
+    if (isRateLimit(e)) return rateLimitResponse(e)
     const message = e instanceof Error ? e.message : 'Failed to load comments'
     console.log('[v0] comments list failed:', message)
     return NextResponse.json({ success: false, error: message }, { status: 500 })

@@ -1,6 +1,6 @@
 'use client'
 
-import { ExternalLink, KeyRound, ShieldCheck } from 'lucide-react'
+import { Clock, ExternalLink, KeyRound, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -37,14 +37,56 @@ export function InboxSetup({
   pages = [],
   activePageId,
   onSelectPage,
+  usagePct,
 }: {
   pageName?: string
   reason?: string
+  /** Rolling app-usage estimate (0-100) shown while throttled. */
+  usagePct?: number | null
   pages?: { id: string; name: string }[]
   activePageId?: string
   onSelectPage?: (id: string) => void
 }) {
   const noPage = reason === 'no-page'
+
+  // Rate limiting is a WAIT, not a setup task. It must never fall through to
+  // the steps below: those tell the user to generate a new Graph Explorer
+  // token, which is short-lived, so acting on them during a throttle would
+  // trade a temporary outage for a permanently broken token.
+  if (reason === 'rate-limit') {
+    return (
+      <div className="mx-auto w-full max-w-3xl py-10">
+        <Card className="border-sky-500/30 bg-sky-500/5 p-8">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-sky-500/15">
+              <Clock className="h-5 w-5 text-sky-500" aria-hidden="true" />
+            </div>
+            <div className="flex flex-col gap-3">
+              <h2 className="text-xl font-semibold text-balance">Facebook is rate limiting this app</h2>
+              <p className="text-pretty leading-relaxed text-muted-foreground">
+                Meta caps how many Graph API calls an app can make per hour, and that cap has been
+                reached. This clears itself, usually within the hour.
+                {typeof usagePct === 'number' && usagePct > 0 ? (
+                  <> Current app usage is about {usagePct}% of the quota.</>
+                ) : null}
+              </p>
+              <p className="rounded-md border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-sm leading-relaxed text-pretty">
+                <strong className="font-semibold">Your access token is fine.</strong> Nothing here
+                needs fixing, and you should not regenerate it — a token made in the Graph API
+                Explorer expires in about an hour, so replacing a working one now would cause a real
+                outage later.
+              </p>
+              <div>
+                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                  Try again
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl py-10">

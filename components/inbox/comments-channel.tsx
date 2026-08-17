@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { ChannelUnavailable } from './channel-unavailable'
+import { InboxSetup } from './inbox-setup'
 import { ALL_PAGES, PageScopeSelect } from './page-scope-select'
 
 type Author = { id: string; name?: string }
@@ -61,6 +62,9 @@ type Stat = { id: string; name: string; needsReply: number | null; total: number
 type Response = {
   success: boolean
   needsPermission?: boolean
+  /** Transient Graph throttle - a wait, not a setup task. */
+  rateLimited?: boolean
+  usagePct?: number | null
   reason?: string
   missing?: string[]
   capability?: { missing: string[]; degraded: string[]; reason?: string }
@@ -107,6 +111,12 @@ export function CommentsChannel() {
         ))}
       </div>
     )
+  }
+
+  // Checked before needsPermission: a throttle must not be presented as a
+  // scope problem, or the fix on offer would be "regenerate your token".
+  if (data?.rateLimited) {
+    return <InboxSetup reason="rate-limit" usagePct={data.usagePct} />
   }
 
   if (data?.needsPermission) {

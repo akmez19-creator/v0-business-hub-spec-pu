@@ -1,4 +1,4 @@
-import { fbGet } from './graph'
+import { FbGraphError, fbGet } from './graph'
 
 /**
  * What the CURRENT token can actually do, read from Facebook rather than
@@ -109,8 +109,14 @@ export async function getCapabilities(token: string): Promise<TokenCapabilities>
       channels: allChannels(scopes),
     }
   } catch (e) {
-    // A failed probe must not claim "no permissions" - that would tell the
-    // user to fix a token that is fine. Report the probe failure instead.
+    // Throttling is not a verdict about the token. Swallowing it here would
+    // report every channel as missing its scopes and send the user off to
+    // regenerate a token that is perfectly healthy, so let it propagate to
+    // the route, which renders a "wait it out" panel instead.
+    if (e instanceof FbGraphError && e.isRateLimit) throw e
+    // Any other failed probe must not claim "no permissions" either - that
+    // would tell the user to fix a token that is fine. Report the probe
+    // failure instead.
     const message = e instanceof Error ? e.message : 'Could not inspect the access token'
     return { valid: false, scopes: [], expiresAt: null, channels: allChannels([]), error: message }
   }
