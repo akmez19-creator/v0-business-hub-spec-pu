@@ -287,7 +287,10 @@ export function QuickOrderPanel({
               exists. A locality with no contractor is the silent failure. */}
           {routing ? (
             <p className="text-xs text-muted-foreground">
-              {routing.contractor}
+              {/* Labelled, because a bare uppercase name in the form reads as a
+                  stray value rather than the resolved delivery route. */}
+              <span className="text-muted-foreground/70">Routed to </span>
+              <span className="text-foreground">{routing.contractor}</span>
               {routing.rider ? ` · ${routing.rider}` : ''}
             </p>
           ) : null}

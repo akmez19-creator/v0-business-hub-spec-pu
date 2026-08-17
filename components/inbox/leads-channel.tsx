@@ -155,7 +155,18 @@ export function LeadsChannel() {
 
   const products = useMemo(() => productOptions(all), [all])
   const campaigns = useMemo(() => campaignOptions(all), [all])
-  const counts = useMemo(() => stageCounts(all), [all])
+  /**
+   * Counted on the channel-filtered set, not on everything.
+   *
+   * Counting `all` made the chips lie: with WhatsApp selected they still
+   * advertised "Awaiting reply (36)" from Messenger while the list showed
+   * nothing, which reads as a broken filter rather than an empty stage.
+   */
+  const inChannel = useMemo(
+    () => (channel === 'all' ? all : all.filter((t) => t.channel === channel)),
+    [all, channel],
+  )
+  const counts = useMemo(() => stageCounts(inChannel), [inChannel])
 
   const rows = useMemo(
     () =>
@@ -211,7 +222,10 @@ export function LeadsChannel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messages: turns,
-            customerName: thread.name,
+            // "Facebook user" is the anonymity placeholder Meta forces on
+            // comments, not a name. Sending it would prefill the order form
+            // with it and file a real delivery under a fake customer.
+            customerName: thread.name === 'Facebook user' ? '' : thread.name,
             pageName: thread.source,
             channel: thread.channel,
             productHint: thread.product,
