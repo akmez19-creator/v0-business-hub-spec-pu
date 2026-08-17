@@ -42,6 +42,8 @@ export type MessengerRow = {
   customer?: { name?: string } | null
   outsideWindow?: boolean
   pageName?: string
+  adId?: string | null
+  adName?: string | null
 }
 
 export type WhatsAppRow = {
@@ -68,8 +70,10 @@ export function fromMessenger(c: MessengerRow): UnifiedThread {
     unreadCount: c.unreadCount ?? 0,
     outsideWindow: c.outsideWindow ?? false,
     source: c.pageName ?? 'Page',
-    adId: null,
-    adName: null,
+    // Populated from the page webhook (messenger_ad_refs). Null on every
+    // thread that predates the subscription - Graph cannot backfill it.
+    adId: c.adId ?? null,
+    adName: c.adName ?? null,
   }
 }
 

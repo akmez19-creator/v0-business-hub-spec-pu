@@ -1,3 +1,4 @@
+import { getAdRefs } from '@/lib/messenger/ad-refs'
 import { fbGet, fbWrite, FbGraphError } from './graph'
 import { getManageablePages, type FbPage } from './pages'
 
@@ -33,6 +34,13 @@ export type InboxConversation = {
    */
   pageId: string
   pageName: string
+  /**
+   * Ad this conversation started from, joined in from `messenger_ad_refs`.
+   * Only ever set for threads that arrived AFTER the page webhook was
+   * subscribed: Graph cannot backfill this, so older threads stay null.
+   */
+  adId?: string | null
+  adName?: string | null
 }
 
 export type InboxMessage = {
@@ -189,6 +197,24 @@ export async function listAllConversations(
       pageStats.push({ id: page.id, name: page.name, unread: null, conversations: 0, error: message })
     }
   })
+
+  // Attach ad attribution in ONE query for every page, keyed by the customer's
+  // PSID - the same id the page webhook delivers as `sender.id`.
+  try {
+    const psids = conversations.map((c) => c.customer?.id).filter((id): id is string => Boolean(id))
+    const refs = await getAdRefs(psids)
+    if (refs.size > 0) {
+      for (const c of conversations) {
+        const ref = c.customer?.id ? refs.get(c.customer.id) : undefined
+        if (!ref) continue
+        c.adId = ref.adId
+        c.adName = ref.adName
+      }
+    }
+  } catch (error) {
+    // Attribution is decoration; never let it take down the inbox.
+    console.log('[v0] inbox: ad attribution lookup failed', error)
+  }
 
   conversations.sort((a, b) => new Date(b.updatedTime).getTime() - new Date(a.updatedTime).getTime())
   pageStats.sort((a, b) => a.name.localeCompare(b.name))
