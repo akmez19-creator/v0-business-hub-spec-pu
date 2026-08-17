@@ -25,8 +25,13 @@ create index if not exists page_post_ads_campaign_idx on page_post_ads (campaign
 -- are products genuinely missing from the catalogue rather than matcher
 -- failures, so this is also where a marketing name gets mapped onto a
 -- catalogue item that is worded differently.
-create table if not exists product_aliases (
-  alias text primary key,
-  product_id uuid references products (id) on delete cascade,
-  created_at timestamptz default now()
-);
+--
+-- product_aliases ALREADY EXISTS and is shared with the deliveries importer
+-- (104 rows, source='delivery'). Do NOT create a parallel table: reuse it and
+-- tag inbox-side rows source='ad', so an alias taught here also teaches
+-- deliveries and vice versa. Its shape is
+--   id uuid pk | alias_name text | product_id uuid | source text | created_at
+-- Case-insensitive lookup index; not unique, because the same marketing name
+-- can legitimately arrive from both sources.
+create index if not exists product_aliases_lookup_idx
+  on product_aliases (lower(alias_name));

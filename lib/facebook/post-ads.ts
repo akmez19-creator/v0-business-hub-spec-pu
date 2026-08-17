@@ -1,6 +1,8 @@
 import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/server'
+import { createProductMatcher, type MatchConfidence } from '@/lib/products/match'
+import { productFromAdName, productFromCampaignName } from './ad-product-name'
 import { fbGet } from './graph'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
@@ -19,70 +21,19 @@ export type PostAd = {
   adName: string | null
   /** Human-readable product, derived from the ad name. */
   product: string | null
+  /** Canonical catalogue product, when the label could be resolved. */
+  productId: string | null
+  matchConfidence: MatchConfidence | null
+  campaignId: string | null
+  campaignName: string | null
+  campaignObjective: string | null
+  /** ACTIVE | PAUSED | ... - whether this lead source is still running. */
+  adStatus: string | null
 }
 
-/** Placeholder ad names that carry no product meaning. */
-const JUNK_NAMES = /^(new engagement ad|dup|copy|untitled|test)\b/i
-
-/**
- * Turns an ad name into a product label. Three shapes exist in this account:
- *   1. "DBM - Car Wash Kit - 1"       -> the house convention (majority)
- *   2. 'Post: "Easy to use mini..."'  -> Meta's auto name, i.e. the post copy
- *   3. "New Engagement Ad"            -> junk, deliberately returns null
- */
-export function productFromAdName(adName: string | null | undefined): string | null {
-  if (!adName) return null
-  const raw = adName.trim()
-  if (!raw || JUNK_NAMES.test(raw)) return null
-
-  const isAutoName = /^post:\s*/i.test(raw)
-
-  // Shape 1: BRAND - Product [- VARIANT] - 3
-  if (!isAutoName && raw.includes(' - ')) {
-    const parts = raw
-      .split(/\s+-\s+/)
-      .map((p) => p.trim())
-      .filter(Boolean)
-    if (parts.length >= 2) {
-      // Drop a short leading brand code (DBM/MBM) and any trailing plain
-      // number, which is just the creative iteration.
-      if (parts.length > 2 && parts[0].length <= 12 && !/\s/.test(parts[0])) parts.shift()
-      while (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) parts.pop()
-      const joined = parts.join(' - ').trim()
-      if (joined) return truncate(joined)
-    }
-  }
-
-  // Shape 2: strip the wrapper, quotes and marketing noise, keep first clause.
-  let s = raw.replace(/^post:\s*/i, '').replace(/^["“”']+|["“”']+$/g, '')
-  s = s.replace(/^[^\p{L}\p{N}]+/u, '')
-  s = s.replace(
-    /^(ultimate deal|new price drop|price drop|special offer|mega deal|hot deal|flash sale|new|promo|sale|deal)\s*[!:–-]*\s*/i,
-    '',
-  )
-  s = s.replace(/^[^\p{L}\p{N}]+/u, '').trim()
-  if (!s) return null
-  // Post copy is a sentence, not a name: stop at the first hard break so we
-  // get "BUILDECO Bamboo Charcoal Boards" and not the whole sales pitch.
-  let cut = (s.split(/[\n–—|]/)[0] ?? s).trim()
-  cut = (cut.split(/\s+[-—]\s+|[.!?]\s|,\s|\s+(?:Rs|only|now)\b/i)[0] ?? cut).trim()
-  // Marketing copy often leads with a verb phrase ("Revolutionize Your Walls
-  // Instantly with BUILDECO's ..."); the product follows the preposition.
-  const after = cut.match(/\b(?:with|from)\s+(.{6,})$/i)?.[1]
-  if (after && /^[\p{Lu}]/u.test(after)) cut = after.trim()
-  cut = cut
-    .replace(/[’']s\b/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    // Trailing punctuation from the original sentence.
-    .replace(/[!?.,:;\s]+$/u, '')
-    .trim()
-  return truncate(cut.length >= 8 ? cut : s)
-}
-
-function truncate(value: string): string {
-  const out = value.trim()
-  return out.length > 48 ? `${out.slice(0, 48).trimEnd()}…` : out
-}
+// Re-exported so existing importers keep working; the implementation lives in
+// a dependency-free module that backfill scripts can import too.
+export { productFromAdName }
 
 const STALE_MS = 6 * 60 * 60 * 1000 // 6h - ad<->post links change slowly.
 let lastSync = 0
@@ -104,17 +55,44 @@ async function syncPostAds(): Promise<void> {
     { cacheTtl: STALE_MS },
   )
 
-  const rows = new Map<
-    string,
-    { post_id: string; ad_id: string; ad_name: string; product: string | null; page_id: string }
-  >()
+  // Resolve labels onto the real catalogue while we are here, so the inbox
+  // never has to fuzzy-match at read time.
+  const [{ data: products }, { data: aliases }] = await Promise.all([
+    db.from('products').select('id, name, category'),
+    db.from('product_aliases').select('alias_name, product_id'),
+  ])
+  const matchProduct = createProductMatcher(products ?? [], aliases ?? [])
+
+  type Row = {
+    post_id: string
+    ad_id: string
+    ad_name: string
+    product: string | null
+    page_id: string
+    product_id: string | null
+    match_confidence: MatchConfidence | null
+    campaign_id: string | null
+    campaign_name: string | null
+    campaign_objective: string | null
+    ad_status: string | null
+  }
+
+  const rows = new Map<string, Row>()
+  const fields =
+    'id,name,effective_status,campaign{id,name,objective},creative{effective_object_story_id}'
   for (const account of accounts.data ?? []) {
-    let url: string | null =
-      `${GRAPH}/${account.id}/ads?fields=id,name,creative{effective_object_story_id}&limit=500&${auth}`
-    // Cap pagination so a huge account cannot hang the request.
-    for (let page = 0; page < 6 && url; page++) {
+    let url: string | null = `${GRAPH}/${account.id}/ads?fields=${encodeURIComponent(fields)}&limit=500&${auth}`
+    // Walk every page. A truncated crawl previously left whole pages with no
+    // cached ads at all, which looked like broken attribution.
+    for (let page = 0; page < 25 && url; page++) {
       type AdsPage = {
-        data?: { id: string; name?: string; creative?: { effective_object_story_id?: string } }[]
+        data?: {
+          id: string
+          name?: string
+          effective_status?: string
+          campaign?: { id?: string; name?: string; objective?: string }
+          creative?: { effective_object_story_id?: string }
+        }[]
         paging?: { next?: string }
       }
       const res: AdsPage | null = await fbGet<AdsPage>(url, { cacheTtl: STALE_MS }).catch(() => null)
@@ -122,13 +100,30 @@ async function syncPostAds(): Promise<void> {
 
       for (const ad of res.data ?? []) {
         const postId = ad.creative?.effective_object_story_id
-        if (!postId || rows.has(postId)) continue
+        if (!postId) continue
+        // One post can carry several ads. Prefer a live one, so the campaign
+        // shown against a lead is the campaign still spending money.
+        const existing = rows.get(postId)
+        if (existing && existing.ad_status === 'ACTIVE' && ad.effective_status !== 'ACTIVE') continue
+
+        // Prefer the ad name; fall back to the campaign name, which is
+        // human-written and often cleaner than Meta's auto-generated copy.
+        const campaignLabel = productFromCampaignName(ad.campaign?.name)
+        const adLabel = productFromAdName(ad.name)
+        const match = matchProduct(adLabel) ?? matchProduct(campaignLabel)
+        const label = adLabel ?? campaignLabel
         rows.set(postId, {
           post_id: postId,
           ad_id: ad.id,
           ad_name: ad.name ?? '',
-          product: productFromAdName(ad.name),
+          product: label,
           page_id: postId.split('_')[0] ?? '',
+          product_id: match?.productId ?? null,
+          match_confidence: match?.confidence ?? null,
+          campaign_id: ad.campaign?.id ?? null,
+          campaign_name: ad.campaign?.name ?? null,
+          campaign_objective: ad.campaign?.objective ?? null,
+          ad_status: ad.effective_status ?? null,
         })
       }
       url = res.paging?.next ?? null
@@ -166,18 +161,14 @@ export async function getPostAds(postIds: string[]): Promise<Map<string, PostAd>
 
   try {
     const db = createAdminClient()
-    let { data } = await db
-      .from('page_post_ads')
-      .select('post_id, ad_id, ad_name, product')
-      .in('post_id', unique)
+    const columns =
+      'post_id, ad_id, ad_name, product, product_id, match_confidence, campaign_id, campaign_name, campaign_objective, ad_status'
+    let { data } = await db.from('page_post_ads').select(columns).in('post_id', unique)
 
     // Cold cache (or all misses) - build it once, then retry.
     if (!data || data.length === 0) {
       await ensurePostAdsFresh()
-      ;({ data } = await db
-        .from('page_post_ads')
-        .select('post_id, ad_id, ad_name, product')
-        .in('post_id', unique))
+      ;({ data } = await db.from('page_post_ads').select(columns).in('post_id', unique))
     }
 
     for (const row of data ?? []) {
@@ -186,6 +177,12 @@ export async function getPostAds(postIds: string[]): Promise<Map<string, PostAd>
         adId: row.ad_id,
         adName: row.ad_name,
         product: row.product ?? productFromAdName(row.ad_name),
+        productId: row.product_id ?? null,
+        matchConfidence: (row.match_confidence as MatchConfidence | null) ?? null,
+        campaignId: row.campaign_id ?? null,
+        campaignName: row.campaign_name ?? null,
+        campaignObjective: row.campaign_objective ?? null,
+        adStatus: row.ad_status ?? null,
       })
     }
   } catch (error) {

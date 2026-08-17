@@ -2,6 +2,7 @@ import 'server-only'
 
 import { fbGet } from './graph'
 import type { FbPage } from './pages'
+import { getProductMatcher } from '@/lib/products/catalogue'
 import { getPostAds, productFromAdName, type PostAd } from './post-ads'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
@@ -31,6 +32,9 @@ export type ThreadOrigin = {
   ad: PostAd | null
   /** Product label, from the ad when possible, else from the post copy. */
   product: string | null
+  /** Catalogue id, resolved from whichever label we ended up with. */
+  productId: string | null
+  productCategory: string | null
 }
 
 /** Extract the numeric post id from a comment permalink. */
@@ -105,12 +109,20 @@ export async function resolveCommentOrigins(
       }),
     )
 
+    // Organic posts never went through the ads cache, so their label has not
+    // been matched against the catalogue yet.
+    const matchProduct = await getProductMatcher()
+
     for (const s of staged) {
       const ad = ads.get(s.postId) ?? null
+      const product = ad?.product ?? copyByPost.get(s.postId) ?? null
+      const match = ad?.productId ? null : matchProduct(product)
       out.set(s.id, {
         postId: s.postId,
         ad,
-        product: ad?.product ?? copyByPost.get(s.postId) ?? null,
+        product,
+        productId: ad?.productId ?? match?.productId ?? null,
+        productCategory: match?.category ?? null,
       })
     }
   } catch (error) {
