@@ -89,6 +89,31 @@ type MessagingEvent = {
   }
 }
 
+/**
+ * Is this echo a "Offers and announcements" marketing blast rather than a
+ * reply to a person?
+ *
+ * Subscribing `marketing_message_*` makes Meta echo every broadcast into
+ * `entry.messaging` looking exactly like an outbound reply. Treating those as
+ * conversation traffic is actively harmful in two ways:
+ *  - a blast to someone who never messaged us invents a nameless thread
+ *    ("Unknown customer / No preview"), because a recipient who only opted
+ *    into notifications has no messaging profile to look up; and
+ *  - a blast to a REAL lead bumps their thread and flags it answered, so it
+ *    silently drops out of "to reply" while they are still waiting.
+ * Recurring-notification templates are the reliable tell - a broadcast always
+ * carries the re-optin marker, a human reply never does.
+ */
+function isMarketingBroadcast(message: MessagingEvent['message']): boolean {
+  const attachments = message?.attachments
+  if (!attachments) return false
+  try {
+    return JSON.stringify(attachments).includes('notification_messages_')
+  } catch {
+    return false
+  }
+}
+
 /** A `feed` change. Only `item: 'comment'` is of interest here. */
 type FeedChange = {
   field?: string
@@ -158,6 +183,11 @@ export async function POST(request: Request) {
 
       const message = event.message
       if (!message?.mid) continue
+
+      if (isMarketingBroadcast(message)) {
+        console.log(`[v0] messenger webhook: skipped marketing broadcast echo ${message.mid}`)
+        continue
+      }
 
       // An echo is the Page talking, so sender/recipient are reversed. Getting
       // this backwards would file our own replies under a customer psid of the

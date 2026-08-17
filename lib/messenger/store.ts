@@ -2,6 +2,7 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getProductMatcher } from '@/lib/products/catalogue'
 import { productFromAdName } from '@/lib/facebook/ad-product-name'
+import { getInboxPage } from '@/lib/facebook/messages'
 
 /**
  * Persistence for Messenger threads.
@@ -79,11 +80,17 @@ export async function recordMessengerMessage(msg: IncomingMessage): Promise<void
     // ad attribution the referral webhook already captured, so a brand-new
     // lead shows its product immediately instead of waiting for a refresh.
     const attribution = await attributionFor(pageId, psid)
+    const [pageName, customerName] = await Promise.all([
+      pageNameFor(pageId),
+      customerNameFor(pageId, psid),
+    ])
     const { error } = await db.from('messenger_conversations').insert({
       page_id: pageId,
       psid,
+      page_name: pageName,
+      customer_name: customerName,
       last_message_at: msg.createdAt,
-      last_snippet: msg.body ?? '',
+      last_snippet: snippetFor(msg),
       last_from_customer: inbound,
       message_count: 1,
       unread_count: inbound ? 1 : 0,
@@ -99,7 +106,7 @@ export async function recordMessengerMessage(msg: IncomingMessage): Promise<void
   }
   if (isNewer) {
     update.last_message_at = msg.createdAt
-    update.last_snippet = msg.body ?? ''
+    update.last_snippet = snippetFor(msg)
     // The whole point of subscribing message_echoes: a reply sent from
     // Business Suite or respond.io clears "awaiting" here too, so a thread you
     // already answered stops being flagged as needing attention.
@@ -120,6 +127,81 @@ export async function recordMessengerMessage(msg: IncomingMessage): Promise<void
     .update(update)
     .eq('id', existing.id as string)
   if (error) console.log('[v0] messenger store: conversation update failed', error.message)
+}
+
+/**
+ * The customer's display name for a thread we have never seen before.
+ *
+ * Only ever called when a conversation is FIRST created, so this is one Graph
+ * call per new person - not per message - and a failure just leaves the name
+ * for the next sync to fill.
+ *
+ * Note the endpoint: /{page}/conversations?user_id= works, while the obvious
+ * /{psid}?fields=name returns "Object does not exist, cannot be loaded due to
+ * missing permissions" for these ids. Do not swap it for the direct lookup.
+ */
+async function customerNameFor(pageId: string, psid: string): Promise<string | null> {
+  try {
+    const page = await getInboxPage(pageId)
+    if (!page || page.id !== pageId) return null
+
+    const url =
+      `https://graph.facebook.com/v21.0/${pageId}/conversations` +
+      `?user_id=${encodeURIComponent(psid)}&fields=participants` +
+      `&access_token=${encodeURIComponent(page.access_token)}`
+    const json = (await (await fetch(url)).json()) as {
+      data?: { participants?: { data?: { id?: string; name?: string }[] } }[]
+    }
+    const participants = json.data?.[0]?.participants?.data ?? []
+    return participants.find((p) => p.id !== pageId)?.name ?? null
+  } catch {
+    // A name is decoration - never fail a message write for it.
+    return null
+  }
+}
+
+/**
+ * A human-readable one-line preview.
+ *
+ * A photo or voice note has no text, and storing '' for it rendered as
+ * "No preview" while also wiping the previous line - so a thread could look
+ * empty even though the customer had just sent something.
+ */
+function snippetFor(msg: IncomingMessage): string {
+  const text = msg.body?.trim()
+  if (text) return text
+
+  const list = Array.isArray(msg.attachments) ? (msg.attachments as { type?: string }[]) : []
+  const type = list[0]?.type
+  if (type === 'image') return '[Photo]'
+  if (type === 'video') return '[Video]'
+  if (type === 'audio') return '[Voice message]'
+  if (type === 'file') return '[File]'
+  return list.length > 0 ? '[Attachment]' : ''
+}
+
+/**
+ * The Page's display name, read from a thread we already hold for that Page.
+ *
+ * Deliberately NOT a Graph lookup: page discovery costs 10+ calls and a
+ * webhook can arrive on a cold start, so resolving it that way would fan out
+ * requests on exactly the path that must stay cheap (error #4 is app-wide).
+ * Every Page already has hundreds of rows, so Postgres always knows the name.
+ */
+async function pageNameFor(pageId: string): Promise<string | null> {
+  try {
+    const db = createAdminClient()
+    const { data } = await db
+      .from('messenger_conversations')
+      .select('page_name')
+      .eq('page_id', pageId)
+      .not('page_name', 'is', null)
+      .limit(1)
+      .maybeSingle()
+    return (data?.page_name as string | null) ?? null
+  } catch {
+    return null
+  }
 }
 
 /** Copy ad attribution captured by the referral webhook onto a new thread. */
