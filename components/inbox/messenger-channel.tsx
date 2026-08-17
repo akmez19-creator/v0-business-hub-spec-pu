@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { formatDistanceToNow } from 'date-fns'
-import { Inbox, MessageSquare, RefreshCw, Search } from 'lucide-react'
+import { Inbox, Megaphone, MessageSquare, RefreshCw, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,9 @@ export type Conversation = {
   outsideWindow: boolean
   pageId: string
   pageName: string
+  /** From the page webhook (messenger_ad_refs); null on pre-webhook threads. */
+  adId?: string | null
+  adName?: string | null
 }
 
 type PageRef = { id: string; name: string }
@@ -65,6 +68,8 @@ export function MessengerChannel({
 } = {}) {
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [query, setQuery] = useState('')
+  /** 'all' | 'ads' | a specific ad id. */
+  const [adFilter, setAdFilter] = useState<string>('all')
   // Default to every Page merged and sorted by recency, so the newest customer
   // message is on top no matter which business it came to.
   const [scope, setScope] = useState<string>(ALL)
@@ -134,16 +139,31 @@ export function MessengerChannel({
   }
 
   const all = data.conversations ?? []
+
+  // Distinct ads seen in this list, for the filter dropdown.
+  const adCounts = new Map<string, { name: string; count: number }>()
+  for (const c of all) {
+    if (!c.adId) continue
+    const prev = adCounts.get(c.adId)
+    adCounts.set(c.adId, { name: c.adName ?? c.adId, count: (prev?.count ?? 0) + 1 })
+  }
+  const ads = [...adCounts.entries()].sort((a, b) => b[1].count - a[1].count)
+  const adSourced = all.reduce((n, c) => n + (c.adId ? 1 : 0), 0)
+
   const q = query.trim().toLowerCase()
-  const conversations = q
-    ? all.filter(
-        (c) =>
-          (c.customer?.name ?? '').toLowerCase().includes(q) ||
-          c.snippet.toLowerCase().includes(q) ||
-          // In the merged view the Page name is a useful filter of its own.
-          (combined && c.pageName.toLowerCase().includes(q)),
-      )
-    : all
+  const conversations = all.filter((c) => {
+    if (adFilter === 'ads' && !c.adId) return false
+    if (adFilter !== 'all' && adFilter !== 'ads' && c.adId !== adFilter) return false
+    if (!q) return true
+    return (
+      (c.customer?.name ?? '').toLowerCase().includes(q) ||
+      c.snippet.toLowerCase().includes(q) ||
+      (c.adName ?? '').toLowerCase().includes(q) ||
+      (c.adId ?? '').includes(q) ||
+      // In the merged view the Page name is a useful filter of its own.
+      (combined && c.pageName.toLowerCase().includes(q))
+    )
+  })
   // Count CHATS needing a reply, not raw messages: the dropdown already shows
   // message totals, and two different numbers both labelled "unread" side by
   // side read as a bug.
@@ -182,6 +202,24 @@ export function MessengerChannel({
               </SelectContent>
             </Select>
           ) : null}
+          {/* Only shown once attribution exists, so pre-webhook inboxes are
+              not given a filter that can only ever return nothing. */}
+          {adSourced > 0 ? (
+            <Select value={adFilter} onValueChange={setAdFilter}>
+              <SelectTrigger aria-label="Filter by ad">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="max-h-[320px]">
+                <SelectItem value="all">Any source ({all.length})</SelectItem>
+                <SelectItem value="ads">Ad clicks only ({adSourced})</SelectItem>
+                {ads.map(([id, meta]) => (
+                  <SelectItem key={id} value={id}>
+                    {meta.name} ({meta.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <h2 className="font-semibold">{combined ? 'All conversations' : 'Conversations'}</h2>
@@ -209,7 +247,7 @@ export function MessengerChannel({
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name or message..."
+              placeholder="Search name, message or ad..."
               className="pl-9"
               aria-label="Search conversations"
             />
@@ -256,6 +294,16 @@ export function MessengerChannel({
                             {/* Badge centres its text, so a bare truncate
                                 would clip both ends of a long Page name. */}
                             <span className="block w-full truncate text-left">{c.pageName}</span>
+                          </Badge>
+                        ) : null}
+                        {c.adName ? (
+                          <Badge
+                            variant="outline"
+                            className="h-5 max-w-full gap-1 border-primary/40 font-normal text-primary"
+                            title={`${c.adName} · ad_id.${c.adId}`}
+                          >
+                            <Megaphone className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="block w-full truncate text-left">{c.adName}</span>
                           </Badge>
                         ) : null}
                         {c.unreadCount > 0 ? (
