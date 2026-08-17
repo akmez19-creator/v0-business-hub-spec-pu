@@ -92,11 +92,25 @@ export function CommentsChannel() {
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  // Reads Postgres, not Facebook: new comments arrive by webhook, so polling
+  // here costs no Graph quota.
   const { data, isLoading, mutate, isValidating } = useSWR<Response>(
     `/api/inbox/comments?pageId=${encodeURIComponent(scope)}`,
     fetcher,
     { refreshInterval: 90_000, revalidateOnFocus: true },
   )
+
+  // The only path that re-reads Facebook, for reconciling missed webhooks.
+  const [isSyncing, setIsSyncing] = useState(false)
+  const forceRefresh = async () => {
+    setIsSyncing(true)
+    try {
+      await fetch(`/api/inbox/comments?pageId=${encodeURIComponent(scope)}&refresh=1`)
+      await mutate()
+    } finally {
+      setIsSyncing(false)
+    }
+  }
 
   const switchScope = (next: string) => {
     setSelectedId(null)
@@ -228,11 +242,16 @@ export function CommentsChannel() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => mutate()}
-              aria-label="Refresh comments"
+              onClick={forceRefresh}
+              disabled={isSyncing}
+              aria-label="Check Facebook for new comments"
+              title="Check Facebook for new comments"
               className="h-8 w-8"
             >
-              <RefreshCw className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <RefreshCw
+                className={`h-4 w-4 ${isSyncing || isValidating ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
             </Button>
           </div>
 

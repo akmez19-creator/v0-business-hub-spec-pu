@@ -52,17 +52,19 @@ export async function GET(request: Request) {
       limit: 200,
     })
 
-    // Page list for the rail. Cheap and cached upstream, but the cache is a
-    // sufficient fallback if Graph is throttled - a stale rail beats an error.
-    let pageRefs: { id: string; name: string }[] = []
-    try {
-      pageRefs = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
-    } catch {
-      pageRefs = (await cachedPageStats()).map((p) => ({ id: p.id, name: p.name }))
-    }
-    if (pageRefs.length === 0) pageRefs = (await cachedPageStats()).map((p) => ({ id: p.id, name: p.name }))
-
     const stats = await cachedPageStats()
+
+    // Page list for the rail, taken from the cache. Calling Graph here would
+    // reintroduce a live request on every single load.
+    let pageRefs = stats.map((p) => ({ id: p.id, name: p.name }))
+    if (pageRefs.length === 0) {
+      try {
+        pageRefs = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
+      } catch {
+        pageRefs = []
+      }
+    }
+
     const pageStats = requested === 'all' ? stats : stats.filter((p) => p.id === requested)
 
     return NextResponse.json({

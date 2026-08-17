@@ -46,9 +46,25 @@ export async function GET(request: Request) {
       })
     }
 
-    const caps = await getCapabilities(token)
-    const channel = caps.channels.comments
-    if (!channel.available) {
+    const params = new URL(request.url).searchParams
+    const requested = params.get('pageId') ?? 'all'
+    const wantsRefresh = params.get('refresh') === '1'
+
+    // Capabilities are a LIVE Graph call, so it must not gate cached reads.
+    // While throttled it reports no scopes, which is indistinguishable from a
+    // genuinely missing permission - blocking on it would hide 1000+ comments
+    // we already hold locally and wrongly advise regenerating the token.
+    const hasCache = !(await commentCacheIsEmpty())
+    let channel: Awaited<ReturnType<typeof getCapabilities>>['channels']['comments'] | undefined
+    try {
+      channel = (await getCapabilities(token)).channels.comments
+    } catch {
+      channel = undefined // throttled or unreachable; cache still serves
+    }
+
+    // Only refuse when the permission is genuinely missing AND we have nothing
+    // cached to show.
+    if (channel && !channel.available && !hasCache) {
       return NextResponse.json({
         success: false,
         needsPermission: true,
@@ -59,18 +75,15 @@ export async function GET(request: Request) {
       })
     }
 
-    const params = new URL(request.url).searchParams
-    const requested = params.get('pageId') ?? 'all'
-    const wantsRefresh = params.get('refresh') === '1'
-
     // Graph is touched only on an explicit refresh, or to fill an empty cache.
     let rateLimited = false
     let syncError: string | undefined
-    if (wantsRefresh || (await commentCacheIsEmpty())) {
+    if (wantsRefresh || !hasCache) {
       const result = await syncComments()
       rateLimited = result.rateLimited
       syncError = result.error
-      if (!result.ok && result.rateLimited && (await commentCacheIsEmpty())) {
+      // Only surface the throttle when there is genuinely nothing to show.
+      if (!result.ok && result.rateLimited && !hasCache) {
         return rateLimitResponse(new Error(result.error ?? 'rate limited'))
       }
     }
@@ -78,13 +91,16 @@ export async function GET(request: Request) {
     const comments = await listCachedComments(requested === 'all' ? undefined : requested)
     const stats = await cachedCommentStats()
 
-    let pageRefs: { id: string; name: string }[] = []
-    try {
-      pageRefs = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
-    } catch {
-      pageRefs = stats.map((p) => ({ id: p.id, name: p.name }))
+    // Page names come from the cache. Asking Graph here would put a live call
+    // back on every load, which is the thing this cache exists to avoid.
+    let pageRefs = stats.map((p) => ({ id: p.id, name: p.name }))
+    if (pageRefs.length === 0) {
+      try {
+        pageRefs = (await getInboxPages()).map((p) => ({ id: p.id, name: p.name }))
+      } catch {
+        pageRefs = []
+      }
     }
-    if (pageRefs.length === 0) pageRefs = stats.map((p) => ({ id: p.id, name: p.name }))
 
     return NextResponse.json({
       success: true,

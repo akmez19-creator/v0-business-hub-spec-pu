@@ -38,7 +38,12 @@ export function InboxThread({
   const [sending, setSending] = useState(false)
   const { toast } = useToast()
 
-  const { data, isLoading, mutate } = useSWR<{ success: boolean; messages?: Message[]; error?: string }>(
+  const { data, isLoading, mutate } = useSWR<{
+    success: boolean
+    messages?: Message[]
+    error?: string
+    rateLimited?: boolean
+  }>(
     `/api/inbox/messages?id=${encodeURIComponent(conversation.id)}` +
       (pageId ? `&pageId=${encodeURIComponent(pageId)}` : ''),
     fetcher,
@@ -132,6 +137,21 @@ export function InboxThread({
             {Array.from({ length: 5 }).map((_, i) => (
               <Skeleton key={i} className="h-14 w-2/3" />
             ))}
+          </div>
+        ) : data && !data.success && data.rateLimited ? (
+          // A throttle is transient and says nothing about the token. Showing
+          // the raw "(#4) Application request limit reached" here has
+          // previously prompted regenerating a working token, which replaces a
+          // permanent one with a token that expires in about two hours.
+          <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
+            <p className="text-sm font-medium text-foreground">
+              This older conversation has not been saved locally yet
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Facebook is rate limiting the app right now, so its history cannot be fetched. This clears on its
+              own, usually within the hour, and your access token is fine and does not need regenerating. New
+              messages still arrive normally.
+            </p>
           </div>
         ) : data && !data.success ? (
           <p className="text-sm text-destructive">{data.error}</p>

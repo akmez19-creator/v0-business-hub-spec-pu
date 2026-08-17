@@ -81,13 +81,27 @@ export function MessengerChannel({
   // message is on top no matter which business it came to.
   const [scope, setScope] = useState<string>(ALL)
 
-  // Poll so new customer messages appear without a manual refresh. The Graph
-  // client caches for 30s, so this costs no extra Facebook quota.
+  // Polling reads Postgres, never Facebook, so it costs no Graph quota. New
+  // messages land here via the webhook rather than by asking Meta.
   const { data, isLoading, mutate, isValidating } = useSWR<ListResponse>(
     `/api/inbox?pageId=${encodeURIComponent(scope)}`,
     fetcher,
     { refreshInterval: 60_000, revalidateOnFocus: true },
   )
+
+  // Explicit Refresh is the ONE path allowed to hit Graph: it reconciles
+  // anything the webhook could have missed. Kept separate from mutate() so a
+  // background poll can never trigger it.
+  const [isSyncing, setIsSyncing] = useState(false)
+  const forceRefresh = async () => {
+    setIsSyncing(true)
+    try {
+      await fetch(`/api/inbox?pageId=${encodeURIComponent(scope)}&refresh=1`)
+      await mutate()
+    } finally {
+      setIsSyncing(false)
+    }
+  }
 
   // Open the thread the unified inbox asked for, once conversations load.
   // Guarded on `selected` so it never overrides a later manual click.
@@ -242,11 +256,16 @@ export function MessengerChannel({
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => mutate()}
-              aria-label="Refresh conversations"
+              onClick={forceRefresh}
+              disabled={isSyncing}
+              aria-label="Check Facebook for new messages"
+              title="Check Facebook for new messages"
               className="h-8 w-8"
             >
-              <RefreshCw className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} aria-hidden="true" />
+              <RefreshCw
+                className={`h-4 w-4 ${isSyncing || isValidating ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
             </Button>
           </div>
           <div className="relative">
