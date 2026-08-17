@@ -1,5 +1,7 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/server'
+import { productFromAdName } from '@/lib/facebook/ad-product-name'
+import { getProductMatcher } from '@/lib/products/catalogue'
 
 const GRAPH = 'https://graph.facebook.com/v23.0'
 
@@ -92,6 +94,25 @@ export async function recordAdRef(input: {
     },
     { onConflict: 'page_id,sender_id', ignoreDuplicates: true },
   )
+
+  // Stamp an already-existing thread immediately. Without this, a referral
+  // that lands after the person's last message would sit in this table unused
+  // until they happened to write again - the attribution is captured but the
+  // inbox keeps showing no product.
+  if (!adName) return
+  const product = productFromAdName(adName)
+  const match = product ? (await getProductMatcher())(product) : null
+  await db
+    .from('messenger_conversations')
+    .update({
+      ad_id: adId ?? null,
+      ad_name: adName,
+      product,
+      product_id: match?.productId ?? null,
+    })
+    .eq('page_id', pageId)
+    .eq('psid', senderId)
+    .is('ad_id', null) // never overwrite the ad that originally found them
 }
 
 /**

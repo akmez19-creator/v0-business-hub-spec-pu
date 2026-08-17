@@ -108,6 +108,13 @@ export async function recordMessengerMessage(msg: IncomingMessage): Promise<void
   if (inbound) update.unread_count = (existing.unread_count as number) + 1
   else update.unread_count = 0
 
+  // Meta delivers `referral` and `message` as SEPARATE webhook events with no
+  // guaranteed order, and the person may have messaged the page before ever
+  // clicking the ad. So a thread frequently already exists by the time its ad
+  // referral lands, and attaching attribution only on insert silently loses it
+  // - the thread shows no product even though the ad id was captured.
+  if (!existing.ad_id) Object.assign(update, await attributionFor(pageId, psid))
+
   const { error } = await db
     .from('messenger_conversations')
     .update(update)
