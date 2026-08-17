@@ -190,23 +190,24 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
     console.log('[v0] inbox: ad attribution lookup failed', error)
   }
 
-  // Fallback for threads that began as a comment private-reply. Only fills
-  // gaps - a real ad click always wins over this inference.
+  // Fallback for threads that began as a comment private-reply: the notice
+  // carries a comment_id that resolves to the exact post. Only fills gaps -
+  // a real ad click still wins, since it needs no lookup at all.
   try {
     const pending = conversations
       .filter((c) => !c.product)
-      .map((c) => ({ id: c.id, noticeTime: noticeByConversation.get(c.id) }))
-      .filter((t): t is { id: string; noticeTime: string } => Boolean(t.noticeTime))
+      .map((c) => ({ id: c.id, notice: noticeByConversation.get(c.id) }))
+      .filter((t): t is { id: string; notice: string } => Boolean(t.notice))
 
     if (pending.length > 0) {
       const origins = await resolveCommentOrigins(page, pending)
       for (const c of conversations) {
         const origin = origins.get(c.id)
-        if (!origin?.ad?.product) continue
+        if (!origin?.product) continue
         c.postId = origin.postId
-        c.adId = origin.ad.adId
-        c.adName = origin.ad.adName
-        c.product = origin.ad.product
+        c.adId = origin.ad?.adId ?? null
+        c.adName = origin.ad?.adName ?? null
+        c.product = origin.product
         c.productSource = 'comment'
       }
     }

@@ -62,13 +62,26 @@ export function productFromAdName(adName: string | null | undefined): string | n
   )
   s = s.replace(/^[^\p{L}\p{N}]+/u, '').trim()
   if (!s) return null
-  const cut = s.split(/[\n–—|]/)[0]?.trim() ?? s
+  // Post copy is a sentence, not a name: stop at the first hard break so we
+  // get "BUILDECO Bamboo Charcoal Boards" and not the whole sales pitch.
+  let cut = (s.split(/[\n–—|]/)[0] ?? s).trim()
+  cut = (cut.split(/\s+[-—]\s+|[.!?]\s|,\s|\s+(?:Rs|only|now)\b/i)[0] ?? cut).trim()
+  // Marketing copy often leads with a verb phrase ("Revolutionize Your Walls
+  // Instantly with BUILDECO's ..."); the product follows the preposition.
+  const after = cut.match(/\b(?:with|from)\s+(.{6,})$/i)?.[1]
+  if (after && /^[\p{Lu}]/u.test(after)) cut = after.trim()
+  cut = cut
+    .replace(/[’']s\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    // Trailing punctuation from the original sentence.
+    .replace(/[!?.,:;\s]+$/u, '')
+    .trim()
   return truncate(cut.length >= 8 ? cut : s)
 }
 
 function truncate(value: string): string {
   const out = value.trim()
-  return out.length > 70 ? `${out.slice(0, 70).trimEnd()}…` : out
+  return out.length > 48 ? `${out.slice(0, 48).trimEnd()}…` : out
 }
 
 const STALE_MS = 6 * 60 * 60 * 1000 // 6h - ad<->post links change slowly.

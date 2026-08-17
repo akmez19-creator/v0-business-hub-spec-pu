@@ -305,14 +305,10 @@ export function MessengerChannel({
                         {c.product ? (
                           <Badge
                             variant="outline"
-                            className={
-                              c.productSource === 'comment'
-                                ? 'h-5 max-w-full gap-1 border-muted-foreground/30 font-normal text-muted-foreground'
-                                : 'h-5 max-w-full gap-1 border-primary/40 font-normal text-primary'
-                            }
+                            className="h-5 max-w-full gap-1 border-primary/40 font-normal text-primary"
                             title={
                               c.productSource === 'comment'
-                                ? `Likely — commented on the post for "${c.adName}"`
+                                ? 'Commented on the post for this product'
                                 : `Clicked the ad "${c.adName}"`
                             }
                           >

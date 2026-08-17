@@ -97,14 +97,12 @@ export function InboxThread({
             <span className="tabular-nums">{conversation.messageCount} messages</span>
             {showPageName ? <span> · via {conversation.pageName}</span> : null}
           </p>
-          {/* What this person is asking about. Either an exact ad click (post-
-              webhook threads) or a product inferred from the comment they
-              privately replied to - the wording distinguishes the two. */}
+          {/* What this person is asking about. Both routes are exact: an ad
+              click comes from the webhook, a comment resolves through its
+              comment_id to the post. Only the wording differs. */}
           {conversation.product ? (
             <p
-              className={`flex items-center gap-1.5 text-xs ${
-                conversation.productSource === 'comment' ? 'text-muted-foreground' : 'text-primary'
-              }`}
+              className="flex items-center gap-1.5 text-xs text-primary"
               title={conversation.adName ?? undefined}
             >
               {conversation.productSource === 'comment' ? (
@@ -113,7 +111,7 @@ export function InboxThread({
                 <Megaphone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               )}
               <span className="truncate">
-                {conversation.productSource === 'comment' ? 'Likely asking about' : 'Came from ad'}
+                {conversation.productSource === 'comment' ? 'Commented on' : 'Came from ad'}
                 {': '}
                 {conversation.product}
               </span>
