@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { format } from 'date-fns'
-import { AlertTriangle, Send } from 'lucide-react'
+import { AlertTriangle, Megaphone, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -97,6 +97,17 @@ export function InboxThread({
             <span className="tabular-nums">{conversation.messageCount} messages</span>
             {showPageName ? <span> · via {conversation.pageName}</span> : null}
           </p>
+          {/* Which ad brought this person in - only set for threads that
+              started after the page webhook went live. */}
+          {conversation.adName ? (
+            <p
+              className="flex items-center gap-1.5 text-xs text-primary"
+              title={`ad_id.${conversation.adId}`}
+            >
+              <Megaphone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Came from {conversation.adName}</span>
+            </p>
+          ) : null}
         </div>
         {conversation.outsideWindow ? (
           <Badge variant="outline" className="gap-1.5 border-amber-500/40 text-amber-500">

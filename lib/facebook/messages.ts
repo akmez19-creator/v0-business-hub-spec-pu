@@ -131,7 +131,7 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
   }
 
   const now = Date.now()
-  return (json.data ?? []).map((c) => {
+  const conversations: InboxConversation[] = (json.data ?? []).map((c) => {
     const participants = c.participants?.data ?? []
     // The Page is always a participant; the customer is whoever else is there.
     const customer = participants.find((p) => p.id !== page.id) ?? null
@@ -148,6 +148,27 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
       pageName: page.name,
     }
   })
+
+  // Attach ad attribution in ONE query, keyed by the customer's PSID - the
+  // same id the page webhook stores as `sender.id`. Done here rather than in
+  // listAllConversations so the single-Page view gets badges too.
+  try {
+    const psids = conversations
+      .map((c) => c.customer?.id)
+      .filter((id): id is string => Boolean(id))
+    const refs = await getAdRefs(psids)
+    for (const c of conversations) {
+      const ref = c.customer?.id ? refs.get(c.customer.id) : undefined
+      if (!ref) continue
+      c.adId = ref.adId
+      c.adName = ref.adName
+    }
+  } catch (error) {
+    // Attribution is decoration; never let it take down the inbox.
+    console.log('[v0] inbox: ad attribution lookup failed', error)
+  }
+
+  return conversations
 }
 
 export type PageStat = {
@@ -198,24 +219,8 @@ export async function listAllConversations(
     }
   })
 
-  // Attach ad attribution in ONE query for every page, keyed by the customer's
-  // PSID - the same id the page webhook delivers as `sender.id`.
-  try {
-    const psids = conversations.map((c) => c.customer?.id).filter((id): id is string => Boolean(id))
-    const refs = await getAdRefs(psids)
-    if (refs.size > 0) {
-      for (const c of conversations) {
-        const ref = c.customer?.id ? refs.get(c.customer.id) : undefined
-        if (!ref) continue
-        c.adId = ref.adId
-        c.adName = ref.adName
-      }
-    }
-  } catch (error) {
-    // Attribution is decoration; never let it take down the inbox.
-    console.log('[v0] inbox: ad attribution lookup failed', error)
-  }
-
+  // Attribution is attached inside listConversations, so it applies to the
+  // single-Page view too - not just this merged one.
   conversations.sort((a, b) => new Date(b.updatedTime).getTime() - new Date(a.updatedTime).getTime())
   pageStats.sort((a, b) => a.name.localeCompare(b.name))
 
