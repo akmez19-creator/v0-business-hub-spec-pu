@@ -58,3 +58,6 @@ export const STAGE_PRIORITY: Record<LeadStage, number> = {
   active: 2,
   dormant: 3,
 }
+
+/** Stages in triage order, for rendering the filter row. */
+export const STAGE_ORDER: LeadStage[] = ['awaiting', 'new', 'active', 'dormant']

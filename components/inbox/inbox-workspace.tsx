@@ -2,14 +2,15 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
-import { Inbox, MessageCircle, MessageSquareText, Phone } from 'lucide-react'
+import { Inbox, MessageCircle, MessageSquareText, Phone, Target } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { AllMessagesChannel } from './all-messages-channel'
+import { LeadsChannel } from './leads-channel'
 import { MessengerChannel } from './messenger-channel'
 import { CommentsChannel } from './comments-channel'
 import { WhatsAppChannel } from './whatsapp-channel'
 
-type ChannelId = 'all' | 'messenger' | 'comments' | 'whatsapp'
+type ChannelId = 'leads' | 'all' | 'messenger' | 'comments' | 'whatsapp'
 
 type CapabilityState = { id: string; label: string; available: boolean; missing: string[]; reason?: string }
 
@@ -25,6 +26,7 @@ type CapabilitiesResponse = {
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 const CHANNELS: { id: ChannelId; label: string; icon: typeof MessageCircle; hint: string }[] = [
+  { id: 'leads', label: 'Leads', icon: Target, hint: 'By stage, product, ad' },
   { id: 'all', label: 'All messages', icon: Inbox, hint: 'Messenger + WhatsApp' },
   { id: 'messenger', label: 'Messenger', icon: MessageCircle, hint: 'Page inbox' },
   { id: 'comments', label: 'Comments', icon: MessageSquareText, hint: 'Post replies' },
@@ -32,7 +34,7 @@ const CHANNELS: { id: ChannelId; label: string; icon: typeof MessageCircle; hint
 ]
 
 export function InboxWorkspace({ origin }: { origin: string }) {
-  const [active, setActive] = useState<ChannelId>('all')
+  const [active, setActive] = useState<ChannelId>('leads')
   /** Thread to preselect after jumping out of the unified list. */
   const [jumpTo, setJumpTo] = useState<{ channel: 'messenger' | 'whatsapp'; id: string } | null>(
     null,
@@ -46,11 +48,9 @@ export function InboxWorkspace({ origin }: { origin: string }) {
   // instant and the rail costs no extra Graph calls. A channel whose scope is
   // missing short-circuits server-side before any Page fetch, so an
   // unavailable channel is effectively free to poll.
-  const { data: messenger } = useSWR<{ conversations?: { unreadCount: number }[] }>(
-    '/api/inbox?pageId=all',
-    fetcher,
-    { refreshInterval: 60_000 },
-  )
+  const { data: messenger } = useSWR<{
+    conversations?: { unreadCount: number; lastFromCustomer?: boolean }[]
+  }>('/api/inbox?pageId=all', fetcher, { refreshInterval: 60_000 })
   const { data: comments } = useSWR<{ comments?: { needsReply: boolean }[] }>(
     '/api/inbox/comments?pageId=all',
     fetcher,
@@ -64,6 +64,11 @@ export function InboxWorkspace({ origin }: { origin: string }) {
   const whatsappUnread = (whatsapp?.contacts ?? []).filter((c) => c.unreadCount > 0).length
 
   const counts: Record<ChannelId, number> = {
+    // Leads badges what is actually waiting on a human, across every channel:
+    // customers who spoke last, plus comments nobody has answered.
+    leads:
+      (messenger?.conversations ?? []).filter((c) => c.lastFromCustomer).length +
+      (comments?.comments ?? []).filter((c) => c.needsReply).length,
     // "All" counts the two message channels only - comments are a different
     // surface and already have their own badge.
     all: messengerUnread + whatsappUnread,
@@ -126,11 +131,29 @@ export function InboxWorkspace({ origin }: { origin: string }) {
       </nav>
 
       {/* Active channel. Each channel owns its own list + detail panes. */}
+      {active === 'leads' ? (
+        <LeadsChannel
+          onOpen={(channel, nativeId) => {
+            if (channel === 'comment') {
+              setActive('comments')
+              return
+            }
+            setJumpTo({ channel, id: nativeId })
+            setActive(channel)
+          }}
+        />
+      ) : null}
       {active === 'all' ? (
         <AllMessagesChannel
           onOpen={(channel, nativeId) => {
             // Hand off to the owning channel, which has the reply box and the
             // channel-specific rules (24h window, media proxy, page token).
+            // The comments tab is keyed 'comments' but a lead's channel is the
+            // singular 'comment', so map it rather than leaving a dead click.
+            if (channel === 'comment') {
+              setActive('comments')
+              return
+            }
             setJumpTo({ channel, id: nativeId })
             setActive(channel)
           }}

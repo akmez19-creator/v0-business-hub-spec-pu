@@ -1,5 +1,6 @@
 import { fbGet, fbWrite } from './graph'
 import type { FbPage } from './pages'
+import { getProductMatcher } from '@/lib/products/catalogue'
 import { getPostAds } from './post-ads'
 
 /**
@@ -49,6 +50,13 @@ export type CommentItem = {
   adName?: string | null
   /** Readable product label derived from the ad name. */
   product?: string | null
+  /** Canonical catalogue product, when the label resolved. */
+  productId?: string | null
+  productCategory?: string | null
+  campaignId?: string | null
+  campaignName?: string | null
+  /** True when the ad promoting this post is still running. */
+  campaignActive?: boolean
 }
 
 export type CommentPageStat = {
@@ -141,12 +149,28 @@ export async function listPageComments(page: FbPage, postLimit = 15): Promise<Co
   // single-Page view gets it too.
   try {
     const ads = await getPostAds(out.map((c) => c.postId))
+    // Organic posts are not in the ads cache, so their label still needs
+    // resolving against the catalogue.
+    const matchProduct = await getProductMatcher()
     for (const c of out) {
       const ad = ads.get(c.postId)
-      if (!ad) continue
+      if (!ad) {
+        // Fall back to the post copy, which is all an organic post has.
+        const fallback = matchProduct(c.postMessage?.slice(0, 80) ?? null)
+        if (fallback) {
+          c.product = c.product ?? fallback.productName
+          c.productId = fallback.productId
+          c.productCategory = fallback.category
+        }
+        continue
+      }
       c.adId = ad.adId
       c.adName = ad.adName
       c.product = ad.product
+      c.productId = ad.productId
+      c.campaignId = ad.campaignId
+      c.campaignName = ad.campaignName
+      c.campaignActive = ad.adStatus === 'ACTIVE'
     }
   } catch (error) {
     console.log('[v0] comments: ad lookup failed', error)

@@ -35,6 +35,47 @@ export type PostAd = {
 // a dependency-free module that backfill scripts can import too.
 export { productFromAdName }
 
+export type AdCampaign = {
+  campaignId: string | null
+  campaignName: string | null
+  /** True when the ad itself is still delivering. */
+  active: boolean
+}
+
+/**
+ * Campaign lookup keyed by AD id rather than post id.
+ *
+ * Messenger click-to-message threads arrive via the webhook with only an ad
+ * id, so they never touch the post->ad cache the comment path uses. The rows
+ * are already in `page_post_ads`, just indexed the other way round.
+ */
+export async function getCampaignsForAds(adIds: string[]): Promise<Map<string, AdCampaign>> {
+  const out = new Map<string, AdCampaign>()
+  const unique = [...new Set(adIds.filter(Boolean))]
+  if (unique.length === 0) return out
+
+  try {
+    const db = createAdminClient()
+    const { data } = await db
+      .from('page_post_ads')
+      .select('ad_id, campaign_id, campaign_name, ad_status')
+      .in('ad_id', unique)
+
+    for (const row of data ?? []) {
+      if (!row.ad_id) continue
+      out.set(row.ad_id, {
+        campaignId: row.campaign_id ?? null,
+        campaignName: row.campaign_name ?? null,
+        active: row.ad_status === 'ACTIVE',
+      })
+    }
+  } catch (error) {
+    // Campaign context is decoration; never take down the inbox for it.
+    console.log('[v0] post-ads: campaign lookup failed', error)
+  }
+  return out
+}
+
 const STALE_MS = 6 * 60 * 60 * 1000 // 6h - ad<->post links change slowly.
 let lastSync = 0
 let syncing: Promise<void> | null = null

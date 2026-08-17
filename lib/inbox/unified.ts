@@ -46,33 +46,24 @@ export type UnifiedThread = {
   messageCount: number
 }
 
-/** Attribution + activity a caller can attach when building a thread. */
-type Enrichment = {
-  product?: string | null
-  productId?: string | null
-  productCategory?: string | null
-  productSource?: 'ad' | 'comment' | null
-  campaignId?: string | null
-  campaignName?: string | null
-  campaignActive?: boolean
-  messageCount?: number
-  lastFromCustomer?: boolean
-}
-
-function attribution(extra: Enrichment, updatedAt: string | null) {
-  const messageCount = extra.messageCount ?? 0
+function attribution(
+  row: AttributedRow,
+  updatedAt: string | null,
+  productSource: 'ad' | 'comment' | null,
+) {
+  const messageCount = row.messageCount ?? 0
   return {
-    product: extra.product ?? null,
-    productId: extra.productId ?? null,
-    productCategory: extra.productCategory ?? null,
-    productSource: extra.productSource ?? null,
-    campaignId: extra.campaignId ?? null,
-    campaignName: extra.campaignName ?? null,
-    campaignActive: extra.campaignActive ?? false,
+    product: row.product ?? null,
+    productId: row.productId ?? null,
+    productCategory: row.productCategory ?? null,
+    productSource,
+    campaignId: row.campaignId ?? null,
+    campaignName: row.campaignName ?? null,
+    campaignActive: row.campaignActive ?? false,
     messageCount,
     stage: deriveStage({
       messageCount,
-      lastFromCustomer: extra.lastFromCustomer ?? false,
+      lastFromCustomer: row.lastFromCustomer ?? false,
       lastMessageAt: updatedAt,
     }),
   }
@@ -83,7 +74,19 @@ export type ChannelFilter = 'all' | UnifiedChannel
 /** 'ads' means any ad-sourced thread; any other string is a specific ad id. */
 export type AdFilter = 'all' | 'ads' | string
 
-export type MessengerRow = {
+/** Attribution fields the API attaches to every channel row alike. */
+type AttributedRow = {
+  product?: string | null
+  productId?: string | null
+  productCategory?: string | null
+  campaignId?: string | null
+  campaignName?: string | null
+  campaignActive?: boolean
+  messageCount?: number
+  lastFromCustomer?: boolean
+}
+
+export type MessengerRow = AttributedRow & {
   id: string
   snippet?: string
   updatedTime?: string
@@ -93,9 +96,10 @@ export type MessengerRow = {
   pageName?: string
   adId?: string | null
   adName?: string | null
+  productSource?: 'ad-click' | 'comment' | null
 }
 
-export type WhatsAppRow = {
+export type WhatsAppRow = AttributedRow & {
   waId: string
   profileName?: string | null
   lastSnippet?: string | null
@@ -108,7 +112,7 @@ export type WhatsAppRow = {
   firstAdHeadline?: string | null
 }
 
-export function fromMessenger(c: MessengerRow, extra: Enrichment = {}): UnifiedThread {
+export function fromMessenger(c: MessengerRow): UnifiedThread {
   const updatedAt = c.updatedTime ?? null
   return {
     key: `messenger:${c.id}`,
@@ -124,11 +128,11 @@ export function fromMessenger(c: MessengerRow, extra: Enrichment = {}): UnifiedT
     // thread that predates the subscription - Graph cannot backfill it.
     adId: c.adId ?? null,
     adName: c.adName ?? null,
-    ...attribution(extra, updatedAt),
+    ...attribution(c, updatedAt, c.product ? 'ad' : null),
   }
 }
 
-export function fromWhatsApp(c: WhatsAppRow, extra: Enrichment = {}): UnifiedThread {
+export function fromWhatsApp(c: WhatsAppRow): UnifiedThread {
   const updatedAt = c.lastMessageAt ?? null
   return {
     key: `whatsapp:${c.waId}`,
@@ -144,11 +148,11 @@ export function fromWhatsApp(c: WhatsAppRow, extra: Enrichment = {}): UnifiedThr
     // The headline Meta sends is the PAGE name on every ad, so it is only a
     // last resort - never preferred over the resolved ad name.
     adName: c.firstAdName ?? c.firstAdHeadline ?? null,
-    ...attribution(extra, updatedAt),
+    ...attribution(c, updatedAt, c.product ? 'ad' : null),
   }
 }
 
-export type CommentRow = {
+export type CommentRow = AttributedRow & {
   id: string
   message?: string | null
   createdTime?: string | null
@@ -164,7 +168,7 @@ export type CommentRow = {
  * post an ad promotes. Meta withholds the commenter's name on public comments,
  * so the product is often the only identifying detail the row carries.
  */
-export function fromComment(c: CommentRow, extra: Enrichment = {}): UnifiedThread {
+export function fromComment(c: CommentRow): UnifiedThread {
   const updatedAt = c.createdTime ?? null
   return {
     key: `comment:${c.id}`,
@@ -177,11 +181,14 @@ export function fromComment(c: CommentRow, extra: Enrichment = {}): UnifiedThrea
     // Comment replies have no 24h window the way messaging does.
     outsideWindow: false,
     source: c.pageName ?? 'Page',
+    // A comment belongs to a POST, not to one specific ad, so there is no
+    // single ad id to show. Campaign context still comes through attribution.
     adId: null,
     adName: null,
     ...attribution(
-      { ...extra, messageCount: 1, lastFromCustomer: c.needsReply ?? true },
+      { ...c, messageCount: 1, lastFromCustomer: c.needsReply ?? true },
       updatedAt,
+      'comment',
     ),
   }
 }

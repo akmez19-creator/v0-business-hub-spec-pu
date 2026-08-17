@@ -1,7 +1,8 @@
 import { getAdRefs } from '@/lib/messenger/ad-refs'
 import { findNotice, resolveCommentOrigins } from './comment-origin'
 import { fbGet, fbWrite, FbGraphError } from './graph'
-import { productFromAdName } from './post-ads'
+import { getProductMatcher } from '@/lib/products/catalogue'
+import { getCampaignsForAds, productFromAdName } from './post-ads'
 import { getManageablePages, type FbPage } from './pages'
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
@@ -52,6 +53,18 @@ export type InboxConversation = {
   productSource?: 'ad-click' | 'comment' | null
   /** Post the customer commented on, when the thread began as a reply. */
   postId?: string | null
+  /** Canonical catalogue product, when the label resolved. */
+  productId?: string | null
+  productCategory?: string | null
+  campaignId?: string | null
+  campaignName?: string | null
+  /** True when the ad this thread came from is still running. */
+  campaignActive?: boolean
+  /**
+   * True when the customer spoke last, i.e. the thread is waiting on YOU.
+   * This is the single most commercially useful signal in the inbox.
+   */
+  lastFromCustomer?: boolean
 }
 
 export type InboxMessage = {
@@ -126,7 +139,7 @@ type RawConversation = {
   unread_count?: number
   message_count?: number
   participants?: { data?: InboxParticipant[] }
-  messages?: { data?: { message?: string; created_time?: string }[] }
+  messages?: { data?: { message?: string; created_time?: string; from?: { id?: string } }[] }
 }
 
 export async function listConversations(page: FbPage, limit = 40): Promise<InboxConversation[]> {
@@ -137,7 +150,9 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
   const url =
     `${GRAPH}/${page.id}/conversations` +
     `?fields=id,snippet,updated_time,unread_count,message_count,participants,` +
-    `${encodeURIComponent('messages.limit(15){message,created_time}')}` +
+    // `from` rides along on the SAME call - it is what tells us whether the
+    // thread is waiting on us, with no extra request per conversation.
+    `${encodeURIComponent('messages.limit(15){message,created_time,from}')}` +
     `&limit=${limit}&access_token=${encodeURIComponent(page.access_token)}`
 
   let json: { data?: RawConversation[] }
@@ -156,6 +171,9 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
     // The Page is always a participant; the customer is whoever else is there.
     const customer = participants.find((p) => p.id !== page.id) ?? null
     const updatedTime = c.updated_time ?? new Date(0).toISOString()
+    // Graph returns messages newest-first, so [0] is the latest. If it did not
+    // come from the Page, the customer spoke last and we owe them a reply.
+    const newest = c.messages?.data?.[0]
     return {
       id: c.id,
       snippet: c.snippet ?? '',
@@ -166,6 +184,7 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
       outsideWindow: now - new Date(updatedTime).getTime() > MESSAGING_WINDOW_MS,
       pageId: page.id,
       pageName: page.name,
+      lastFromCustomer: newest?.from?.id ? newest.from.id !== page.id : false,
     }
   })
 
@@ -177,6 +196,7 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
       .map((c) => c.customer?.id)
       .filter((id): id is string => Boolean(id))
     const refs = await getAdRefs(psids)
+    const matchProduct = await getProductMatcher()
     for (const c of conversations) {
       const ref = c.customer?.id ? refs.get(c.customer.id) : undefined
       if (!ref) continue
@@ -184,6 +204,22 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
       c.adName = ref.adName
       c.product = productFromAdName(ref.adName)
       c.productSource = 'ad-click'
+      const match = matchProduct(c.product)
+      c.productId = match?.productId ?? null
+      c.productCategory = match?.category ?? null
+    }
+
+    // Campaign + live status for whatever ads ended up attached.
+    const adIds = conversations.map((c) => c.adId).filter((id): id is string => Boolean(id))
+    if (adIds.length > 0) {
+      const campaigns = await getCampaignsForAds(adIds)
+      for (const c of conversations) {
+        const campaign = c.adId ? campaigns.get(c.adId) : undefined
+        if (!campaign) continue
+        c.campaignId = campaign.campaignId
+        c.campaignName = campaign.campaignName
+        c.campaignActive = campaign.active
+      }
     }
   } catch (error) {
     // Attribution is decoration; never let it take down the inbox.
@@ -209,6 +245,11 @@ export async function listConversations(page: FbPage, limit = 40): Promise<Inbox
         c.adName = origin.ad?.adName ?? null
         c.product = origin.product
         c.productSource = 'comment'
+        c.productId = origin.productId
+        c.productCategory = origin.productCategory
+        c.campaignId = origin.ad?.campaignId ?? null
+        c.campaignName = origin.ad?.campaignName ?? null
+        c.campaignActive = origin.ad?.adStatus === 'ACTIVE'
       }
     }
   } catch (error) {
