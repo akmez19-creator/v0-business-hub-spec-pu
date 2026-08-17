@@ -35,7 +35,6 @@ import {
   fromWhatsApp,
   productOptions,
   sortThreads,
-  stageCounts,
   type ChannelFilter,
   type SortKey,
   type UnifiedChannel,
@@ -48,7 +47,6 @@ import {
   transcriptUrl,
   type LeadMessage,
 } from '@/lib/inbox/lead-actions'
-import { STAGE_LABELS, STAGE_ORDER, type LeadStage } from '@/lib/inbox/stage'
 import { LeadConversation } from './lead-conversation'
 import { EMPTY_ORDER, QuickOrderPanel, type OrderDraft } from './quick-order-panel'
 
@@ -73,14 +71,6 @@ const CHANNEL_ICON: Record<UnifiedChannel, typeof Phone> = {
   messenger: MessageCircle,
   whatsapp: Phone,
   comment: MessageSquare,
-}
-
-/** Stage pill colours. Awaiting is the only one that shouts. */
-const STAGE_STYLE: Record<LeadStage, string> = {
-  awaiting: 'border-primary bg-primary text-primary-foreground',
-  new: 'border-border bg-muted text-foreground',
-  active: 'border-border bg-muted text-foreground',
-  dormant: 'border-border bg-transparent text-muted-foreground',
 }
 
 type AssistResponse = {
@@ -108,9 +98,6 @@ export function LeadsChannel() {
   const [product, setProduct] = useState<string>('all')
   const [campaign, setCampaign] = useState<string>('all')
   const [liveOnly, setLiveOnly] = useState(false)
-  // Default to the work: dormant threads are a remarketing list, not a daily
-  // to-do, so they stay out until asked for.
-  const [stages, setStages] = useState<Set<LeadStage>>(new Set(['awaiting', 'new']))
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   const [draft, setDraft] = useState('')
@@ -155,19 +142,6 @@ export function LeadsChannel() {
 
   const products = useMemo(() => productOptions(all), [all])
   const campaigns = useMemo(() => campaignOptions(all), [all])
-  /**
-   * Counted on the channel-filtered set, not on everything.
-   *
-   * Counting `all` made the chips lie: with WhatsApp selected they still
-   * advertised "Awaiting reply (36)" from Messenger while the list showed
-   * nothing, which reads as a broken filter rather than an empty stage.
-   */
-  const inChannel = useMemo(
-    () => (channel === 'all' ? all : all.filter((t) => t.channel === channel)),
-    [all, channel],
-  )
-  const counts = useMemo(() => stageCounts(inChannel), [inChannel])
-
   const rows = useMemo(
     () =>
       sortThreads(
@@ -176,14 +150,14 @@ export function LeadsChannel() {
           ad: 'all',
           unreadOnly: false,
           query,
-          stages,
+          // No stage filter: every lead is listed and the sort handles order.
           product,
           campaign,
           liveOnly,
         }),
         sort,
       ),
-    [all, channel, query, stages, product, campaign, liveOnly, sort],
+    [all, channel, query, product, campaign, liveOnly, sort],
   )
 
   const selected = useMemo(
@@ -320,15 +294,6 @@ export function LeadsChannel() {
     }
   }
 
-  function toggleStage(stage: LeadStage) {
-    setStages((prev) => {
-      const next = new Set(prev)
-      if (next.has(stage)) next.delete(stage)
-      else next.add(stage)
-      return next
-    })
-  }
-
   const loading = !mData && !wData && !cData
   const refreshing = mv || wv || cv
   const awaiting = all.filter((r) => r.stage === 'awaiting').length
@@ -403,23 +368,7 @@ export function LeadsChannel() {
             })}
           </div>
 
-          {/* Stage triage: answers "who is waiting on me" before anything else. */}
           <div className="flex flex-wrap items-center gap-1.5">
-            {STAGE_ORDER.map((stage) => (
-              <button
-                key={stage}
-                type="button"
-                onClick={() => toggleStage(stage)}
-                aria-pressed={stages.has(stage)}
-                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  stages.has(stage)
-                    ? STAGE_STYLE[stage]
-                    : 'border-border text-muted-foreground hover:bg-muted'
-                }`}
-              >
-                {STAGE_LABELS[stage]} ({counts[stage]})
-              </button>
-            ))}
             <button
               type="button"
               onClick={() => setLiveOnly((v) => !v)}
@@ -497,7 +446,7 @@ export function LeadsChannel() {
             <p className="p-6 text-sm text-muted-foreground">Loading leads...</p>
           ) : rows.length === 0 ? (
             <p className="p-6 text-sm text-muted-foreground">
-              No leads match these filters. Try enabling more stages above.
+              No leads match these filters.
             </p>
           ) : (
             <ul>
