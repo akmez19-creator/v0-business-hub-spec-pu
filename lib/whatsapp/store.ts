@@ -53,6 +53,15 @@ export type WaContact = {
   firstAdHeadline: string | null
   firstAdSourceUrl: string | null
   firstAdAt: string | null
+  /**
+   * Product the customer arrived for, resolved from the click-to-WhatsApp ad.
+   *
+   * WhatsApp stores no product of its own, but `page_post_ads` already maps
+   * every ad to a catalogue product for the comments channel - so the same
+   * cache answers it here rather than adding a column or a Graph call.
+   */
+  product: string | null
+  productId: string | null
 }
 
 export type WaMessage = {
@@ -99,7 +108,11 @@ type ContactRow = {
   first_ad_at: string | null
 }
 
-function toContact(r: ContactRow, messageCount = 0): WaContact {
+function toContact(
+  r: ContactRow,
+  messageCount = 0,
+  product: { product: string | null; productId: string | null } | null = null,
+): WaContact {
   const inbound = r.last_inbound_at ? new Date(r.last_inbound_at).getTime() : 0
   const latest = r.last_message_at ? new Date(r.last_message_at).getTime() : 0
   return {
@@ -122,7 +135,47 @@ function toContact(r: ContactRow, messageCount = 0): WaContact {
     firstAdHeadline: r.first_ad_headline ?? null,
     firstAdSourceUrl: r.first_ad_source_url ?? null,
     firstAdAt: r.first_ad_at ?? null,
+    product: product?.product ?? null,
+    productId: product?.productId ?? null,
   }
+}
+
+/**
+ * Products for the click-to-WhatsApp ads on this page of contacts.
+ *
+ * Reuses `page_post_ads`, the same ad->product cache the comments channel
+ * relies on, so WhatsApp gains attribution without a new column, a backfill,
+ * or a Graph call. Resolves ~199 of 265 contacts; the rest either arrived
+ * organically (no ad) or clicked an ad that predates the cache.
+ */
+async function adProducts(
+  db: ReturnType<typeof createAdminClient>,
+  adIds: string[],
+): Promise<Map<string, { product: string | null; productId: string | null }>> {
+  const out = new Map<string, { product: string | null; productId: string | null }>()
+  if (!adIds.length) return out
+
+  const { data, error } = await db
+    .from('page_post_ads')
+    .select('ad_id,product,product_id')
+    .in('ad_id', adIds)
+  // Attribution is a nice-to-have next to the message itself, so a failure
+  // here degrades the label rather than failing the whole inbox load.
+  if (error) {
+    console.log('[v0] whatsapp ad->product lookup failed:', error.message)
+    return out
+  }
+
+  for (const row of data ?? []) {
+    // One ad can appear on several posts; first non-null wins, and they all
+    // point at the same product anyway.
+    if (out.has(row.ad_id as string)) continue
+    out.set(row.ad_id as string, {
+      product: (row.product as string | null) ?? null,
+      productId: (row.product_id as string | null) ?? null,
+    })
+  }
+  return out
 }
 
 /**
@@ -182,8 +235,15 @@ export async function listContacts(limit = 100, search?: string): Promise<WaCont
   if (error) throw new Error(error.message)
 
   const rows = (data ?? []) as ContactRow[]
-  const counts = await messageCounts(db, rows.map((r) => r.wa_id))
-  return rows.map((r) => toContact(r, counts.get(r.wa_id) ?? 0))
+  // Both lookups are scoped to this page and independent, so run them together
+  // rather than paying two sequential round trips on every 30s poll.
+  const [counts, products] = await Promise.all([
+    messageCounts(db, rows.map((r) => r.wa_id)),
+    adProducts(db, [...new Set(rows.map((r) => r.first_ad_id).filter((id): id is string => Boolean(id)))]),
+  ])
+  return rows.map((r) =>
+    toContact(r, counts.get(r.wa_id) ?? 0, r.first_ad_id ? (products.get(r.first_ad_id) ?? null) : null),
+  )
 }
 
 /**

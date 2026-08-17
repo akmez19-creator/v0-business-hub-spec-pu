@@ -140,8 +140,19 @@ export function LeadsChannel() {
     [mData, wData, cData],
   )
 
-  const products = useMemo(() => productOptions(all), [all])
-  const campaigns = useMemo(() => campaignOptions(all), [all])
+  /**
+   * Options come from the selected channel, not from everything.
+   *
+   * Built from `all`, the dropdown offered Messenger-only products while
+   * WhatsApp was selected, so choosing one emptied the list - the filter read
+   * as broken when it was really offering choices that could never match.
+   */
+  const inChannel = useMemo(
+    () => (channel === 'all' ? all : all.filter((t) => t.channel === channel)),
+    [all, channel],
+  )
+  const products = useMemo(() => productOptions(inChannel), [inChannel])
+  const campaigns = useMemo(() => campaignOptions(inChannel), [inChannel])
   const rows = useMemo(
     () =>
       sortThreads(
@@ -159,6 +170,13 @@ export function LeadsChannel() {
       ),
     [all, channel, query, product, campaign, liveOnly, sort],
   )
+
+  // A product picked on one channel usually does not exist on the next, and a
+  // filter naming something absent hides every lead with no way to tell why.
+  useEffect(() => {
+    if (product !== 'all' && !products.some((p) => p.key === product)) setProduct('all')
+    if (campaign !== 'all' && !campaigns.some((c) => c.id === campaign)) setCampaign('all')
+  }, [products, campaigns, product, campaign])
 
   const selected = useMemo(
     () => all.find((r) => r.key === selectedKey) ?? null,
