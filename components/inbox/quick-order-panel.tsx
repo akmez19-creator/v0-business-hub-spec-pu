@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { offerLabel, priceFor, type QuickOrderProduct } from '@/lib/orders/quick-order'
+import { offerLabel, priceFor, unitPrice, type QuickOrderProduct } from '@/lib/orders/quick-order'
 import type { UnifiedThread } from '@/lib/inbox/unified'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -97,7 +97,7 @@ export function QuickOrderPanel({
   )
 
   const amount = product ? priceFor(product, draft.qty) : 0
-  const unit = product ? product.price * draft.qty : 0
+  const unit = unitPrice(product) * draft.qty
   const saved = unit - amount
 
   const routing = draft.region ? data?.regionDelivery?.[draft.region] : undefined

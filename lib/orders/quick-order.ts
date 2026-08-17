@@ -35,6 +35,16 @@ export type QuickOrderVariant = {
 export type Holiday = { start: string; end: string }
 
 /**
+ * Single-unit price as a number.
+ *
+ * Postgres returns `numeric` columns as strings, so `product.price` is a string
+ * at runtime often enough that multiplying it directly silently concatenates.
+ */
+export function unitPrice(product: QuickOrderProduct | null | undefined): number {
+  return Number.parseFloat(String(product?.price ?? 0)) || 0
+}
+
+/**
  * Cheapest way to buy `qty` units, allowing bundle tiers to be combined.
  *
  * A greedy "use the biggest bundle first" pass is wrong: with tiers of 2 for
@@ -49,7 +59,7 @@ export function priceFor(product: QuickOrderProduct | null | undefined, qty: num
   const q = Math.max(0, Number.parseInt(String(qty), 10) || 0)
   if (q === 0 || !product) return 0
 
-  const unit = Number.parseFloat(String(product.price ?? 0)) || 0
+  const unit = unitPrice(product)
   const bundles = product.bundle_prices
   if (bundles && typeof bundles === 'object') {
     const tiers = Object.keys(bundles)

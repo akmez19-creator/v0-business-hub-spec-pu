@@ -98,7 +98,7 @@ type AssistResponse = {
     notes: string
     deliveryDate: string
   }
-  unmatched?: { product: string | null; locality: string | null }
+  unmatched?: { product: string | null; locality: string | null } | null
 }
 
 export function LeadsChannel() {
