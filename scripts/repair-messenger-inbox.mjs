@@ -46,7 +46,17 @@ async function pageTokens() {
   return Object.fromEntries((json.data ?? []).map((p) => [p.id, p.access_token]))
 }
 
+// The three repairs are independent: a run with no new broadcasts must still
+// name unknown threads and restore blank previews, so purging cannot early
+// return out of the whole script.
 async function main() {
+  const tokens = await pageTokens()
+  await purgeBroadcasts(tokens)
+  await nameUnknownThreads(tokens)
+  await fixBlankPreviews()
+}
+
+async function purgeBroadcasts(tokens) {
   const { data: echoes, error } = await db
     .from('messenger_messages')
     .select('mid,page_id,psid,raw')
@@ -73,7 +83,6 @@ async function main() {
     .in('mid', blasts.map((m) => m.mid))
 
   const affected = [...new Set(blasts.map((m) => `${m.page_id}|${m.psid}`))]
-  const tokens = await pageTokens()
   let deleted = 0
   let repaired = 0
   let untouched = 0
@@ -136,9 +145,6 @@ async function main() {
   console.log(
     `[v0] done - ${deleted} phantom threads deleted, ${repaired} real threads repaired, ${untouched} left for sync`,
   )
-
-  await nameUnknownThreads(tokens)
-  await fixBlankPreviews()
 }
 
 /**
