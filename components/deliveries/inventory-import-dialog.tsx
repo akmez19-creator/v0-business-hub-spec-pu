@@ -34,6 +34,13 @@ const COLUMN_MAPPING: Record<string, string> = {
   'quantity': 'quantity',
   'Qty': 'quantity',
   'qty': 'quantity',
+  // The Excel export now labels on-hand stock "In Store" to distinguish it from
+  // in-China and undelivered stock. Accept it so an exported file still
+  // re-imports. Initial/In China/Undelivered/Actual are intentionally NOT
+  // mapped: they are derived from purchase_orders and deliveries, so importing
+  // them would overwrite computed values with a stale snapshot.
+  'In Store': 'quantity',
+  'in store': 'quantity',
   'PRICE UNIT': 'price',
   'Price Unit': 'price',
   'price_unit': 'price',

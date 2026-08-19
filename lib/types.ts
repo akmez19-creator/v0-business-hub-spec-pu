@@ -208,6 +208,34 @@ export interface Product {
   variants?: ProductVariant[]
 }
 
+/** One purchase-order batch behind a product's initial stock. */
+export interface StockPoBatch {
+  id: string
+  qty: number
+  /** purchase_orders.order_date - null until someone fills it in. */
+  date: string | null
+  status: string
+}
+
+/**
+ * Per-product stock breakdown from the get_product_stock_summary() RPC.
+ *
+ * Deliberately does NOT carry an "in store" figure: products.quantity is
+ * already the counted Mauritius on-hand, and PO status 'Received' describes
+ * that same stock, so adding the two would double-count it.
+ */
+export interface ProductStock {
+  /** Everything ever ordered, all PO statuses. */
+  initialQty: number
+  /** Ordered / Payment Done / Loaded and Shipped - not yet in Mauritius. */
+  chinaQty: number
+  /** Pending + assigned deliveries. Committed, not deducted from on-hand. */
+  undeliveredQty: number
+  /** Most recent non-null order_date across this product's POs. */
+  latestOrderDate: string | null
+  poBatches: StockPoBatch[]
+}
+
 export interface ProductVariant {
   id: string
   product_id: string

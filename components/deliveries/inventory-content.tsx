@@ -75,15 +75,32 @@ import {
   WashingMachine,
 } from 'lucide-react'
 import Image from 'next/image'
-import { Product } from '@/lib/types'
+import { Product, ProductStock } from '@/lib/types'
 import { InventoryImportDialog } from './inventory-import-dialog'
 import { mediaSrc } from '@/lib/media-url'
 
 type ViewMode = 'table' | 'grid'
-type SortKey = 'name' | 'category' | 'quantity' | 'price'
+type SortKey = 'name' | 'category' | 'quantity' | 'price' | 'initial' | 'actual'
 type SortOrder = 'asc' | 'desc'
 
-export function InventoryContent({ products: initialProducts }: { products: Product[] }) {
+/** Empty breakdown for products with no PO or delivery history. */
+const NO_STOCK: ProductStock = {
+  initialQty: 0,
+  chinaQty: 0,
+  undeliveredQty: 0,
+  latestOrderDate: null,
+  poBatches: [],
+}
+
+export function InventoryContent({
+  products: initialProducts,
+  stock = {},
+  unresolvedDeliveries = 0,
+}: {
+  products: Product[]
+  stock?: Record<string, ProductStock>
+  unresolvedDeliveries?: number
+}) {
   const [products, setProducts] = useState(initialProducts)
   const [search, setSearch] = useState('')
   const [editProduct, setEditProduct] = useState<Product | null>(null)
@@ -133,7 +150,15 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
               'Category': p.category || '',
               'Item': p.name,
               'Variant': `${v.attribute_name}: ${v.attribute_value}`,
-              'Quantity': v.quantity || 0,
+              'In Store': v.quantity || 0,
+              // Stock breakdown is tracked per product, not per variant. Left
+              // blank on variant rows so summing the column in Excel cannot
+              // multiply one product's stock by its variant count.
+              'Initial Stock': '',
+              'Order Date': '',
+              'In China': '',
+              'Undelivered': '',
+              'Actual Stock': '',
               'PRICE UNIT': v.price_override || p.price || 0,
               '2-Pack': p.bundle_prices?.['2'] || '',
               '3-Pack': p.bundle_prices?.['3'] || '',
@@ -147,11 +172,17 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
           }
         } else {
           // Regular product without variants
+          const st = stock[p.id] ?? NO_STOCK
           exportData.push({
             'Category': p.category || '',
             'Item': p.name,
             'Variant': '',
-            'Quantity': p.quantity || 0,
+            'In Store': p.quantity || 0,
+            'Initial Stock': st.initialQty,
+            'Order Date': st.latestOrderDate || '',
+            'In China': st.chinaQty,
+            'Undelivered': st.undeliveredQty,
+            'Actual Stock': actualStock(p, st),
             'PRICE UNIT': p.price || 0,
             '2-Pack': p.bundle_prices?.['2'] || '',
             '3-Pack': p.bundle_prices?.['3'] || '',
@@ -341,6 +372,14 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
           aVal = a.price || 0
           bVal = b.price || 0
           break
+        case 'initial':
+          aVal = (stock[a.id] ?? NO_STOCK).initialQty
+          bVal = (stock[b.id] ?? NO_STOCK).initialQty
+          break
+        case 'actual':
+          aVal = actualStock(a, stock[a.id])
+          bVal = actualStock(b, stock[b.id])
+          break
       }
       
       if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1
@@ -349,7 +388,7 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
     })
 
     return result
-  }, [products, search, categoryFilter, sortKey, sortOrder])
+  }, [products, search, categoryFilter, sortKey, sortOrder, stock])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -751,8 +790,16 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       })()}
 
       {/* Results count */}
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
         <span>Showing {filtered.length} of {products.length} products</span>
+        {/* Say so when some deliveries could not be matched to a product, rather
+            than quietly under-reporting the Undelivered column. */}
+        {unresolvedDeliveries > 0 && (
+          <span className="flex items-center gap-1.5 text-xs text-amber-600">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {unresolvedDeliveries.toLocaleString()} undelivered rows not matched to a product
+          </span>
+        )}
       </div>
 
       {/* Content */}
@@ -790,12 +837,37 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                       <ArrowUpDown className="w-3 h-3" />
                     </button>
                   </TableHead>
-                  <TableHead className="text-center">
-                    <button 
+                  {/* Initial Stock: everything ever ordered, with the order date
+                      of the most recent PO batch underneath. */}
+                  <TableHead className="text-center border-l border-border/50">
+                    <button
+                      onClick={() => toggleSort('initial')}
+                      className="flex items-center gap-1 hover:text-foreground transition-colors mx-auto"
+                    >
+                      Initial
+                      <ArrowUpDown className="w-3 h-3" />
+                    </button>
+                  </TableHead>
+                  {/* Actual Stock group: the three components, then the total.
+                      'In Store' IS the old Qty column - same products.quantity,
+                      renamed to say what it actually measures. */}
+                  <TableHead className="text-center border-l border-border/50">
+                    <button
                       onClick={() => toggleSort('quantity')}
                       className="flex items-center gap-1 hover:text-foreground transition-colors mx-auto"
                     >
-                      Qty
+                      In Store
+                      <ArrowUpDown className="w-3 h-3" />
+                    </button>
+                  </TableHead>
+                  <TableHead className="text-center text-xs">In China</TableHead>
+                  <TableHead className="text-center text-xs">Undelivered</TableHead>
+                  <TableHead className="text-center border-r border-border/50">
+                    <button
+                      onClick={() => toggleSort('actual')}
+                      className="flex items-center gap-1 hover:text-foreground transition-colors mx-auto font-semibold"
+                    >
+                      Actual
                       <ArrowUpDown className="w-3 h-3" />
                     </button>
                   </TableHead>
@@ -871,9 +943,57 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
                         <span className="text-muted-foreground/50">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-center">
-                      <QuantityBadge quantity={product.quantity} hasVariants={product.has_variants} />
-                    </TableCell>
+                    {(() => {
+                      const st = stock[product.id] ?? NO_STOCK
+                      return (
+                        <>
+                          <TableCell className="text-center border-l border-border/50">
+                            {st.initialQty > 0 ? (
+                              <div className="flex flex-col items-center leading-tight">
+                                <span className="text-sm font-medium text-foreground">
+                                  {st.initialQty.toLocaleString()}
+                                </span>
+                                {/* Order date is blank until entered - all POs
+                                    share one bulk-import timestamp, so showing
+                                    that would fake an ordering date. */}
+                                {st.latestOrderDate ? (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {new Date(st.latestOrderDate).toLocaleDateString('en-GB', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: '2-digit',
+                                    })}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground/40">no date</span>
+                                )}
+                                {st.poBatches.length > 1 && (
+                                  <span className="text-[10px] text-muted-foreground/60">
+                                    {st.poBatches.length} batches
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center border-l border-border/50">
+                            <QuantityBadge quantity={product.quantity} hasVariants={product.has_variants} />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <StockPart value={st.chinaQty} className="text-sky-500" />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <StockPart value={st.undeliveredQty} className="text-amber-500" />
+                          </TableCell>
+                          <TableCell className="text-center border-r border-border/50">
+                            <span className="text-sm font-semibold text-foreground">
+                              {actualStock(product, st).toLocaleString()}
+                            </span>
+                          </TableCell>
+                        </>
+                      )
+                    })()}
                     <TableCell className="text-right">
                       {product.price > 0 ? (
                         <span className="font-medium text-foreground">Rs {product.price}</span>
@@ -1023,6 +1143,26 @@ export function InventoryContent({ products: initialProducts }: { products: Prod
       )}
     </div>
   )
+}
+
+/**
+ * Actual Stock = in store + in China + undelivered.
+ *
+ * `products.quantity` is the counted Mauritius on-hand and is the ONLY source
+ * for the in-store part. PO status 'Received' describes that same physical
+ * stock (327 of 378 POs are Received), so it is excluded from chinaQty rather
+ * than added in - otherwise received goods would be counted twice.
+ * Undelivered is included as committed stock but never subtracted.
+ */
+function actualStock(product: Product, s: ProductStock | undefined): number {
+  const st = s ?? NO_STOCK
+  return (product.quantity || 0) + st.chinaQty + st.undeliveredQty
+}
+
+/** Muted dash for a genuinely zero component, so real zeros read as zero. */
+function StockPart({ value, className }: { value: number; className: string }) {
+  if (!value) return <span className="text-xs text-muted-foreground/40">—</span>
+  return <span className={`text-xs font-medium ${className}`}>{value.toLocaleString()}</span>
 }
 
 function QuantityBadge({ quantity, hasVariants }: { quantity: number | null | undefined, hasVariants?: boolean }) {

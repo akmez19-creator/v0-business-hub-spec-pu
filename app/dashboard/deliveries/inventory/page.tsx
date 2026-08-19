@@ -19,10 +19,26 @@ export default async function InventoryPage() {
     redirect('/dashboard')
   }
 
-  const { data: products } = await adminDb
-    .from('products')
-    .select('*')
-    .order('name')
+  // Stock breakdown is aggregated in SQL: purchase_orders + deliveries run to
+  // thousands of rows and PostgREST silently caps selects at 1000, which would
+  // under-report every total. The RPC also does the product_id -> name ->
+  // product_aliases resolution that recovers ~96% of unlinked delivery rows.
+  const [{ data: products }, { data: stock, error: stockError }] = await Promise.all([
+    adminDb.from('products').select('*').order('name'),
+    adminDb.rpc('get_product_stock_summary'),
+  ])
 
-  return <InventoryContent products={products || []} />
+  if (stockError) {
+    console.log('[v0] stock summary failed:', stockError.message)
+  }
+
+  return (
+    <InventoryContent
+      products={products || []}
+      // Degrade to no breakdown rather than an empty catalog: the product list
+      // must still render if the stock aggregate fails.
+      stock={stock?.products ?? {}}
+      unresolvedDeliveries={stock?.unresolvedDeliveries ?? 0}
+    />
+  )
 }
