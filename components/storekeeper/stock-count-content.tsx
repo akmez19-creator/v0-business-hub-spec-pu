@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
+import { PhotoCountSheet } from '@/components/storekeeper/photo-count-sheet'
 import {
   getOrCreateDraftCount,
   saveCountItem,
@@ -122,6 +123,7 @@ export function StockCountContent({
   const [savingId, setSavingId] = useState<string | null>(null)
   const [showSubmit, setShowSubmit] = useState(false)
   const [submitNotes, setSubmitNotes] = useState('')
+  const [showPhoto, setShowPhoto] = useState(false)
 
   const qtyRef = useRef<HTMLInputElement>(null)
 
@@ -168,6 +170,26 @@ export function StockCountContent({
     // since an agent works through one shelf at a time.
     setShelfInput(p.shelf_code || lastShelf)
     setError(null)
+  }
+
+  /**
+   * The photo flow saves as soon as the quantity is entered, so the count
+   * session has to exist before the camera opens - unlike the typed flow, there
+   * is no later point at which failing to create one could be reported.
+   */
+  async function handleOpenPhoto() {
+    setError(null)
+    if (countId) {
+      setShowPhoto(true)
+      return
+    }
+    const res = await getOrCreateDraftCount()
+    if (!res.ok) {
+      setError(res.error)
+      return
+    }
+    setCountId(res.data!.id)
+    setShowPhoto(true)
   }
 
   async function handleSave() {
@@ -319,25 +341,37 @@ export function StockCountContent({
         </div>
       )}
 
-      {/* Search: the entry point for the whole flow. */}
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search product to count..."
-          className="w-full rounded-xl border border-border bg-card py-3 pl-9 pr-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
-        />
-        {search && (
-          <button
-            onClick={() => setSearch('')}
-            aria-label="Clear search"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
+      {/* Two ways in: search by name, or photograph the item. The photo route
+          exists for the common case where the agent is holding something whose
+          catalogue name they do not know. */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search product to count..."
+            className="w-full rounded-xl border border-border bg-card py-3 pl-9 pr-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <button
+          onClick={handleOpenPhoto}
+          disabled={isPending}
+          className="flex shrink-0 items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+        >
+          <Camera className="h-4 w-4" />
+          <span className="hidden sm:inline">Photo</span>
+        </button>
       </div>
 
       {results.length > 0 && (
@@ -730,6 +764,19 @@ export function StockCountContent({
             </div>
           </div>
         </div>
+      )}
+
+      {showPhoto && (
+        <PhotoCountSheet
+          countId={countId}
+          products={products}
+          onCounted={() => {
+            // The count line was written server-side, so pull the authoritative
+            // rows rather than trying to reconstruct them here.
+            startTransition(() => router.refresh())
+          }}
+          onClose={() => setShowPhoto(false)}
+        />
       )}
     </div>
   )

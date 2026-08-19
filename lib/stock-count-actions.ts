@@ -106,6 +106,14 @@ export async function saveCountItem(input: {
   productId: string
   countedQty: number
   notes?: string
+  /**
+   * Internal. Lets an admin attach a line to an already-submitted session while
+   * resolving a photo the agent could not identify - without it, submitting a
+   * count would permanently strand any unidentified capture. Never set from a
+   * normal counting path, and never allowed for an approved session, whose
+   * quantities have already been written to stock.
+   */
+  allowSubmitted?: boolean
 }): Promise<ActionResult> {
   const guard = await requireCounter()
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -129,8 +137,22 @@ export async function saveCountItem(input: {
     .single()
 
   if (!session) return { ok: false, error: 'Count session not found' }
-  if (session.status !== 'draft') {
-    return { ok: false, error: 'This count has already been submitted' }
+
+  // An approved session's figures are already in stock, so a late line would
+  // never be applied - it has to go in a fresh count instead.
+  const lateResolveAllowed =
+    input.allowSubmitted &&
+    guard.actor.role === 'admin' &&
+    (session.status === 'submitted' || session.status === 'rejected')
+
+  if (session.status !== 'draft' && !lateResolveAllowed) {
+    return {
+      ok: false,
+      error:
+        session.status === 'approved'
+          ? 'That count is already approved - record this in a new count'
+          : 'This count has already been submitted',
+    }
   }
   if (session.counted_by !== guard.actor.id && guard.actor.role !== 'admin') {
     return { ok: false, error: 'This count belongs to another agent' }
@@ -301,6 +323,9 @@ export async function confirmCaptureMatch(input: {
     productId: input.productId,
     countedQty: capture.counted_qty,
     notes: 'Counted from photo',
+    // An admin resolving from the queue may be looking at a session the agent
+    // has already submitted; without this the photo could never be resolved.
+    allowSubmitted: guard.actor.role === 'admin',
   })
   if (!saved.ok) return saved
 
@@ -344,7 +369,7 @@ export async function confirmCaptureMatch(input: {
   }
 
   revalidatePath('/dashboard/storekeeper/stock-count')
-  revalidatePath('/dashboard/deliveries/stock-count')
+  revalidatePath('/dashboard/deliveries/stock-counts')
   return { ok: true }
 }
 
