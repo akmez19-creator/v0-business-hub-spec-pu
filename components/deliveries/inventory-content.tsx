@@ -80,7 +80,7 @@ import { InventoryImportDialog } from './inventory-import-dialog'
 import { mediaSrc } from '@/lib/media-url'
 
 type ViewMode = 'table' | 'grid'
-type SortKey = 'name' | 'category' | 'quantity' | 'price' | 'initial' | 'actual'
+type SortKey = 'name' | 'category' | 'quantity' | 'price' | 'initial' | 'actual' | 'shelf'
 type SortOrder = 'asc' | 'desc'
 
 /** Empty breakdown for products with no PO or delivery history. */
@@ -90,6 +90,20 @@ const NO_STOCK: ProductStock = {
   undeliveredQty: 0,
   latestOrderDate: null,
   poBatches: [],
+}
+
+/**
+ * Sort key for shelf codes like "E1".
+ *
+ * A plain string sort gives E1, E10, E2 - useless for walking the warehouse in
+ * order - so the numeric part is zero-padded to sort as a number while keeping
+ * the zone letters leading. Products with no shelf recorded sort last in both
+ * directions, since a screen full of dashes at the top hides the real data.
+ */
+function shelfSortKey(shelfCode?: string | null): string {
+  if (!shelfCode) return '\uffff' // sentinel: always last
+  const [, zone = '', num = ''] = shelfCode.match(/^([A-Za-z]*)(\d*)/) || []
+  return `${zone.toUpperCase()}${num.padStart(6, '0')}`
 }
 
 export function InventoryContent({
@@ -149,6 +163,7 @@ export function InventoryContent({
             exportData.push({
               'Category': p.category || '',
               'Item': p.name,
+              'Zone': p.shelf_code || '',
               'Variant': `${v.attribute_name}: ${v.attribute_value}`,
               'In Store': v.quantity || 0,
               // Stock breakdown is tracked per product, not per variant. Left
@@ -176,6 +191,7 @@ export function InventoryContent({
           exportData.push({
             'Category': p.category || '',
             'Item': p.name,
+            'Zone': p.shelf_code || '',
             'Variant': '',
             'In Store': p.quantity || 0,
             'Initial Stock': st.initialQty,
@@ -312,6 +328,56 @@ export function InventoryContent({
     }
   }
 
+  // --- Inline shelf editing -------------------------------------------------
+  // Which row's shelf cell is open for editing, and its draft value.
+  const [editingShelfFor, setEditingShelfFor] = useState<string | null>(null)
+  const [shelfDraft, setShelfDraft] = useState('')
+  const [savingShelfFor, setSavingShelfFor] = useState<string | null>(null)
+
+  const openShelfEditor = (product: Product) => {
+    setEditingShelfFor(product.id)
+    setShelfDraft(product.shelf_code || '')
+  }
+
+  const handleSaveShelf = async (productId: string) => {
+    const raw = shelfDraft.trim()
+    // Mirror the DB trigger so the cell shows the stored value immediately
+    // rather than flashing the raw input and correcting itself on next load.
+    const normalised = raw ? raw.replace(/\s+/g, '').toUpperCase() : null
+
+    const current = products.find(p => p.id === productId)?.shelf_code || null
+    if (normalised === current) {
+      setEditingShelfFor(null)
+      return
+    }
+
+    setSavingShelfFor(productId)
+    try {
+      // `zone` is a generated column - only shelf_code is written, Postgres
+      // derives the zone. Selecting it back confirms what was actually stored.
+      const { data, error } = await supabase
+        .from('products')
+        .update({ shelf_code: normalised, updated_at: new Date().toISOString() })
+        .eq('id', productId)
+        .select('shelf_code, zone')
+        .single()
+
+      if (error) throw error
+
+      setProducts(prev => prev.map(p =>
+        p.id === productId
+          ? { ...p, shelf_code: data.shelf_code, zone: data.zone }
+          : p
+      ))
+      setEditingShelfFor(null)
+    } catch (err) {
+      console.error('Shelf save failed:', err)
+      alert('Could not save shelf: ' + (err as Error).message)
+    } finally {
+      setSavingShelfFor(null)
+    }
+  }
+
   // Get unique categories
   const categories = useMemo(() => {
     const cats = new Set(products.map(p => p.category).filter(Boolean))
@@ -382,6 +448,10 @@ export function InventoryContent({
         case 'actual':
           aVal = actualStock(a, stock[a.id])
           bVal = actualStock(b, stock[b.id])
+          break
+        case 'shelf':
+          aVal = shelfSortKey(a.shelf_code)
+          bVal = shelfSortKey(b.shelf_code)
           break
       }
       
@@ -840,6 +910,17 @@ export function InventoryContent({
                       <ArrowUpDown className="w-3 h-3" />
                     </button>
                   </TableHead>
+                  {/* Shelf location. Sits outside the bordered stock group so
+                      that grouping stays intact. */}
+                  <TableHead className="w-[90px]">
+                    <button
+                      onClick={() => toggleSort('shelf')}
+                      className="flex items-center gap-1 hover:text-foreground transition-colors"
+                    >
+                      Zone
+                      <ArrowUpDown className="w-3 h-3" />
+                    </button>
+                  </TableHead>
                   {/* Initial Stock: everything ever ordered, with the order date
                       of the most recent PO batch underneath. */}
                   <TableHead className="text-center border-l border-border/50">
@@ -944,6 +1025,46 @@ export function InventoryContent({
                         <span className="text-sm text-muted-foreground">{product.category}</span>
                       ) : (
                         <span className="text-muted-foreground/50">-</span>
+                      )}
+                    </TableCell>
+                    {/* Shelf cell. The whole row opens the edit dialog on click,
+                        so every interactive element here stops propagation. */}
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      {editingShelfFor === product.id ? (
+                        <Input
+                          autoFocus
+                          value={shelfDraft}
+                          disabled={savingShelfFor === product.id}
+                          onChange={e => setShelfDraft(e.target.value)}
+                          onBlur={() => handleSaveShelf(product.id)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleSaveShelf(product.id)
+                            if (e.key === 'Escape') setEditingShelfFor(null)
+                          }}
+                          placeholder="E1"
+                          className="h-7 w-[74px] text-sm uppercase"
+                        />
+                      ) : (
+                        <button
+                          onClick={() => openShelfEditor(product)}
+                          title={
+                            product.shelf_code
+                              ? `Zone ${product.zone} · shelf ${product.shelf_code}`
+                              : 'Set shelf location'
+                          }
+                          className="group flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-muted/60 transition-colors"
+                        >
+                          {product.shelf_code ? (
+                            <span className="font-mono text-sm font-medium text-foreground">
+                              {product.shelf_code}
+                            </span>
+                          ) : (
+                            // Quiet dash: most of the 488 rows are unset, so this
+                            // column must not shout on every line.
+                            <span className="text-muted-foreground/50">-</span>
+                          )}
+                          <Pencil className="w-3 h-3 text-muted-foreground/0 group-hover:text-muted-foreground/60 transition-colors" />
+                        </button>
                       )}
                     </TableCell>
                     {(() => {

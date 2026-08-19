@@ -21,6 +21,7 @@ import {
   TrendingUp,
   TrendingDown,
   Sparkles,
+  MapPin,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { mediaSrc } from '@/lib/media-url'
@@ -29,6 +30,7 @@ import {
   saveCountItem,
   removeCountItem,
   submitCount,
+  setProductShelf,
 } from '@/lib/stock-count-actions'
 
 interface CountProduct {
@@ -39,6 +41,9 @@ interface CountProduct {
   image_url: string | null
   last_counted_at: string | null
   has_variants: boolean
+  // Shelf label like "E1"; `zone` is its derived letter prefix ("E").
+  shelf_code: string | null
+  zone: string | null
 }
 
 interface CountItem {
@@ -108,6 +113,11 @@ export function StockCountContent({
   const [search, setSearch] = useState('')
   const [activeProduct, setActiveProduct] = useState<CountProduct | null>(null)
   const [qtyInput, setQtyInput] = useState('')
+  // Shelf the agent is standing at. Prefilled from the product, and remembered
+  // between products so counting a whole shelf does not mean retyping "E1" every
+  // time - that retyping is exactly what leads to the field being left blank.
+  const [shelfInput, setShelfInput] = useState('')
+  const [lastShelf, setLastShelf] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
   const [showSubmit, setShowSubmit] = useState(false)
@@ -154,6 +164,9 @@ export function StockCountContent({
     const existing = items.find((i) => i.product_id === p.id)
     setActiveProduct(p)
     setQtyInput(existing ? String(existing.counted_qty) : '')
+    // The product's own shelf wins; otherwise carry over the last one entered,
+    // since an agent works through one shelf at a time.
+    setShelfInput(p.shelf_code || lastShelf)
     setError(null)
   }
 
@@ -192,6 +205,25 @@ export function StockCountContent({
       setError(res.error)
       setSavingId(null)
       return
+    }
+
+    // Persist the shelf only when it actually changed. Deliberately after the
+    // count has been saved and NOT allowed to fail the whole action: the counted
+    // quantity is the valuable data, a shelf label is metadata.
+    const shelfTrimmed = shelfInput.trim().replace(/\s+/g, '').toUpperCase()
+    const shelfChanged = shelfTrimmed !== (activeProduct.shelf_code || '')
+    if (shelfChanged) {
+      const shelfRes = await setProductShelf(activeProduct.id, shelfTrimmed || null)
+      if (shelfRes.ok) {
+        // `products` is a server-provided prop, so the refreshed shelf arrives
+        // via the router.refresh() at the end of this function.
+        setLastShelf(shelfRes.data?.shelf_code || '')
+      } else {
+        // Surfaced, not swallowed - but the count still stands.
+        setError(shelfRes.error)
+      }
+    } else if (shelfTrimmed) {
+      setLastShelf(shelfTrimmed)
     }
 
     // Must mirror the server's baseline rule exactly (see stock-count-actions):
@@ -568,6 +600,45 @@ export function StockCountContent({
               placeholder="0"
               className="w-full rounded-xl border border-border bg-background px-4 py-3 text-2xl font-semibold text-foreground focus:border-primary/50 focus:outline-none"
             />
+
+            {/* Shelf location, captured while the agent is physically at the
+                shelf - the only moment the true location is known. */}
+            <div className="mt-3">
+              <label htmlFor="shelf-code" className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <MapPin className="h-3 w-3" />
+                Shelf
+                <span className="font-normal text-muted-foreground/60">
+                  {activeProduct.shelf_code ? 'recorded' : 'optional'}
+                </span>
+              </label>
+              <input
+                id="shelf-code"
+                value={shelfInput}
+                onChange={(e) => setShelfInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                    e.preventDefault()
+                    handleSave()
+                  }
+                }}
+                placeholder="E1"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-full rounded-xl border border-border bg-background px-4 py-2.5 font-mono text-base uppercase text-foreground focus:border-primary/50 focus:outline-none"
+              />
+              {/* Show the zone that will be derived, so "E1" -> zone E is
+                  visible rather than implied. */}
+              {shelfInput.trim() !== '' && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {/^[A-Za-z]{1,3}\s*\d{0,4}[A-Za-z]?$/.test(shelfInput.trim()) ? (
+                    <>Zone {shelfInput.trim().replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3)}</>
+                  ) : (
+                    <span className="text-amber-400">Use a shelf code like E1</span>
+                  )}
+                </p>
+              )}
+            </div>
 
             {/* Live variance preview, so a mistyped digit is obvious before saving. */}
             {qtyInput.trim() !== '' &&

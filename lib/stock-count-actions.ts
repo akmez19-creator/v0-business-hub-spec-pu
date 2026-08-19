@@ -305,3 +305,49 @@ export async function rejectCount(countId: string, reviewNotes?: string): Promis
   revalidatePath('/dashboard/deliveries/stock-counts')
   return { ok: true }
 }
+
+/**
+ * Records where a product physically sits, e.g. shelf "E1" in zone "E".
+ *
+ * Unlike a counted quantity this applies immediately with no approval step: a
+ * shelf label is descriptive metadata, not a stock figure, so a wrong value
+ * misdirects someone for a minute rather than corrupting inventory numbers.
+ *
+ * `zone` is never written - it is a generated column derived from shelf_code by
+ * Postgres, which also normalises the code (trim/upper) via trigger.
+ */
+export async function setProductShelf(
+  productId: string,
+  shelfCode: string | null,
+): Promise<ActionResult<{ shelf_code: string | null; zone: string | null }>> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const trimmed = (shelfCode || '').trim()
+  // An emptied field means "location unknown", stored as NULL so that
+  // `shelf_code IS NULL` is the single test for unset everywhere.
+  const value = trimmed === '' ? null : trimmed
+
+  // Shelf labels are short codes like "E1" or "AA12". Reject anything longer
+  // before this becomes a de facto notes field that breaks zone grouping.
+  if (value && !/^[A-Za-z]{1,3}\s*\d{0,4}[A-Za-z]?$/.test(value)) {
+    return { ok: false, error: 'Use a shelf code like E1' }
+  }
+
+  const adminDb = createAdminClient()
+  const { data, error } = await adminDb
+    .from('products')
+    .update({ shelf_code: value, updated_at: new Date().toISOString() })
+    .eq('id', productId)
+    .select('shelf_code, zone')
+    .single()
+
+  if (error) {
+    console.log('[v0] setProductShelf failed:', error.message)
+    return { ok: false, error: 'Could not save the shelf location' }
+  }
+
+  revalidatePath('/dashboard/storekeeper/stock-count')
+  revalidatePath('/dashboard/deliveries/inventory')
+  return { ok: true, data }
+}

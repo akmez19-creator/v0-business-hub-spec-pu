@@ -197,6 +197,12 @@ export interface Product {
   // Null means `quantity` has never been physically verified - it may still hold
   // a real book figure carried over from before stock counting existed.
   last_counted_at?: string | null
+  // Warehouse shelf label, e.g. "E1" - letter prefix is the zone, number is the
+  // shelf within it. Null means the location has not been recorded yet.
+  shelf_code?: string | null
+  // Derived in Postgres from shelf_code's letter prefix ("E1" -> "E").
+  // Read-only: writing it is rejected by the database.
+  zone?: string | null
   // Bundle pricing - flexible tiers stored as JSON {"2": 900, "3": 1200, "6": 2000}
   bundle_prices: Record<string, number>
   // B1G1 offer flag

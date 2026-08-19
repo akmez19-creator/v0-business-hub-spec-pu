@@ -18,7 +18,7 @@ export default async function StockCountPage() {
   // because this list is sent to the client on every load.
   const { data: products } = await adminDb
     .from('products')
-    .select('id, name, category, quantity, image_url, last_counted_at, has_variants')
+    .select('id, name, category, quantity, image_url, last_counted_at, has_variants, shelf_code, zone')
     .order('name')
     .limit(1000)
 
