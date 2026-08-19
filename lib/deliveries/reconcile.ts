@@ -35,6 +35,59 @@ export interface FileRow {
   medium: string | null
   /** Zone/route label ("WEST", "EAST-1"). NOT a person - never mapped to a rider. */
   zone: string | null
+  /**
+   * Raw delivery status from the file ("Delivered", "CMS", "A_Delivered"). Must be
+   * mapped through `statusByRaw` into the 6 system statuses before it can be
+   * stored - `deliveries.status` has a CHECK constraint and a raw value aborts
+   * the whole batch.
+   */
+  status: string | null
+  /**
+   * A PERSON's name from the file's Rider column ("DIVESH", "MOON"). Distinct
+   * from `zone`: some COMPILE files put route labels in that same column, so the
+   * caller decides which field a value lands in by testing it against the known
+   * rider names. Never guess from the header alone.
+   */
+  rider: string | null
+}
+
+/** The 6 values `deliveries.status` accepts. Anything else violates the CHECK. */
+export const SYSTEM_STATUSES = ['pending', 'assigned', 'picked_up', 'delivered', 'nwd', 'cms'] as const
+export type SystemStatus = (typeof SYSTEM_STATUSES)[number]
+
+/**
+ * How far along a delivery is. Used to stop the spreadsheet dragging a row
+ * BACKWARDS (delivered -> pending), which would strip real progress. The three
+ * end states share the top rank so one is never silently swapped for another.
+ */
+const STATUS_RANK: Record<string, number> = {
+  pending: 0,
+  assigned: 1,
+  picked_up: 2,
+  delivered: 3,
+  nwd: 3,
+  cms: 3,
+}
+
+/** Status write policy. `forward` never moves a row backwards. */
+export type StatusPolicy = 'forward' | 'overwrite' | 'pending_only' | 'off'
+/** Contractor/rider write policy. `fill` only ever populates an empty column. */
+export type ContractorPolicy = 'fill' | 'overwrite' | 'report' | 'off'
+/** Which product matches may set `product_id`. */
+export type ProductPolicy = 'exact' | 'variant' | 'off'
+
+/**
+ * Everything needed to turn the file's free text into system ids. All of it is
+ * loaded from tables the app already maintains (`import_mappings`,
+ * `product_aliases`, `riders`), so the reconcile agrees with the importer.
+ */
+export interface ReconcileLookups {
+  /** import_mappings(status): raw file value (lowercased) -> system status. */
+  statusByRaw?: Map<string, string>
+  /** Rider name (lowercased) -> rider id. From `riders` + import_mappings(rider). */
+  riderByName?: Map<string, string>
+  /** Rider id -> contractor id. From import_mappings(rider_contractor) + riders.contractor_id. */
+  contractorByRider?: Map<string, string>
 }
 
 /** The subset of an existing delivery we need in order to compare. */
@@ -57,6 +110,7 @@ export interface DbRow {
   rider_id: string | null
   contractor_id: string | null
   status: string | null
+  product_id?: string | null
 }
 
 export interface FieldDiff {
@@ -100,6 +154,10 @@ export interface PlanRow {
     rte: string | null
     entry_date: string | null
     payment_method: string | null
+    /** Already canonicalised to a system status, or null if unmappable. */
+    status: SystemStatus | null
+    rider_id: string | null
+    contractor_id: string | null
   }
   productMatch: 'exact' | 'normalized' | 'variant' | 'none'
   warnings: string[]
@@ -190,6 +248,11 @@ export interface ReconcilePlan {
    * entirely - not counted as new, not counted as skipped errors.
    */
   outOfScope: { rowNumber: number; date: string }[]
+  /**
+   * Changes the file asked for that were withheld to protect existing work
+   * (status rewinds, contractor reassignments). Review list, never applied.
+   */
+  blocked: (BlockedChange & { rowNumber: number; dbId: string; date: string })[]
   stats: {
     fileRows: number
     dbRows: number
@@ -202,6 +265,18 @@ export interface ReconcilePlan {
     skipped: number
     outOfScope: number
     productsUnmatched: number
+    /** Existing rows that would gain/change a product_id. */
+    productLinks: number
+    /** Existing rows whose status would change. */
+    statusChanges: number
+    /** Existing rows that would gain a rider or contractor link. */
+    contractorLinks: number
+    /** Changes withheld to protect existing work. */
+    blocked: number
+    /** Distinct file status values that no mapping could resolve. */
+    statusUnmapped: string[]
+    /** Distinct file rider names that no mapping could resolve. */
+    ridersUnmapped: string[]
     matchedByTier: Record<string, number>
     fileAmountTotal: number
     /** Per delivery date, ascending. */
@@ -218,6 +293,10 @@ export interface BuildPlanOptions {
   dates?: string[]
   /** Target month (YYYY-MM), used only to mark dates that fall outside it. */
   month?: string
+  /** Name/id lookups so file text can become system ids. */
+  lookups?: ReconcileLookups
+  /** Per-field write policies. Defaults are the safe ones (see DEFAULT_POLICIES). */
+  policies?: Partial<LinkPolicies>
 }
 
 /* ------------------------------------------------------------------ *
@@ -341,10 +420,19 @@ export const UPDATABLE_FIELDS = [
 ] as const
 
 /**
- * Deliberately NOT updated: rider_id, contractor_id, status, assigned_*,
- * delivered_at, cash_*, juice_*, stock_*, payment_status, rider_paid.
- * Those are operational facts earned in the app; a spreadsheet must never
- * clobber them. 3,777 August rows carry a contractor assignment.
+ * Operational columns a spreadsheet may only touch under an explicit policy.
+ * They are NOT in UPDATABLE_FIELDS, so the default run cannot reach them; the
+ * caller has to opt in per field (see LinkPolicies) and every write is still
+ * filtered by the guards in diffAgainstDb.
+ */
+export const LINK_FIELDS = ['status', 'product_id', 'rider_id', 'contractor_id'] as const
+
+/**
+ * Still never updated from a file under any policy: assigned_*, delivered_at,
+ * cash_*, juice_*, stock_*, payment_status, rider_paid, payment_cash,
+ * payment_bank. Those are money and dispatch facts earned in the app - a
+ * spreadsheet must never clobber them. 3,777 August rows carry a contractor
+ * assignment, which is why the contractor policy defaults to fill-only.
  */
 
 export interface ProductLookup {
@@ -385,11 +473,93 @@ function resolveLocality(region: string | null): string | null {
   return s === '' ? null : s
 }
 
-function buildResolved(row: FileRow, lookup: ProductLookup): { resolved: PlanRow['resolved']; productMatch: PlanRow['productMatch']; warnings: string[] } {
+/**
+ * Raw file status -> one of the 6 system statuses, or null when it cannot be
+ * resolved. Saved mappings win, then the same word tests the importer uses.
+ * Returning null (rather than guessing) is deliberate: an unmapped value is
+ * surfaced for review instead of being written and rejected by the CHECK.
+ */
+export function canonicalStatus(raw: unknown, statusByRaw?: Map<string, string>): SystemStatus | null {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null
+  const trimmed = String(raw).trim()
+  const key = trimmed.toLowerCase()
+
+  const mapped = statusByRaw?.get(key)
+  if (mapped && (SYSTEM_STATUSES as readonly string[]).includes(mapped)) return mapped as SystemStatus
+  if ((SYSTEM_STATUSES as readonly string[]).includes(key)) return key as SystemStatus
+
+  // Same order of tests as import-dialog, so both paths agree.
+  if (key.includes('nwd') || key.includes('not working')) return 'nwd'
+  if (key.includes('cms') || key.includes('cancel')) return 'cms'
+  if (key.includes('deliver')) return 'delivered'
+  if (key.includes('pick')) return 'picked_up'
+  if (key.includes('assign')) return 'assigned'
+  if (key.includes('pending')) return 'pending'
+  return null
+}
+
+/**
+ * Raw payment cell -> the stored `payment_method` vocabulary. Mirrors
+ * import-dialog: PAID/bank/prepaid all collapse to 'paid', "Juice to Rider" to
+ * 'juice'. An unrecognised value is kept as-is (lowercased) rather than dropped.
+ */
+export function canonicalPaymentMethod(raw: unknown): string | null {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null
+  const v = String(raw).trim().toLowerCase()
+  if (v === 'juice to rider' || v === 'juice_to_rider' || v === 'jtr' || v === 'juice') return 'juice'
+  if (v === 'cash') return 'cash'
+  if (
+    v === 'bank' ||
+    v === 'internet banking' ||
+    v === 'already paid' ||
+    v === 'already_paid' ||
+    v === 'prepaid' ||
+    v === 'pre-paid' ||
+    v === 'paid'
+  ) {
+    return 'paid'
+  }
+  return v
+}
+
+/** Rider name -> { rider_id, contractor_id }. Both may be null. */
+function resolveRider(
+  name: string | null,
+  lookups: ReconcileLookups,
+): { riderId: string | null; contractorId: string | null } {
+  const key = name ? String(name).trim().toLowerCase() : ''
+  if (!key) return { riderId: null, contractorId: null }
+  const riderId = lookups.riderByName?.get(key) ?? null
+  if (!riderId) return { riderId: null, contractorId: null }
+  return { riderId, contractorId: lookups.contractorByRider?.get(riderId) ?? null }
+}
+
+function buildResolved(
+  row: FileRow,
+  lookup: ProductLookup,
+  lookups: ReconcileLookups = {},
+  productPolicy: ProductPolicy = 'exact',
+): { resolved: PlanRow['resolved']; productMatch: PlanRow['productMatch']; warnings: string[] } {
   const warnings: string[] = []
   const product = resolveProduct(row.products, lookup)
   const amount = parseAmount(row.amount)
   const date = normDate(row.delivery_date)
+  const status = canonicalStatus(row.status, lookups.statusByRaw)
+  const rider = resolveRider(row.rider, lookups)
+
+  // A product id is only trusted at the confidence the operator allowed.
+  const productIdAllowed =
+    productPolicy === 'off' ? false : productPolicy === 'variant' ? product.match !== 'none' : product.match === 'exact'
+
+  if (row.status && String(row.status).trim() !== '' && !status) {
+    warnings.push(`status "${String(row.status).trim()}" is not mapped to a system status`)
+  }
+  if (row.rider && String(row.rider).trim() !== '' && !rider.riderId) {
+    warnings.push(`rider "${String(row.rider).trim()}" is not mapped to a system rider`)
+  }
+  if (rider.riderId && !rider.contractorId) {
+    warnings.push(`rider "${String(row.rider).trim()}" has no contractor assigned`)
+  }
 
   if (!row.customer_name || String(row.customer_name).trim() === '') warnings.push('missing customer name')
   if (!row.products || String(row.products).trim() === '') warnings.push('missing product')
@@ -413,19 +583,51 @@ function buildResolved(row: FileRow, lookup: ProductLookup): { resolved: PlanRow
       locality: resolveLocality(row.region),
       qty: parseQty(row.qty),
       products: row.products ? String(row.products).trim() : null,
-      product_id: product.id,
+      product_id: productIdAllowed ? product.id : null,
       amount,
       sales_type: canonicalSalesType(row.sales_type),
       notes: row.notes ? String(row.notes).trim() : null,
       medium: canonicalMedium(row.medium),
       rte: row.rte ? String(row.rte).trim() : null,
       entry_date: normDate(row.entry_date) || null,
-      payment_method: row.payment_method ? normText(row.payment_method) : null,
+      payment_method: canonicalPaymentMethod(row.payment_method),
+      status,
+      rider_id: rider.riderId,
+      contractor_id: rider.contractorId,
     },
   }
 }
 
-function diffAgainstDb(resolved: PlanRow['resolved'], db: DbRow): FieldDiff[] {
+export interface LinkPolicies {
+  status: StatusPolicy
+  contractor: ContractorPolicy
+  product: ProductPolicy
+}
+
+export const DEFAULT_POLICIES: LinkPolicies = {
+  status: 'forward',
+  contractor: 'fill',
+  product: 'exact',
+}
+
+/**
+ * Field changes the file wants to make that were deliberately NOT applied,
+ * because applying them would destroy work recorded in the system. Reported so
+ * the operator can see and resolve them by hand.
+ */
+export interface BlockedChange {
+  field: 'status' | 'contractor_id' | 'rider_id'
+  from: unknown
+  to: unknown
+  reason: string
+}
+
+function diffAgainstDb(
+  resolved: PlanRow['resolved'],
+  db: DbRow,
+  policies: LinkPolicies = DEFAULT_POLICIES,
+  blocked?: BlockedChange[],
+): FieldDiff[] {
   const diffs: FieldDiff[] = []
   const cmp = (field: string, next: unknown, current: unknown, mode: 'text' | 'num' | 'contact' | 'date' = 'text') => {
     // Never blank out an existing value with an empty spreadsheet cell.
@@ -452,6 +654,65 @@ function diffAgainstDb(resolved: PlanRow['resolved'], db: DbRow): FieldDiff[] {
   cmp('rte', resolved.rte, db.rte)
   cmp('entry_date', resolved.entry_date, db.entry_date, 'date')
   cmp('payment_method', resolved.payment_method, db.payment_method)
+
+  // ---- product link. Backfilling an id never changes what the customer ordered.
+  if (policies.product !== 'off' && resolved.product_id && resolved.product_id !== db.product_id) {
+    diffs.push({ field: 'product_id', from: db.product_id ?? null, to: resolved.product_id })
+  }
+
+  // ---- status. Guarded so the sheet cannot rewind real progress.
+  if (policies.status !== 'off' && resolved.status) {
+    const current = db.status ? String(db.status).trim().toLowerCase() : null
+    if (current !== resolved.status) {
+      const curRank = current ? (STATUS_RANK[current] ?? 0) : 0
+      const nextRank = STATUS_RANK[resolved.status] ?? 0
+      const allowed =
+        policies.status === 'overwrite'
+          ? true
+          : policies.status === 'pending_only'
+            ? current === null || current === 'pending'
+            : nextRank > curRank // 'forward'
+      if (allowed) diffs.push({ field: 'status', from: db.status ?? null, to: resolved.status })
+      else {
+        blocked?.push({
+          field: 'status',
+          from: db.status ?? null,
+          to: resolved.status,
+          reason:
+            policies.status === 'pending_only'
+              ? `row is already "${current}", not pending`
+              : `would move backwards from "${current}"`,
+        })
+      }
+    }
+  }
+
+  // ---- rider / contractor. 3,777 August rows already carry an assignment that
+  // represents real dispatch work, so 'fill' only ever populates an empty cell.
+  if (policies.contractor !== 'off') {
+    const pairs: { field: 'rider_id' | 'contractor_id'; next: string | null; current: string | null }[] = [
+      { field: 'rider_id', next: resolved.rider_id, current: db.rider_id },
+      { field: 'contractor_id', next: resolved.contractor_id, current: db.contractor_id },
+    ]
+    for (const { field, next, current } of pairs) {
+      if (!next || next === current) continue
+      if (!current || policies.contractor === 'overwrite') {
+        if (policies.contractor === 'report') {
+          blocked?.push({ field, from: current, to: next, reason: 'reporting only, nothing written' })
+        } else {
+          diffs.push({ field, from: current ?? null, to: next })
+        }
+      } else {
+        blocked?.push({
+          field,
+          from: current,
+          to: next,
+          reason: 'a different assignment already exists in the system',
+        })
+      }
+    }
+  }
+
   return diffs
 }
 
@@ -537,6 +798,8 @@ export function buildPlan(
   options: BuildPlanOptions = {},
 ): ReconcilePlan {
   const lookup = buildProductLookup(products)
+  const lookups: ReconcileLookups = options.lookups ?? {}
+  const policies: LinkPolicies = { ...DEFAULT_POLICIES, ...(options.policies ?? {}) }
   // An empty array means "no dates selected", which is different from omitted.
   const selected = options.dates ? new Set(options.dates) : null
   const inScope = (date: string) => selected === null || selected.has(date)
@@ -550,6 +813,7 @@ export function buildPlan(
     dbOnly: [],
     skipped: [],
     outOfScope: [],
+    blocked: [],
     stats: {
       fileRows: fileRows.length,
       dbRows: dbRows.length,
@@ -562,6 +826,12 @@ export function buildPlan(
       skipped: 0,
       outOfScope: 0,
       productsUnmatched: 0,
+      productLinks: 0,
+      statusChanges: 0,
+      contractorLinks: 0,
+      blocked: 0,
+      statusUnmapped: [],
+      ridersUnmapped: [],
       matchedByTier: {},
       fileAmountTotal: 0,
       byDate: [],
@@ -599,7 +869,7 @@ export function buildPlan(
   const rawFingerprints = new Map<string, string>()
 
   for (const row of fileRows) {
-    const { resolved, productMatch, warnings } = buildResolved(row, lookup)
+    const { resolved, productMatch, warnings } = buildResolved(row, lookup, lookups, policies.product)
     const base: PlanRow = { rowNumber: row.rowNumber, file: row, resolved, productMatch, warnings }
 
     if (!resolved.delivery_date) {
@@ -735,8 +1005,15 @@ export function buildPlan(
   /* ---- phase 3: classify every pair ---- */
   for (const { cand, dbId, tier, productMismatch } of pairs) {
     const db = byId.get(dbId)!
-    const diffs = diffAgainstDb(cand.base.resolved, db)
+    const rowBlocked: BlockedChange[] = []
+    const diffs = diffAgainstDb(cand.base.resolved, db, policies, rowBlocked)
     plan.stats.matchedByTier[tier] = (plan.stats.matchedByTier[tier] ?? 0) + 1
+
+    // Surface protected values so a "nothing to do" row still explains itself.
+    for (const b of rowBlocked) {
+      plan.blocked.push({ rowNumber: cand.base.rowNumber, dbId, date: cand.date, ...b })
+      cand.base.warnings.push(`${b.field} kept as "${String(b.from ?? '-')}": ${b.reason}`)
+    }
 
     // Hard invariant: a commit must NEVER rewrite the product of an existing
     // entry. Even a pass that believed it had a product match is overridden
@@ -794,6 +1071,29 @@ export function buildPlan(
   plan.stats.dbOnly = plan.dbOnly.length
   plan.stats.skipped = plan.skipped.length
   plan.stats.outOfScope = plan.outOfScope.length
+  plan.stats.blocked = plan.blocked.length
+
+  // What the link policies would actually change on existing rows.
+  const has = (r: UpdatePlanRow, f: string) => r.diffs.some((d) => d.field === f)
+  plan.stats.productLinks = plan.updates.filter((r) => has(r, 'product_id')).length
+  plan.stats.statusChanges = plan.updates.filter((r) => has(r, 'status')).length
+  plan.stats.contractorLinks = plan.updates.filter((r) => has(r, 'contractor_id') || has(r, 'rider_id')).length
+
+  // Distinct unresolved names, so the operator knows exactly what to map. Taken
+  // from in-scope rows only - an unselected date must not add review noise.
+  const inScopeRows = [...plan.inserts, ...plan.updates, ...plan.unchanged, ...plan.flagged]
+  const scopedRowNumbers = new Set(inScopeRows.map((r) => r.rowNumber))
+  const unmappedStatus = new Set<string>()
+  const unmappedRiders = new Set<string>()
+  for (const row of fileRows) {
+    if (!scopedRowNumbers.has(row.rowNumber)) continue
+    const rawStatus = row.status ? String(row.status).trim() : ''
+    if (rawStatus && !canonicalStatus(rawStatus, lookups.statusByRaw)) unmappedStatus.add(rawStatus)
+    const rawRider = row.rider ? String(row.rider).trim() : ''
+    if (rawRider && !lookups.riderByName?.get(rawRider.toLowerCase())) unmappedRiders.add(rawRider)
+  }
+  plan.stats.statusUnmapped = [...unmappedStatus].sort()
+  plan.stats.ridersUnmapped = [...unmappedRiders].sort()
 
   /* ---- per-date breakdown, so the operator can apply one day at a time ---- */
   const buckets = new Map<string, DateBucket>()

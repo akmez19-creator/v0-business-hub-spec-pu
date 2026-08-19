@@ -4,9 +4,14 @@ import {
   buildPlan,
   normDate,
   UPDATABLE_FIELDS,
+  LINK_FIELDS,
+  type ContractorPolicy,
   type DbRow,
   type FileRow,
+  type ProductPolicy,
+  type ReconcileLookups,
   type ReconcilePlan,
+  type StatusPolicy,
 } from '@/lib/deliveries/reconcile'
 
 /**
@@ -44,6 +49,16 @@ interface ReconcileRequest {
      * the file. Days not listed are left completely untouched.
      */
     dates?: string[]
+    /**
+     * How the file's Status column is applied. 'forward' (default) never moves a
+     * row backwards, so a delivered row cannot be reset to pending.
+     */
+    statusPolicy?: StatusPolicy
+    /**
+     * How the file's Rider column is applied. 'fill' (default) only populates an
+     * empty rider/contractor and never reassigns existing dispatch work.
+     */
+    contractorPolicy?: ContractorPolicy
   }
 }
 
@@ -88,7 +103,7 @@ function dbWindow(dates: string[], month: string): { start: string; end: string 
 
 async function loadDbRows(db: ReturnType<typeof createAdminClient>, start: string, end: string) {
   const cols =
-    'id,delivery_date,customer_name,contact_1,contact_2,products,amount,qty,sales_type,medium,notes,rte,locality,entry_date,payment_method,rider_id,contractor_id,status'
+    'id,delivery_date,customer_name,contact_1,contact_2,products,amount,qty,sales_type,medium,notes,rte,locality,entry_date,payment_method,rider_id,contractor_id,status,product_id'
   const out: DbRow[] = []
   // PostgREST caps a plain select at 1,000 rows - paging is mandatory here or
   // the plan silently reconciles against a truncated view of the month.
@@ -106,6 +121,51 @@ async function loadDbRows(db: ReturnType<typeof createAdminClient>, start: strin
     if (data.length < 1000) break
   }
   return out
+}
+
+/**
+ * Build the name->id lookups from the tables the app already maintains, so a
+ * reconcile resolves names exactly like the importer does.
+ *
+ * - import_mappings(status)           raw status text  -> system status
+ * - import_mappings(rider)            rider name       -> rider id
+ * - import_mappings(rider_contractor) rider id         -> contractor id
+ * - riders.name / riders.contractor_id are the fallbacks for both
+ *
+ * Saved mappings win over the name match, because they are the operator's
+ * explicit decision about an ambiguous spelling.
+ */
+async function loadLookups(db: ReturnType<typeof createAdminClient>): Promise<ReconcileLookups> {
+  const [mappingsResult, ridersResult] = await Promise.all([
+    db.from('import_mappings').select('mapping_type,source_value,target_id,target_value'),
+    db.from('riders').select('id,name,contractor_id'),
+  ])
+  if (mappingsResult.error) throw new Error(`loading import mappings: ${mappingsResult.error.message}`)
+  if (ridersResult.error) throw new Error(`loading riders: ${ridersResult.error.message}`)
+
+  const statusByRaw = new Map<string, string>()
+  const riderByName = new Map<string, string>()
+  const contractorByRider = new Map<string, string>()
+
+  // Rider names first so an explicit mapping can overwrite them below.
+  for (const r of ridersResult.data ?? []) {
+    const name = (r.name as string | null)?.trim().toLowerCase()
+    if (name) riderByName.set(name, r.id as string)
+    if (r.contractor_id) contractorByRider.set(r.id as string, r.contractor_id as string)
+  }
+  for (const m of mappingsResult.data ?? []) {
+    const src = (m.source_value as string | null)?.trim()
+    if (!src) continue
+    if (m.mapping_type === 'status' && m.target_value) {
+      statusByRaw.set(src.toLowerCase(), String(m.target_value).trim().toLowerCase())
+    } else if (m.mapping_type === 'rider' && m.target_id) {
+      riderByName.set(src.toLowerCase(), m.target_id as string)
+    } else if (m.mapping_type === 'rider_contractor' && m.target_id) {
+      // source_value is a rider id here, not a name.
+      contractorByRider.set(src, m.target_id as string)
+    }
+  }
+  return { statusByRaw, riderByName, contractorByRider }
 }
 
 function summarise(plan: ReconcilePlan) {
@@ -179,7 +239,14 @@ function summarise(plan: ReconcilePlan) {
       })),
       dbOnly: plan.dbOnly.slice(0, SAMPLE),
       skipped: plan.skipped.slice(0, SAMPLE),
+      // Status rewinds and contractor reassignments that were withheld.
+      blocked: plan.blocked.slice(0, SAMPLE),
     },
+    blockedByReason: plan.blocked.reduce<Record<string, number>>((acc, b) => {
+      const key = `${b.field}: ${b.reason}`
+      acc[key] = (acc[key] ?? 0) + 1
+      return acc
+    }, {}),
   }
 }
 
@@ -226,16 +293,28 @@ export async function POST(request: Request) {
   }
   const { start, end } = dbWindow(requestedDates ?? fileDates, month)
 
+  // 'exact+variant' would let "Auto Door Closer - Set of 3" set the id of
+  // "Auto Door Closer", so the product policy is exact-only unless the operator
+  // widens it. Anything unmatched is mappable by hand instead of guessed.
+  const productLinking = options.productLinking ?? 'exact'
+  const productPolicy: ProductPolicy =
+    productLinking === 'none' ? 'off' : productLinking === 'exact+variant' ? 'variant' : 'exact'
+  const statusPolicy: StatusPolicy = options.statusPolicy ?? 'forward'
+  const contractorPolicy: ContractorPolicy = options.contractorPolicy ?? 'fill'
+
   let plan: ReconcilePlan
   try {
-    const [dbRows, productsResult] = await Promise.all([
+    const [dbRows, productsResult, lookups] = await Promise.all([
       loadDbRows(db, start, end),
       db.from('products').select('id,name'),
+      loadLookups(db),
     ])
     if (productsResult.error) throw new Error(`loading products: ${productsResult.error.message}`)
     plan = buildPlan(rows, dbRows, (productsResult.data ?? []) as { id: string; name: string }[], {
       dates: requestedDates ?? undefined,
       month,
+      lookups,
+      policies: { status: statusPolicy, contractor: contractorPolicy, product: productPolicy },
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'unknown error'
@@ -256,8 +335,19 @@ export async function POST(request: Request) {
   const insertNew = options.insertNew !== false
   const applyUpdates = options.applyUpdates !== false
   const removeDbOnly = options.removeDbOnly === true
-  const productLinking = options.productLinking ?? 'exact+variant'
-  const allowedFields = new Set(options.fields?.length ? options.fields : UPDATABLE_FIELDS)
+  const allowedFields = new Set<string>(options.fields?.length ? options.fields : UPDATABLE_FIELDS)
+  // Link columns are reachable only while their policy is on. The plan has
+  // already applied the guards, so this is the second of two gates.
+  for (const f of LINK_FIELDS) {
+    const on =
+      f === 'status'
+        ? statusPolicy !== 'off'
+        : f === 'product_id'
+          ? productPolicy !== 'off'
+          : contractorPolicy !== 'off' && contractorPolicy !== 'report'
+    if (on) allowedFields.add(f)
+    else allowedFields.delete(f)
+  }
 
   // A partial run is labelled in the filename so the import history shows which
   // days were applied. delivery_imports has no column for this and the label is
@@ -289,12 +379,6 @@ export async function POST(request: Request) {
   let archived = 0
   let removed = 0
 
-  const linkedProductId = (r: { product_id: string | null }, match: string) => {
-    if (productLinking === 'none') return null
-    if (productLinking === 'exact' && match !== 'exact') return null
-    return r.product_id
-  }
-
   try {
     // ---- 1. inserts ----
     if (insertNew && plan.inserts.length) {
@@ -308,13 +392,28 @@ export async function POST(request: Request) {
         locality: r.resolved.locality,
         qty: r.resolved.qty,
         products: r.resolved.products,
-        product_id: linkedProductId(r.resolved, r.productMatch),
+        // Already gated by the product policy inside the plan.
+        product_id: r.resolved.product_id,
         amount: r.resolved.amount,
         sales_type: r.resolved.sales_type,
         notes: r.resolved.notes,
         medium: r.resolved.medium,
         payment_method: r.resolved.payment_method,
-        status: 'pending',
+        // A brand new row has no history to protect, so the file's own status
+        // stands. Falls back to pending when the file has none or it is unmapped.
+        status: statusPolicy === 'off' ? 'pending' : (r.resolved.status ?? 'pending'),
+        // Only on inserts: cash/bank splits on an EXISTING row are collection
+        // facts and are never rewritten from a file.
+        payment_cash: r.resolved.payment_method === 'cash' ? r.resolved.amount : 0,
+        payment_bank: r.resolved.payment_method === 'paid' ? r.resolved.amount : 0,
+        ...(contractorPolicy === 'off' || contractorPolicy === 'report'
+          ? {}
+          : {
+              rider_id: r.resolved.rider_id,
+              contractor_id: r.resolved.contractor_id,
+              assigned_at: r.resolved.rider_id ? new Date().toISOString() : null,
+              assigned_by: r.resolved.rider_id ? user.id : null,
+            }),
         import_batch_id: log.id,
         created_by: user.id,
       }))
@@ -362,13 +461,16 @@ export async function POST(request: Request) {
       for (const u of plan.updates) {
         if (!archivedIds.has(u.dbId)) continue
         const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        // The plan is the only thing that decides what changes; every diff has
+        // already passed the status/contractor/product guards.
         for (const d of u.diffs) {
-          if (!allowedFields.has(d.field as (typeof UPDATABLE_FIELDS)[number])) continue
+          if (!allowedFields.has(d.field)) continue
           patch[d.field] = d.to
         }
-        if (u.productMatch !== 'none') {
-          const pid = linkedProductId(u.resolved, u.productMatch)
-          if (pid) patch.product_id = pid
+        // Stamp the assignment trail when this run is what linked the rider.
+        if (patch.rider_id) {
+          patch.assigned_at = new Date().toISOString()
+          patch.assigned_by = user.id
         }
         if (Object.keys(patch).length === 1) continue
         const { error } = await db.from('deliveries').update(patch).eq('id', u.dbId)
