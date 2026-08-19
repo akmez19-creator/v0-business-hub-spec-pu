@@ -63,6 +63,13 @@ export function PhotoCountSheet({
   const [aiNames, setAiNames] = useState<string[]>([])
   const [candidates, setCandidates] = useState<MatchCandidate[]>([])
   const [aiFailed, setAiFailed] = useState(false)
+  /**
+   * Why identification failed, so the wording names an action that can help.
+   * 'session' needs a sign-in, 'server' is our fault and worth a retry,
+   * 'model' is provider capacity. Never conflate them - a 500 shown as a model
+   * outage is what let a broken production deploy look like a busy AI.
+   */
+  const [failReason, setFailReason] = useState<'session' | 'server' | 'model' | null>(null)
 
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -170,21 +177,48 @@ export function PhotoCountSheet({
   async function analyse(url: string) {
     setAnalysing(true)
     setAiFailed(false)
+    setFailReason(null)
     try {
       const res = await fetch('/api/stock-count/identify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ photoUrl: url }),
       })
+
+      // Branch on the HTTP status BEFORE touching the body. A crashed route
+      // returns an HTML error page, so res.json() throws and the old code
+      // reported it as "identifying is temporarily unavailable" - blaming the
+      // model for a deploy-time fault (sharp was a devDependency, so the route
+      // 500'd in production only). An expired login is a 401 and needs a
+      // different action entirely: signing in, not retrying.
+      if (res.status === 401) {
+        setAiFailed(true)
+        setFailReason('session')
+        setCandidates([])
+        setAiNames([])
+        return
+      }
+      if (!res.ok) {
+        setAiFailed(true)
+        setFailReason('server')
+        setCandidates([])
+        setAiNames([])
+        return
+      }
+
       const json = await res.json()
       setCandidates(Array.isArray(json.candidates) ? json.candidates : [])
       setAiLabel(json.label ?? null)
       setAiNames(Array.isArray(json.names) ? json.names : [])
-      if (json.error) setAiFailed(true)
+      if (json.error) {
+        setAiFailed(true)
+        setFailReason('model')
+      }
     } catch {
       // A failed match must never block the count - the agent can still pick
       // the product by hand, and the photo and quantity are already safe.
       setAiFailed(true)
+      setFailReason('server')
       setCandidates([])
       setAiNames([])
     } finally {
@@ -279,6 +313,7 @@ export function PhotoCountSheet({
     setAiLabel(null)
     setAiNames([])
     setAiFailed(false)
+    setFailReason(null)
     setCaptureId(null)
     setError(null)
     setManualSearch('')
@@ -382,11 +417,13 @@ export function PhotoCountSheet({
                   photo is no good" - which sent the storekeeper to Retake, the
                   one action that cannot help.
                 */}
-                {!uploading && !analysing && aiFailed && (
-                  <p className="text-[12px] text-amber-400">
-                    Identifying is temporarily unavailable - your photo is fine
-                  </p>
-                )}
+          {!uploading && !analysing && aiFailed && (
+            <p className="text-[12px] text-amber-400">
+              {failReason === 'session'
+                ? 'Your session expired - sign in again to identify'
+                : 'Identifying is temporarily unavailable - your photo is fine'}
+            </p>
+          )}
                 <div className="mt-1 flex flex-wrap items-center gap-1">
                   {!uploading && !analysing && aiFailed && photoUrl && (
                     <Button
