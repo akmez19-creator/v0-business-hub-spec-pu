@@ -21,13 +21,32 @@ import {
 import type { MatchCandidate } from '@/lib/types'
 
 /**
- * Tried in order. The second entry is a different model and the third a
- * different provider on purpose: the first failure seen in testing was a
- * model-wide 503 ("high demand"), which a retry on the same model cannot
- * survive. A warehouse agent mid-count should never be blocked by one busy
- * model.
+ * Gateway models, tried in order. Two entries, not one, because the first
+ * failure seen in testing was a model-wide 503 ("high demand") that a retry on
+ * the same model cannot survive.
  */
-const MODELS = ['google/gemini-3.7-flash', 'google/gemini-3.5-flash', 'openai/gpt-5.6-luna-fast']
+const MODELS = ['google/gemini-3.7-flash', 'google/gemini-3.5-flash']
+
+/** Direct-provider model, used when the gateway itself is the problem. */
+const DIRECT_MODEL = 'gemini-2.5-flash'
+
+/**
+ * A gateway rate-limit / quota rejection is account-wide, not per-model, so
+ * every other gateway model will fail the same way. Detecting it lets the call
+ * jump straight to the direct provider key instead of burning a few seconds
+ * proving the obvious - which matters when someone is stood at a shelf waiting.
+ */
+function isAccountWideLimit(error: unknown): boolean {
+  const message = (error as Error)?.message?.toLowerCase() || ''
+  return (
+    message.includes('rate-limited') ||
+    message.includes('rate limited') ||
+    message.includes('quota') ||
+    message.includes('free tier') ||
+    message.includes('billing') ||
+    message.includes('credit')
+  )
+}
 
 /**
  * Downscale before sending. A phone photo is 3-5MB; thirteen of them in one
@@ -53,9 +72,9 @@ async function fetchImage(url: string): Promise<Buffer | null> {
 }
 
 /**
- * Walk the model list, then fall back to Gemini directly if the gateway itself
- * is unreachable. Mirrors the existing image-search route so a blip degrades
- * rather than takes stock counting offline.
+ * Walk the gateway models, then fall back to the provider directly. Mirrors the
+ * existing image-search route so a blip degrades rather than taking stock
+ * counting offline entirely.
  */
 async function withFallback<T>(
   run: (model: Parameters<typeof generateText>[0]['model']) => Promise<T>,
@@ -67,15 +86,18 @@ async function withFallback<T>(
       return await run(model)
     } catch (error) {
       lastError = error
-      console.log(`[v0] identify: ${model} failed, trying next -`, (error as Error).message)
+      console.log(`[v0] identify: ${model} failed -`, (error as Error).message)
+      // No point trying a second gateway model against an account-wide limit.
+      if (isAccountWideLimit(error)) break
     }
   }
 
-  // Last resort: bypass the gateway entirely with a direct provider key.
+  // Bypass the gateway with a direct provider key. This is the path that keeps
+  // working when the gateway account is rate-limited.
   const key = process.env.GOOGLE_AI_API_KEY
   if (key) {
     const google = createGoogleGenerativeAI({ apiKey: key })
-    return await run(google('gemini-flash-latest'))
+    return await run(google(DIRECT_MODEL))
   }
 
   throw lastError

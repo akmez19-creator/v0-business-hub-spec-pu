@@ -92,6 +92,18 @@ export function PhotoCountSheet({
       .slice(0, 20)
   }, [products, manualSearch])
 
+  /**
+   * True when the top two suggestions are too close to separate by score. Both
+   * must have been judged on their photos - two weak text-only guesses being
+   * near each other is just noise, not a genuine lookalike pair.
+   */
+  const lookalike = useMemo(() => {
+    const [first, second] = candidates
+    if (!first || !second) return false
+    if (!first.visually_compared || !second.visually_compared) return false
+    return first.confidence - second.confidence < 0.15
+  }, [candidates])
+
   async function handleFile(file: File) {
     setError(null)
     setUploading(true)
@@ -404,6 +416,26 @@ export function PhotoCountSheet({
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Best matches
                 </p>
+
+                {/*
+                  Real finding from testing: a bulb-style IP camera and a
+                  separate "Bulb Camera" product scored within a whisker of each
+                  other. When two products are that close the score cannot break
+                  the tie - only a person looking at both can - so say so
+                  instead of letting the ordering imply a winner.
+                */}
+                {lookalike && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      <span className="font-medium text-amber-400">
+                        Two similar products.
+                      </span>{' '}
+                      Compare both photos before choosing - tap an image to
+                      enlarge it.
+                    </p>
+                  </div>
+                )}
                 {candidates.map(c => {
                   const band = confidenceLabel(c.confidence)
                   return (
