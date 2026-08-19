@@ -3,9 +3,12 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { DeliveriesTable } from '@/components/deliveries/deliveries-table'
 import { DeliveryFilters } from '@/components/deliveries/delivery-filters'
 import { ImportDeliveriesDialog } from '@/components/deliveries/import-dialog'
+import { ReconcileDeliveriesDialog } from '@/components/deliveries/reconcile-dialog'
 import { ExportDeliveriesDialog } from '@/components/deliveries/export-dialog'
 import { AddDeliveryDialog } from '@/components/deliveries/add-delivery-dialog'
 import { ClearDeliveriesDialog } from '@/components/deliveries/clear-deliveries-dialog'
+import { Button } from '@/components/ui/button'
+import { GitCompareArrows } from 'lucide-react'
 import type { Profile, Delivery, Rider } from '@/lib/types'
 
 const DEFAULT_PAGE_SIZE = 100
@@ -164,6 +167,12 @@ export default async function AllDeliveriesPage({ searchParams }: Props) {
           <ClearDeliveriesDialog />
           <ExportDeliveriesDialog />
           <ImportDeliveriesDialog />
+          <ReconcileDeliveriesDialog>
+            <Button variant="outline">
+              <GitCompareArrows className="w-4 h-4 mr-2" />
+              Reconcile Month
+            </Button>
+          </ReconcileDeliveriesDialog>
           <AddDeliveryDialog />
         </div>
       </div>

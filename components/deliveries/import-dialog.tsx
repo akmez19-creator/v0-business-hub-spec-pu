@@ -1128,7 +1128,9 @@ export function ImportDeliveriesDialog() {
           status: 'completed',
           completed_at: new Date().toISOString(),
           error_message: errors.length > 0 ? errors.slice(0, 10).join('; ') : null,
-          target_month: monthOf ? monthOf.slice(0, 7) : null,
+          // target_month is a DATE column, so it needs a full day - '2026-08'
+          // alone is not a valid date and the write would fail.
+          target_month: monthOf ? `${monthOf.slice(0, 7)}-01` : null,
         })
         .eq('id', importLog?.id)
 
