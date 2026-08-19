@@ -55,6 +55,30 @@ function isAccountWideLimit(error: unknown): boolean {
 }
 
 /**
+ * Google occasionally answers a healthy request with a short-lived 429/503 or
+ * "model is overloaded". The exact phone photo that failed in production was
+ * replayed unchanged nine minutes later and succeeded in 9s as "watch", proving
+ * this is provider capacity rather than a bad photo or unreadable Blob.
+ *
+ * Only these transient failures are retried. Auth, schema, safety and malformed
+ * image errors should surface immediately rather than being hidden behind three
+ * identical attempts.
+ */
+function isTransientProviderError(error: unknown): boolean {
+  const message = (error as Error)?.message?.toLowerCase() || ''
+  return (
+    message.includes('overload') ||
+    message.includes('high demand') ||
+    message.includes('try again later') ||
+    message.includes('service unavailable') ||
+    message.includes('temporarily unavailable') ||
+    /\b(429|500|502|503|504)\b/.test(message)
+  )
+}
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
  * Downscale before sending. A phone photo is 3-5MB; thirteen of them in one
  * request would be slow and expensive, and the extra pixels add nothing to a
  * "same product or not" judgement.
@@ -96,12 +120,24 @@ async function withFallback<T>(
 
   const key = process.env.GOOGLE_AI_API_KEY
   if (key) {
-    try {
-      const google = createGoogleGenerativeAI({ apiKey: key })
-      return await run(google(DIRECT_MODEL))
-    } catch (error) {
-      lastError = error
-      console.log('[v0] identify: direct Google failed -', (error as Error).message)
+    const google = createGoogleGenerativeAI({ apiKey: key })
+
+    // Three total attempts absorb Google's brief capacity spikes. Backoff stays
+    // short because this runs behind quantity entry and a storekeeper is waiting
+    // at the shelf; retries measured in tens of seconds would be worse than an
+    // honest Try again button.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await run(google(DIRECT_MODEL))
+      } catch (error) {
+        lastError = error
+        console.log(
+          `[v0] identify: direct Google attempt ${attempt}/3 failed -`,
+          (error as Error).message,
+        )
+        if (!isTransientProviderError(error) || attempt === 3) break
+        await wait(attempt * 750)
+      }
     }
   }
 
