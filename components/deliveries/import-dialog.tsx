@@ -857,12 +857,19 @@ export function ImportDeliveriesDialog() {
     if (!newContractorName.trim()) return
     setCreatingContractor(true)
     try {
-      const result = await createContractor(newContractorName.trim())
-      if (result.success && result.contractorId) {
-        setSystemContractors(prev => [...prev, { id: result.contractorId!, name: newContractorName.trim() }])
+      // createContractor takes an OBJECT and returns { contractor }, not
+      // { contractorId }. This was called with a bare string, so `data.name`
+      // arrived undefined and every insert failed - "Create contractor" could
+      // never work from the importer. Both halves are fixed here.
+      const result = await createContractor({ name: newContractorName.trim() })
+      if (result.success && result.contractor) {
+        setSystemContractors(prev => [
+          ...prev,
+          { id: result.contractor.id as string, name: result.contractor.name as string },
+        ])
         setNewContractorName('')
-      } else if (result.error) {
-        alert(`Failed to create contractor: ${result.error}`)
+      } else {
+        alert(`Failed to create contractor: ${result.error ?? 'unknown error'}`)
       }
     } catch (err) {
       alert(`Error: ${(err as Error).message}`)
@@ -1103,8 +1110,17 @@ export function ImportDeliveriesDialog() {
         }
       }
 
-      // Update import log
-      await supabase
+      // Close out the import log.
+      //
+      // This write silently did NOTHING for 192 imports: delivery_imports had
+      // RLS with INSERT/SELECT policies but no UPDATE policy, so every log was
+      // stranded at status='processing' with successful_rows=0 - 110,737 rows
+      // logged as if nothing had ever succeeded. The error was discarded, so
+      // there was no clue. The policy now exists (see
+      // scripts/fix-import-log-update-policy.sql); this surfaces any future
+      // failure instead of leaving the history quietly wrong.
+      const monthOf = deliveries.find(d => d.delivery_date)?.delivery_date as string | undefined
+      const { error: logError } = await supabase
         .from('delivery_imports')
         .update({
           successful_rows: successCount,
@@ -1112,8 +1128,16 @@ export function ImportDeliveriesDialog() {
           status: 'completed',
           completed_at: new Date().toISOString(),
           error_message: errors.length > 0 ? errors.slice(0, 10).join('; ') : null,
+          target_month: monthOf ? monthOf.slice(0, 7) : null,
         })
         .eq('id', importLog?.id)
+
+      if (logError) {
+        console.log('[v0] import: could not close import log -', logError.message)
+        errors.push(
+          `Rows imported, but the import history could not be updated (${logError.message}). Undo will not be available for this batch.`,
+        )
+      }
 
       setResult({
         success: successCount,
