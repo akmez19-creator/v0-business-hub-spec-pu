@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Camera,
   Check,
+  ImageIcon,
   Loader2,
   RefreshCw,
   Search,
@@ -67,6 +68,7 @@ export function PhotoCountSheet({
   const [showManual, setShowManual] = useState(false)
 
   const fileRef = useRef<HTMLInputElement>(null)
+  const galleryRef = useRef<HTMLInputElement>(null)
   const qtyRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -285,9 +287,26 @@ export function PhotoCountSheet({
                 it most reliably.
               </p>
             </div>
-            <Button onClick={() => fileRef.current?.click()} className="gap-2">
-              <Camera className="h-4 w-4" /> Open camera
-            </Button>
+            <div className="flex flex-col items-center gap-2">
+              <Button onClick={() => fileRef.current?.click()} className="gap-2">
+                <Camera className="h-4 w-4" /> Open camera
+              </Button>
+              {/*
+                The camera input carries capture="environment", which on a phone
+                jumps straight to the viewfinder and gives NO way to reach the
+                gallery. A storekeeper who already photographed the shelf, or who
+                was sent a picture of the item, then has no route in at all - so
+                picking an existing photo needs its own input without `capture`.
+              */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => galleryRef.current?.click()}
+                className="gap-2 text-muted-foreground"
+              >
+                <ImageIcon className="h-4 w-4" /> Choose an existing photo
+              </Button>
+            </div>
             {error && <p className="text-[12px] text-rose-400">{error}</p>}
           </div>
         )}
@@ -611,8 +630,8 @@ export function PhotoCountSheet({
         )}
       </div>
 
-      {/* `capture` opens the rear camera on a phone but still allows a file pick
-          on desktop, so this works at a desk as well as in the aisle. */}
+      {/* `capture` sends a phone straight to the rear camera - right for counting
+          in the aisle, but it is a one-way door, hence the gallery input below. */}
       <input
         ref={fileRef}
         type="file"
@@ -622,6 +641,18 @@ export function PhotoCountSheet({
         onChange={e => {
           const file = e.target.files?.[0]
           // Reset so retaking the same file still fires a change event.
+          e.target.value = ''
+          if (file) void handleFile(file)
+        }}
+      />
+      {/* Same handler, no `capture`: opens the gallery / file browser instead. */}
+      <input
+        ref={galleryRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0]
           e.target.value = ''
           if (file) void handleFile(file)
         }}
