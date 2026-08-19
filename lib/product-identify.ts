@@ -16,10 +16,18 @@ import {
   VISUAL_CANDIDATE_LIMIT,
   type PhotoDescription,
   type ScoredProduct,
+  type ScorableProduct,
 } from '@/lib/product-match'
 import type { MatchCandidate } from '@/lib/types'
 
-const MODEL = 'google/gemini-3.7-flash'
+/**
+ * Tried in order. The second entry is a different model and the third a
+ * different provider on purpose: the first failure seen in testing was a
+ * model-wide 503 ("high demand"), which a retry on the same model cannot
+ * survive. A warehouse agent mid-count should never be blocked by one busy
+ * model.
+ */
+const MODELS = ['google/gemini-3.7-flash', 'google/gemini-3.5-flash', 'openai/gpt-5.6-luna-fast']
 
 /**
  * Downscale before sending. A phone photo is 3-5MB; thirteen of them in one
@@ -45,21 +53,32 @@ async function fetchImage(url: string): Promise<Buffer | null> {
 }
 
 /**
- * Run a model call through the AI Gateway, falling back to Gemini directly.
- * Mirrors the existing image-search route so a gateway blip degrades rather
- * than takes stock counting offline.
+ * Walk the model list, then fall back to Gemini directly if the gateway itself
+ * is unreachable. Mirrors the existing image-search route so a blip degrades
+ * rather than takes stock counting offline.
  */
 async function withFallback<T>(
   run: (model: Parameters<typeof generateText>[0]['model']) => Promise<T>,
 ): Promise<T> {
-  try {
-    return await run(MODEL)
-  } catch (gatewayError) {
-    const key = process.env.GOOGLE_AI_API_KEY
-    if (!key) throw gatewayError
+  let lastError: unknown
+
+  for (const model of MODELS) {
+    try {
+      return await run(model)
+    } catch (error) {
+      lastError = error
+      console.log(`[v0] identify: ${model} failed, trying next -`, (error as Error).message)
+    }
+  }
+
+  // Last resort: bypass the gateway entirely with a direct provider key.
+  const key = process.env.GOOGLE_AI_API_KEY
+  if (key) {
     const google = createGoogleGenerativeAI({ apiKey: key })
     return await run(google('gemini-flash-latest'))
   }
+
+  throw lastError
 }
 
 const descriptionSchema = z.object({
@@ -91,6 +110,10 @@ async function describePhoto(photo: Buffer): Promise<PhotoDescription> {
   const { output } = await withFallback(model =>
     generateText({
       model,
+      // One attempt per model. The SDK default of three turns a busy model into a
+      // long stall, and switching model recovers from a 503 far faster than
+      // retrying the model that is already overloaded.
+      maxRetries: 1,
       system:
         'You are cataloguing warehouse stock. Describe ONLY the product in the photo - ignore hands, ' +
         'shelves, floors and background. Copy any text or brand name printed on the item or its ' +
@@ -157,6 +180,10 @@ async function verifyVisually(
   const { output } = await withFallback(model =>
     generateText({
       model,
+      // One attempt per model. The SDK default of three turns a busy model into a
+      // long stall, and switching model recovers from a 503 far faster than
+      // retrying the model that is already overloaded.
+      maxRetries: 1,
       system:
         'You verify warehouse stock identity by comparing photographs. Judge whether each candidate ' +
         'is the SAME product as the warehouse photo - not merely a similar or related one. Lighting, ' +
@@ -187,21 +214,32 @@ interface AnalysisResult {
   candidates: MatchCandidate[]
 }
 
-/** The whole pipeline for one photo, independent of where the photo came from. */
-export async function analysePhoto(photoUrl: string): Promise<AnalysisResult> {
-  const db = createAdminClient()
-
+/**
+ * The whole pipeline for one photo, independent of where the photo came from.
+ *
+ * `catalogue` is injectable so the matching can be exercised against real
+ * products without a request context - accuracy is the entire point of this
+ * feature, and it has to be measurable.
+ */
+export async function analysePhoto(
+  photoUrl: string,
+  catalogue?: ScorableProduct[],
+): Promise<AnalysisResult> {
   const photo = await fetchImage(photoUrl)
   if (!photo) throw new Error('The photo could not be read')
 
   const description = await describePhoto(photo)
 
-  const { data: products } = await db
-    .from('products')
-    .select('id, name, category, description, sku, image_url')
-    .eq('is_active', true)
+  let products = catalogue
+  if (!products) {
+    const { data } = await createAdminClient()
+      .from('products')
+      .select('id, name, category, description, sku, image_url')
+      .eq('is_active', true)
+    products = (data || []) as ScorableProduct[]
+  }
 
-  const shortlist = shortlistProducts(description, products || [])
+  const shortlist = shortlistProducts(description, products)
 
   // Nothing even vaguely similar in the catalogue - say so plainly rather than
   // offering the least-bad row.
