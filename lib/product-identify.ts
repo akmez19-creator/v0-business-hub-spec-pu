@@ -21,11 +21,17 @@ import {
 import type { MatchCandidate } from '@/lib/types'
 
 /**
- * Gateway models, tried in order. Two entries, not one, because the first
- * failure seen in testing was a model-wide 503 ("high demand") that a retry on
- * the same model cannot survive.
+ * Gateway models, tried in order.
+ *
+ * gemini-2.5-flash is FIRST because it is the only vision model this account can
+ * actually reach: gemini-3.7-flash and gemini-3.5-flash both return "Free tier
+ * users do not have access to this model", and gpt-4o-mini is rate-limited on
+ * the free tier. Leading with a paywalled model cost two wasted round-trips on
+ * every single photo, which is what made real identifications fail.
+ *
+ * If the account gets paid credits, put the newer models in front of this one.
  */
-const MODELS = ['google/gemini-3.7-flash', 'google/gemini-3.5-flash']
+const MODELS = ['google/gemini-2.5-flash']
 
 /** Direct-provider model, used when the gateway itself is the problem. */
 const DIRECT_MODEL = 'gemini-2.5-flash'
@@ -72,14 +78,32 @@ async function fetchImage(url: string): Promise<Buffer | null> {
 }
 
 /**
- * Walk the gateway models, then fall back to the provider directly. Mirrors the
- * existing image-search route so a blip degrades rather than taking stock
- * counting offline entirely.
+ * Try the direct Google key first, then the AI Gateway.
+ *
+ * Direct-first looks backwards but is what the evidence supports: on this
+ * account every Gateway vision model is either paywalled or rate-limited on the
+ * free tier, so leading with the Gateway burnt two failed round-trips on every
+ * photo before succeeding. That wasted latency is the likely reason a real
+ * identification timed out in the warehouse and reported a stocked product as
+ * missing. The Gateway stays as the fallback so this keeps working if the
+ * direct key is ever removed - and if the account gets paid credits, swapping
+ * the two blocks back is a one-line change.
  */
 async function withFallback<T>(
   run: (model: Parameters<typeof generateText>[0]['model']) => Promise<T>,
 ): Promise<T> {
   let lastError: unknown
+
+  const key = process.env.GOOGLE_AI_API_KEY
+  if (key) {
+    try {
+      const google = createGoogleGenerativeAI({ apiKey: key })
+      return await run(google(DIRECT_MODEL))
+    } catch (error) {
+      lastError = error
+      console.log('[v0] identify: direct Google failed -', (error as Error).message)
+    }
+  }
 
   for (const model of MODELS) {
     try {
@@ -90,14 +114,6 @@ async function withFallback<T>(
       // No point trying a second gateway model against an account-wide limit.
       if (isAccountWideLimit(error)) break
     }
-  }
-
-  // Bypass the gateway with a direct provider key. This is the path that keeps
-  // working when the gateway account is rate-limited.
-  const key = process.env.GOOGLE_AI_API_KEY
-  if (key) {
-    const google = createGoogleGenerativeAI({ apiKey: key })
-    return await run(google(DIRECT_MODEL))
   }
 
   throw lastError

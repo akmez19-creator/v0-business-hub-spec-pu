@@ -157,6 +157,15 @@ export function PhotoCountSheet({
     }
   }
 
+  /**
+   * Re-run identification for a photo that is already uploaded and counted.
+   * Failures here are usually transient (model timeout), so a retry costs one
+   * tap and saves the storekeeper from resolving it by hand.
+   */
+  async function retryIdentify() {
+    if (photoUrl) await analyse(photoUrl)
+  }
+
   /** Save the photo + quantity, then move on to confirming which product it is. */
   async function handleSaveDetails() {
     if (!countId) {
@@ -476,7 +485,37 @@ export function PhotoCountSheet({
               </div>
             )}
 
-            {!analysing && candidates.length === 0 && (
+            {/*
+              A crashed/timed-out identification must NOT be reported as "nothing
+              in the catalogue matches". A real miss happened in the warehouse
+              where the product WAS stocked - the lookup had simply failed - and
+              the wrong wording sends the storekeeper hunting for a product they
+              were told does not exist. Offer a retry, since a failure is usually
+              transient whereas a genuine no-match is not.
+            */}
+            {!analysing && candidates.length === 0 && aiFailed && (
+              <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
+                <div className="flex flex-col items-start gap-2">
+                  <div>
+                    <p className="text-[12px] font-medium text-rose-400">
+                      Identification failed
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                      This is a problem on our side, not a missing product - the
+                      item may well be in the catalogue. Your count of{' '}
+                      <span className="font-medium text-foreground">{qtyInput}</span>{' '}
+                      is saved. Try again, search by name, or leave it for an admin.
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={retryIdentify}>
+                    Try identifying again
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!analysing && candidates.length === 0 && !aiFailed && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
                 <div>
