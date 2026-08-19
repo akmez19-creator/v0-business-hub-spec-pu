@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle,
   ImageIcon,
+  Layers,
   Link2,
   Loader2,
   Maximize2,
@@ -86,6 +88,91 @@ async function loadMedia(link: string): Promise<MediaItem[]> {
   const json = await res.json()
   if (!json.success) throw new Error(json.error || 'Could not load listing media')
   return (json.media || []) as MediaItem[]
+}
+
+/**
+ * Write one product's kept media to the product master.
+ *
+ * Shared by the one-at-a-time reviewer and the bulk "keep everything" run so
+ * both produce identical records - the ordering rules below are subtle enough
+ * that a second copy would drift out of step.
+ */
+async function persistPicks({
+  item,
+  images,
+  videos,
+  cover,
+  ownUrls,
+  sourceLink,
+}: {
+  item: MediaQueueItem
+  images: string[]
+  videos: string[]
+  cover: string | null
+  ownUrls: Set<string>
+  sourceLink: string | null | undefined
+}) {
+  // The whole photo selection goes to the product's gallery, with the cover
+  // mirrored onto products.image_url by the route. An unmatched row has no
+  // product yet, so its picks are handed back and written once it exists.
+  if (images.length > 0 && item.productId) {
+    // Your own photos are recorded as uploads, not as 1688 media: they have no
+    // listing behind them, and mislabelling them would point a later re-source
+    // at a supplier page that never showed this photo.
+    const batches = [
+      { images: images.filter(u => !ownUrls.has(u)), source: '1688', sourceUrl: sourceLink },
+      { images: images.filter(u => ownUrls.has(u)), source: 'upload', sourceUrl: null },
+    ].filter(b => b.images.length > 0)
+
+    // The cover's batch must go LAST. The route falls back to the first photo of
+    // whatever it is given when no primaryUrl matches, so a batch running after
+    // the cover's would silently take the product image.
+    batches.sort(
+      (a, b) =>
+        Number(!!cover && a.images.includes(cover)) - Number(!!cover && b.images.includes(cover)),
+    )
+
+    for (const batch of batches) {
+      const res = await fetch('/api/product-master/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: item.productId,
+          productName: item.productName,
+          images: batch.images,
+          primaryUrl: cover && batch.images.includes(cover) ? cover : undefined,
+          source: batch.source,
+          sourceUrl: batch.sourceUrl,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || 'Could not save the photos')
+    }
+  }
+
+  // Selected videos go to the shared clip library by URL. The route
+  // de-duplicates on source_id, so re-saving the same clip is harmless.
+  if (item.productId) {
+    for (const url of videos) {
+      await fetch('/api/product-master/clips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: item.productId,
+          productName: item.productName,
+          name: `${item.productName} - ${ownUrls.has(url) ? 'uploaded clip' : '1688 clip'}`,
+          fileUrl: url,
+          source: ownUrls.has(url) ? 'upload' : '1688',
+          sourceId: url,
+          sourceUrl: ownUrls.has(url) ? null : sourceLink,
+          duration: 0,
+          width: 0,
+          height: 0,
+          sizeBytes: 0,
+        }),
+      }).catch(() => null)
+    }
+  }
 }
 
 /**
@@ -220,6 +307,17 @@ export function PoMediaPicker({
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  // Progress of an unattended "keep everything" run.
+  const [bulk, setBulk] = useState<{
+    running: boolean
+    done: number
+    total: number
+    failed: string[]
+  }>({ running: false, done: 0, total: 0, failed: [] })
+  // A ref, not state: the loop reads this between awaits and must see the change
+  // immediately, which a state value captured in the closure would not do.
+  const stopBulk = useRef(false)
+
   // Listing media cached by link, so revisiting never refetches.
   const cache = useRef<Map<string, MediaItem[]>>(new Map())
   // Incremented per load so a superseded request cannot write state, see show()
@@ -249,6 +347,10 @@ export function PoMediaPicker({
     if (open) {
       setIndex(startIndex)
       setDoneCount(0)
+      // Clear a previous run's outcome, otherwise last session's failure notice
+      // greets the reviewer on a queue those products may not even be in.
+      stopBulk.current = false
+      setBulk({ running: false, done: 0, total: 0, failed: [] })
     }
   }, [open, startIndex])
 
@@ -519,6 +621,97 @@ export function PoMediaPicker({
     })
   }
 
+  /**
+   * Keep every photo and video on every remaining listing, without stopping to
+   * review them.
+   *
+   * Deliberately unattended: it fetches each listing in turn, keeps the lot, and
+   * marks the row reviewed. Products whose listing will not load are LEFT IN THE
+   * QUEUE rather than marked reviewed, so the run never silently swallows them -
+   * they are exactly the rows that still need a human, and reopening the wizard
+   * lands on the first of them.
+   *
+   * Runs strictly one listing at a time. The media endpoint scrapes a supplier
+   * page per call, and firing 172 of those at once is what gets an IP throttled.
+   */
+  async function keepAllRemaining() {
+    stopBulk.current = false
+    setError('')
+    setBulk({ running: true, done: 0, failed: [], total: total - index })
+
+    let cursor = index
+    // Keyed by excelProduct, the unique row key - two spreadsheet lines can
+    // share a product name, so names alone would land the reviewer on the wrong
+    // row when the run finishes.
+    const failed: { key: string; name: string }[] = []
+
+    for (let i = index; i < total; i++) {
+      if (stopBulk.current) break
+      cursor = i
+      const item = queue[i]
+      if (!item) continue
+
+      // Mirror the single-product resolution: a pasted override wins, otherwise
+      // the spreadsheet link, and uploads already made for this row still count.
+      const link = linkOverride[item.excelProduct] ?? item.link
+      const uploads = ownMedia[item.excelProduct] ?? []
+      const uploadUrls = new Set(uploads.map(m => m.url))
+
+      try {
+        let items = link ? cache.current.get(link) : undefined
+        if (!items && link) {
+          items = await loadMedia(link)
+          cache.current.set(link, items)
+        }
+
+        const all = [...uploads, ...(items ?? [])]
+        const imgs = all.filter(m => m.kind === 'image').map(m => m.url)
+        const vids = all.filter(m => m.kind === 'video').map(m => m.url)
+
+        // Nothing to keep is a genuine outcome, not a failure: record it as
+        // reviewed so a listing with no media cannot block the import forever.
+        if (imgs.length === 0 && vids.length === 0) {
+          onSkipped(item.excelProduct)
+        } else {
+          await persistPicks({
+            item,
+            images: imgs,
+            videos: vids,
+            cover: imgs[0] ?? null,
+            ownUrls: uploadUrls,
+            sourceLink: link,
+          })
+          onSaved(item.excelProduct, {
+            cover: imgs[0] ?? null,
+            images: item.productId ? [] : imgs,
+            videos: item.productId ? [] : vids,
+            uploaded: item.productId ? [] : [...imgs, ...vids].filter(u => uploadUrls.has(u)),
+          })
+        }
+        setDoneCount(c => c + 1)
+      } catch {
+        // Left unreviewed on purpose - see the note above.
+        failed.push({ key: item.excelProduct, name: item.productName })
+      }
+
+      setBulk(b => ({ ...b, done: i - index + 1, failed: failed.map(f => f.name) }))
+    }
+
+    setBulk(b => ({ ...b, running: false }))
+
+    // Land on the first listing that still needs attention so the failures are
+    // the next thing in front of the reviewer, not buried at the end of a queue.
+    const failedKeys = new Set(failed.map(f => f.key))
+    const firstFailed = queue.findIndex(q => failedKeys.has(q.excelProduct))
+    if (failed.length > 0 && firstFailed >= 0) {
+      setIndex(firstFailed)
+    } else if (stopBulk.current) {
+      setIndex(Math.min(cursor, total - 1))
+    } else {
+      onOpenChange(false)
+    }
+  }
+
   /** Move on without keeping anything, recording the row as reviewed. */
   function skipAndNext() {
     if (current) onSkipped(current.excelProduct)
@@ -539,71 +732,14 @@ export function PoMediaPicker({
     setSaving(true)
     setError('')
     try {
-      // The whole photo selection goes to the product's gallery, with the
-      // cover mirrored onto products.image_url by the route. An unmatched row
-      // has no product yet, so its picks are handed back to the import dialog
-      // and written once the product exists.
-      if (pickedImages.length > 0 && current.productId) {
-        // Your own photos are recorded as uploads, not as 1688 media: they have
-        // no listing behind them, and mislabelling them would point a later
-        // re-source at a supplier page that never showed this photo.
-        const batches = [
-          {
-            images: pickedImages.filter(u => !ownUrls.has(u)),
-            source: '1688',
-            sourceUrl: effectiveLink,
-          },
-          { images: pickedImages.filter(u => ownUrls.has(u)), source: 'upload', sourceUrl: null },
-        ].filter(b => b.images.length > 0)
-
-        // The cover's batch must go LAST. The route falls back to the first
-        // photo of whatever it is given when no primaryUrl matches, so a batch
-        // running after the cover's would silently take the product image.
-        batches.sort((a, b) => Number(!!cover && a.images.includes(cover)) - Number(!!cover && b.images.includes(cover)))
-
-        for (const batch of batches) {
-          const res = await fetch('/api/product-master/images', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              productId: current.productId,
-              productName: current.productName,
-              images: batch.images,
-              primaryUrl: cover && batch.images.includes(cover) ? cover : undefined,
-              source: batch.source,
-              sourceUrl: batch.sourceUrl,
-            }),
-          })
-          const json = await res.json()
-          if (!json.success) throw new Error(json.error || 'Could not save the photos')
-        }
-      }
-
-      // Selected videos go to the shared clip library by URL. The route
-      // de-duplicates on source_id, so re-saving the same clip is harmless.
-      // An unmatched row has no owner yet, so its clips are handed back and
-      // attached once the product master record exists.
-      if (current.productId) {
-        for (const url of pickedVideos) {
-          await fetch('/api/product-master/clips', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              productId: current.productId,
-              productName: current.productName,
-              name: `${current.productName} - ${ownUrls.has(url) ? 'uploaded clip' : '1688 clip'}`,
-              fileUrl: url,
-              source: ownUrls.has(url) ? 'upload' : '1688',
-              sourceId: url,
-              sourceUrl: ownUrls.has(url) ? null : effectiveLink,
-              duration: 0,
-              width: 0,
-              height: 0,
-              sizeBytes: 0,
-            }),
-          }).catch(() => null)
-        }
-      }
+      await persistPicks({
+        item: current,
+        images: pickedImages,
+        videos: pickedVideos,
+        cover,
+        ownUrls,
+        sourceLink: effectiveLink,
+      })
 
       // Always report the outcome so the row leaves the queue, even when the
       // reviewer kept only videos. Anything that could not be written yet
@@ -1088,6 +1224,58 @@ export function PoMediaPicker({
           </ScrollArea>
         )}
 
+        {/*
+          Covers the dialog while an unattended run is going, because the media
+          on screen no longer reflects what is being saved. Stop is always
+          reachable: this makes 172 sequential scrapes and the reviewer must be
+          able to call it off without closing the dialog and losing the run.
+        */}
+        {bulk.running && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-background/95">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <p className="text-sm font-medium">
+              {`Keeping everything - ${bulk.done} of ${bulk.total}`}
+            </p>
+            <p className="max-w-sm text-center text-xs text-muted-foreground">
+              Fetching each listing in turn and keeping every photo and video. You
+              can leave this running.
+            </p>
+            {bulk.failed.length > 0 && (
+              <p className="text-xs text-amber-400">
+                {`${bulk.failed.length} listing${bulk.failed.length === 1 ? '' : 's'} would not load - kept for you to review`}
+              </p>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                stopBulk.current = true
+              }}
+              className="mt-1 bg-transparent"
+            >
+              Stop
+            </Button>
+          </div>
+        )}
+
+        {/*
+          Result of a finished run. Only appears when something needs a human -
+          a clean run closes the dialog, so silence here means success.
+        */}
+        {!bulk.running && bulk.failed.length > 0 && (
+          <div className="flex flex-shrink-0 items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <div>
+              <p className="text-[12px] font-medium text-amber-400">
+                {`Kept everything except ${bulk.failed.length} listing${bulk.failed.length === 1 ? '' : 's'}`}
+              </p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                {`These would not load, so nothing was saved for them and they are still waiting: ${bulk.failed.slice(0, 4).join(', ')}${bulk.failed.length > 4 ? ` and ${bulk.failed.length - 4} more` : ''}. Fix the link or upload a photo, product by product.`}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t pt-3">
           <p className="text-xs text-muted-foreground">
             {pickedImages.length > 0
@@ -1100,19 +1288,37 @@ export function PoMediaPicker({
             <Button
               variant="ghost"
               onClick={() => setIndex(i => Math.max(0, i - 1))}
-              disabled={index === 0 || saving}
+              disabled={index === 0 || saving || bulk.running}
               className="gap-1.5"
             >
               <ArrowLeft className="w-4 h-4" />
               Back
             </Button>
-          <Button variant="outline" onClick={skipAndNext} disabled={saving} className="gap-1.5 bg-transparent">
+            {/*
+              The unattended route through the rest of the queue. Kept as an
+              outline button next to the deliberate per-product actions rather
+              than as the primary one: it keeps everything sight-unseen, so it
+              should not be the thing a tired reviewer hits by reflex.
+            */}
+            {total - index > 1 && (
+              <Button
+                variant="outline"
+                onClick={keepAllRemaining}
+                disabled={saving || bulk.running}
+                className="gap-1.5 bg-transparent"
+                title={`Keep every photo and video on the remaining ${total - index} listings without reviewing them`}
+              >
+                <Layers className="w-4 h-4" />
+                {`Keep all ${total - index}`}
+              </Button>
+            )}
+          <Button variant="outline" onClick={skipAndNext} disabled={saving || bulk.running} className="gap-1.5 bg-transparent">
             {isLast ? 'Finish' : 'Skip'}
               <SkipForward className="w-4 h-4" />
             </Button>
             <Button
               onClick={saveAndNext}
-              disabled={saving || (pickedImages.length === 0 && pickedVideos.length === 0)}
+              disabled={saving || bulk.running || (pickedImages.length === 0 && pickedVideos.length === 0)}
               className="gap-1.5"
             >
               {saving ? (

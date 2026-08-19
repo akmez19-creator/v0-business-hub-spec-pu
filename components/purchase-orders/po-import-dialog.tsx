@@ -779,10 +779,27 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     [mediaQueue, productMappings],
   )
 
-  /** Open the wizard, starting at a given row (or the first one). */
+  /**
+   * Open the wizard at a given row, or resume where the review actually stopped.
+   *
+   * Resuming matters: this always used to open at row 1, so on a 172-line import
+   * every reopen meant clicking through everything already done to get back to
+   * the work. `imageStatus` is set for any row that was saved or skipped, so the
+   * first row without one is the true resume point.
+   */
   function openMediaWizard(excelProduct?: string) {
-    const at = excelProduct ? mediaQueue.findIndex(q => q.excelProduct === excelProduct) : 0
-    setMediaStart(at < 0 ? 0 : at)
+    if (excelProduct) {
+      const at = mediaQueue.findIndex(q => q.excelProduct === excelProduct)
+      setMediaStart(at < 0 ? 0 : at)
+      setMediaOpen(true)
+      return
+    }
+    const firstUnreviewed = mediaQueue.findIndex(
+      q => !productMappings.find(m => m.excelProduct === q.excelProduct)?.imageStatus,
+    )
+    // Everything reviewed already: reopen at the start rather than off the end,
+    // so a reviewer coming back to change a pick still has the queue in front.
+    setMediaStart(firstUnreviewed < 0 ? 0 : firstUnreviewed)
     setMediaOpen(true)
   }
 
