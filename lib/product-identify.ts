@@ -174,6 +174,129 @@ async function describePhoto(photo: Buffer): Promise<PhotoDescription> {
 }
 
 /**
+ * Read a photo and propose names to search a supplier marketplace with.
+ *
+ * Exists because the photo search had no idea what it was looking at. 1688's
+ * image search is pure visual similarity, and the route drops the keyword
+ * entirely in image mode - so a photo of a clothesline matched anything
+ * rope-shaped, and the spreadsheet name was passed in and then ignored.
+ *
+ * Names are deliberately plain English: a storekeeper has to read these and
+ * judge which one describes the thing in their hand, so a native trade term
+ * they cannot evaluate would be worse than useless.
+ *
+ * The FIRST term is the one searched automatically, so ordering is the whole
+ * game. Measured against the live marketplace:
+ *   "kettle"          -> top hits were a plastic water cup and a cold-water jug
+ *   "stovetop kettle" -> top hits were all actual whistling stovetop kettles
+ * So a bare one-word label is not good enough to lead with, even though the
+ * model sometimes returns exactly that. Two or three words is the sweet spot:
+ * enough to pin the object down, not so much that the search returns nothing.
+ *
+ * Colour-qualified terms are pushed to the back on purpose - "silver kettle"
+ * matches anything silver, so colour narrows the results without making them
+ * more relevant.
+ */
+export async function suggestSearchTerms(imageUrl: string): Promise<{
+  label: string
+  terms: string[]
+}> {
+  const photo = await fetchImage(imageUrl)
+  if (!photo) throw new Error('Could not read that photo')
+
+  const d = await describePhoto(photo)
+  const label = (d.label || '').trim()
+  if (!label) throw new Error('Could not tell what is in that photo')
+
+  // A brand read off the packaging is the strongest term available, but only
+  // paired with the object - a bare brand name matches that seller's whole range.
+  const brand = (d.packaging_text || [])
+    .map(t => t.trim())
+    .filter(t => t.length > 2 && t.length < 20 && /^[\p{L}][\p{L}\d\s&.-]*$/u.test(t))[0]
+
+  /**
+   * Take the first value of a list-like field.
+   *
+   * These fields come back as "Metal, Plastic" or "Silver, Black" often enough
+   * that using them raw produced chips like "Metal, Plastic Kettle" - unreadable
+   * to the storekeeper who has to choose between them, and a keyword no
+   * marketplace will match.
+   */
+  const firstOf = (value: string | null) => (value || '').split(/[,/]|\bor\b|\band\b/i)[0].trim()
+
+  /**
+   * Qualify the label without repeating a word it already contains.
+   *
+   * Without this, a model that returns label "Kettle" and form factor "stovetop
+   * kettle" yields the chip "Stovetop kettle Kettle".
+   */
+  const qualify = (qualifier: string | null, base: string) => {
+    const q = firstOf(qualifier)
+    if (!q) return null
+    // A long qualifier is a description, not a name: form_factor came back as
+    // "Container with handle and spout", which is no use as a search term.
+    if (q.split(/\s+/).length > 2) return null
+    const words = new Set(base.toLowerCase().split(/\s+/))
+    const kept = q.split(/\s+/).filter(w => !words.has(w.toLowerCase()))
+    return kept.length > 0 ? `${kept.join(' ')} ${base}` : null
+  }
+
+  // `kind` records where a term came from, because that predicts how useful it
+  // is far better than the words themselves do.
+  const candidates: { term: string; kind: 'name' | 'brand' | 'material' | 'colour' }[] = [
+    { term: label, kind: 'name' },
+    ...(d.alternate_names || []).map(t => ({ term: t, kind: 'name' as const })),
+    ...(() => {
+      const t = qualify(d.form_factor, label)
+      return t ? [{ term: t, kind: 'name' as const }] : []
+    })(),
+    ...(brand ? [{ term: `${brand} ${label}`, kind: 'brand' as const }] : []),
+    ...(() => {
+      const t = qualify(d.material, label)
+      return t ? [{ term: t, kind: 'material' as const }] : []
+    })(),
+    ...(() => {
+      const t = qualify(d.colour, label)
+      return t ? [{ term: t, kind: 'colour' as const }] : []
+    })(),
+  ]
+
+  // Case-insensitive de-duplication, first occurrence wins.
+  const seen = new Set<string>()
+  const clean = candidates
+    .map(c => ({ ...c, term: c.term.trim().replace(/\s+/g, ' ') }))
+    .filter(c => {
+      if (c.term.length < 2 || c.term.length > 60) return false
+      const key = c.term.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+  /**
+   * Lower sorts earlier, and position 0 is what gets searched automatically.
+   * A one-word term is demoted below the multi-word ones describing the same
+   * object: it is the case that measurably returned the wrong products.
+   */
+  const rank = (c: (typeof clean)[number]) => {
+    const words = c.term.split(' ').length
+    const vague = words === 1 ? 4 : 0
+    const byKind = { name: 0, brand: 1, material: 2, colour: 3 }[c.kind]
+    // Beyond three words the search starts returning nothing at all.
+    const tooLong = words > 3 ? 2 : 0
+    return vague + byKind + tooLong
+  }
+
+  const terms = [...clean]
+    // Stable sort, so equally-ranked terms keep the model's own ordering.
+    .sort((a, b) => rank(a) - rank(b))
+    .slice(0, 6)
+    .map(c => c.term)
+
+  return { label, terms }
+}
+
+/**
  * Stage 2: put the agent's photo next to the shortlisted catalogue photos and
  * ask which are the same product. This is the step that carries the accuracy -
  * 422 of 488 products have an image, so the deciding comparison is

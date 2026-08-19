@@ -80,7 +80,14 @@ const proxied = (url: string) => mediaSrc(url)
 
 /** Fetch every photo and video on one listing. */
 /** Why a listing failed to load, so the UI can advise correctly. */
-type FailReason = 'provider-auth' | 'credit' | 'not-found' | 'bad-link' | 'upstream' | 'unknown'
+type FailReason =
+  | 'session'
+  | 'provider-auth'
+  | 'credit'
+  | 'not-found'
+  | 'bad-link'
+  | 'upstream'
+  | 'unknown'
 
 /** Carries the route's classification alongside the message. */
 class MediaError extends Error {
@@ -97,6 +104,21 @@ async function loadMedia(link: string): Promise<MediaItem[]> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ link }),
   })
+  /**
+   * An expired login is caught here, before the body is trusted.
+   *
+   * middleware.ts answers ANY unauthenticated /api call with the bare body
+   * {"error":"Unauthorized"} and no `reason`. That is a different failure from
+   * the marketplace refusing us, but it used to render as the single word
+   * "Unauthorized" - which read as a dead listing and sent the reviewer hunting
+   * for a replacement link when all they needed was to sign in again. A review
+   * session spans hundreds of products, so the token expiring part-way through
+   * is routine rather than exotic.
+   */
+  if (res.status === 401) {
+    throw new MediaError('Your session has expired - sign in again to keep reviewing.', 'session')
+  }
+
   const json = await res.json()
   if (!json.success) {
     throw new MediaError(json.error || 'Could not load listing media', (json.reason as FailReason) || 'unknown')

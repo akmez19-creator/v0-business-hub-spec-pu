@@ -63,6 +63,11 @@ export function SupplierFinder({
   const [hits, setHits] = useState<SupplierHit[]>([])
   const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
+  // Names the vision pass read off the photo, and which one produced the
+  // results on screen - without that the reviewer cannot tell what they are
+  // looking at after tapping two chips.
+  const [terms, setTerms] = useState<string[]>([])
+  const [activeTerm, setActiveTerm] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   /**
@@ -112,28 +117,121 @@ export function SupplierFinder({
     return () => document.removeEventListener('paste', onPaste)
   }, [takeFile])
 
+  /** One marketplace call. `term` searches by name; omitting it searches by photo. */
+  async function runSearch(term?: string): Promise<SupplierHit[]> {
+    const res = await fetch('/api/product-master/marketplace-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        // Image mode and keyword mode are mutually exclusive upstream: the route
+        // drops the keyword whenever an image is present, so sending both would
+        // silently run the photo search twice and never search the name at all.
+        ...(term ? { query: term } : { imageUrl: reference }),
+        // 1688 is the only source with image search, and the only one these
+        // products are actually bought from. Its platform id is 'alibaba' -
+        // '1688' matches no platform and the search is rejected outright.
+        platforms: ['alibaba'],
+        sort: 'best',
+      }),
+    })
+    const json = await res.json()
+    if (!json.success) throw new Error(json.error || 'Search failed')
+    return (json.results || []) as SupplierHit[]
+  }
+
+  /**
+   * Search by one of the suggested names.
+   *
+   * Kept as its own action because every call is billable, so a name is only
+   * searched when it is actually asked for.
+   */
+  async function searchByTerm(term: string) {
+    setBusy('search')
+    setError('')
+    setSearched(true)
+    setActiveTerm(term)
+    try {
+      setHits(await runSearch(term))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Search failed')
+      setHits([])
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function search() {
     if (!reference) return
     setBusy('search')
     setError('')
     setSearched(true)
+    setTerms([])
+    setActiveTerm(null)
     try {
-      const res = await fetch('/api/product-master/marketplace-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl: reference,
-          // 1688 is the only source with image search, and the only one these
-          // products are actually bought from. Its platform id is 'alibaba' -
-          // '1688' matches no platform and the search is rejected outright.
-          platforms: ['alibaba'],
-          sort: 'best',
-          query: productName,
-        }),
-      })
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error || 'Search failed')
-      setHits((json.results || []) as SupplierHit[])
+      /**
+       * Look at the photo and search it at the same time.
+       *
+       * The visual search alone matched anything of a similar shape, because
+       * 1688's image search is pure visual similarity and the route discards the
+       * keyword in image mode - the product name was being passed in and
+       * ignored. Reading the photo produces a name that actually describes it
+       * ("stovetop kettle" rather than "kettle", which returns plastic cups).
+       *
+       * Run together rather than in sequence: the vision pass takes a few
+       * seconds, and making the reviewer wait for it before seeing any results
+       * would make a working search feel broken.
+       */
+      const [visual, described] = await Promise.allSettled([
+        runSearch(),
+        fetch('/api/product-master/photo-terms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: reference }),
+        }).then(r => r.json()),
+      ])
+
+      if (visual.status === 'rejected') throw visual.reason
+      let merged = visual.value
+
+      const read: string[] =
+        described.status === 'fulfilled' && described.value?.success ? described.value.terms || [] : []
+
+      /**
+       * Offer the spreadsheet name too, but last and never auto-searched.
+       *
+       * It is the name that was already failing to find anything useful, so it
+       * does not deserve a paid call by default - but it is occasionally the only
+       * one carrying a model number, so removing the option would lose that.
+       */
+      const sheetName = productName.trim()
+      const suggestions =
+        sheetName.length > 1 && !read.some(t => t.toLowerCase() === sheetName.toLowerCase())
+          ? [...read, sheetName]
+          : read
+      setTerms(suggestions)
+
+      // Search the broadest suggestion straight away so the closer results are
+      // simply there. The sharper names stay one tap away rather than costing a
+      // call each on every photo.
+      // Strictly a name the vision pass read - NOT `suggestions[0]`, which falls
+      // back to the spreadsheet name when the vision pass fails and would spend
+      // a call re-running the search that was already coming up short.
+      if (read[0]) {
+        try {
+          const byName = await runSearch(read[0])
+          setActiveTerm(read[0])
+          // Name matches lead: they describe the object, whereas a visual match
+          // can be any object of that shape. De-duplicated by listing id so a
+          // listing found both ways is not shown twice.
+          const seen = new Set(byName.map(h => h.id))
+          merged = [...byName, ...merged.filter(h => !seen.has(h.id))]
+        } catch {
+          // The photo results are already good enough to show; a failed extra
+          // search must not throw away the search that did work.
+        }
+      }
+
+      setHits(merged)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Search failed')
       setHits([])
@@ -221,6 +319,35 @@ export function SupplierFinder({
           </div>
         </div>
       </div>
+
+      {/*
+        What the photo was read as. The whole point is that the storekeeper can
+        see the names in plain English and pick the one that matches what they
+        are holding - the photo search on its own gives no clue what it thought
+        the thing was, so a wrong result looked like a broken search.
+      */}
+      {terms.length > 0 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Looks like</span>
+          {terms.map(term => {
+            const active = term === activeTerm
+            return (
+              <Button
+                key={term}
+                size="sm"
+                variant={active ? 'default' : 'outline'}
+                onClick={() => void searchByTerm(term)}
+                disabled={busy !== null}
+                className="h-6 rounded-full px-2.5 text-[11px] font-normal"
+                // Not every chip is obviously a search action, so say so.
+                title={active ? `Showing results for "${term}"` : `Search 1688 for "${term}"`}
+              >
+                {term}
+              </Button>
+            )
+          })}
+        </div>
+      )}
 
       {error && <p className="text-[11px] text-destructive">{error}</p>}
 
