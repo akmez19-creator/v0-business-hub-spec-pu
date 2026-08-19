@@ -218,6 +218,51 @@ export interface Product {
   variants?: ProductVariant[]
 }
 
+/**
+ * One product the AI thinks a photo might be, with the reason it thinks so.
+ * The reason is shown to the agent verbatim - a bare percentage is not
+ * checkable, but "text on box reads VESLEE" is.
+ */
+export interface MatchCandidate {
+  product_id: string
+  name: string
+  image_url: string | null
+  /** 0-1. Below MATCH_CONFIDENCE_FLOOR the whole capture is left unmatched. */
+  confidence: number
+  reason: string
+  /**
+   * True when this candidate was judged on its catalogue photo. Text-only
+   * candidates (66 products have no image) are inherently weaker guesses and
+   * are labelled as such in the UI.
+   */
+  visually_compared: boolean
+}
+
+/**
+ * A photo counted before the product was identified.
+ * Staging only: on confirmation it becomes a normal `stock_count_items` row.
+ */
+export interface StockCountCapture {
+  id: string
+  count_id: string
+  photo_url: string
+  counted_qty: number
+  shelf_code: string | null
+  /** Generated in Postgres from shelf_code. Read-only. */
+  zone: string | null
+  status: 'analysing' | 'suggested' | 'unmatched' | 'resolved'
+  matched_product_id: string | null
+  /** What the AI thought the item was, in its own words. */
+  ai_label: string | null
+  ai_confidence: number | null
+  ai_candidates: MatchCandidate[] | null
+  ai_error: string | null
+  created_by: string | null
+  created_at: string
+  resolved_by: string | null
+  resolved_at: string | null
+}
+
 /** One purchase-order batch behind a product's initial stock. */
 export interface StockPoBatch {
   id: string

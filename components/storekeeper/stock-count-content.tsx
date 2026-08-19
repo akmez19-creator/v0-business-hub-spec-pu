@@ -17,14 +17,14 @@ import {
   Send,
   Trash2,
   AlertTriangle,
-  Package,
+  Camera,
   TrendingUp,
   TrendingDown,
   Sparkles,
   MapPin,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { mediaSrc } from '@/lib/media-url'
+import { ImageLightbox } from '@/components/ui/image-lightbox'
 import {
   getOrCreateDraftCount,
   saveCountItem,
@@ -345,22 +345,25 @@ export function StockCountContent({
           {results.map((p) => {
             const already = countedIds.has(p.id)
             return (
-              <li key={p.id}>
+              <li
+                key={p.id}
+                className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"
+              >
+                {/*
+                  The thumbnail is its own button so it can zoom, which means it
+                  cannot live inside the row button - nested buttons are invalid
+                  HTML and the inner one stops being reachable.
+                */}
+                <ImageLightbox
+                  src={p.image_url}
+                  alt={p.name}
+                  caption={p.shelf_code ? `${p.name} · shelf ${p.shelf_code}` : p.name}
+                  className="h-10 w-10"
+                />
                 <button
                   onClick={() => openProduct(p)}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted/50"
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
-                    {p.image_url ? (
-                      <img
-                        src={mediaSrc(p.image_url) || '/placeholder.svg'}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-foreground">{p.name}</p>
                     <p className="text-[11px] text-muted-foreground">
@@ -541,17 +544,18 @@ export function StockCountContent({
         <div className="fixed inset-0 z-50 flex items-end bg-black/70 backdrop-blur-sm">
           <div className="w-full rounded-t-2xl border-t border-border bg-card p-4 pb-8">
             <div className="mb-4 flex items-start gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
-                {activeProduct.image_url ? (
-                  <img
-                    src={mediaSrc(activeProduct.image_url) || '/placeholder.svg'}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <Package className="h-5 w-5 text-muted-foreground" />
-                )}
-              </div>
+              {/* Tap to enlarge - the picture is the fastest way to confirm
+                  the thing in your hand is the thing on the screen. */}
+              <ImageLightbox
+                src={activeProduct.image_url}
+                alt={activeProduct.name}
+                caption={
+                  activeProduct.shelf_code
+                    ? `${activeProduct.name} · shelf ${activeProduct.shelf_code}`
+                    : activeProduct.name
+                }
+                className="h-12 w-12"
+              />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-foreground">{activeProduct.name}</p>
                 <p className="text-xs text-muted-foreground">

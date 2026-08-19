@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import type { MatchCandidate } from '@/lib/types'
 
 /**
  * Server actions for warehouse physical stock counts.
@@ -169,6 +170,213 @@ export async function saveCountItem(input: {
   return { ok: true }
 }
 
+/* ------------------------------------------------------------------ *
+ * Photo-first counting
+ *
+ * The agent photographs an item and records a quantity before anyone knows
+ * which product it is. That row cannot go straight into `stock_count_items`
+ * (product_id is NOT NULL there), so it is staged as a capture and promoted to
+ * a real count line once a human confirms the product.
+ * ------------------------------------------------------------------ */
+
+/** Shared shelf-code validation, so every entry path agrees on the shape. */
+function normaliseShelf(raw: string | null | undefined): { value: string | null; error?: string } {
+  const normalised = (raw || '').replace(/\s+/g, '').toUpperCase()
+  if (!normalised) return { value: null }
+  if (!/^[A-Z]{1,3}\d{0,4}[A-Z]?$/.test(normalised)) {
+    return { value: null, error: 'Use a shelf code like E1' }
+  }
+  return { value: normalised }
+}
+
+/**
+ * Store the photo and quantity immediately, before any AI runs.
+ *
+ * Written first on purpose: the agent's work is saved the moment they press the
+ * button, so a dropped signal, a closed tab or a failed vision call can never
+ * cost them a count they already did.
+ */
+export async function createCapture(input: {
+  countId: string
+  photoUrl: string
+  countedQty: number
+  shelfCode?: string | null
+  /**
+   * Matching usually finishes while the agent is still typing the quantity, so
+   * the result is passed in here rather than recomputed - re-running two vision
+   * calls per capture would double the cost and the wait for no benefit.
+   */
+  aiLabel?: string | null
+  aiCandidates?: MatchCandidate[] | null
+  aiStatus?: 'analysing' | 'suggested' | 'unmatched'
+}): Promise<ActionResult<{ id: string }>> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const qty = Number(input.countedQty)
+  if (!Number.isInteger(qty) || qty < 0) {
+    return { ok: false, error: 'Counted quantity must be a whole number of 0 or more' }
+  }
+  if (qty > 1_000_000) {
+    return { ok: false, error: 'That quantity looks too large - please re-check' }
+  }
+  if (!input.photoUrl) return { ok: false, error: 'A photo is required' }
+
+  const shelf = normaliseShelf(input.shelfCode)
+  if (shelf.error) return { ok: false, error: shelf.error }
+
+  const adminDb = createAdminClient()
+
+  const { data: session } = await adminDb
+    .from('stock_counts')
+    .select('id, status, counted_by')
+    .eq('id', input.countId)
+    .single()
+
+  if (!session) return { ok: false, error: 'Count session not found' }
+  if (session.status !== 'draft') {
+    return { ok: false, error: 'This count has already been submitted' }
+  }
+  if (session.counted_by !== guard.actor.id && guard.actor.role !== 'admin') {
+    return { ok: false, error: 'This count belongs to another agent' }
+  }
+
+  const { data, error } = await adminDb
+    .from('stock_count_captures')
+    .insert({
+      count_id: input.countId,
+      photo_url: input.photoUrl,
+      counted_qty: qty,
+      shelf_code: shelf.value,
+      // Defaults to 'analysing' so an interrupted match is visibly unfinished
+      // rather than silently looking like "nothing found".
+      status: input.aiStatus || 'analysing',
+      ai_label: input.aiLabel || null,
+      ai_candidates: input.aiCandidates || null,
+      ai_confidence: input.aiCandidates?.[0]?.confidence ?? null,
+      created_by: guard.actor.id,
+    })
+    .select('id')
+    .single()
+
+  if (error || !data) {
+    console.log('[v0] createCapture failed:', error?.message)
+    return { ok: false, error: 'Could not save this photo count' }
+  }
+
+  return { ok: true, data: { id: data.id } }
+}
+
+/**
+ * Promote a capture into a real count line once a product is confirmed.
+ *
+ * Nothing reaches this point automatically - a human always taps the product,
+ * because a confident-but-wrong AI match is indistinguishable on screen from a
+ * correct one and this figure rewrites real stock on approval.
+ */
+export async function confirmCaptureMatch(input: {
+  captureId: string
+  productId: string
+}): Promise<ActionResult> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+
+  const { data: capture } = await adminDb
+    .from('stock_count_captures')
+    .select('id, count_id, counted_qty, shelf_code, photo_url, status')
+    .eq('id', input.captureId)
+    .single()
+
+  if (!capture) return { ok: false, error: 'Capture not found' }
+  if (capture.status === 'resolved') {
+    return { ok: false, error: 'This photo has already been matched' }
+  }
+
+  // Reuses the existing count-line path, so photo counts land in exactly the
+  // same shape as typed ones and the approval flow needs no special case.
+  const saved = await saveCountItem({
+    countId: capture.count_id,
+    productId: input.productId,
+    countedQty: capture.counted_qty,
+    notes: 'Counted from photo',
+  })
+  if (!saved.ok) return saved
+
+  // Record the shelf the agent read off the rack while they were standing there.
+  if (capture.shelf_code) {
+    await adminDb
+      .from('products')
+      .update({ shelf_code: capture.shelf_code })
+      .eq('id', input.productId)
+  }
+
+  // Backfill the product image only when there isn't one. 66 products have no
+  // photo, and every one filled in makes the next visual match better - but a
+  // curated catalogue image must never be replaced by a shelf snapshot.
+  const { data: product } = await adminDb
+    .from('products')
+    .select('id, image_url')
+    .eq('id', input.productId)
+    .single()
+
+  if (product && !product.image_url) {
+    await adminDb
+      .from('products')
+      .update({ image_url: capture.photo_url })
+      .eq('id', input.productId)
+  }
+
+  const { error } = await adminDb
+    .from('stock_count_captures')
+    .update({
+      status: 'resolved',
+      matched_product_id: input.productId,
+      resolved_by: guard.actor.id,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq('id', input.captureId)
+
+  if (error) {
+    console.log('[v0] confirmCaptureMatch failed:', error.message)
+    return { ok: false, error: 'Counted, but could not close off the photo' }
+  }
+
+  revalidatePath('/dashboard/storekeeper/stock-count')
+  revalidatePath('/dashboard/deliveries/stock-count')
+  return { ok: true }
+}
+
+/** Discard a capture - a duplicate photo, or a shot too poor to use. */
+export async function discardCapture(captureId: string): Promise<ActionResult> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+  const { data: capture } = await adminDb
+    .from('stock_count_captures')
+    .select('id, status')
+    .eq('id', captureId)
+    .single()
+
+  if (!capture) return { ok: false, error: 'Capture not found' }
+  if (capture.status === 'resolved') {
+    // The count line already exists; removing the photo would orphan it.
+    return { ok: false, error: 'Already counted - remove the count line instead' }
+  }
+
+  const { error } = await adminDb
+    .from('stock_count_captures')
+    .delete()
+    .eq('id', captureId)
+
+  if (error) return { ok: false, error: 'Could not discard this photo' }
+
+  revalidatePath('/dashboard/storekeeper/stock-count')
+  return { ok: true }
+}
+
 export async function removeCountItem(itemId: string): Promise<ActionResult> {
   const guard = await requireCounter()
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -323,18 +531,11 @@ export async function setProductShelf(
   const guard = await requireCounter()
   if (!guard.ok) return { ok: false, error: guard.error }
 
-  // Normalise exactly as the DB trigger does (strip spaces, uppercase) so the
-  // pattern below is checked against the value that will actually be stored.
-  const normalised = (shelfCode || '').replace(/\s+/g, '').toUpperCase()
-  // An emptied field means "location unknown", stored as NULL so that
-  // `shelf_code IS NULL` is the single test for unset everywhere.
-  const value = normalised === '' ? null : normalised
-
-  // Shelf labels are short codes like "E1" or "AA12". Reject anything else
-  // before this becomes a de facto notes field that breaks zone grouping.
-  if (value && !/^[A-Z]{1,3}\d{0,4}[A-Z]?$/.test(value)) {
-    return { ok: false, error: 'Use a shelf code like E1' }
-  }
+  // Shared with the photo-capture path so both entry points normalise and
+  // validate identically - an emptied field becomes NULL ("location unknown").
+  const shelf = normaliseShelf(shelfCode)
+  if (shelf.error) return { ok: false, error: shelf.error }
+  const value = shelf.value
 
   const adminDb = createAdminClient()
   const { data, error } = await adminDb
