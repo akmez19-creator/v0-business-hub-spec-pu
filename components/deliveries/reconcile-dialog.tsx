@@ -195,6 +195,8 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
    * the operator is reconciling day by day. Days left out are untouched.
    */
   const [selectedDates, setSelectedDates] = useState<Set<string> | null>(null)
+  /** Hide dates the file does not mention (they exist only in the system). */
+  const [datesFileOnly, setDatesFileOnly] = useState(true)
 
   const reset = useCallback(() => {
     setFile(null)
@@ -208,6 +210,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
     setSkipFields(new Set())
     setRemoveDbOnly(false)
     setSelectedDates(null)
+    setDatesFileOnly(true)
     if (fileInput.current) fileInput.current.value = ''
   }, [])
 
@@ -579,6 +582,13 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                     this file every order was entered weeks before it shipped. Tick the days to reconcile; unticked
                     days are not touched at all.
                   </p>
+                  <label className="flex items-center gap-2 text-xs whitespace-nowrap">
+                    <Checkbox
+                      checked={datesFileOnly}
+                      onCheckedChange={(v) => setDatesFileOnly(Boolean(v))}
+                    />
+                    Only days in this file
+                  </label>
                   <Button type="button" variant="outline" size="sm" onClick={() => setSelectedDates(null)}>
                     Select all
                   </Button>
@@ -609,7 +619,9 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {preview.stats.byDate.map((b) => {
+                      {preview.stats.byDate
+                        .filter((b) => !datesFileOnly || b.fileRows > 0)
+                        .map((b) => {
                         const inFile = b.fileRows > 0
                         const on = inFile && isDateOn(b.date)
                         return (
@@ -672,6 +684,13 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                     </TableBody>
                   </Table>
                 </ScrollArea>
+                {datesFileOnly && preview.stats.byDate.some((b) => b.fileRows === 0) && (
+                  <p className="pt-2 text-xs text-muted-foreground">
+                    {preview.stats.byDate.filter((b) => b.fileRows === 0).length} day(s) exist in the system for
+                    this month but are not in the file &mdash; hidden. Untick &ldquo;Only days in this file&rdquo;
+                    to see them.
+                  </p>
+                )}
               </TabsContent>
 
               <TabsContent value="updates" className="flex-1 min-h-0">
