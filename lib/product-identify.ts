@@ -241,14 +241,24 @@ export async function suggestSearchTerms(imageUrl: string): Promise<{
     return kept.length > 0 ? `${kept.join(' ')} ${base}` : null
   }
 
-  // `kind` records where a term came from, because that predicts how useful it
-  // is far better than the words themselves do.
-  const candidates: { term: string; kind: 'name' | 'brand' | 'material' | 'colour' }[] = [
-    { term: label, kind: 'name' },
-    ...(d.alternate_names || []).map(t => ({ term: t, kind: 'name' as const })),
+  /**
+   * `kind` records where a term came from, which predicts usefulness far better
+   * than the words themselves.
+   *
+   * 'label' terms are built from the object the model actually named, so they
+   * still describe the right thing. 'synonym' terms are its alternate names, and
+   * those are only loosely tied to the photo - a stovetop kettle came back with
+   * the synonym "water heater", which searched to electric wall water heaters.
+   * That is why a synonym never leads, however well-formed it looks.
+   */
+  const candidates: {
+    term: string
+    kind: 'label' | 'brand' | 'material' | 'colour' | 'synonym'
+  }[] = [
+    { term: label, kind: 'label' },
     ...(() => {
       const t = qualify(d.form_factor, label)
-      return t ? [{ term: t, kind: 'name' as const }] : []
+      return t ? [{ term: t, kind: 'label' as const }] : []
     })(),
     ...(brand ? [{ term: `${brand} ${label}`, kind: 'brand' as const }] : []),
     ...(() => {
@@ -259,6 +269,9 @@ export async function suggestSearchTerms(imageUrl: string): Promise<{
       const t = qualify(d.colour, label)
       return t ? [{ term: t, kind: 'colour' as const }] : []
     })(),
+    // Last: useful to have on hand when the label finds nothing, never the
+    // automatic search.
+    ...(d.alternate_names || []).map(t => ({ term: t, kind: 'synonym' as const })),
   ]
 
   // Case-insensitive de-duplication, first occurrence wins.
@@ -275,13 +288,19 @@ export async function suggestSearchTerms(imageUrl: string): Promise<{
 
   /**
    * Lower sorts earlier, and position 0 is what gets searched automatically.
-   * A one-word term is demoted below the multi-word ones describing the same
-   * object: it is the case that measurably returned the wrong products.
+   *
+   * Two measured effects drive this:
+   *  - a bare one-word term is too broad ("kettle" returned plastic water cups),
+   *    so it sorts below a qualified version of the same object;
+   *  - a synonym can drift to another product category entirely, so it is held
+   *    behind every term built from the label, however specific it looks.
+   * The synonym penalty outweighs the vagueness penalty deliberately: a broad
+   * term for the right object beats a precise term for the wrong one.
    */
   const rank = (c: (typeof clean)[number]) => {
     const words = c.term.split(' ').length
     const vague = words === 1 ? 4 : 0
-    const byKind = { name: 0, brand: 1, material: 2, colour: 3 }[c.kind]
+    const byKind = { label: 0, brand: 1, material: 2, colour: 3, synonym: 10 }[c.kind]
     // Beyond three words the search starts returning nothing at all.
     const tooLong = words > 3 ? 2 : 0
     return vague + byKind + tooLong
