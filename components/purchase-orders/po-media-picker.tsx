@@ -79,6 +79,18 @@ export interface MediaQueueItem {
 const proxied = (url: string) => mediaSrc(url)
 
 /** Fetch every photo and video on one listing. */
+/** Why a listing failed to load, so the UI can advise correctly. */
+type FailReason = 'provider-auth' | 'credit' | 'not-found' | 'bad-link' | 'upstream' | 'unknown'
+
+/** Carries the route's classification alongside the message. */
+class MediaError extends Error {
+  reason: FailReason
+  constructor(message: string, reason: FailReason) {
+    super(message)
+    this.reason = reason
+  }
+}
+
 async function loadMedia(link: string): Promise<MediaItem[]> {
   const res = await fetch('/api/purchase-orders/product-media', {
     method: 'POST',
@@ -86,7 +98,9 @@ async function loadMedia(link: string): Promise<MediaItem[]> {
     body: JSON.stringify({ link }),
   })
   const json = await res.json()
-  if (!json.success) throw new Error(json.error || 'Could not load listing media')
+  if (!json.success) {
+    throw new MediaError(json.error || 'Could not load listing media', (json.reason as FailReason) || 'unknown')
+  }
   return (json.media || []) as MediaItem[]
 }
 
@@ -307,6 +321,9 @@ export function PoMediaPicker({
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  // Why the current listing failed, so the advice can match the actual cause.
+  const [reason, setReason] = useState<FailReason>('unknown')
+
   // Progress of an unattended "keep everything" run.
   const [bulk, setBulk] = useState<{
     running: boolean
@@ -367,6 +384,7 @@ export function PoMediaPicker({
     const current = () => loadTicket.current === ticket
 
     setError('')
+    setReason('unknown')
     if (!link) {
       setMedia([])
       setLoading(false)
@@ -386,7 +404,10 @@ export function PoMediaPicker({
       if (current()) setMedia(items)
       return true
     } catch (e) {
-      if (current()) setError(e instanceof Error ? e.message : 'Could not load listing media')
+      if (current()) {
+        setError(e instanceof Error ? e.message : 'Could not load listing media')
+        setReason(e instanceof MediaError ? e.reason : 'unknown')
+      }
       return false
     } finally {
       // Only the newest request owns the spinner: an older one clearing it
@@ -689,9 +710,19 @@ export function PoMediaPicker({
           })
         }
         setDoneCount(c => c + 1)
-      } catch {
+      } catch (e) {
         // Left unreviewed on purpose - see the note above.
         failed.push({ key: item.excelProduct, name: item.productName })
+
+        // A provider rejection or an exhausted plan is not per-product bad
+        // luck: every remaining call will fail the same way. Stop rather than
+        // marching through the rest of the queue producing a wall of failures
+        // that hides the single real cause.
+        if (e instanceof MediaError && (e.reason === 'provider-auth' || e.reason === 'credit')) {
+          setError(e.message)
+          setReason(e.reason)
+          stopBulk.current = true
+        }
       }
 
       setBulk(b => ({ ...b, done: i - index + 1, failed: failed.map(f => f.name) }))
@@ -985,20 +1016,44 @@ export function PoMediaPicker({
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-destructive" />
             <div className="flex-1">
               <p className="text-destructive">{error}</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                If the seller has pulled this listing, paste a replacement link above - retrying the same dead URL will
-                not bring it back.
+              {/*
+                The advice has to follow the actual cause. This panel used to
+                say "the seller has pulled this listing, paste a replacement
+                link" for EVERY failure - including a provider rejecting our
+                token, where no amount of new links can help. On a 172-line
+                import that sent the reviewer hunting for replacements to fix
+                something that was never wrong with the link.
+              */}
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                {reason === 'provider-auth'
+                  ? 'This is a problem with our listing data provider, not with your link - the listing is probably fine. Pasting a new link will not help. Try again in a moment; if it keeps happening the API key or plan needs looking at.'
+                  : reason === 'credit'
+                    ? 'The listing data plan has run out of credit, so no listing can be fetched until it is topped up. Your own photos still work.'
+                    : reason === 'bad-link'
+                      ? 'That link is not a 1688 offer page, so there is nothing to fetch from it. A 1688 listing URL looks like detail.1688.com/offer/<number>.html.'
+                      : reason === 'not-found'
+                        ? 'The seller has pulled this listing, so paste a replacement link above - retrying the same dead URL will not bring it back.'
+                        : 'Retrying often clears this. If it persists, the listing may be gone - paste a replacement link, or use a photo instead.'}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
+                {/* Pointless once we know the listing is genuinely gone. */}
+                {reason !== 'not-found' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void show(effectiveLink, true)}
+                    className="bg-transparent"
+                  >
+                    Try again
+                  </Button>
+                )}
+                {/* Only the primary action when a new link can actually fix it. */}
                 <Button
-                  variant="outline"
                   size="sm"
-                  onClick={() => void show(effectiveLink, true)}
-                  className="bg-transparent"
+                  variant={reason === 'provider-auth' || reason === 'credit' ? 'secondary' : 'default'}
+                  onClick={() => setEditingLink(true)}
+                  className="gap-1.5"
                 >
-                  Try again
-                </Button>
-                <Button size="sm" onClick={() => setEditingLink(true)} className="gap-1.5">
                   <Link2 className="h-3.5 w-3.5" />
                   Use a new link
                 </Button>

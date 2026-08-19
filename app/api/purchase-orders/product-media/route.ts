@@ -133,7 +133,10 @@ export async function POST(request: Request) {
     const link = String(body?.link || '').trim()
     const offerId = offerIdFrom(link)
     if (!offerId) {
-      return NextResponse.json({ success: false, error: 'Not a recognisable 1688 listing link' }, { status: 400 })
+      return NextResponse.json(
+        { success: false, reason: 'bad-link', error: 'Not a recognisable 1688 listing link' },
+        { status: 400 },
+      )
     }
 
     const res = await fetch(
@@ -141,14 +144,62 @@ export async function POST(request: Request) {
       { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(25_000), cache: 'no-store' },
     )
     if (res.status === 439) {
-      return NextResponse.json({ success: false, error: 'No API credit left' }, { status: 402 })
+      return NextResponse.json({ success: false, reason: 'credit', error: 'No API credit left' }, { status: 402 })
     }
     const json = (await res.json().catch(() => null)) as Raw | null
-    if (!res.ok) {
-      return NextResponse.json({ success: false, error: `Listing lookup failed (HTTP ${res.status})` }, { status: 502 })
+
+    /**
+     * Tell apart "this listing is gone" from "our data provider refused the
+     * request". They demand opposite responses and were previously flattened
+     * into one message, so the UI told a reviewer to paste a replacement link
+     * for a listing that was never the problem.
+     *
+     * Verified against the live API:
+     *   pulled/unknown listing -> HTTP 200 {"code":404,"msg":"Item not found"}
+     *   bad or rejected token  -> HTTP 401 {"message":"Unauthorized"}
+     * The gateway also answers 200 with a bare {"message":...} envelope (no
+     * `code`) for plan and routing rejections, which is how the raw word
+     * "Unauthorized" used to reach the screen.
+     */
+    const upstream = apiError(json)
+    const code = String((json as Raw | null)?.code ?? '')
+    const authRejected =
+      res.status === 401 || res.status === 403 || /unauthorized|forbidden|api key|token/i.test(upstream ?? '')
+    const missing = code === '404' || /not found|item.*(deleted|removed|offline)/i.test(upstream ?? '')
+
+    if (authRejected) {
+      // Logged with the request id so a recurrence can be taken to TMAPI.
+      console.error('[v0] product-media: provider rejected the request -', {
+        httpStatus: res.status,
+        upstream,
+        requestId: (json as Raw | null)?.request_id ?? null,
+      })
+      return NextResponse.json(
+        {
+          success: false,
+          reason: 'provider-auth',
+          error: 'Our listing data provider rejected the request',
+        },
+        { status: 502 },
+      )
     }
-    const failed = apiError(json)
-    if (failed) return NextResponse.json({ success: false, error: failed }, { status: 502 })
+
+    if (missing) {
+      return NextResponse.json(
+        { success: false, reason: 'not-found', error: 'This listing is no longer on 1688' },
+        { status: 404 },
+      )
+    }
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { success: false, reason: 'upstream', error: `Listing lookup failed (HTTP ${res.status})` },
+        { status: 502 },
+      )
+    }
+    if (upstream) {
+      return NextResponse.json({ success: false, reason: 'upstream', error: upstream }, { status: 502 })
+    }
 
     const data = (json?.data ?? {}) as Raw
     const images: MediaItem[] = imagesFrom(data).map((url) => ({ url, kind: 'image' as const }))
