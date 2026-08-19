@@ -66,16 +66,19 @@ export interface FieldDiff {
 }
 
 /**
- * Identity is NAME + NUMBER + DATE.
+ * Which signals agreed. The DELIVERY DATE always agrees - matching is done one
+ * date at a time and nothing is ever paired across two dates.
  *
- * The date is part of identity, not optional: 849 file identities have more
- * than one row and 675 of those span different dates, so name+number alone
- * would merge a customer's separate orders across the month into one entry.
+ * The date cannot be dropped from identity: 849 customers have more than one
+ * row and 675 of those span different dates, so name+number alone would merge a
+ * customer's separate orders from different days into one entry.
  *
- * 'number+date' is a fallback for when the name is spelled differently on the
- * two sides but the phone and day agree, and only when it is unambiguous.
+ * 'name+date' exists because the stored phone number is not always usable -
+ * measured cases include digit typos ('581044227' vs '58104227'), country-code
+ * prefixes, and whole sentences pasted into the number column. When the name,
+ * the day and the product all agree, that is the same order.
  */
-export type MatchTier = 'name+number+date' | 'number+date'
+export type MatchTier = 'name+number+date' | 'number+date' | 'name+date'
 
 export interface PlanRow {
   rowNumber: number
@@ -264,11 +267,6 @@ export function parseQty(v: unknown): number {
  * Matching
  * ------------------------------------------------------------------ */
 
-/** Identity: who the customer is and which day. Product is NOT part of it. */
-const keyIdentity = (name: string, contact: string, date: string) => `${name}|${contact}|${date}`
-/** Fallback identity for differently-spelled names. */
-const keyPhoneDate = (contact: string, date: string) => `${contact}|${date}`
-
 /** Fields we are willing to overwrite from the spreadsheet. */
 export const UPDATABLE_FIELDS = [
   'customer_name',
@@ -402,6 +400,29 @@ function diffAgainstDb(resolved: PlanRow['resolved'], db: DbRow): FieldDiff[] {
 }
 
 /** Every one of the meaningful spreadsheet columns identical => a true duplicate line. */
+/** Untouched cell values, used only to tell a true byte-repeat from a normalised one. */
+function rawRowFingerprint(r: FileRow): string {
+  return [
+    r.rte,
+    r.entry_date,
+    r.delivery_date,
+    r.customer_name,
+    r.contact_1,
+    r.contact_2,
+    r.region,
+    r.qty,
+    r.products,
+    r.amount,
+    r.payment_method,
+    r.sales_type,
+    r.notes,
+    r.medium,
+    r.zone,
+  ]
+    .map((v) => String(v ?? ''))
+    .join('\u0001')
+}
+
 function fileRowFingerprint(r: FileRow): string {
   return [
     normDate(r.delivery_date),
@@ -425,20 +446,27 @@ function fileRowFingerprint(r: FileRow): string {
 /**
  * Build the full reconciliation plan.
  *
- * HOW MATCHING WORKS (name + number first, then product):
+ * HOW MATCHING WORKS - ONE DELIVERY DATE AT A TIME.
  *
- *  1. Group both sides by identity = name + number + date.
- *  2. Inside a shared identity, pair rows BY PRODUCT first - exact name, then
- *     variant-stripped name. This is what stops a customer's two same-day
- *     orders from being cross-matched and both looking "changed".
- *  3. Any leftovers inside that identity are paired and FLAGGED as a product
- *     mismatch. They are never written automatically.
- *  4. Still-unpaired file rows fall back to number + date, used only when
- *     exactly one candidate remains on each side.
- *  5. Whatever is still unpaired is genuinely new -> insert.
+ * The delivery date is the anchor: both sides are partitioned by it and a row
+ * is NEVER paired against a different date. Within a single date, a customer
+ * may legitimately have several separate orders, so the passes below run
+ * strongest-first and each existing row can be claimed only once:
  *
- * Each existing row can be claimed only once, so nothing is double-counted and
- * the six output buckets always sum back to the file's row count.
+ *   1. name + number + product   - the same customer, the same item
+ *   2. number + product          - the name is spelled differently
+ *   3. name + product            - the stored number is wrong or unusable
+ *   4. name + number             - same customer, DIFFERENT product -> FLAG
+ *   5. number only, unambiguous  - DIFFERENT product -> FLAG
+ *   6. name only, unambiguous    - DIFFERENT product -> FLAG
+ *   7. anything left over        - genuinely a new order -> insert
+ *
+ * Passes 1-3 anchor on the product, which is what stops a customer's two
+ * same-day orders from being cross-matched and both reported as "changed".
+ * Passes 4-6 are how an existing customer whose product does not line up gets
+ * surfaced for review instead of being silently overwritten or duplicated.
+ *
+ * The six output buckets always sum back to the file's row count.
  */
 export function buildPlan(
   fileRows: FileRow[],
@@ -470,36 +498,30 @@ export function buildPlan(
     },
   }
 
-  const push = (m: Map<string, string[]>, k: string, id: string) => {
-    const cur = m.get(k)
-    if (cur) cur.push(id)
-    else m.set(k, [id])
-  }
-
-  // ---- index the DB side by identity ----
+  // ---- index the DB side, partitioned by delivery date ----
   const byId = new Map<string, DbRow>()
-  const dbByIdentity = new Map<string, string[]>()
-  const dbByPhoneDate = new Map<string, string[]>()
+  const dbIdsByDate = new Map<string, string[]>()
   for (const d of dbRows) {
     byId.set(d.id, d)
     const date = normDate(d.delivery_date)
-    const contact = normContact(d.contact_1)
-    const name = normText(d.customer_name)
     if (!date) continue
-    if (name) push(dbByIdentity, keyIdentity(name, contact, date), d.id)
-    if (contact) push(dbByPhoneDate, keyPhoneDate(contact, date), d.id)
+    const cur = dbIdsByDate.get(date)
+    if (cur) cur.push(d.id)
+    else dbIdsByDate.set(date, [d.id])
   }
 
   /* ---- phase 1: resolve, validate, drop in-file duplicates ---- */
   interface Candidate {
     base: PlanRow
-    identity: string
-    phoneDate: string
+    date: string
+    name: string
+    contact: string
     productKey: string
     productBase: string
   }
   const candidates: Candidate[] = []
   const seenFingerprints = new Map<string, number>()
+  const rawFingerprints = new Map<string, string>()
 
   for (const row of fileRows) {
     const { resolved, productMatch, warnings } = buildResolved(row, lookup)
@@ -520,99 +542,124 @@ export function buildPlan(
     const fp = fileRowFingerprint(row)
     const firstSeen = seenFingerprints.get(fp)
     if (firstSeen !== undefined) {
-      plan.duplicates.push({ ...base, action: 'duplicate', duplicateOf: firstSeen, identical: true })
+      // `identical` distinguishes a byte-for-byte repeat from one that only
+      // matches after normalising (measured: 4 rows differ solely by
+      // 'SALES' vs 'sale'), so the UI never overstates what it dropped.
+      plan.duplicates.push({
+        ...base,
+        action: 'duplicate',
+        duplicateOf: firstSeen,
+        identical: rawFingerprints.get(fp) === rawRowFingerprint(row),
+      })
       continue
     }
     seenFingerprints.set(fp, row.rowNumber)
+    rawFingerprints.set(fp, rawRowFingerprint(row))
 
-    const contact = normContact(resolved.contact_1)
-    const date = resolved.delivery_date
     candidates.push({
       base,
-      identity: keyIdentity(normText(resolved.customer_name), contact, date),
-      phoneDate: contact ? keyPhoneDate(contact, date) : '',
+      date: resolved.delivery_date,
+      name: normText(resolved.customer_name),
+      contact: normContact(resolved.contact_1),
       productKey: normText(resolved.products),
       productBase: productBaseKey(resolved.products),
     })
   }
 
-  /* ---- phase 2: within each identity, pair by product, flag leftovers ---- */
+  /* ---- phase 2: match one delivery date at a time ---- */
   const claimed = new Set<string>()
   const pairs: { cand: Candidate; dbId: string; tier: MatchTier; productMismatch: boolean }[] = []
-  const stillUnpaired: Candidate[] = []
-
-  const fileByIdentity = new Map<string, Candidate[]>()
-  for (const c of candidates) {
-    const cur = fileByIdentity.get(c.identity)
-    if (cur) cur.push(c)
-    else fileByIdentity.set(c.identity, [c])
-  }
-
-  for (const [identity, group] of fileByIdentity) {
-    const available = (dbByIdentity.get(identity) ?? []).filter((id) => !claimed.has(id))
-
-    // pass A - identical product name
-    const afterExact: Candidate[] = []
-    for (const c of group) {
-      const i = available.findIndex((id) => normText(byId.get(id)!.products) === c.productKey)
-      if (i >= 0) {
-        const id = available.splice(i, 1)[0]
-        claimed.add(id)
-        pairs.push({ cand: c, dbId: id, tier: 'name+number+date', productMismatch: false })
-      } else afterExact.push(c)
-    }
-
-    // pass B - same product once variant suffixes are stripped
-    const afterVariant: Candidate[] = []
-    for (const c of afterExact) {
-      const i = c.productBase
-        ? available.findIndex((id) => productBaseKey(byId.get(id)!.products) === c.productBase)
-        : -1
-      if (i >= 0) {
-        const id = available.splice(i, 1)[0]
-        claimed.add(id)
-        pairs.push({ cand: c, dbId: id, tier: 'name+number+date', productMismatch: false })
-      } else afterVariant.push(c)
-    }
-
-    // pass C - same customer and day, product genuinely differs -> FLAG
-    for (const c of afterVariant) {
-      if (available.length > 0) {
-        const id = available.shift()!
-        claimed.add(id)
-        pairs.push({ cand: c, dbId: id, tier: 'name+number+date', productMismatch: true })
-      } else stillUnpaired.push(c)
-    }
-  }
-
-  /* ---- phase 3: fallback on number + date when the name is spelled differently ---- */
   const inserts: Candidate[] = []
-  for (const c of stillUnpaired) {
-    if (!c.phoneDate) {
-      inserts.push(c)
-      continue
-    }
-    const available = (dbByPhoneDate.get(c.phoneDate) ?? []).filter((id) => !claimed.has(id))
-    if (available.length !== 1) {
-      inserts.push(c)
-      continue
-    }
-    const id = available[0]
-    const db = byId.get(id)!
-    const productSame =
-      normText(db.products) === c.productKey ||
-      (c.productBase !== '' && productBaseKey(db.products) === c.productBase)
-    claimed.add(id)
-    pairs.push({ cand: c, dbId: id, tier: 'number+date', productMismatch: !productSame })
+
+  const fileByDate = new Map<string, Candidate[]>()
+  for (const c of candidates) {
+    const cur = fileByDate.get(c.date)
+    if (cur) cur.push(c)
+    else fileByDate.set(c.date, [c])
   }
 
-  /* ---- phase 4: classify every pair ---- */
+  /** Identical product text. */
+  const exactProduct = (c: Candidate, d: DbRow) => normText(d.products) === c.productKey
+  /**
+   * Same product once a variant suffix is stripped ('- Small', '- B1G1').
+   * Deliberately tried only AFTER every exact match on the date is taken: one
+   * customer bought 'Leather Patch - Small' AND '- Large' on the same day, and
+   * matching on the shared base first paired them crosswise and swapped their
+   * amounts.
+   */
+  const variantProduct = (c: Candidate, d: DbRow) =>
+    c.productBase !== '' && productBaseKey(d.products) === c.productBase
+  const sameName = (c: Candidate, d: DbRow) => c.name !== '' && c.name === normText(d.customer_name)
+  const sameNumber = (c: Candidate, d: DbRow) => c.contact !== '' && c.contact === normContact(d.contact_1)
+
+  // process dates in order so the plan reads chronologically
+  for (const date of [...fileByDate.keys()].sort()) {
+    const avail = (dbIdsByDate.get(date) ?? []).filter((id) => !claimed.has(id))
+    let remaining = fileByDate.get(date)!
+
+    /** Run one pass over the rows still unpaired on this date. */
+    const pass = (
+      tier: MatchTier,
+      productMismatch: boolean,
+      match: (c: Candidate, d: DbRow, unpaired: Set<Candidate>) => boolean,
+    ) => {
+      if (avail.length === 0) return
+      const next: Candidate[] = []
+      const unpaired = new Set(remaining)
+      for (const c of remaining) {
+        const i = avail.length ? avail.findIndex((id) => match(c, byId.get(id)!, unpaired)) : -1
+        unpaired.delete(c)
+        if (i >= 0) {
+          const id = avail.splice(i, 1)[0]
+          claimed.add(id)
+          pairs.push({ cand: c, dbId: id, tier, productMismatch })
+        } else next.push(c)
+      }
+      remaining = next
+    }
+
+    // ---- product-anchored: these are the same order ----
+    // every EXACT product match first, across all three identity strengths ...
+    pass('name+number+date', false, (c, d) => sameName(c, d) && sameNumber(c, d) && exactProduct(c, d))
+    pass('number+date', false, (c, d) => sameNumber(c, d) && exactProduct(c, d))
+    pass('name+date', false, (c, d) => sameName(c, d) && exactProduct(c, d))
+    // ... only then fall back to variant-of-the-same-product
+    pass('name+number+date', false, (c, d) => sameName(c, d) && sameNumber(c, d) && variantProduct(c, d))
+    pass('number+date', false, (c, d) => sameNumber(c, d) && variantProduct(c, d))
+    pass('name+date', false, (c, d) => sameName(c, d) && variantProduct(c, d))
+
+    // ---- same customer, product does not line up -> flag for review ----
+    pass('name+number+date', true, (c, d) => sameName(c, d) && sameNumber(c, d))
+    // number-only and name-only are weaker, so only when a single candidate
+    // remains on BOTH sides - otherwise two separate orders could be paired.
+    pass('number+date', true, (c, d, unpaired) => {
+      if (!sameNumber(c, d)) return false
+      const dbHits = avail.filter((id) => normContact(byId.get(id)!.contact_1) === c.contact).length
+      let fileHits = 0
+      for (const x of unpaired) if (x.contact === c.contact) fileHits++
+      return dbHits === 1 && fileHits === 1
+    })
+    pass('name+date', true, (c, d, unpaired) => {
+      if (!sameName(c, d)) return false
+      const dbHits = avail.filter((id) => normText(byId.get(id)!.customer_name) === c.name).length
+      let fileHits = 0
+      for (const x of unpaired) if (x.name === c.name) fileHits++
+      return dbHits === 1 && fileHits === 1
+    })
+
+    for (const c of remaining) inserts.push(c)
+  }
+
+  /* ---- phase 3: classify every pair ---- */
   for (const { cand, dbId, tier, productMismatch } of pairs) {
     const db = byId.get(dbId)!
     const diffs = diffAgainstDb(cand.base.resolved, db)
     plan.stats.matchedByTier[tier] = (plan.stats.matchedByTier[tier] ?? 0) + 1
 
-    if (productMismatch) {
+    // Hard invariant: a commit must NEVER rewrite the product of an existing
+    // entry. Even a pass that believed it had a product match is overridden
+    // here if the resulting text would change (e.g. a variant pairing).
+    if (productMismatch || diffs.some((d) => d.field === 'products')) {
       plan.flagged.push({
         ...cand.base,
         action: 'flagged',

@@ -798,6 +798,12 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold pb-2">How rows were matched</h4>
+                      <p className="pb-2 text-xs text-muted-foreground text-pretty">
+                        Every match is made within a single delivery date &mdash; nothing is ever paired across two
+                        dates. <span className="font-mono">name+number+date</span> is the strongest;{' '}
+                        <span className="font-mono">name+date</span> means the stored phone number could not be
+                        used (a typo, a country code, or text pasted into the number column).
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(preview.stats.matchedByTier).map(([tier, n]) => (
                           <Badge key={tier} variant="secondary" className="font-mono text-[10px]">
