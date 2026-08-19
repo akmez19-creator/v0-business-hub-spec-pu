@@ -134,6 +134,10 @@ export function SupplierFinder({
         sort: 'best',
       }),
     })
+    // middleware.ts answers any unauthenticated /api call with the bare body
+    // {"error":"Unauthorized"}, which as a search error reads like the
+    // marketplace rejected the query rather than "you have been signed out".
+    if (res.status === 401) throw new Error('Your session has expired - sign in again to search.')
     const json = await res.json()
     if (!json.success) throw new Error(json.error || 'Search failed')
     return (json.results || []) as SupplierHit[]

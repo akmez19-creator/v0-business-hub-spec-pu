@@ -740,7 +740,10 @@ export function PoMediaPicker({
         // luck: every remaining call will fail the same way. Stop rather than
         // marching through the rest of the queue producing a wall of failures
         // that hides the single real cause.
-        if (e instanceof MediaError && (e.reason === 'provider-auth' || e.reason === 'credit')) {
+        if (
+          e instanceof MediaError &&
+          (e.reason === 'session' || e.reason === 'provider-auth' || e.reason === 'credit')
+        ) {
           setError(e.message)
           setReason(e.reason)
           stopBulk.current = true
@@ -1047,8 +1050,10 @@ export function PoMediaPicker({
                 something that was never wrong with the link.
               */}
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                {reason === 'provider-auth'
-                  ? 'This is a problem with our listing data provider, not with your link - the listing is probably fine. Pasting a new link will not help. Try again in a moment; if it keeps happening the API key or plan needs looking at.'
+                {reason === 'session'
+                  ? 'Nothing is wrong with this listing or your link - you have simply been signed out. Sign in again in another tab, then press Try again. Everything you have already reviewed is saved.'
+                  : reason === 'provider-auth'
+                    ? 'This is a problem with our listing data provider, not with your link - the listing is probably fine. Pasting a new link will not help. Try again in a moment; if it keeps happening the API key or plan needs looking at.'
                   : reason === 'credit'
                     ? 'The listing data plan has run out of credit, so no listing can be fetched until it is topped up. Your own photos still work.'
                     : reason === 'bad-link'
@@ -1069,34 +1074,47 @@ export function PoMediaPicker({
                     Try again
                   </Button>
                 )}
-                {/* Only the primary action when a new link can actually fix it. */}
-                <Button
-                  size="sm"
-                  variant={reason === 'provider-auth' || reason === 'credit' ? 'secondary' : 'default'}
-                  onClick={() => setEditingLink(true)}
-                  className="gap-1.5"
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                  Use a new link
-                </Button>
-                {/* The usual case for a dead listing: the photo survives even
-                    though the seller is gone, so search 1688 with it. */}
-                <Button size="sm" variant="secondary" onClick={() => setFinding(true)} className="gap-1.5">
-                  <Search className="h-3.5 w-3.5" />
-                  Find by photo
-                </Button>
+                {/*
+                  Every action below goes through an authenticated API, so while
+                  the session is dead they can only fail again. Offering them
+                  invites the reviewer to try four things that cannot work
+                  instead of the one that can.
+                */}
+                {reason !== 'session' && (
+                  <>
+                    {/* Only the primary action when a new link can actually fix it. */}
+                    <Button
+                      size="sm"
+                      variant={reason === 'provider-auth' || reason === 'credit' ? 'secondary' : 'default'}
+                      onClick={() => setEditingLink(true)}
+                      className="gap-1.5"
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                      Use a new link
+                    </Button>
+                    {/* The usual case for a dead listing: the photo survives even
+                        though the seller is gone, so search 1688 with it. */}
+                    <Button size="sm" variant="secondary" onClick={() => setFinding(true)} className="gap-1.5">
+                      <Search className="h-3.5 w-3.5" />
+                      Find by photo
+                    </Button>
+                  </>
+                )}
                 {/* If the product was never on 1688, no link and no image
-                    search will help - your own photo is the only way through. */}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => fileInput.current?.click()}
-                  disabled={uploading}
-                  className="gap-1.5"
-                >
-                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  Upload your own
-                </Button>
+                    search will help - your own photo is the only way through.
+                    Uploading also needs the session, so it is hidden too. */}
+                {reason !== 'session' && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => fileInput.current?.click()}
+                    disabled={uploading}
+                    className="gap-1.5"
+                  >
+                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                    Upload your own
+                  </Button>
+                )}
               </div>
             </div>
           </div>
