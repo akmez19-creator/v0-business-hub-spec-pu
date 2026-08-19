@@ -323,14 +323,16 @@ export async function setProductShelf(
   const guard = await requireCounter()
   if (!guard.ok) return { ok: false, error: guard.error }
 
-  const trimmed = (shelfCode || '').trim()
+  // Normalise exactly as the DB trigger does (strip spaces, uppercase) so the
+  // pattern below is checked against the value that will actually be stored.
+  const normalised = (shelfCode || '').replace(/\s+/g, '').toUpperCase()
   // An emptied field means "location unknown", stored as NULL so that
   // `shelf_code IS NULL` is the single test for unset everywhere.
-  const value = trimmed === '' ? null : trimmed
+  const value = normalised === '' ? null : normalised
 
-  // Shelf labels are short codes like "E1" or "AA12". Reject anything longer
+  // Shelf labels are short codes like "E1" or "AA12". Reject anything else
   // before this becomes a de facto notes field that breaks zone grouping.
-  if (value && !/^[A-Za-z]{1,3}\s*\d{0,4}[A-Za-z]?$/.test(value)) {
+  if (value && !/^[A-Z]{1,3}\d{0,4}[A-Z]?$/.test(value)) {
     return { ok: false, error: 'Use a shelf code like E1' }
   }
 

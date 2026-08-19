@@ -77,6 +77,7 @@ import {
 import Image from 'next/image'
 import { Product, ProductStock } from '@/lib/types'
 import { InventoryImportDialog } from './inventory-import-dialog'
+import { setProductShelf } from '@/lib/stock-count-actions'
 import { mediaSrc } from '@/lib/media-url'
 
 type ViewMode = 'table' | 'grid'
@@ -333,46 +334,55 @@ export function InventoryContent({
   const [editingShelfFor, setEditingShelfFor] = useState<string | null>(null)
   const [shelfDraft, setShelfDraft] = useState('')
   const [savingShelfFor, setSavingShelfFor] = useState<string | null>(null)
+  const [shelfError, setShelfError] = useState<string | null>(null)
 
   const openShelfEditor = (product: Product) => {
     setEditingShelfFor(product.id)
     setShelfDraft(product.shelf_code || '')
+    setShelfError(null)
   }
 
   const handleSaveShelf = async (productId: string) => {
+    // Enter fires this, and the resulting blur fires it again. Without this
+    // guard the second call re-saves and can double-apply the draft.
+    if (savingShelfFor === productId || editingShelfFor !== productId) return
+
     const raw = shelfDraft.trim()
     // Mirror the DB trigger so the cell shows the stored value immediately
     // rather than flashing the raw input and correcting itself on next load.
     const normalised = raw ? raw.replace(/\s+/g, '').toUpperCase() : null
 
+    // Same shape the server action enforces - without this the table would
+    // happily store "C7C7" or a sentence, which breaks zone grouping.
+    if (normalised && !/^[A-Za-z]{1,3}\d{0,4}[A-Za-z]?$/.test(normalised)) {
+      setShelfError('Use a shelf code like E1')
+      return
+    }
+
     const current = products.find(p => p.id === productId)?.shelf_code || null
     if (normalised === current) {
       setEditingShelfFor(null)
+      setShelfError(null)
       return
     }
 
     setSavingShelfFor(productId)
     try {
-      // `zone` is a generated column - only shelf_code is written, Postgres
-      // derives the zone. Selecting it back confirms what was actually stored.
-      const { data, error } = await supabase
-        .from('products')
-        .update({ shelf_code: normalised, updated_at: new Date().toISOString() })
-        .eq('id', productId)
-        .select('shelf_code, zone')
-        .single()
-
-      if (error) throw error
+      // Goes through the guarded server action rather than writing to
+      // `products` from the browser. `zone` is never sent - Postgres derives it.
+      const res = await setProductShelf(productId, normalised)
+      if (!res.ok) {
+        setShelfError(res.error)
+        return
+      }
 
       setProducts(prev => prev.map(p =>
         p.id === productId
-          ? { ...p, shelf_code: data.shelf_code, zone: data.zone }
+          ? { ...p, shelf_code: res.data?.shelf_code ?? null, zone: res.data?.zone ?? null }
           : p
       ))
       setEditingShelfFor(null)
-    } catch (err) {
-      console.error('Shelf save failed:', err)
-      alert('Could not save shelf: ' + (err as Error).message)
+      setShelfError(null)
     } finally {
       setSavingShelfFor(null)
     }
@@ -1031,19 +1041,37 @@ export function InventoryContent({
                         so every interactive element here stops propagation. */}
                     <TableCell onClick={e => e.stopPropagation()}>
                       {editingShelfFor === product.id ? (
-                        <Input
-                          autoFocus
-                          value={shelfDraft}
-                          disabled={savingShelfFor === product.id}
-                          onChange={e => setShelfDraft(e.target.value)}
-                          onBlur={() => handleSaveShelf(product.id)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleSaveShelf(product.id)
-                            if (e.key === 'Escape') setEditingShelfFor(null)
-                          }}
-                          placeholder="E1"
-                          className="h-7 w-[74px] text-sm uppercase"
-                        />
+                        <div className="flex flex-col gap-0.5">
+                          <Input
+                            autoFocus
+                            value={shelfDraft}
+                            disabled={savingShelfFor === product.id}
+                            onChange={e => {
+                              setShelfDraft(e.target.value)
+                              if (shelfError) setShelfError(null)
+                            }}
+                            onBlur={() => handleSaveShelf(product.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                handleSaveShelf(product.id)
+                              }
+                              if (e.key === 'Escape') {
+                                setEditingShelfFor(null)
+                                setShelfError(null)
+                              }
+                            }}
+                            placeholder="E1"
+                            className={`h-7 w-[74px] text-sm uppercase ${
+                              shelfError ? 'border-destructive' : ''
+                            }`}
+                          />
+                          {shelfError && (
+                            <span className="text-[10px] leading-tight text-destructive">
+                              {shelfError}
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <button
                           onClick={() => openShelfEditor(product)}

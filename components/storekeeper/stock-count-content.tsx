@@ -631,7 +631,7 @@ export function StockCountContent({
                   visible rather than implied. */}
               {shelfInput.trim() !== '' && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  {/^[A-Za-z]{1,3}\s*\d{0,4}[A-Za-z]?$/.test(shelfInput.trim()) ? (
+                  {/^[A-Z]{1,3}\d{0,4}[A-Z]?$/.test(shelfInput.replace(/\s+/g, '').toUpperCase()) ? (
                     <>Zone {shelfInput.trim().replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3)}</>
                   ) : (
                     <span className="text-amber-400">Use a shelf code like E1</span>
