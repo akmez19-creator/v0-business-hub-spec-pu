@@ -3,6 +3,7 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import {
   buildPlan,
   normDate,
+  normText,
   UPDATABLE_FIELDS,
   LINK_FIELDS,
   type ContractorPolicy,
@@ -146,6 +147,7 @@ async function loadLookups(db: ReturnType<typeof createAdminClient>): Promise<Re
   const statusByRaw = new Map<string, string>()
   const riderByName = new Map<string, string>()
   const contractorByRider = new Map<string, string>()
+  const productByName = new Map<string, string>()
 
   // Rider names first so an explicit mapping can overwrite them below.
   for (const r of ridersResult.data ?? []) {
@@ -163,9 +165,13 @@ async function loadLookups(db: ReturnType<typeof createAdminClient>): Promise<Re
     } else if (m.mapping_type === 'rider_contractor' && m.target_id) {
       // source_value is a rider id here, not a name.
       contractorByRider.set(src, m.target_id as string)
+    } else if (m.mapping_type === 'product' && m.target_id) {
+      // normText matches how resolveProduct keys names, so a mapping saved by
+      // the older importer (which stored the raw cell) still resolves here.
+      productByName.set(normText(src), m.target_id as string)
     }
   }
-  return { statusByRaw, riderByName, contractorByRider }
+  return { statusByRaw, riderByName, contractorByRider, productByName }
 }
 
 /**

@@ -88,6 +88,12 @@ export interface ReconcileLookups {
   riderByName?: Map<string, string>
   /** Rider id -> contractor id. From import_mappings(rider_contractor) + riders.contractor_id. */
   contractorByRider?: Map<string, string>
+  /**
+   * import_mappings(product): file product name -> product id. A hand-made
+   * mapping is the operator stating this name IS that product, so it outranks
+   * every automatic guess and is honoured even under the `exact` policy.
+   */
+  productByName?: Map<string, string>
 }
 
 /** The subset of an existing delivery we need in order to compare. */
@@ -159,7 +165,7 @@ export interface PlanRow {
     rider_id: string | null
     contractor_id: string | null
   }
-  productMatch: 'exact' | 'normalized' | 'variant' | 'none'
+  productMatch: 'mapped' | 'exact' | 'normalized' | 'variant' | 'none'
   warnings: string[]
 }
 
@@ -457,8 +463,14 @@ export function buildProductLookup(products: { id: string; name: string }[]): Pr
 function resolveProduct(
   name: string | null,
   lookup: ProductLookup,
+  productByName?: Map<string, string>,
 ): { id: string | null; match: PlanRow['productMatch'] } {
   if (!name) return { id: null, match: 'none' }
+  // A saved mapping is an explicit human decision, so it wins outright - this
+  // is what lets "AirFryer - B1G1" reach a chosen product without loosening the
+  // variant guard for every other row.
+  const mapped = productByName?.get(normText(name))
+  if (mapped) return { id: mapped, match: 'mapped' }
   const exact = lookup.byName.get(normText(name))
   if (exact) return { id: exact, match: 'exact' }
   const base = productBaseKey(name)
@@ -541,15 +553,23 @@ function buildResolved(
   productPolicy: ProductPolicy = 'exact',
 ): { resolved: PlanRow['resolved']; productMatch: PlanRow['productMatch']; warnings: string[] } {
   const warnings: string[] = []
-  const product = resolveProduct(row.products, lookup)
+  const product = resolveProduct(row.products, lookup, lookups.productByName)
   const amount = parseAmount(row.amount)
   const date = normDate(row.delivery_date)
   const status = canonicalStatus(row.status, lookups.statusByRaw)
   const rider = resolveRider(row.rider, lookups)
 
-  // A product id is only trusted at the confidence the operator allowed.
+  // A product id is only trusted at the confidence the operator allowed, except
+  // for 'mapped' - the operator chose that pairing by hand, so only turning
+  // product linking off entirely discards it.
   const productIdAllowed =
-    productPolicy === 'off' ? false : productPolicy === 'variant' ? product.match !== 'none' : product.match === 'exact'
+    productPolicy === 'off'
+      ? false
+      : product.match === 'mapped'
+        ? true
+        : productPolicy === 'variant'
+          ? product.match !== 'none'
+          : product.match === 'exact'
 
   if (row.status && String(row.status).trim() !== '' && !status) {
     warnings.push(`status "${String(row.status).trim()}" is not mapped to a system status`)

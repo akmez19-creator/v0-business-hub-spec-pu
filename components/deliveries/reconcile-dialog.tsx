@@ -22,6 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { ReconcileMapping } from '@/components/deliveries/reconcile-mapping'
 import {
   AlertTriangle,
   ArrowRight,
@@ -238,6 +239,8 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
   const [selectedDates, setSelectedDates] = useState<Set<string> | null>(null)
   /** Hide dates the file does not mention (they exist only in the system). */
   const [datesFileOnly, setDatesFileOnly] = useState(true)
+  /** Controlled so the unmapped-value notices can jump to the Mapping tab. */
+  const [tab, setTab] = useState('dates')
 
   const reset = useCallback(() => {
     setFile(null)
@@ -252,6 +255,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
     setRemoveDbOnly(false)
     setSelectedDates(null)
     setDatesFileOnly(true)
+    setTab('dates')
     if (fileInput.current) fileInput.current.value = ''
   }, [])
 
@@ -437,6 +441,13 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
       return acc
     }, zero)
   }, [preview, isDateOn])
+
+  /** Distinct spreadsheet values still awaiting a mapping decision. */
+  const unmappedTotal = preview
+    ? preview.stats.statusUnmapped.length +
+      preview.stats.riderValuesTreatedAsZone.length +
+      preview.unmatchedProducts.length
+    : 0
 
   const partialRun = preview !== null && scoped.dates < fileDateBuckets.length
   const nothingSelected = preview !== null && scoped.dates === 0
@@ -692,7 +703,15 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                     <p className="text-pretty">
                       <span className="text-amber-600">Unrecognised status:</span>{' '}
                       <span className="font-mono">{preview.stats.statusUnmapped.join(', ')}</span> &mdash; left
-                      unchanged. Map these in the importer to apply them.
+                      unchanged.{' '}
+                      <button
+                        type="button"
+                        onClick={() => setTab('mapping')}
+                        className="underline underline-offset-2 hover:text-foreground"
+                      >
+                        Map them
+                      </button>{' '}
+                      to apply them.
                     </p>
                   )}
                   {/*
@@ -713,7 +732,15 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                               ` +${preview.stats.riderValuesTreatedAsZone.length - 6}`}
                             )
                           </span>{' '}
-                          &mdash; kept as the delivery zone. No contractor assignments were touched.
+                          &mdash; kept as the delivery zone. No contractor assignments were touched.{' '}
+                          <button
+                            type="button"
+                            onClick={() => setTab('mapping')}
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            Map any that are people
+                          </button>
+                          .
                         </>
                       ) : (
                         <>
@@ -723,8 +750,15 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                           </span>
                           {preview.stats.riderValuesTreatedAsZone.length > 25 &&
                             ` +${preview.stats.riderValuesTreatedAsZone.length - 25} more`}{' '}
-                          &mdash; kept as zones, so no contractor was linked. If one of these is a person, check the
-                          spelling against the riders list.
+                          &mdash; kept as zones, so no contractor was linked. If one of these is a person,{' '}
+                          <button
+                            type="button"
+                            onClick={() => setTab('mapping')}
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            map it to a rider
+                          </button>
+                          .
                         </>
                       )}
                     </p>
@@ -751,7 +785,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
               </Alert>
             )}
 
-            <Tabs defaultValue="dates" className="flex-1 min-h-0 flex flex-col">
+            <Tabs value={tab} onValueChange={setTab} className="flex-1 min-h-0 flex flex-col">
               <TabsList className="flex-wrap h-auto">
                 <TabsTrigger value="dates">
                   Delivery dates ({scoped.dates}/{fileDateBuckets.length})
@@ -765,6 +799,9 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 {preview.stats.blocked > 0 && (
                   <TabsTrigger value="protected">Protected ({preview.stats.blocked})</TabsTrigger>
                 )}
+                <TabsTrigger value="mapping">
+                  Mapping{unmappedTotal > 0 ? ` (${unmappedTotal})` : ''}
+                </TabsTrigger>
                 <TabsTrigger value="quality">Data quality</TabsTrigger>
               </TabsList>
 
@@ -1210,7 +1247,15 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 <p className="pb-3 text-sm text-muted-foreground">
                   {preview.stats.productsUnmatched.toLocaleString()} rows name a product that is not in the catalogue,
                   across {preview.unmatchedProducts.length} distinct names. Those rows still import — they simply stay
-                  unlinked from stock until the product exists.
+                  unlinked from stock until the product exists.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setTab('mapping')}
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    Map them to catalogue products
+                  </button>{' '}
+                  to link them now.
                 </p>
                 <ScrollArea className="h-[38vh] rounded-md border">
                   <Table>
@@ -1230,6 +1275,19 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                     </TableBody>
                   </Table>
                 </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="mapping" className="flex-1 min-h-0">
+                <ReconcileMapping
+                  statusValues={preview.stats.statusUnmapped}
+                  riderValues={preview.stats.riderValuesTreatedAsZone}
+                  productValues={preview.unmatchedProducts}
+                  disabled={busy}
+                  // Saved mappings only change the outcome once the file is
+                  // compared again, so re-run the preview rather than leaving
+                  // stale counts on screen.
+                  onSaved={() => call('preview')}
+                />
               </TabsContent>
 
               <TabsContent value="quality" className="flex-1 min-h-0">
