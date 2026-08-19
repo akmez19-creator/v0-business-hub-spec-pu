@@ -68,7 +68,7 @@ function summarise(plan: ReconcilePlan) {
   const productWarnings = new Map<string, number>()
   const warningCounts: Record<string, number> = {}
   const fieldCounts: Record<string, number> = {}
-  for (const r of [...plan.inserts, ...plan.updates, ...plan.unchanged]) {
+  for (const r of [...plan.inserts, ...plan.updates, ...plan.unchanged, ...plan.flagged]) {
     for (const w of r.warnings) warningCounts[w] = (warningCounts[w] ?? 0) + 1
     if (r.productMatch === 'none' && r.resolved.products) {
       productWarnings.set(r.resolved.products, (productWarnings.get(r.resolved.products) ?? 0) + 1)
@@ -109,6 +109,21 @@ function summarise(plan: ReconcilePlan) {
         customer: r.resolved.customer_name,
         date: r.resolved.delivery_date,
         diffs: r.diffs,
+      })),
+      // Product mismatches on an identical name+number+date. Review only -
+      // these are never written by a commit.
+      flagged: plan.flagged.slice(0, SAMPLE).map((r) => ({
+        rowNumber: r.rowNumber,
+        dbId: r.dbId,
+        tier: r.tier,
+        customer: r.resolved.customer_name,
+        contact: r.resolved.contact_1,
+        date: r.resolved.delivery_date,
+        fileProduct: r.resolved.products,
+        dbProduct: r.dbProducts,
+        fileAmount: r.resolved.amount,
+        dbAmount: r.dbAmount,
+        otherDiffs: r.diffs.filter((d) => d.field !== 'products'),
       })),
       duplicates: plan.duplicates.slice(0, SAMPLE).map((r) => ({
         rowNumber: r.rowNumber,
@@ -334,7 +349,10 @@ export async function POST(request: Request) {
     .update({
       successful_rows: inserted + updated,
       failed_rows: errors.length,
-      skipped_rows: plan.stats.duplicates + plan.stats.skipped + plan.stats.unchanged,
+      // flagged rows are intentionally held back for review, so they count as
+      // "not applied" rather than as failures.
+      skipped_rows:
+        plan.stats.duplicates + plan.stats.skipped + plan.stats.unchanged + plan.stats.flagged,
       archived_rows: archived,
       deleted_rows: removed,
       status: errors.length ? 'completed_with_errors' : 'completed',
@@ -359,6 +377,7 @@ export async function POST(request: Request) {
     archived,
     removed,
     unchanged: plan.stats.unchanged,
+    flagged: plan.stats.flagged,
     duplicates: plan.stats.duplicates,
     skipped: plan.stats.skipped,
     errors: errors.slice(0, 25),

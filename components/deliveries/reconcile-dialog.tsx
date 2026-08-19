@@ -81,6 +81,7 @@ interface PreviewResponse {
     inserts: number
     updates: number
     unchanged: number
+    flagged: number
     duplicates: number
     dbOnly: number
     skipped: number
@@ -105,6 +106,19 @@ interface PreviewResponse {
       warnings: string[]
     }[]
     updates: { rowNumber: number; dbId: string; tier: string; customer: string | null; date: string | null; diffs: Diff[] }[]
+    flagged: {
+      rowNumber: number
+      dbId: string
+      tier: string
+      customer: string | null
+      contact: string | null
+      date: string | null
+      fileProduct: string | null
+      dbProduct: string | null
+      fileAmount: number
+      dbAmount: number | null
+      otherDiffs: Diff[]
+    }[]
     duplicates: { rowNumber: number; duplicateOf: number; customer: string | null; product: string | null; amount: number; date: string | null }[]
     dbOnly: { id: string; delivery_date: string | null; customer_name: string | null; contact_1: string | null; products: string | null; amount: number | null; hasAssignment: boolean; status: string | null }[]
     skipped: { rowNumber: number; reason: string }[]
@@ -118,6 +132,7 @@ interface CommitResponse {
   archived: number
   removed: number
   unchanged: number
+  flagged: number
   duplicates: number
   skipped: number
   errors: string[]
@@ -386,14 +401,27 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
 
         {stage === 'review' && preview && (
           <div className="flex-1 min-h-0 flex flex-col gap-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
               <SummaryCard label="To add" value={preview.stats.inserts} tone="add" icon={<Plus className="h-4 w-4" />} />
               <SummaryCard label="To update" value={preview.stats.updates} tone="change" icon={<ArrowRight className="h-4 w-4" />} />
               <SummaryCard label="Already correct" value={preview.stats.unchanged} tone="quiet" icon={<CheckCircle2 className="h-4 w-4" />} />
+              <SummaryCard label="Product conflict" value={preview.stats.flagged} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
               <SummaryCard label="Duplicate lines" value={preview.stats.duplicates} tone="quiet" icon={<Minus className="h-4 w-4" />} />
               <SummaryCard label="Only in system" value={preview.stats.dbOnly} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
               <SummaryCard label="Unreadable" value={preview.stats.skipped} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
             </div>
+
+            {preview.stats.flagged > 0 && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <p className="text-pretty">
+                  {preview.stats.flagged.toLocaleString()} row
+                  {preview.stats.flagged === 1 ? '' : 's'} match an existing entry on customer name, phone
+                  and date but name a <strong>different product</strong>. These are never written
+                  automatically &mdash; open the Product conflicts tab and fix them by hand.
+                </p>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border p-4">
               <label className="flex items-center gap-2 text-sm">
@@ -445,6 +473,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
               <TabsList className="flex-wrap h-auto">
                 <TabsTrigger value="updates">Updates ({preview.stats.updates})</TabsTrigger>
                 <TabsTrigger value="inserts">New rows ({preview.stats.inserts})</TabsTrigger>
+                <TabsTrigger value="flagged">Product conflicts ({preview.stats.flagged})</TabsTrigger>
                 <TabsTrigger value="dbonly">Only in system ({preview.stats.dbOnly})</TabsTrigger>
                 <TabsTrigger value="dupes">Duplicates ({preview.stats.duplicates})</TabsTrigger>
                 <TabsTrigger value="products">Products ({preview.unmatchedProducts.length})</TabsTrigger>
@@ -574,6 +603,71 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                     </TableBody>
                   </Table>
                 </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="flagged" className="flex-1 min-h-0">
+                <p className="pb-3 text-sm text-muted-foreground">
+                  Same customer name, same phone number, same date &mdash; but a different product. Either the product
+                  was corrected, or these are two separate orders that only look alike. Nothing here is written on
+                  commit.
+                </p>
+                {preview.samples.flagged.length === 0 ? (
+                  <div className="flex h-[38vh] items-center justify-center rounded-md border">
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-4 w-4" />
+                      No product conflicts. Every matched entry names the same product on both sides.
+                    </p>
+                  </div>
+                ) : (
+                  <ScrollArea className="h-[38vh] rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-16">Row</TableHead>
+                          <TableHead className="w-28">Date</TableHead>
+                          <TableHead>Customer</TableHead>
+                          <TableHead className="w-32">Phone</TableHead>
+                          <TableHead>In the file</TableHead>
+                          <TableHead>In the system</TableHead>
+                          <TableHead className="w-40">Other changes</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {preview.samples.flagged.map((f) => (
+                          <TableRow key={`${f.rowNumber}-${f.dbId}`}>
+                            <TableCell className="font-mono text-xs text-muted-foreground">{f.rowNumber}</TableCell>
+                            <TableCell className="font-mono text-xs">{f.date}</TableCell>
+                            <TableCell className="text-sm">{f.customer}</TableCell>
+                            <TableCell className="font-mono text-xs">{f.contact}</TableCell>
+                            <TableCell className="text-sm">
+                              {f.fileProduct}
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                @ {f.fileAmount.toLocaleString()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {f.dbProduct}
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                @ {(f.dbAmount ?? 0).toLocaleString()}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {f.otherDiffs.length === 0
+                                ? '—'
+                                : f.otherDiffs.map((d) => d.field).join(', ')}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                )}
+                {preview.stats.flagged > preview.samples.flagged.length && (
+                  <p className="pt-2 text-xs text-muted-foreground">
+                    Showing the first {preview.samples.flagged.length.toLocaleString()} of{' '}
+                    {preview.stats.flagged.toLocaleString()}.
+                  </p>
+                )}
               </TabsContent>
 
               <TabsContent value="dbonly" className="flex-1 min-h-0">

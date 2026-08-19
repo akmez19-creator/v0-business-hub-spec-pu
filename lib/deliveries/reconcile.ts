@@ -65,7 +65,17 @@ export interface FieldDiff {
   to: unknown
 }
 
-export type MatchTier = 'contact+date+product+amount' | 'contact+date+product' | 'name+date+product' | 'contact+date'
+/**
+ * Identity is NAME + NUMBER + DATE.
+ *
+ * The date is part of identity, not optional: 849 file identities have more
+ * than one row and 675 of those span different dates, so name+number alone
+ * would merge a customer's separate orders across the month into one entry.
+ *
+ * 'number+date' is a fallback for when the name is spelled differently on the
+ * two sides but the phone and day agree, and only when it is unambiguous.
+ */
+export type MatchTier = 'name+number+date' | 'number+date'
 
 export interface PlanRow {
   rowNumber: number
@@ -106,6 +116,21 @@ export interface UnchangedPlanRow extends PlanRow {
   dbId: string
   tier: MatchTier
 }
+/**
+ * Same customer (name + number) on the same day, but the product does not
+ * match the existing entry. NEVER written automatically - a product change is
+ * either a genuine correction or a sign the two rows are actually different
+ * orders, and only a human can tell which.
+ */
+export interface FlaggedPlanRow extends PlanRow {
+  action: 'flagged'
+  dbId: string
+  tier: MatchTier
+  reason: 'product mismatch'
+  dbProducts: string | null
+  dbAmount: number | null
+  diffs: FieldDiff[]
+}
 export interface DuplicatePlanRow extends PlanRow {
   action: 'duplicate'
   /** Row number of the row inside the file this one duplicates. */
@@ -129,6 +154,7 @@ export interface ReconcilePlan {
   inserts: InsertPlanRow[]
   updates: UpdatePlanRow[]
   unchanged: UnchangedPlanRow[]
+  flagged: FlaggedPlanRow[]
   duplicates: DuplicatePlanRow[]
   dbOnly: DbOnlyRow[]
   skipped: { rowNumber: number; reason: string }[]
@@ -138,6 +164,7 @@ export interface ReconcilePlan {
     inserts: number
     updates: number
     unchanged: number
+    flagged: number
     duplicates: number
     dbOnly: number
     skipped: number
@@ -237,15 +264,10 @@ export function parseQty(v: unknown): number {
  * Matching
  * ------------------------------------------------------------------ */
 
-const keyContactDateProductAmount = (
-  contact: string,
-  date: string,
-  product: string,
-  amount: number,
-) => `${contact}|${date}|${product}|${amount}`
-const keyContactDateProduct = (contact: string, date: string, product: string) => `${contact}|${date}|${product}`
-const keyNameDateProduct = (name: string, date: string, product: string) => `${name}|${date}|${product}`
-const keyContactDate = (contact: string, date: string) => `${contact}|${date}`
+/** Identity: who the customer is and which day. Product is NOT part of it. */
+const keyIdentity = (name: string, contact: string, date: string) => `${name}|${contact}|${date}`
+/** Fallback identity for differently-spelled names. */
+const keyPhoneDate = (contact: string, date: string) => `${contact}|${date}`
 
 /** Fields we are willing to overwrite from the spreadsheet. */
 export const UPDATABLE_FIELDS = [
@@ -403,11 +425,20 @@ function fileRowFingerprint(r: FileRow): string {
 /**
  * Build the full reconciliation plan.
  *
- * Matching runs in tiers, strongest first, and each existing row can only be
- * claimed once. `contact+date` alone is deliberately the LAST resort and only
- * used when the key is unique on both sides: 377 file rows share a
- * contact+date, but most are one customer buying several different products
- * that day, so treating that key as identity would wrongly merge real orders.
+ * HOW MATCHING WORKS (name + number first, then product):
+ *
+ *  1. Group both sides by identity = name + number + date.
+ *  2. Inside a shared identity, pair rows BY PRODUCT first - exact name, then
+ *     variant-stripped name. This is what stops a customer's two same-day
+ *     orders from being cross-matched and both looking "changed".
+ *  3. Any leftovers inside that identity are paired and FLAGGED as a product
+ *     mismatch. They are never written automatically.
+ *  4. Still-unpaired file rows fall back to number + date, used only when
+ *     exactly one candidate remains on each side.
+ *  5. Whatever is still unpaired is genuinely new -> insert.
+ *
+ * Each existing row can be claimed only once, so nothing is double-counted and
+ * the six output buckets always sum back to the file's row count.
  */
 export function buildPlan(
   fileRows: FileRow[],
@@ -419,6 +450,7 @@ export function buildPlan(
     inserts: [],
     updates: [],
     unchanged: [],
+    flagged: [],
     duplicates: [],
     dbOnly: [],
     skipped: [],
@@ -428,6 +460,7 @@ export function buildPlan(
       inserts: 0,
       updates: 0,
       unchanged: 0,
+      flagged: 0,
       duplicates: 0,
       dbOnly: 0,
       skipped: 0,
@@ -437,39 +470,35 @@ export function buildPlan(
     },
   }
 
-  // ---- index the DB side, tier by tier ----
-  const claimed = new Set<string>()
-  const byId = new Map<string, DbRow>()
-  const t1 = new Map<string, string[]>()
-  const t2 = new Map<string, string[]>()
-  const t3 = new Map<string, string[]>()
-  const t4 = new Map<string, string[]>()
   const push = (m: Map<string, string[]>, k: string, id: string) => {
     const cur = m.get(k)
     if (cur) cur.push(id)
     else m.set(k, [id])
   }
+
+  // ---- index the DB side by identity ----
+  const byId = new Map<string, DbRow>()
+  const dbByIdentity = new Map<string, string[]>()
+  const dbByPhoneDate = new Map<string, string[]>()
   for (const d of dbRows) {
     byId.set(d.id, d)
     const date = normDate(d.delivery_date)
     const contact = normContact(d.contact_1)
-    const product = normText(d.products)
     const name = normText(d.customer_name)
-    if (contact && date) {
-      push(t1, keyContactDateProductAmount(contact, date, product, Number(d.amount ?? 0)), d.id)
-      push(t2, keyContactDateProduct(contact, date, product), d.id)
-      push(t4, keyContactDate(contact, date), d.id)
-    }
-    if (name && date) push(t3, keyNameDateProduct(name, date, product), d.id)
+    if (!date) continue
+    if (name) push(dbByIdentity, keyIdentity(name, contact, date), d.id)
+    if (contact) push(dbByPhoneDate, keyPhoneDate(contact, date), d.id)
   }
 
-  const take = (m: Map<string, string[]>, k: string): string | null => {
-    const ids = m.get(k)
-    if (!ids) return null
-    for (const id of ids) if (!claimed.has(id)) return id
-    return null
+  /* ---- phase 1: resolve, validate, drop in-file duplicates ---- */
+  interface Candidate {
+    base: PlanRow
+    identity: string
+    phoneDate: string
+    productKey: string
+    productBase: string
   }
-
+  const candidates: Candidate[] = []
   const seenFingerprints = new Map<string, number>()
 
   for (const row of fileRows) {
@@ -488,7 +517,6 @@ export function buildPlan(
     plan.stats.fileAmountTotal += resolved.amount
     if (productMatch === 'none' && resolved.products) plan.stats.productsUnmatched++
 
-    // in-file duplicate?
     const fp = fileRowFingerprint(row)
     const firstSeen = seenFingerprints.get(fp)
     if (firstSeen !== undefined) {
@@ -499,44 +527,117 @@ export function buildPlan(
 
     const contact = normContact(resolved.contact_1)
     const date = resolved.delivery_date
-    const product = normText(resolved.products)
-    const name = normText(resolved.customer_name)
+    candidates.push({
+      base,
+      identity: keyIdentity(normText(resolved.customer_name), contact, date),
+      phoneDate: contact ? keyPhoneDate(contact, date) : '',
+      productKey: normText(resolved.products),
+      productBase: productBaseKey(resolved.products),
+    })
+  }
 
-    let dbId: string | null = null
-    let tier: MatchTier | null = null
-    if (contact) {
-      dbId = take(t1, keyContactDateProductAmount(contact, date, product, resolved.amount))
-      if (dbId) tier = 'contact+date+product+amount'
-      if (!dbId) {
-        dbId = take(t2, keyContactDateProduct(contact, date, product))
-        if (dbId) tier = 'contact+date+product'
-      }
-    }
-    if (!dbId && name) {
-      dbId = take(t3, keyNameDateProduct(name, date, product))
-      if (dbId) tier = 'name+date+product'
-    }
-    if (!dbId && contact) {
-      // last resort, and only when unambiguous on both sides
-      const k = keyContactDate(contact, date)
-      const candidates = (t4.get(k) ?? []).filter((id) => !claimed.has(id))
-      if (candidates.length === 1) {
-        dbId = candidates[0]
-        tier = 'contact+date'
-      }
+  /* ---- phase 2: within each identity, pair by product, flag leftovers ---- */
+  const claimed = new Set<string>()
+  const pairs: { cand: Candidate; dbId: string; tier: MatchTier; productMismatch: boolean }[] = []
+  const stillUnpaired: Candidate[] = []
+
+  const fileByIdentity = new Map<string, Candidate[]>()
+  for (const c of candidates) {
+    const cur = fileByIdentity.get(c.identity)
+    if (cur) cur.push(c)
+    else fileByIdentity.set(c.identity, [c])
+  }
+
+  for (const [identity, group] of fileByIdentity) {
+    const available = (dbByIdentity.get(identity) ?? []).filter((id) => !claimed.has(id))
+
+    // pass A - identical product name
+    const afterExact: Candidate[] = []
+    for (const c of group) {
+      const i = available.findIndex((id) => normText(byId.get(id)!.products) === c.productKey)
+      if (i >= 0) {
+        const id = available.splice(i, 1)[0]
+        claimed.add(id)
+        pairs.push({ cand: c, dbId: id, tier: 'name+number+date', productMismatch: false })
+      } else afterExact.push(c)
     }
 
-    if (dbId && tier) {
-      claimed.add(dbId)
-      plan.stats.matchedByTier[tier] = (plan.stats.matchedByTier[tier] ?? 0) + 1
-      const db = byId.get(dbId)!
-      const diffs = diffAgainstDb(resolved, db)
-      if (diffs.length) plan.updates.push({ ...base, action: 'update', dbId, tier, diffs })
-      else plan.unchanged.push({ ...base, action: 'unchanged', dbId, tier })
-    } else {
-      plan.inserts.push({ ...base, action: 'insert' })
+    // pass B - same product once variant suffixes are stripped
+    const afterVariant: Candidate[] = []
+    for (const c of afterExact) {
+      const i = c.productBase
+        ? available.findIndex((id) => productBaseKey(byId.get(id)!.products) === c.productBase)
+        : -1
+      if (i >= 0) {
+        const id = available.splice(i, 1)[0]
+        claimed.add(id)
+        pairs.push({ cand: c, dbId: id, tier: 'name+number+date', productMismatch: false })
+      } else afterVariant.push(c)
+    }
+
+    // pass C - same customer and day, product genuinely differs -> FLAG
+    for (const c of afterVariant) {
+      if (available.length > 0) {
+        const id = available.shift()!
+        claimed.add(id)
+        pairs.push({ cand: c, dbId: id, tier: 'name+number+date', productMismatch: true })
+      } else stillUnpaired.push(c)
     }
   }
+
+  /* ---- phase 3: fallback on number + date when the name is spelled differently ---- */
+  const inserts: Candidate[] = []
+  for (const c of stillUnpaired) {
+    if (!c.phoneDate) {
+      inserts.push(c)
+      continue
+    }
+    const available = (dbByPhoneDate.get(c.phoneDate) ?? []).filter((id) => !claimed.has(id))
+    if (available.length !== 1) {
+      inserts.push(c)
+      continue
+    }
+    const id = available[0]
+    const db = byId.get(id)!
+    const productSame =
+      normText(db.products) === c.productKey ||
+      (c.productBase !== '' && productBaseKey(db.products) === c.productBase)
+    claimed.add(id)
+    pairs.push({ cand: c, dbId: id, tier: 'number+date', productMismatch: !productSame })
+  }
+
+  /* ---- phase 4: classify every pair ---- */
+  for (const { cand, dbId, tier, productMismatch } of pairs) {
+    const db = byId.get(dbId)!
+    const diffs = diffAgainstDb(cand.base.resolved, db)
+    plan.stats.matchedByTier[tier] = (plan.stats.matchedByTier[tier] ?? 0) + 1
+
+    if (productMismatch) {
+      plan.flagged.push({
+        ...cand.base,
+        action: 'flagged',
+        dbId,
+        tier,
+        reason: 'product mismatch',
+        dbProducts: db.products,
+        dbAmount: db.amount,
+        diffs,
+      })
+      cand.base.warnings.push(`product differs from the existing entry ("${db.products ?? '-'}")`)
+    } else if (diffs.length) {
+      plan.updates.push({ ...cand.base, action: 'update', dbId, tier, diffs })
+    } else {
+      plan.unchanged.push({ ...cand.base, action: 'unchanged', dbId, tier })
+    }
+  }
+  for (const c of inserts) plan.inserts.push({ ...c.base, action: 'insert' })
+
+  // keep everything in spreadsheet order so the UI lines up with the file
+  const byRow = (a: { rowNumber: number }, b: { rowNumber: number }) => a.rowNumber - b.rowNumber
+  plan.inserts.sort(byRow)
+  plan.updates.sort(byRow)
+  plan.unchanged.sort(byRow)
+  plan.flagged.sort(byRow)
 
   for (const d of dbRows) {
     if (claimed.has(d.id)) continue
@@ -555,6 +656,7 @@ export function buildPlan(
   plan.stats.inserts = plan.inserts.length
   plan.stats.updates = plan.updates.length
   plan.stats.unchanged = plan.unchanged.length
+  plan.stats.flagged = plan.flagged.length
   plan.stats.duplicates = plan.duplicates.length
   plan.stats.dbOnly = plan.dbOnly.length
   plan.stats.skipped = plan.skipped.length
