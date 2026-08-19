@@ -177,14 +177,22 @@ async function loadLookups(db: ReturnType<typeof createAdminClient>): Promise<Re
  * `zone`, which is how that column behaved before. This is what stops a route
  * label from ever being written into `rider_id`.
  */
-function classifyRiderColumn(rows: FileRow[], lookups: ReconcileLookups): void {
+function classifyRiderColumn(rows: FileRow[], lookups: ReconcileLookups): string[] {
+  const routedToZone = new Set<string>()
   for (const row of rows) {
     const raw = (row as unknown as Record<string, unknown>).rider_raw
     const value = raw === null || raw === undefined ? '' : String(raw).trim()
     if (!value) continue
-    if (lookups.riderByName?.has(value.toLowerCase())) row.rider = value
-    else if (!row.zone) row.zone = value
+    if (lookups.riderByName?.has(value.toLowerCase())) {
+      row.rider = value
+    } else {
+      // Not a known rider, so it is treated as a route label. Reported back so a
+      // misspelled rider name cannot disappear into `zone` unnoticed.
+      routedToZone.add(value)
+      if (!row.zone) row.zone = value
+    }
   }
+  return [...routedToZone].sort()
 }
 
 function summarise(plan: ReconcilePlan) {
@@ -322,6 +330,7 @@ export async function POST(request: Request) {
   const contractorPolicy: ContractorPolicy = options.contractorPolicy ?? 'fill'
 
   let plan: ReconcilePlan
+  let riderValuesTreatedAsZone: string[] = []
   try {
     const [dbRows, productsResult, lookups] = await Promise.all([
       loadDbRows(db, start, end),
@@ -330,7 +339,7 @@ export async function POST(request: Request) {
     ])
     if (productsResult.error) throw new Error(`loading products: ${productsResult.error.message}`)
     // Needs the rider names, so it can only run once the lookups are loaded.
-    classifyRiderColumn(rows, lookups)
+    riderValuesTreatedAsZone = classifyRiderColumn(rows, lookups)
     plan = buildPlan(rows, dbRows, (productsResult.data ?? []) as { id: string; name: string }[], {
       dates: requestedDates ?? undefined,
       month,
@@ -348,7 +357,15 @@ export async function POST(request: Request) {
   const scopedDates = requestedDates ?? fileDates
 
   if (mode === 'preview') {
-    return NextResponse.json({ month, mode, fileDates, scopedDates, ...summarise(plan) })
+    const summary = summarise(plan)
+    return NextResponse.json({
+      month,
+      mode,
+      fileDates,
+      scopedDates,
+      ...summary,
+      stats: { ...summary.stats, riderValuesTreatedAsZone },
+    })
   }
 
   /* ---------------- commit ---------------- */

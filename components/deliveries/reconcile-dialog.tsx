@@ -117,6 +117,8 @@ interface PreviewResponse {
     blocked: number
     statusUnmapped: string[]
     ridersUnmapped: string[]
+    /** Rider-column values that were not known riders, so became route labels. */
+    riderValuesTreatedAsZone: string[]
     matchedByTier: Record<string, number>
     fileAmountTotal: number
     byDate: DateBucket[]
@@ -684,7 +686,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 </div>
               </div>
 
-              {(preview.stats.statusUnmapped.length > 0 || preview.stats.ridersUnmapped.length > 0) && (
+              {(preview.stats.statusUnmapped.length > 0 || preview.stats.riderValuesTreatedAsZone.length > 0) && (
                 <div className="mt-3 flex flex-col gap-1.5 border-t pt-3 text-xs">
                   {preview.stats.statusUnmapped.length > 0 && (
                     <p className="text-pretty">
@@ -693,13 +695,38 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                       unchanged. Map these in the importer to apply them.
                     </p>
                   )}
-                  {preview.stats.ridersUnmapped.length > 0 && (
+                  {/*
+                    Tone depends on whether the column is MIXED. If nothing matched a
+                    rider the column is simply this month's route column (COMPILE
+                    AUGUST is all zones), which is normal and not a warning. If some
+                    values did match, the leftovers are worth a second look because a
+                    misspelled name loses its assignment.
+                  */}
+                  {preview.stats.riderValuesTreatedAsZone.length > 0 && (
                     <p className="text-pretty">
-                      <span className="text-amber-600">Unrecognised rider:</span>{' '}
-                      <span className="font-mono">{preview.stats.ridersUnmapped.slice(0, 25).join(', ')}</span>
-                      {preview.stats.ridersUnmapped.length > 25 &&
-                        ` +${preview.stats.ridersUnmapped.length - 25} more`}{' '}
-                      &mdash; no contractor linked.
+                      {preview.stats.contractorLinks === 0 ? (
+                        <>
+                          <span className="text-muted-foreground">Rider column holds routes, not people</span>{' '}
+                          <span className="font-mono">
+                            ({preview.stats.riderValuesTreatedAsZone.slice(0, 6).join(', ')}
+                            {preview.stats.riderValuesTreatedAsZone.length > 6 &&
+                              ` +${preview.stats.riderValuesTreatedAsZone.length - 6}`}
+                            )
+                          </span>{' '}
+                          &mdash; kept as the delivery zone. No contractor assignments were touched.
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-amber-600">Some rider values matched no one:</span>{' '}
+                          <span className="font-mono">
+                            {preview.stats.riderValuesTreatedAsZone.slice(0, 25).join(', ')}
+                          </span>
+                          {preview.stats.riderValuesTreatedAsZone.length > 25 &&
+                            ` +${preview.stats.riderValuesTreatedAsZone.length - 25} more`}{' '}
+                          &mdash; kept as zones, so no contractor was linked. If one of these is a person, check the
+                          spelling against the riders list.
+                        </>
+                      )}
                     </p>
                   )}
                 </div>
