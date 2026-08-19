@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         status: 'unmatched',
         label: null,
+        names: [],
         candidates: [],
         error: 'Could not analyse the photo',
       })
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
   }
   // Already sorted out by a human - never overwrite their decision.
   if (capture.status === 'resolved') {
-    return NextResponse.json({ status: 'resolved', label: null, candidates: [] })
+    return NextResponse.json({ status: 'resolved', label: null, names: [], candidates: [] })
   }
 
   try {
@@ -100,6 +101,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       status: 'unmatched',
       label: null,
+      names: [],
       candidates: [],
       error: 'Could not analyse the photo',
     })

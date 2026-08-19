@@ -391,7 +391,31 @@ async function verifyVisually(
 interface AnalysisResult {
   status: 'suggested' | 'unmatched'
   label: string | null
+  /**
+   * Every name the vision pass thinks this object goes by, label first.
+   *
+   * Surfaced because the model always forms an opinion about WHAT the thing is,
+   * even when it cannot tie it to a catalogue row - and throwing that away left
+   * the storekeeper with a dead end and an empty search box. These drive the
+   * by-hand picker instead.
+   */
+  names: string[]
   candidates: MatchCandidate[]
+}
+
+/** Label first, de-duplicated case-insensitively, blanks dropped. */
+function collectNames(description: PhotoDescription): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const name of [description.label, ...description.alternate_names]) {
+    const trimmed = (name || '').trim()
+    if (trimmed.length < 2) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(trimmed)
+  }
+  return out
 }
 
 /**
@@ -424,7 +448,12 @@ export async function analysePhoto(
   // Nothing even vaguely similar in the catalogue - say so plainly rather than
   // offering the least-bad row.
   if (!shortlist.length) {
-    return { status: 'unmatched', label: description.label, candidates: [] }
+    return {
+      status: 'unmatched',
+      label: description.label,
+      names: collectNames(description),
+      candidates: [],
+    }
   }
 
   const verdicts = await verifyVisually(photo, shortlist)
@@ -462,6 +491,7 @@ export async function analysePhoto(
   return {
     status: best && best.confidence >= MATCH_CONFIDENCE_FLOOR ? 'suggested' : 'unmatched',
     label: description.label,
+    names: collectNames(description),
     candidates,
   }
 }

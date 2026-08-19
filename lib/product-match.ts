@@ -204,3 +204,66 @@ export function shortlistProducts(
 export function textOnlyConfidence(score: number): number {
   return Math.min(0.6, score / 12)
 }
+
+/**
+ * Find catalogue products by a free-text name, for the by-hand picker.
+ *
+ * Exists because a plain `name.includes(query)` cannot handle the phrase the
+ * vision pass produces. Measured against the real catalogue:
+ *   "stainless steel pot" -> substring finds NOTHING; this finds Oil Pot,
+ *                            Oil Measure Pot
+ *   "steel cooking pot"   -> substring finds NOTHING; this finds the same two
+ * That is the whole point: the AI names the object in words a human would use
+ * ("stainless steel pot"), while the catalogue names it tersely ("Oil Pot"), so
+ * the two only ever meet on the head noun.
+ *
+ * Substring scoring is kept and ranked highest so typing letter by letter still
+ * narrows normally - a token-only search would go blank at "po" and feel broken.
+ */
+export function searchCatalogue<T extends { name: string; category: string | null }>(
+  query: string,
+  products: T[],
+  limit = 20,
+): T[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+
+  const tokens = tokenise(query)
+  // The last significant word carries the object itself - "pot" in "stainless
+  // steel pot" - so it is weighted above the adjectives in front of it.
+  const head = tokens[tokens.length - 1]
+
+  const scored = products.map(product => {
+    const name = product.name.toLowerCase()
+    const category = (product.category || '').toLowerCase()
+    const productTokens = new Set(tokenise(`${product.name} ${product.category || ''}`))
+    let score = 0
+
+    if (name.includes(q)) score += 4
+    else if (category.includes(q)) score += 1.5
+
+    for (const token of tokens) {
+      if (productTokens.has(token)) score += 1
+    }
+    if (head && productTokens.has(head)) score += 2
+    // Prefix match on the word being typed, so "pot" still ranks while the
+    // storekeeper is only as far as "po".
+    else if (head && head.length >= 2) {
+      for (const token of productTokens) {
+        if (token.startsWith(head)) {
+          score += 1.5
+          break
+        }
+      }
+    }
+
+    return { product, score }
+  })
+
+  return scored
+    .filter(s => s.score > 0)
+    // A shorter name matching equally well is the more specific product.
+    .sort((a, b) => b.score - a.score || a.product.name.length - b.product.name.length)
+    .slice(0, limit)
+    .map(s => s.product)
+}

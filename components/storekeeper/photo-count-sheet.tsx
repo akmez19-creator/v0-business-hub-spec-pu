@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ImageLightbox } from '@/components/ui/image-lightbox'
 import { createCapture, confirmCaptureMatch, discardCapture } from '@/lib/stock-count-actions'
+import { searchCatalogue } from '@/lib/product-match'
 import type { MatchCandidate } from '@/lib/types'
 
 interface SearchableProduct {
@@ -58,6 +59,8 @@ export function PhotoCountSheet({
   // whatever they are doing on screen.
   const [analysing, setAnalysing] = useState(false)
   const [aiLabel, setAiLabel] = useState<string | null>(null)
+  /** Every name the AI thinks the item goes by - drives the by-hand picker. */
+  const [aiNames, setAiNames] = useState<string[]>([])
   const [candidates, setCandidates] = useState<MatchCandidate[]>([])
   const [aiFailed, setAiFailed] = useState(false)
 
@@ -82,17 +85,34 @@ export function PhotoCountSheet({
     }
   }, [localPreview])
 
-  const manualResults = useMemo(() => {
-    const q = manualSearch.trim().toLowerCase()
-    if (!q) return []
-    return products
-      .filter(
-        p =>
-          p.name.toLowerCase().includes(q) ||
-          (p.category || '').toLowerCase().includes(q),
-      )
-      .slice(0, 20)
-  }, [products, manualSearch])
+  /**
+   * When the AI knows what the thing is but cannot match a row, open the picker
+   * already searched on its best name. Otherwise the storekeeper is handed an
+   * empty box and has to guess the catalogue's own wording for an object the app
+   * has just finished describing.
+   *
+   * Seeded once per photo, and never over the top of typing, so it assists
+   * rather than fights whoever is holding the phone.
+   */
+  const seededFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (phase !== 'choose' || analysing) return
+    if (candidates.length > 0 || !aiNames.length) return
+    const key = photoUrl || 'pending'
+    if (seededFor.current === key) return
+    if (manualSearch.trim() !== '') return
+    seededFor.current = key
+    setManualSearch(aiNames[0])
+    setShowManual(true)
+  }, [phase, analysing, candidates.length, aiNames, photoUrl, manualSearch])
+
+  // Token-aware on purpose: the AI describes the object the way a person would
+  // ("stainless steel pot") while the catalogue names it tersely ("Oil Pot"), and
+  // a substring match finds nothing at all between those two.
+  const manualResults = useMemo(
+    () => searchCatalogue(manualSearch, products, 20),
+    [products, manualSearch],
+  )
 
   /**
    * True when the top two suggestions are too close to separate by score. Both
@@ -148,12 +168,14 @@ export function PhotoCountSheet({
       const json = await res.json()
       setCandidates(Array.isArray(json.candidates) ? json.candidates : [])
       setAiLabel(json.label ?? null)
+      setAiNames(Array.isArray(json.names) ? json.names : [])
       if (json.error) setAiFailed(true)
     } catch {
       // A failed match must never block the count - the agent can still pick
       // the product by hand, and the photo and quantity are already safe.
       setAiFailed(true)
       setCandidates([])
+      setAiNames([])
     } finally {
       setAnalysing(false)
     }
@@ -244,11 +266,13 @@ export function PhotoCountSheet({
     setQtyInput('')
     setCandidates([])
     setAiLabel(null)
+    setAiNames([])
     setAiFailed(false)
     setCaptureId(null)
     setError(null)
     setManualSearch('')
     setShowManual(false)
+    seededFor.current = null
     // shelfInput is deliberately kept: the next photo is usually the same shelf.
   }
 
@@ -340,19 +364,38 @@ export function PhotoCountSheet({
                     Looks like <span className="text-foreground">{aiLabel}</span>
                   </p>
                 )}
+                {/*
+                  Measured cause of this state in practice: the vision model
+                  answering "high demand, try again later". That is our problem
+                  and a retry usually clears it, so it must not read as "this
+                  photo is no good" - which sent the storekeeper to Retake, the
+                  one action that cannot help.
+                */}
                 {!uploading && !analysing && aiFailed && (
                   <p className="text-[12px] text-amber-400">
-                    Could not identify it - you can still pick it by hand
+                    Identifying is temporarily unavailable - your photo is fine
                   </p>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mt-1 h-7 gap-1 px-2 text-[11px]"
-                  onClick={() => fileRef.current?.click()}
-                >
-                  <RefreshCw className="h-3 w-3" /> Retake
-                </Button>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {!uploading && !analysing && aiFailed && photoUrl && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1 px-2 text-[11px]"
+                      onClick={retryIdentify}
+                    >
+                      <Sparkles className="h-3 w-3" /> Try again
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    <RefreshCw className="h-3 w-3" /> Retake
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -535,18 +578,57 @@ export function PhotoCountSheet({
             )}
 
             {!analysing && candidates.length === 0 && !aiFailed && (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                <div>
-                  <p className="text-[12px] font-medium text-amber-400">
-                    No confident match
-                  </p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-                    Nothing in the catalogue clearly matches this photo. Search for
-                    it by hand, or leave it for an admin to resolve - your count is
-                    already saved either way.
-                  </p>
+              <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                  <div>
+                    <p className="text-[12px] font-medium text-amber-400">
+                      No confident match
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                      {aiNames.length ? (
+                        <>
+                          It could not be tied to a catalogue product, but it does
+                          look like{' '}
+                          <span className="font-medium text-foreground">
+                            {aiNames[0]}
+                          </span>
+                          . Tap a name to see what the catalogue has under it.
+                        </>
+                      ) : (
+                        <>
+                          Nothing in the catalogue clearly matches this photo. Search
+                          for it by hand, or leave it for an admin to resolve - your
+                          count is already saved either way.
+                        </>
+                      )}
+                    </p>
+                  </div>
                 </div>
+
+                {/*
+                  The vision pass always forms an opinion about WHAT the object is,
+                  even when it cannot match a row. Discarding that left the
+                  storekeeper at a dead end with an empty search box, having to
+                  guess the catalogue's own wording - so offer its names here.
+                */}
+                {aiNames.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pl-6">
+                    {aiNames.slice(0, 6).map(name => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => {
+                          setManualSearch(name)
+                          setShowManual(true)
+                        }}
+                        className="rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-foreground transition-colors hover:border-primary hover:text-primary"
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
