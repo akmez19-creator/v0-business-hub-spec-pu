@@ -7,7 +7,6 @@
 import { generateText, Output } from 'ai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
-import sharp from 'sharp'
 import { createAdminClient } from '@/lib/supabase/server'
 import {
   shortlistProducts,
@@ -79,16 +78,55 @@ function isTransientProviderError(error: unknown): boolean {
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
+ * sharp is a NATIVE module, loaded lazily and treated as optional.
+ *
+ * A top-level `import sharp from 'sharp'` made the whole module unloadable when
+ * the binary was unavailable, and Next.js answered with an HTML 500 before any
+ * route code ran. Measured in production: /api/stock-count/identify failed in
+ * 174ms and /api/product-master/photo-terms in 253ms - far too fast to be a
+ * model call - which is why this surfaced as "identifying is temporarily
+ * unavailable" and took several rounds to pin down. sharp was declared as a
+ * devDependency, so production installs never had it.
+ *
+ * Loading it here keeps a missing binary a DEGRADATION (full-size upload)
+ * instead of a total outage of every feature in this file.
+ */
+let sharpModule: typeof import('sharp') | null | undefined
+async function loadSharp() {
+  if (sharpModule !== undefined) return sharpModule
+  try {
+    sharpModule = (await import('sharp')).default as unknown as typeof import('sharp')
+  } catch (error) {
+    console.log('[v0] identify: sharp unavailable, sending full-size photos -', (error as Error).message)
+    sharpModule = null
+  }
+  return sharpModule
+}
+
+/**
  * Downscale before sending. A phone photo is 3-5MB; thirteen of them in one
  * request would be slow and expensive, and the extra pixels add nothing to a
  * "same product or not" judgement.
  */
 async function downscale(input: ArrayBuffer | Buffer): Promise<Buffer> {
-  return sharp(Buffer.from(input as Buffer))
-    .rotate() // Honour EXIF orientation, or a sideways photo confuses the model.
-    .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 80 })
-    .toBuffer()
+  const raw = Buffer.from(input as Buffer)
+  const sharp = await loadSharp()
+
+  // No sharp: send the full-size photo. Slower and pricier, but identification
+  // still WORKS. Resizing is an optimisation and must never be the reason a
+  // storekeeper cannot count a shelf.
+  if (!sharp) return raw
+
+  try {
+    return await sharp(raw)
+      .rotate() // Honour EXIF orientation, or a sideways photo confuses the model.
+      .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer()
+  } catch (error) {
+    console.log('[v0] identify: downscale failed, using original -', (error as Error).message)
+    return raw
+  }
 }
 
 async function fetchImage(url: string): Promise<Buffer | null> {
