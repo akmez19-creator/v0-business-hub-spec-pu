@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   GitCompareArrows,
+  Link2,
   Loader2,
   Minus,
   Plus,
@@ -60,7 +61,13 @@ const HEADER_MAP: Record<string, string> = {
   'sales type': 'sales_type',
   notes: 'notes',
   medium: 'medium',
-  rider: 'zone',
+  status: 'status',
+  payment: 'payment_method',
+  // The "Rider" column is not consistent across COMPILE files: some months hold
+  // route labels (WEST, TRIOLET), others hold people (DIVESH, MOON). It is kept
+  // raw here and classified server-side against the real rider names, because
+  // the header alone cannot tell the two apart.
+  rider: 'rider_raw',
   zone: 'zone',
   office: 'office',
   district: 'district',
@@ -104,10 +111,17 @@ interface PreviewResponse {
     skipped: number
     outOfScope: number
     productsUnmatched: number
+    productLinks: number
+    statusChanges: number
+    contractorLinks: number
+    blocked: number
+    statusUnmapped: string[]
+    ridersUnmapped: string[]
     matchedByTier: Record<string, number>
     fileAmountTotal: number
     byDate: DateBucket[]
   }
+  blockedByReason: Record<string, number>
   warningCounts: Record<string, number>
   fieldCounts: Record<string, number>
   unmatchedProducts: { name: string; rows: number }[]
@@ -141,6 +155,15 @@ interface PreviewResponse {
     duplicates: { rowNumber: number; duplicateOf: number; customer: string | null; product: string | null; amount: number; date: string | null }[]
     dbOnly: { id: string; delivery_date: string | null; customer_name: string | null; contact_1: string | null; products: string | null; amount: number | null; hasAssignment: boolean; status: string | null }[]
     skipped: { rowNumber: number; reason: string }[]
+    blocked: {
+      rowNumber: number
+      dbId: string
+      date: string
+      field: string
+      from: unknown
+      to: unknown
+      reason: string
+    }[]
   }
 }
 
@@ -199,7 +222,12 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
   const [insertNew, setInsertNew] = useState(true)
   const [applyUpdates, setApplyUpdates] = useState(true)
   const [removeDbOnly, setRemoveDbOnly] = useState(false)
-  const [productLinking, setProductLinking] = useState<'exact' | 'exact+variant' | 'none'>('exact+variant')
+  // Exact-only by default: a variant match would happily point
+  // "AirFryer - B1G1" at plain "AirFryer".
+  const [productLinking, setProductLinking] = useState<'exact' | 'exact+variant' | 'none'>('exact')
+  // 'forward' never rewinds a delivered row; 'fill' never steals an assignment.
+  const [statusPolicy, setStatusPolicy] = useState<'forward' | 'overwrite' | 'pending_only' | 'off'>('forward')
+  const [contractorPolicy, setContractorPolicy] = useState<'fill' | 'overwrite' | 'report' | 'off'>('fill')
   const [skipFields, setSkipFields] = useState<Set<string>>(new Set())
   /**
    * Delivery dates to apply. Null means "every date in the file"; a Set means
@@ -292,6 +320,8 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
               applyUpdates,
               removeDbOnly,
               productLinking,
+              statusPolicy,
+              contractorPolicy,
               fields: preview ? Object.keys(preview.fieldCounts).filter((f) => !skipFields.has(f)) : undefined,
               // A PREVIEW always covers every date, so the per-date table can
               // show what each day would do. Only the COMMIT is narrowed.
@@ -332,7 +362,21 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
         setBusy(false)
       }
     },
-    [file, month, rows, insertNew, applyUpdates, removeDbOnly, productLinking, preview, skipFields, selectedDates, router],
+    [
+      file,
+      month,
+      rows,
+      insertNew,
+      applyUpdates,
+      removeDbOnly,
+      productLinking,
+      statusPolicy,
+      contractorPolicy,
+      preview,
+      skipFields,
+      selectedDates,
+      router,
+    ],
   )
 
   const revert = useCallback(async () => {
@@ -539,19 +583,6 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 Remove the {scoped.dbOnly.toLocaleString()} rows absent from the file
                 {partialRun && <span className="text-muted-foreground">(selected days only)</span>}
               </label>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-muted-foreground">Link products:</span>
-                <Select value={productLinking} onValueChange={(v) => setProductLinking(v as typeof productLinking)}>
-                  <SelectTrigger className="w-[220px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="exact+variant">Exact + variant suffix</SelectItem>
-                    <SelectItem value="exact">Exact name only</SelectItem>
-                    <SelectItem value="none">Do not link</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="ml-auto text-sm">
                 <span className="text-muted-foreground">Net row change: </span>
                 <span className="font-mono font-semibold">
@@ -559,6 +590,127 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                   {netChange.toLocaleString()}
                 </span>
               </div>
+            </div>
+
+            {/* Linking rules. Every default here is the non-destructive one. */}
+            <div className="rounded-lg border p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Link2 className="h-4 w-4 text-muted-foreground" />
+                <h4 className="text-sm font-semibold">Linking rules</h4>
+                <span className="text-xs text-muted-foreground">
+                  how the file&apos;s status, rider and product columns reach the system
+                </span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium">Status</span>
+                  <Select value={statusPolicy} onValueChange={(v) => setStatusPolicy(v as typeof statusPolicy)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="forward">Only move forward</SelectItem>
+                      <SelectItem value="pending_only">Only fill pending rows</SelectItem>
+                      <SelectItem value="overwrite">Always take the file</SelectItem>
+                      <SelectItem value="off">Do not change status</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {statusPolicy === 'forward'
+                      ? 'A delivered row is never reset to pending.'
+                      : statusPolicy === 'pending_only'
+                        ? 'Touches nothing that already shows progress.'
+                        : statusPolicy === 'overwrite'
+                          ? 'The sheet wins, even moving a row backwards.'
+                          : 'Status is left exactly as it is.'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {preview.stats.statusChanges.toLocaleString()} row(s) would change.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium">Rider &amp; contractor</span>
+                  <Select
+                    value={contractorPolicy}
+                    onValueChange={(v) => setContractorPolicy(v as typeof contractorPolicy)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fill">Fill only when empty</SelectItem>
+                      <SelectItem value="overwrite">Always take the file</SelectItem>
+                      <SelectItem value="report">Report differences only</SelectItem>
+                      <SelectItem value="off">Do not link</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {contractorPolicy === 'fill'
+                      ? 'Existing assignments are kept and reported.'
+                      : contractorPolicy === 'overwrite'
+                        ? 'Replaces assignments already made in the app.'
+                        : contractorPolicy === 'report'
+                          ? 'Nothing is written; differences are listed.'
+                          : 'The rider column is ignored.'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {preview.stats.contractorLinks.toLocaleString()} row(s) would link.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium">Products</span>
+                  <Select value={productLinking} onValueChange={(v) => setProductLinking(v as typeof productLinking)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="exact">Exact name only</SelectItem>
+                      <SelectItem value="exact+variant">Exact + variant suffix</SelectItem>
+                      <SelectItem value="none">Do not link</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {productLinking === 'exact'
+                      ? 'Variant suffixes stay unlinked for review.'
+                      : productLinking === 'exact+variant'
+                        ? 'A "- B1G1" name can link to the base product.'
+                        : 'No product ids are written.'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {preview.stats.productLinks.toLocaleString()} row(s) would link.
+                  </p>
+                </div>
+              </div>
+
+              {(preview.stats.statusUnmapped.length > 0 || preview.stats.ridersUnmapped.length > 0) && (
+                <div className="mt-3 flex flex-col gap-1.5 border-t pt-3 text-xs">
+                  {preview.stats.statusUnmapped.length > 0 && (
+                    <p className="text-pretty">
+                      <span className="text-amber-600">Unrecognised status:</span>{' '}
+                      <span className="font-mono">{preview.stats.statusUnmapped.join(', ')}</span> &mdash; left
+                      unchanged. Map these in the importer to apply them.
+                    </p>
+                  )}
+                  {preview.stats.ridersUnmapped.length > 0 && (
+                    <p className="text-pretty">
+                      <span className="text-amber-600">Unrecognised rider:</span>{' '}
+                      <span className="font-mono">{preview.stats.ridersUnmapped.slice(0, 25).join(', ')}</span>
+                      {preview.stats.ridersUnmapped.length > 25 &&
+                        ` +${preview.stats.ridersUnmapped.length - 25} more`}{' '}
+                      &mdash; no contractor linked.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {preview.stats.blocked > 0 && (
+                <p className="mt-3 border-t pt-3 text-xs text-muted-foreground text-pretty">
+                  <strong className="text-foreground">{preview.stats.blocked.toLocaleString()}</strong> change(s)
+                  withheld to protect existing work &mdash; see the Protected tab.
+                </p>
+              )}
             </div>
 
             {removeDbOnly && preview.samples.dbOnly.some((d) => d.hasAssignment) && (
@@ -583,6 +735,9 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 <TabsTrigger value="dbonly">Only in system ({scoped.dbOnly})</TabsTrigger>
                 <TabsTrigger value="dupes">Duplicates ({scoped.duplicates})</TabsTrigger>
                 <TabsTrigger value="products">Products ({preview.unmatchedProducts.length})</TabsTrigger>
+                {preview.stats.blocked > 0 && (
+                  <TabsTrigger value="protected">Protected ({preview.stats.blocked})</TabsTrigger>
+                )}
                 <TabsTrigger value="quality">Data quality</TabsTrigger>
               </TabsList>
 
@@ -972,6 +1127,51 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                             <span className="block w-full truncate text-left">{d.product}</span>
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs">{d.amount.toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="protected" className="flex-1 min-h-0">
+                <p className="pb-3 text-sm text-muted-foreground text-pretty">
+                  The file asks to change these, but the current rules keep the system&apos;s value because it
+                  represents work already done. Nothing here is written. Widen a linking rule above to apply them, or
+                  fix the rows by hand.
+                </p>
+                {Object.keys(preview.blockedByReason).length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {Object.entries(preview.blockedByReason)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([reason, n]) => (
+                        <Badge key={reason} variant="secondary" className="font-normal">
+                          {reason} &mdash; {n.toLocaleString()}
+                        </Badge>
+                      ))}
+                  </div>
+                )}
+                <ScrollArea className="h-[38vh] rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-20">Row</TableHead>
+                        <TableHead className="w-28">Date</TableHead>
+                        <TableHead className="w-32">Field</TableHead>
+                        <TableHead className="w-32">Kept</TableHead>
+                        <TableHead className="w-32">File wanted</TableHead>
+                        <TableHead>Why</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {preview.samples.blocked.map((b, i) => (
+                        <TableRow key={`${b.dbId}-${b.field}-${i}`}>
+                          <TableCell className="font-mono text-xs">{b.rowNumber}</TableCell>
+                          <TableCell className="font-mono text-xs">{b.date}</TableCell>
+                          <TableCell className="font-mono text-xs">{b.field}</TableCell>
+                          <TableCell className="font-mono text-xs">{String(b.from ?? '—').slice(0, 14)}</TableCell>
+                          <TableCell className="font-mono text-xs">{String(b.to ?? '—').slice(0, 14)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{b.reason}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

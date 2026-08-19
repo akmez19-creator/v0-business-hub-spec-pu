@@ -168,6 +168,25 @@ async function loadLookups(db: ReturnType<typeof createAdminClient>): Promise<Re
   return { statusByRaw, riderByName, contractorByRider }
 }
 
+/**
+ * Split the file's ambiguous "Rider" column into a person and a route label.
+ *
+ * COMPILE files reuse one column for both: some months list route labels
+ * (WEST, TRIOLET), others list people (DIVESH, MOON). A value counts as a person
+ * only when it matches a known rider name; everything else falls through to
+ * `zone`, which is how that column behaved before. This is what stops a route
+ * label from ever being written into `rider_id`.
+ */
+function classifyRiderColumn(rows: FileRow[], lookups: ReconcileLookups): void {
+  for (const row of rows) {
+    const raw = (row as unknown as Record<string, unknown>).rider_raw
+    const value = raw === null || raw === undefined ? '' : String(raw).trim()
+    if (!value) continue
+    if (lookups.riderByName?.has(value.toLowerCase())) row.rider = value
+    else if (!row.zone) row.zone = value
+  }
+}
+
 function summarise(plan: ReconcilePlan) {
   const productWarnings = new Map<string, number>()
   const warningCounts: Record<string, number> = {}
@@ -310,6 +329,8 @@ export async function POST(request: Request) {
       loadLookups(db),
     ])
     if (productsResult.error) throw new Error(`loading products: ${productsResult.error.message}`)
+    // Needs the rider names, so it can only run once the lookups are loaded.
+    classifyRiderColumn(rows, lookups)
     plan = buildPlan(rows, dbRows, (productsResult.data ?? []) as { id: string; name: string }[], {
       dates: requestedDates ?? undefined,
       month,
