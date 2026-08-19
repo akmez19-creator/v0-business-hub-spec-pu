@@ -1,4 +1,4 @@
-MaMap thsi to // Resolves a free-text product label (an ad name, or the copy of an organic
+// Resolves a free-text product label (an ad name, or the copy of an organic
 // post) onto a row in the canonical `products` catalogue.
 //
 // Order matters, and it is strictly most-trustworthy first:
