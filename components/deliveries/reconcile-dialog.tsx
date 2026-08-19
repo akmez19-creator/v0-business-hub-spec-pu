@@ -415,9 +415,9 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <p className="text-pretty">
-                  {preview.stats.flagged.toLocaleString()} row
-                  {preview.stats.flagged === 1 ? '' : 's'} match an existing entry on customer name, phone
-                  and date but name a <strong>different product</strong>. These are never written
+                  {preview.stats.flagged.toLocaleString()}{' '}
+                  {preview.stats.flagged === 1 ? 'row matches' : 'rows match'} an existing entry on customer
+                  name, phone and date but name a <strong>different product</strong>. These are never written
                   automatically &mdash; open the Product conflicts tab and fix them by hand.
                 </p>
               </div>
