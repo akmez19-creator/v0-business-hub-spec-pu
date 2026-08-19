@@ -149,9 +149,12 @@ export async function saveCountItem(input: {
       product_id: input.productId,
       counted_qty: qty,
       system_qty: product.quantity || 0,
-      // First-ever count: system stock is meaningless, so this is an opening
-      // baseline rather than a variance against a real figure.
-      is_baseline: !product.last_counted_at,
+      // Baseline means "there is no figure to compare against", which is only
+      // true when stock is genuinely 0/null. A product carrying book stock that
+      // was never formally counted (quantity > 0, last_counted_at null) still
+      // has a real figure to reconcile against, so flagging it as a baseline
+      // would silently swallow a genuine shortfall.
+      is_baseline: !product.last_counted_at && !product.quantity,
       notes: input.notes || null,
     },
     { onConflict: 'count_id,product_id' },

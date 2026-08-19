@@ -60,6 +60,29 @@ interface RecentCount {
   review_notes: string | null
 }
 
+/**
+ * A product has three distinct states, and collapsing them misleads the agent:
+ *
+ *  1. Formally counted before  -> last_counted_at set; the book figure is trusted.
+ *  2. Has stock but uncounted  -> quantity > 0, last_counted_at null. Stock predates
+ *     this module, so the number is real book stock worth reconciling against, NOT
+ *     something to ignore.
+ *  3. No stock on record       -> quantity 0/null and never counted; a true baseline.
+ *
+ * Only case 3 is a genuine "never counted" opening figure.
+ */
+function countLabel(p: CountProduct): string {
+  if (p.last_counted_at) return `System: ${p.quantity || 0}`
+  if (p.quantity) return `Book: ${p.quantity} · not yet verified`
+  return 'No stock on record'
+}
+
+function activeDetailLabel(p: CountProduct): string {
+  if (p.last_counted_at) return `System stock: ${p.quantity || 0}`
+  if (p.quantity) return `Book stock: ${p.quantity} — never physically verified`
+  return 'No stock on record - this sets the opening figure'
+}
+
 const STATUS_STYLES: Record<string, string> = {
   submitted: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -171,9 +194,11 @@ export function StockCountContent({
       return
     }
 
-    // Mirror the server's baseline rule so the row reads correctly before the
-    // next server round-trip.
-    const isBaseline = !activeProduct.last_counted_at
+    // Must mirror the server's baseline rule exactly (see stock-count-actions):
+    // only a product with no book stock at all is a true baseline. The server is
+    // authoritative; this is purely so the row reads correctly before the next
+    // round-trip.
+    const isBaseline = !activeProduct.last_counted_at && !activeProduct.quantity
     const systemQty = activeProduct.quantity || 0
 
     setItems((prev) => {
@@ -233,7 +258,10 @@ export function StockCountContent({
   }
 
   return (
-    <div className="flex flex-col gap-4 pb-28">
+    /* pb-44 clears BOTH the app's bottom tab bar (bottom-0, h-16) and the fixed
+       submit bar stacked above it (bottom-16), so the last counted row stays
+       readable instead of hiding behind them. */
+    <div className="flex flex-col gap-4 pb-44">
       <header className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15">
@@ -304,8 +332,8 @@ export function StockCountContent({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-foreground">{p.name}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {p.last_counted_at ? `System: ${p.quantity || 0}` : 'Never counted'}
-                      {p.category ? ` · ${p.category}` : ''}
+                                {countLabel(p)}
+                                {p.category ? ` · ${p.category}` : ''}
                     </p>
                   </div>
                   {already ? (
@@ -343,7 +371,7 @@ export function StockCountContent({
             <div className="flex flex-wrap gap-1.5">
               {totals.baseline > 0 && (
                 <span className="flex items-center gap-1 rounded-md border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-400">
-                  <Sparkles className="h-3 w-3" /> {totals.baseline} first count
+                    <Sparkles className="h-3 w-3" /> {totals.baseline} opening
                 </span>
               )}
               {totals.over > 0 && (
@@ -378,9 +406,9 @@ export function StockCountContent({
                     </p>
                     <div className="mt-0.5 flex items-center gap-1.5">
                       {item.is_baseline ? (
-                        // No variance shown: system stock was never counted, so
-                        // a difference here would be meaningless.
-                        <span className="text-[10px] font-medium text-sky-400">First count</span>
+                          // No variance shown: there was no book stock at all, so
+                          // this count establishes the opening figure.
+                          <span className="text-[10px] font-medium text-sky-400">Opening count</span>
                       ) : item.variance === 0 ? (
                         <span className="text-[10px] text-muted-foreground">
                           Matches system ({item.system_qty})
@@ -495,9 +523,7 @@ export function StockCountContent({
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-foreground">{activeProduct.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {activeProduct.last_counted_at
-                    ? `System stock: ${activeProduct.quantity || 0}`
-                    : 'Never counted - this sets the opening figure'}
+                    {activeDetailLabel(activeProduct)}
                 </p>
               </div>
               <button

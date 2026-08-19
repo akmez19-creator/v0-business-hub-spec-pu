@@ -34,8 +34,11 @@ create table if not exists stock_count_items (
   -- Snapshot of products.quantity when the line was added. Frozen so the
   -- variance stays auditable even if stock moves before approval.
   system_qty integer not null default 0,
-  -- True when this product had never been counted, so system_qty carries no
-  -- meaning and the difference must not be reported as a real variance.
+  -- True only when the product had no book stock at all (quantity 0/null AND
+  -- never counted), so system_qty carries no meaning and the difference must not
+  -- be reported as a real variance. A product that already carries book stock but
+  -- was never formally counted is NOT a baseline - its shortfall is real, and
+  -- marking it baseline would silently hide that.
   is_baseline boolean not null default false,
   variance integer generated always as (counted_qty - system_qty) stored,
   notes text,
@@ -71,7 +74,21 @@ as $$
 declare
   v_status text;
   v_applied integer;
+  v_reviewer_role text;
 begin
+  -- Defence in depth: the calling server action already checks the role, but
+  -- products has RLS disabled, so enforce it here too. Without this the function
+  -- would happily apply a count for any reviewer id passed to it, letting a
+  -- storekeeper approve their own stocktake.
+  select role into v_reviewer_role from profiles where id = p_reviewer;
+
+  if v_reviewer_role is distinct from 'admin' then
+    return jsonb_build_object(
+      'ok', false,
+      'error', 'Only an admin can approve a stock count'
+    );
+  end if;
+
   -- Lock the header so two reviewers cannot both apply the same count.
   select status into v_status
   from stock_counts
