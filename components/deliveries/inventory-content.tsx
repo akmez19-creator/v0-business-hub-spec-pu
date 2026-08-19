@@ -182,7 +182,10 @@ export function InventoryContent({
             'Order Date': st.latestOrderDate || '',
             'In China': st.chinaQty,
             'Undelivered': st.undeliveredQty,
-            'Actual Stock': actualStock(p, st),
+            // Blank rather than 0 when on-hand was never counted, so the export
+            // cannot be read as "this product has no stock".
+            'Actual Stock': isUncounted(p) ? '' : actualStock(p, st),
+            'Stock Counted': isUncounted(p) ? 'No' : 'Yes',
             'PRICE UNIT': p.price || 0,
             '2-Pack': p.bundle_prices?.['2'] || '',
             '3-Pack': p.bundle_prices?.['3'] || '',
@@ -987,9 +990,26 @@ export function InventoryContent({
                             <StockPart value={st.undeliveredQty} className="text-amber-500" />
                           </TableCell>
                           <TableCell className="text-center border-r border-border/50">
-                            <span className="text-sm font-semibold text-foreground">
-                              {actualStock(product, st).toLocaleString()}
-                            </span>
+                            {(() => {
+                              const total = actualStock(product, st)
+                              // Uncounted on-hand: show what we do know, but never
+                              // present it as a settled total.
+                              if (isUncounted(product)) {
+                                return (
+                                  <div className="flex flex-col items-center leading-tight">
+                                    <span className="text-sm font-semibold text-muted-foreground">
+                                      {total > 0 ? `${total.toLocaleString()}+` : '?'}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground/60">uncounted</span>
+                                  </div>
+                                )
+                              }
+                              return (
+                                <span className="text-sm font-semibold text-foreground">
+                                  {total.toLocaleString()}
+                                </span>
+                              )
+                            })()}
                           </TableCell>
                         </>
                       )
@@ -1157,6 +1177,18 @@ export function InventoryContent({
 function actualStock(product: Product, s: ProductStock | undefined): number {
   const st = s ?? NO_STOCK
   return (product.quantity || 0) + st.chinaQty + st.undeliveredQty
+}
+
+/**
+ * True when on-hand has never been counted, so Actual Stock is only partial.
+ *
+ * 330 of the 344 products with purchase history are uncounted, spanning ~112k
+ * ordered units. Rendering those as a confident "0" would read as "no stock"
+ * when it really means "not counted yet", so the Actual column marks them
+ * instead of stating a number it cannot support.
+ */
+function isUncounted(product: Product): boolean {
+  return !product.has_variants && !product.quantity
 }
 
 /** Muted dash for a genuinely zero component, so real zeros read as zero. */
