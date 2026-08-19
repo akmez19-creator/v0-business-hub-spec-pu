@@ -190,8 +190,10 @@ export function StockCountReview({
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {s.counted_by_name} · {s.line_count} products ·{' '}
-                      {Number(s.total_counted).toLocaleString()} units
+                      {s.counted_by_name} · {s.line_count}{' '}
+                      {Number(s.line_count) === 1 ? 'product' : 'products'} ·{' '}
+                      {Number(s.total_counted).toLocaleString()}{' '}
+                      {Number(s.total_counted) === 1 ? 'unit' : 'units'}
                     </p>
                   </div>
 

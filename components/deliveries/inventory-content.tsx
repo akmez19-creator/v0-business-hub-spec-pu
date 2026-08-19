@@ -1005,8 +1005,25 @@ export function InventoryContent({
                                 )
                               }
                               return (
-                                <span className="text-sm font-semibold text-foreground">
-                                  {total.toLocaleString()}
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="text-sm font-semibold text-foreground">
+                                    {total.toLocaleString()}
+                                  </span>
+                                  {/* Only VERIFIED products are marked. Flagging the ~330
+                                      unverified ones instead would put a badge on nearly
+                                      every row and carry no signal. */}
+                                  {product.last_counted_at && (
+                                    <span
+                                      title={`In-store figure physically counted on ${new Date(
+                                        product.last_counted_at,
+                                      ).toLocaleDateString()}`}
+                                      className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                                    >
+                                      <span className="sr-only">
+                                        In-store figure physically verified
+                                      </span>
+                                    </span>
+                                  )}
                                 </span>
                               )
                             })()}

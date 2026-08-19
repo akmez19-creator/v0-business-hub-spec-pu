@@ -193,6 +193,10 @@ export interface Product {
   updated_at?: string
   // Inventory tracking
   quantity: number
+  // Set when a storekeeper's physical warehouse count was approved by an admin.
+  // Null means `quantity` has never been physically verified - it may still hold
+  // a real book figure carried over from before stock counting existed.
+  last_counted_at?: string | null
   // Bundle pricing - flexible tiers stored as JSON {"2": 900, "3": 1200, "6": 2000}
   bundle_prices: Record<string, number>
   // B1G1 offer flag
