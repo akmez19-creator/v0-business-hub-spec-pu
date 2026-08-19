@@ -161,14 +161,25 @@ function normHeader(h: string) {
   return h.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+/**
+ * A delivery date is a calendar day, not an instant, so it must be read in
+ * LOCAL time. `cellDates` hands us local midnight; `toISOString()` converts to
+ * UTC and therefore rolls the day backwards everywhere east of Greenwich. In
+ * Mauritius (UTC+4) that turned every row in COMPILE AUGUST into the previous
+ * day and pushed the 1 August rows into July.
+ */
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function toIsoDate(v: unknown): string | null {
   if (v === null || v === undefined || v === '') return null
-  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10)
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : localYmd(v)
   const s = String(v).trim()
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (m) return m[0]
   const d = new Date(s)
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+  return isNaN(d.getTime()) ? null : localYmd(d)
 }
 
 export function ReconcileDeliveriesDialog({ children }: { children: React.ReactNode }) {

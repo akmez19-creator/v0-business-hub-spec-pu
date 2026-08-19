@@ -239,18 +239,31 @@ export function normContact(v: unknown): string {
   return String(v).replace(/\D/g, '')
 }
 
+/**
+ * Read the calendar day off a Date in LOCAL time, never UTC.
+ *
+ * A spreadsheet delivery date is a calendar day, not an instant. `cellDates`
+ * gives us local midnight, so `toISOString()` (UTC) rolls the day BACKWARDS for
+ * every timezone east of Greenwich. Measured in Indian/Mauritius (UTC+4) on the
+ * real COMPILE AUGUST file: all 5,364 rows shifted back a day and the 390 rows
+ * dated 1 Aug were reported as 31 July. Use the local getters.
+ */
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** Excel Dates, ISO strings and timestamps all collapse to YYYY-MM-DD. */
 export function normDate(v: unknown): string {
   if (v === null || v === undefined || v === '') return ''
   if (v instanceof Date) {
     if (isNaN(v.getTime())) return ''
-    return v.toISOString().slice(0, 10)
+    return localYmd(v)
   }
   const s = String(v).trim()
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if (iso) return iso[0]
   const parsed = new Date(s)
-  if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  if (!isNaN(parsed.getTime())) return localYmd(parsed)
   return ''
 }
 
