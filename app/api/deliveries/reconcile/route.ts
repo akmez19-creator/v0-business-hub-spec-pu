@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { buildPlan, UPDATABLE_FIELDS, type DbRow, type FileRow, type ReconcilePlan } from '@/lib/deliveries/reconcile'
+import {
+  buildPlan,
+  normDate,
+  UPDATABLE_FIELDS,
+  type DbRow,
+  type FileRow,
+  type ReconcilePlan,
+} from '@/lib/deliveries/reconcile'
 
 /**
  * Delivery reconciliation: preview and commit.
@@ -32,6 +39,11 @@ interface ReconcileRequest {
     productLinking?: 'exact' | 'exact+variant' | 'none'
     /** Only apply changes to these fields. Defaults to all updatable fields. */
     fields?: string[]
+    /**
+     * Reconcile only these delivery dates (YYYY-MM-DD). Omit for every date in
+     * the file. Days not listed are left completely untouched.
+     */
+    dates?: string[]
   }
 }
 
@@ -40,6 +52,38 @@ function monthBounds(month: string): { start: string; end: string } {
   const start = new Date(Date.UTC(y, m - 1, 1))
   const end = new Date(Date.UTC(y, m, 1))
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) }
+}
+
+/** Exclusive upper bound for a YYYY-MM-DD day. */
+function dayAfter(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * The window of existing entries to compare against is taken from the DELIVERY
+ * DATES IN THE FILE, not from the calendar month.
+ *
+ * Entry date is useless for this: in the real August file every single row has
+ * an entry date in July (the order was taken weeks before it shipped), so
+ * anything keyed on entry date would look like a different month entirely.
+ *
+ * Scoping to the file's own dates also closes a real hole - a row whose
+ * delivery date falls outside the chosen month used to be compared against a
+ * window that had never been loaded, so it could only ever be inserted as new
+ * even when it already existed.
+ */
+function dbWindow(dates: string[], month: string): { start: string; end: string } {
+  if (!dates.length) return monthBounds(month)
+  const sorted = [...dates].sort()
+  const monthWin = monthBounds(month)
+  // Union with the month so a date the file omits is still visible as an
+  // existing entry the file did not mention.
+  const start = sorted[0] < monthWin.start ? sorted[0] : monthWin.start
+  const endExclusive = dayAfter(sorted[sorted.length - 1])
+  const end = endExclusive > monthWin.end ? endExclusive : monthWin.end
+  return { start, end }
 }
 
 async function loadDbRows(db: ReturnType<typeof createAdminClient>, start: string, end: string) {
@@ -170,7 +214,17 @@ export async function POST(request: Request) {
   }
 
   const db = createAdminClient()
-  const { start, end } = monthBounds(month)
+
+  // Every distinct delivery date the spreadsheet actually contains.
+  const fileDates = [...new Set(rows.map((r) => normDate(r.delivery_date)).filter(Boolean))].sort()
+  const requestedDates = options.dates?.length ? options.dates.filter((d) => fileDates.includes(d)) : null
+  if (options.dates && options.dates.length > 0 && requestedDates!.length === 0) {
+    return NextResponse.json(
+      { error: 'None of the selected dates appear in this file.' },
+      { status: 400 },
+    )
+  }
+  const { start, end } = dbWindow(requestedDates ?? fileDates, month)
 
   let plan: ReconcilePlan
   try {
@@ -179,15 +233,22 @@ export async function POST(request: Request) {
       db.from('products').select('id,name'),
     ])
     if (productsResult.error) throw new Error(`loading products: ${productsResult.error.message}`)
-    plan = buildPlan(rows, dbRows, (productsResult.data ?? []) as { id: string; name: string }[])
+    plan = buildPlan(rows, dbRows, (productsResult.data ?? []) as { id: string; name: string }[], {
+      dates: requestedDates ?? undefined,
+      month,
+    })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'unknown error'
     console.log('[v0] reconcile: plan failed -', message)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 
+  // The dates this run actually covers - all of the file's dates unless the
+  // operator narrowed it down.
+  const scopedDates = requestedDates ?? fileDates
+
   if (mode === 'preview') {
-    return NextResponse.json({ month, mode, ...summarise(plan) })
+    return NextResponse.json({ month, mode, fileDates, scopedDates, ...summarise(plan) })
   }
 
   /* ---------------- commit ---------------- */
@@ -198,10 +259,18 @@ export async function POST(request: Request) {
   const productLinking = options.productLinking ?? 'exact+variant'
   const allowedFields = new Set(options.fields?.length ? options.fields : UPDATABLE_FIELDS)
 
+  // A partial run is labelled in the filename so the import history shows which
+  // days were applied. delivery_imports has no column for this and the label is
+  // worth more than a migration here.
+  const partial = requestedDates !== null && requestedDates.length < fileDates.length
+  const loggedName = partial
+    ? `${filename} [${requestedDates!.length === 1 ? requestedDates![0] : `${requestedDates!.length} dates: ${requestedDates![0]}..${requestedDates![requestedDates!.length - 1]}`}]`
+    : filename
+
   const { data: log, error: logError } = await db
     .from('delivery_imports')
     .insert({
-      filename,
+      filename: loggedName,
       total_rows: plan.stats.fileRows,
       status: 'processing',
       mode: 'reconcile',
@@ -372,6 +441,8 @@ export async function POST(request: Request) {
     month,
     mode,
     importId: log.id,
+    scopedDates,
+    outOfScope: plan.stats.outOfScope,
     inserted,
     updated,
     archived,

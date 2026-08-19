@@ -153,6 +153,30 @@ export interface DbOnlyRow {
   status: string | null
 }
 
+/**
+ * One delivery date from the spreadsheet, with everything that would happen on
+ * that day. This is what makes reconciling date-by-date possible: the operator
+ * picks the days to apply and the totals for exactly those days are already
+ * known, without re-running the plan.
+ */
+export interface DateBucket {
+  /** YYYY-MM-DD delivery date, taken from the file - never the entry date. */
+  date: string
+  fileRows: number
+  inserts: number
+  updates: number
+  unchanged: number
+  flagged: number
+  duplicates: number
+  /** Existing entries on this date that the file does not mention. */
+  dbOnly: number
+  /** Existing entries in the system on this date. */
+  dbRows: number
+  fileAmountTotal: number
+  /** True when this date falls outside the target month being reconciled. */
+  outOfMonth: boolean
+}
+
 export interface ReconcilePlan {
   inserts: InsertPlanRow[]
   updates: UpdatePlanRow[]
@@ -161,6 +185,11 @@ export interface ReconcilePlan {
   duplicates: DuplicatePlanRow[]
   dbOnly: DbOnlyRow[]
   skipped: { rowNumber: number; reason: string }[]
+  /**
+   * Rows whose delivery date was not among the selected dates. Held back
+   * entirely - not counted as new, not counted as skipped errors.
+   */
+  outOfScope: { rowNumber: number; date: string }[]
   stats: {
     fileRows: number
     dbRows: number
@@ -171,10 +200,24 @@ export interface ReconcilePlan {
     duplicates: number
     dbOnly: number
     skipped: number
+    outOfScope: number
     productsUnmatched: number
     matchedByTier: Record<string, number>
     fileAmountTotal: number
+    /** Per delivery date, ascending. */
+    byDate: DateBucket[]
   }
+}
+
+export interface BuildPlanOptions {
+  /**
+   * Restrict reconciliation to these delivery dates (YYYY-MM-DD). Omit to use
+   * every date present in the file. Existing entries on other dates are left
+   * completely alone - they cannot be updated, flagged or removed.
+   */
+  dates?: string[]
+  /** Target month (YYYY-MM), used only to mark dates that fall outside it. */
+  month?: string
 }
 
 /* ------------------------------------------------------------------ *
@@ -466,14 +509,25 @@ function fileRowFingerprint(r: FileRow): string {
  * Passes 4-6 are how an existing customer whose product does not line up gets
  * surfaced for review instead of being silently overwritten or duplicated.
  *
- * The six output buckets always sum back to the file's row count.
+ * The output buckets always sum back to the file's row count.
+ *
+ * Pass `options.dates` to reconcile only certain delivery dates. Rows on other
+ * dates go to `outOfScope` and existing entries on those dates are excluded
+ * from the index entirely, so a single-day run cannot touch the rest of the
+ * month. `stats.byDate` always reports every date, selected or not, so the UI
+ * can show what each day would do before anything is applied.
  */
 export function buildPlan(
   fileRows: FileRow[],
   dbRows: DbRow[],
   products: { id: string; name: string }[],
+  options: BuildPlanOptions = {},
 ): ReconcilePlan {
   const lookup = buildProductLookup(products)
+  // An empty array means "no dates selected", which is different from omitted.
+  const selected = options.dates ? new Set(options.dates) : null
+  const inScope = (date: string) => selected === null || selected.has(date)
+
   const plan: ReconcilePlan = {
     inserts: [],
     updates: [],
@@ -482,6 +536,7 @@ export function buildPlan(
     duplicates: [],
     dbOnly: [],
     skipped: [],
+    outOfScope: [],
     stats: {
       fileRows: fileRows.length,
       dbRows: dbRows.length,
@@ -492,19 +547,26 @@ export function buildPlan(
       duplicates: 0,
       dbOnly: 0,
       skipped: 0,
+      outOfScope: 0,
       productsUnmatched: 0,
       matchedByTier: {},
       fileAmountTotal: 0,
+      byDate: [],
     },
   }
 
   // ---- index the DB side, partitioned by delivery date ----
+  // Existing entries on a date that was NOT selected are dropped from the index
+  // entirely, so they can never be matched, changed or reported as orphaned.
   const byId = new Map<string, DbRow>()
   const dbIdsByDate = new Map<string, string[]>()
+  const dbRowsPerDate = new Map<string, number>()
   for (const d of dbRows) {
-    byId.set(d.id, d)
     const date = normDate(d.delivery_date)
     if (!date) continue
+    dbRowsPerDate.set(date, (dbRowsPerDate.get(date) ?? 0) + 1)
+    if (!inScope(date)) continue
+    byId.set(d.id, d)
     const cur = dbIdsByDate.get(date)
     if (cur) cur.push(d.id)
     else dbIdsByDate.set(date, [d.id])
@@ -529,6 +591,13 @@ export function buildPlan(
 
     if (!resolved.delivery_date) {
       plan.skipped.push({ rowNumber: row.rowNumber, reason: 'unparseable or missing delivery date' })
+      continue
+    }
+    // Scope is decided by the DELIVERY date, before any other validation, so a
+    // row on an unselected day is simply not part of this run rather than being
+    // reported as a problem.
+    if (!inScope(resolved.delivery_date)) {
+      plan.outOfScope.push({ rowNumber: row.rowNumber, date: resolved.delivery_date })
       continue
     }
     if (!resolved.customer_name) {
@@ -688,6 +757,10 @@ export function buildPlan(
 
   for (const d of dbRows) {
     if (claimed.has(d.id)) continue
+    // An existing entry on an unselected date is NOT an orphan - it was simply
+    // not part of this run. Without this guard, reconciling a single day would
+    // report the whole rest of the month as removable.
+    if (!inScope(normDate(d.delivery_date))) continue
     plan.dbOnly.push({
       id: d.id,
       delivery_date: normDate(d.delivery_date) || null,
@@ -707,5 +780,50 @@ export function buildPlan(
   plan.stats.duplicates = plan.duplicates.length
   plan.stats.dbOnly = plan.dbOnly.length
   plan.stats.skipped = plan.skipped.length
+  plan.stats.outOfScope = plan.outOfScope.length
+
+  /* ---- per-date breakdown, so the operator can apply one day at a time ---- */
+  const buckets = new Map<string, DateBucket>()
+  const bucket = (date: string): DateBucket => {
+    let b = buckets.get(date)
+    if (!b) {
+      b = {
+        date,
+        fileRows: 0,
+        inserts: 0,
+        updates: 0,
+        unchanged: 0,
+        flagged: 0,
+        duplicates: 0,
+        dbOnly: 0,
+        dbRows: dbRowsPerDate.get(date) ?? 0,
+        fileAmountTotal: 0,
+        outOfMonth: options.month ? !date.startsWith(`${options.month}-`) : false,
+      }
+      buckets.set(date, b)
+    }
+    return b
+  }
+  // Every date present in the system for this month gets a row too, so a day
+  // the file forgot entirely is still visible rather than silently missing.
+  for (const date of dbRowsPerDate.keys()) bucket(date)
+
+  const countRow = (r: PlanRow, key: 'inserts' | 'updates' | 'unchanged' | 'flagged' | 'duplicates') => {
+    const date = r.resolved.delivery_date
+    if (!date) return
+    const b = bucket(date)
+    b[key]++
+    b.fileRows++
+    b.fileAmountTotal += r.resolved.amount
+  }
+  for (const r of plan.inserts) countRow(r, 'inserts')
+  for (const r of plan.updates) countRow(r, 'updates')
+  for (const r of plan.unchanged) countRow(r, 'unchanged')
+  for (const r of plan.flagged) countRow(r, 'flagged')
+  for (const r of plan.duplicates) countRow(r, 'duplicates')
+  for (const d of plan.dbOnly) if (d.delivery_date) bucket(d.delivery_date).dbOnly++
+  for (const o of plan.outOfScope) bucket(o.date).fileRows++
+
+  plan.stats.byDate = [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date))
   return plan
 }

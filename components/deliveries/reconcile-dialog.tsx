@@ -25,6 +25,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarDays,
   CheckCircle2,
   FileSpreadsheet,
   GitCompareArrows,
@@ -73,8 +74,24 @@ interface Diff {
   to: unknown
 }
 
+interface DateBucket {
+  date: string
+  fileRows: number
+  inserts: number
+  updates: number
+  unchanged: number
+  flagged: number
+  duplicates: number
+  dbOnly: number
+  dbRows: number
+  fileAmountTotal: number
+  outOfMonth: boolean
+}
+
 interface PreviewResponse {
   month: string
+  /** Every delivery date present in the spreadsheet. */
+  fileDates: string[]
   stats: {
     fileRows: number
     dbRows: number
@@ -85,9 +102,11 @@ interface PreviewResponse {
     duplicates: number
     dbOnly: number
     skipped: number
+    outOfScope: number
     productsUnmatched: number
     matchedByTier: Record<string, number>
     fileAmountTotal: number
+    byDate: DateBucket[]
   }
   warningCounts: Record<string, number>
   fieldCounts: Record<string, number>
@@ -171,6 +190,11 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
   const [removeDbOnly, setRemoveDbOnly] = useState(false)
   const [productLinking, setProductLinking] = useState<'exact' | 'exact+variant' | 'none'>('exact+variant')
   const [skipFields, setSkipFields] = useState<Set<string>>(new Set())
+  /**
+   * Delivery dates to apply. Null means "every date in the file"; a Set means
+   * the operator is reconciling day by day. Days left out are untouched.
+   */
+  const [selectedDates, setSelectedDates] = useState<Set<string> | null>(null)
 
   const reset = useCallback(() => {
     setFile(null)
@@ -183,6 +207,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
     setResult(null)
     setSkipFields(new Set())
     setRemoveDbOnly(false)
+    setSelectedDates(null)
     if (fileInput.current) fileInput.current.value = ''
   }, [])
 
@@ -223,7 +248,8 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
         setError(
           `Note: ${stray.reduce((a, [, n]) => a + n, 0)} row(s) fall outside ${best?.[0]} (${stray
             .map(([m, n]) => `${m}: ${n}`)
-            .join(', ')}). Only rows in the target month are reconciled.`,
+            .join(', ')}). Those delivery dates are still compared properly and appear in the date list, ` +
+            `marked as outside the month, so you can include or exclude them.`,
         )
       }
     } catch (e) {
@@ -253,6 +279,9 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
               removeDbOnly,
               productLinking,
               fields: preview ? Object.keys(preview.fieldCounts).filter((f) => !skipFields.has(f)) : undefined,
+              // A PREVIEW always covers every date, so the per-date table can
+              // show what each day would do. Only the COMMIT is narrowed.
+              dates: mode === 'commit' && selectedDates ? [...selectedDates].sort() : undefined,
             },
           }),
         })
@@ -289,7 +318,7 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
         setBusy(false)
       }
     },
-    [file, month, rows, insertNew, applyUpdates, removeDbOnly, productLinking, preview, skipFields, router],
+    [file, month, rows, insertNew, applyUpdates, removeDbOnly, productLinking, preview, skipFields, selectedDates, router],
   )
 
   const revert = useCallback(async () => {
@@ -319,10 +348,56 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
     }
   }, [result, router])
 
-  const netChange = useMemo(() => {
-    if (!preview) return 0
-    return (insertNew ? preview.stats.inserts : 0) - (removeDbOnly ? preview.stats.dbOnly : 0)
-  }, [preview, insertNew, removeDbOnly])
+  /** Dates the file actually contains, in order. */
+  const fileDateBuckets = useMemo(
+    () => (preview ? preview.stats.byDate.filter((b) => b.fileRows > 0) : []),
+    [preview],
+  )
+  const isDateOn = useCallback(
+    (date: string) => selectedDates === null || selectedDates.has(date),
+    [selectedDates],
+  )
+
+  /**
+   * What the commit will actually do, for the selected days only. Summed from
+   * the per-date breakdown so the button never promises more than it applies.
+   */
+  const scoped = useMemo(() => {
+    const zero = { dates: 0, inserts: 0, updates: 0, unchanged: 0, flagged: 0, duplicates: 0, dbOnly: 0 }
+    if (!preview) return zero
+    return preview.stats.byDate.reduce((acc, b) => {
+      if (!isDateOn(b.date)) return acc
+      if (b.fileRows > 0) acc.dates++
+      acc.inserts += b.inserts
+      acc.updates += b.updates
+      acc.unchanged += b.unchanged
+      acc.flagged += b.flagged
+      acc.duplicates += b.duplicates
+      acc.dbOnly += b.dbOnly
+      return acc
+    }, zero)
+  }, [preview, isDateOn])
+
+  const partialRun = preview !== null && scoped.dates < fileDateBuckets.length
+  const nothingSelected = preview !== null && scoped.dates === 0
+
+  const toggleDate = useCallback(
+    (date: string) => {
+      setSelectedDates((cur) => {
+        const all = fileDateBuckets.map((b) => b.date)
+        const next = new Set(cur ?? all)
+        if (next.has(date)) next.delete(date)
+        else next.add(date)
+        return next
+      })
+    },
+    [fileDateBuckets],
+  )
+
+  const netChange = useMemo(
+    () => (insertNew ? scoped.inserts : 0) - (removeDbOnly ? scoped.dbOnly : 0),
+    [scoped, insertNew, removeDbOnly],
+  )
 
   return (
     <Dialog
@@ -392,8 +467,9 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 onChange={(e) => setMonth(e.target.value)}
                 placeholder="2026-08"
               />
-              <p className="text-xs text-muted-foreground">
-                Only deliveries in this month are compared. Detected from the file.
+              <p className="text-xs text-muted-foreground text-pretty">
+                Detected from the delivery dates in the file. Used for labelling and to spot days the file left
+                out &mdash; you choose the exact dates to apply on the next screen.
               </p>
             </div>
           </div>
@@ -401,15 +477,27 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
 
         {stage === 'review' && preview && (
           <div className="flex-1 min-h-0 flex flex-col gap-4">
+            {/* Totals follow the selected days, so what is shown is what is applied. */}
             <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-              <SummaryCard label="To add" value={preview.stats.inserts} tone="add" icon={<Plus className="h-4 w-4" />} />
-              <SummaryCard label="To update" value={preview.stats.updates} tone="change" icon={<ArrowRight className="h-4 w-4" />} />
-              <SummaryCard label="Already correct" value={preview.stats.unchanged} tone="quiet" icon={<CheckCircle2 className="h-4 w-4" />} />
-              <SummaryCard label="Product conflict" value={preview.stats.flagged} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
-              <SummaryCard label="Duplicate lines" value={preview.stats.duplicates} tone="quiet" icon={<Minus className="h-4 w-4" />} />
-              <SummaryCard label="Only in system" value={preview.stats.dbOnly} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
+              <SummaryCard label="To add" value={scoped.inserts} tone="add" icon={<Plus className="h-4 w-4" />} />
+              <SummaryCard label="To update" value={scoped.updates} tone="change" icon={<ArrowRight className="h-4 w-4" />} />
+              <SummaryCard label="Already correct" value={scoped.unchanged} tone="quiet" icon={<CheckCircle2 className="h-4 w-4" />} />
+              <SummaryCard label="Product conflict" value={scoped.flagged} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
+              <SummaryCard label="Duplicate lines" value={scoped.duplicates} tone="quiet" icon={<Minus className="h-4 w-4" />} />
+              <SummaryCard label="Only in system" value={scoped.dbOnly} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
               <SummaryCard label="Unreadable" value={preview.stats.skipped} tone="warn" icon={<AlertTriangle className="h-4 w-4" />} />
             </div>
+
+            {partialRun && (
+              <div className="flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-3 text-sm">
+                <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+                <p className="text-pretty">
+                  Reconciling <strong>{scoped.dates}</strong> of {fileDateBuckets.length} delivery dates. The
+                  figures above cover only the selected days &mdash; every other day in the month is left exactly
+                  as it is, including its rows that the file does not mention.
+                </p>
+              </div>
+            )}
 
             {preview.stats.flagged > 0 && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
@@ -426,15 +514,16 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border p-4">
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={insertNew} onCheckedChange={(v) => setInsertNew(Boolean(v))} />
-                Add the {preview.stats.inserts.toLocaleString()} new rows
+                Add the {scoped.inserts.toLocaleString()} new rows
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={applyUpdates} onCheckedChange={(v) => setApplyUpdates(Boolean(v))} />
-                Apply the {preview.stats.updates.toLocaleString()} updates
+                Apply the {scoped.updates.toLocaleString()} updates
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={removeDbOnly} onCheckedChange={(v) => setRemoveDbOnly(Boolean(v))} />
-                Remove the {preview.stats.dbOnly.toLocaleString()} rows absent from the file
+                Remove the {scoped.dbOnly.toLocaleString()} rows absent from the file
+                {partialRun && <span className="text-muted-foreground">(selected days only)</span>}
               </label>
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">Link products:</span>
@@ -469,16 +558,121 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
               </Alert>
             )}
 
-            <Tabs defaultValue="updates" className="flex-1 min-h-0 flex flex-col">
+            <Tabs defaultValue="dates" className="flex-1 min-h-0 flex flex-col">
               <TabsList className="flex-wrap h-auto">
-                <TabsTrigger value="updates">Updates ({preview.stats.updates})</TabsTrigger>
-                <TabsTrigger value="inserts">New rows ({preview.stats.inserts})</TabsTrigger>
-                <TabsTrigger value="flagged">Product conflicts ({preview.stats.flagged})</TabsTrigger>
-                <TabsTrigger value="dbonly">Only in system ({preview.stats.dbOnly})</TabsTrigger>
-                <TabsTrigger value="dupes">Duplicates ({preview.stats.duplicates})</TabsTrigger>
+                <TabsTrigger value="dates">
+                  Delivery dates ({scoped.dates}/{fileDateBuckets.length})
+                </TabsTrigger>
+                <TabsTrigger value="updates">Updates ({scoped.updates})</TabsTrigger>
+                <TabsTrigger value="inserts">New rows ({scoped.inserts})</TabsTrigger>
+                <TabsTrigger value="flagged">Product conflicts ({scoped.flagged})</TabsTrigger>
+                <TabsTrigger value="dbonly">Only in system ({scoped.dbOnly})</TabsTrigger>
+                <TabsTrigger value="dupes">Duplicates ({scoped.duplicates})</TabsTrigger>
                 <TabsTrigger value="products">Products ({preview.unmatchedProducts.length})</TabsTrigger>
                 <TabsTrigger value="quality">Data quality</TabsTrigger>
               </TabsList>
+
+              <TabsContent value="dates" className="flex-1 min-h-0">
+                <div className="flex flex-wrap items-center gap-2 pb-3">
+                  <p className="text-xs text-muted-foreground text-pretty flex-1 min-w-[280px]">
+                    Grouped by the <strong>delivery date in the spreadsheet</strong>, not the entry date &mdash; in
+                    this file every order was entered weeks before it shipped. Tick the days to reconcile; unticked
+                    days are not touched at all.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setSelectedDates(null)}>
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectedDates(new Set())}
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <ScrollArea className="h-[38vh] rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">Do</TableHead>
+                        <TableHead className="w-36">Delivery date</TableHead>
+                        <TableHead className="w-24 text-right">In file</TableHead>
+                        <TableHead className="w-24 text-right">In system</TableHead>
+                        <TableHead className="w-20 text-right">Add</TableHead>
+                        <TableHead className="w-20 text-right">Update</TableHead>
+                        <TableHead className="w-24 text-right">Correct</TableHead>
+                        <TableHead className="w-24 text-right">Conflict</TableHead>
+                        <TableHead className="w-24 text-right">Dupes</TableHead>
+                        <TableHead className="w-28 text-right">Only in system</TableHead>
+                        <TableHead className="text-right">File total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {preview.stats.byDate.map((b) => {
+                        const inFile = b.fileRows > 0
+                        const on = inFile && isDateOn(b.date)
+                        return (
+                          <TableRow key={b.date} className={on ? undefined : 'opacity-55'}>
+                            <TableCell>
+                              <Checkbox
+                                checked={on}
+                                disabled={!inFile}
+                                onCheckedChange={() => toggleDate(b.date)}
+                                aria-label={`Reconcile ${b.date}`}
+                              />
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">
+                              <div className="flex flex-col gap-1">
+                                <span>{b.date}</span>
+                                {!inFile && (
+                                  <span className="font-sans text-[10px] text-muted-foreground">
+                                    not in this file
+                                  </span>
+                                )}
+                                {b.outOfMonth && (
+                                  <Badge variant="outline" className="w-fit font-sans text-[10px]">
+                                    outside {preview.month}
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {b.fileRows ? b.fileRows.toLocaleString() : '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {b.dbRows ? b.dbRows.toLocaleString() : '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">{b.inserts || '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{b.updates || '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {b.unchanged || '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {b.flagged ? (
+                                <span className="text-amber-600 font-semibold">{b.flagged}</span>
+                              ) : (
+                                '—'
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {b.duplicates || '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {b.dbOnly ? <span className="text-amber-600">{b.dbOnly}</span> : '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs">
+                              {b.fileAmountTotal
+                                ? b.fileAmountTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })
+                                : '—'}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </TabsContent>
 
               <TabsContent value="updates" className="flex-1 min-h-0">
                 <div className="flex flex-wrap gap-2 pb-3">
@@ -886,11 +1080,15 @@ export function ReconcileDeliveriesDialog({ children }: { children: React.ReactN
                 Start over
               </Button>
               <Button
-                disabled={busy || (!insertNew && !applyUpdates && !removeDbOnly)}
+                disabled={busy || nothingSelected || (!insertNew && !applyUpdates && !removeDbOnly)}
                 onClick={() => void call('commit')}
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Apply to {preview?.month}
+                {nothingSelected
+                  ? 'Pick at least one delivery date'
+                  : partialRun
+                    ? `Apply ${scoped.dates} ${scoped.dates === 1 ? 'date' : 'dates'}`
+                    : `Apply to ${preview?.month}`}
               </Button>
             </>
           )}
