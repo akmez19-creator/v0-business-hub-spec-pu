@@ -27,6 +27,7 @@ import {
   Wallet,
   CreditCard,
   Wine,
+  ClipboardList,
 } from 'lucide-react'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
@@ -154,6 +155,7 @@ export function StorekeeperMobileLayout({
     { href: '/dashboard/storekeeper/cash-collection', label: 'Cash', icon: Banknote },
     { href: '/dashboard/storekeeper/juice-collection', label: 'Juice', icon: Wine },
     { href: '/dashboard/storekeeper/stock-in', label: 'Returns', icon: Package },
+    { href: '/dashboard/storekeeper/stock-count', label: 'Count', icon: ClipboardList },
     { href: '/dashboard/storekeeper/daily-summary', label: 'Log', icon: Calculator },
     { href: '/dashboard/storekeeper/balance', label: 'Balance', icon: Wallet },
     { href: '/dashboard/storekeeper/payments', label: 'Payments', icon: CreditCard },

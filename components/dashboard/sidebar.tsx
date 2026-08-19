@@ -10,6 +10,7 @@ import { useEffectiveRole, useRoleSwitcher } from './role-switcher-context'
 import { Badge } from '@/components/ui/badge'
 import {
   Package,
+  ClipboardList,
   LayoutDashboard,
   Truck,
   Users,
@@ -113,6 +114,7 @@ const navItems: NavItem[] = [
     subItems: [
       { href: '/dashboard/deliveries/inventory', label: 'Products', icon: BoxesIcon },
       { href: '/dashboard/deliveries/stock', label: 'Stock In/Out', icon: Package },
+      { href: '/dashboard/deliveries/stock-counts', label: 'Stock Counts', icon: ClipboardList },
     ],
   },
   {

@@ -130,7 +130,8 @@ as $$
       c.reviewed_at,
       c.created_at,
       c.counted_by,
-      coalesce(p.full_name, p.email, 'Unknown') as counted_by_name,
+      -- profiles has `name`, not `full_name`.
+      coalesce(p.name, p.email, 'Unknown') as counted_by_name,
       count(i.id)                                          as line_count,
       coalesce(sum(i.counted_qty), 0)                      as total_counted,
       -- Baseline lines are excluded from variance totals: their system_qty is
@@ -142,6 +143,6 @@ as $$
     left join profiles p on p.id = c.counted_by
     left join stock_count_items i on i.count_id = c.id
     where p_status is null or c.status = p_status
-    group by c.id, p.full_name, p.email
+    group by c.id, p.name, p.email
   ) t;
 $$;

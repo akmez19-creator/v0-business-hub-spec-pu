@@ -40,6 +40,7 @@ import {
   BoxesIcon,
   ShoppingCart,
   MessageSquare,
+  ClipboardList,
 } from 'lucide-react'
 
 interface SubNavItem {
@@ -83,6 +84,7 @@ const navItems: NavItem[] = [
       { href: '/dashboard/deliveries/payments', label: 'Payments', icon: Wallet },
       { href: '/dashboard/deliveries/inventory', label: 'Products', icon: BoxesIcon },
       { href: '/dashboard/deliveries/stock', label: 'Stock In/Out', icon: Package },
+      { href: '/dashboard/deliveries/stock-counts', label: 'Stock Counts', icon: ClipboardList },
     ],
   },
   {

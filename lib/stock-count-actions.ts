@@ -1,0 +1,304 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
+
+/**
+ * Server actions for warehouse physical stock counts.
+ *
+ * Every mutation re-derives the caller's identity and role from the session on
+ * the server. RLS is disabled on `products` and `stock_counts`, so the role
+ * check here is the only thing standing between a storekeeper and approving
+ * their own count - it must never be trusted from client input.
+ */
+
+type ActionResult<T = void> = { ok: true; data?: T } | { ok: false; error: string }
+
+/** Resolves the signed-in user's profile, or null when not authenticated. */
+async function getActor() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const adminDb = createAdminClient()
+  const { data: profile } = await adminDb
+    .from('profiles')
+    .select('id, role, name, email')
+    .eq('id', user.id)
+    .single()
+
+  return profile ?? null
+}
+
+type Actor = { id: string; role: string; name: string | null; email: string | null }
+/** `ok` is an explicit discriminant so narrowing works at every call site. */
+type Guard = { ok: true; actor: Actor } | { ok: false; error: string }
+
+/** Storekeepers and admins may record counts. */
+async function requireCounter(): Promise<Guard> {
+  const actor = await getActor()
+  if (!actor) return { ok: false, error: 'Not signed in' }
+  if (actor.role !== 'storekeeper' && actor.role !== 'admin') {
+    return { ok: false, error: 'Not permitted to record stock counts' }
+  }
+  return { ok: true, actor }
+}
+
+/**
+ * Only admins may approve. Deliberately stricter than the storekeeper layout
+ * guard, which admits storekeepers too - otherwise the approval step the user
+ * asked for would be self-serve and meaningless.
+ */
+async function requireApprover(): Promise<Guard> {
+  const actor = await getActor()
+  if (!actor) return { ok: false, error: 'Not signed in' }
+  if (actor.role !== 'admin') {
+    return { ok: false, error: 'Only an admin can approve stock counts' }
+  }
+  return { ok: true, actor }
+}
+
+/** Returns the caller's open draft session, creating one if needed. */
+export async function getOrCreateDraftCount(): Promise<
+  ActionResult<{ id: string; count_date: string }>
+> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+
+  const { data: existing } = await adminDb
+    .from('stock_counts')
+    .select('id, count_date')
+    .eq('counted_by', guard.actor.id)
+    .eq('status', 'draft')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (existing) return { ok: true, data: existing }
+
+  const { data, error } = await adminDb
+    .from('stock_counts')
+    .insert({ counted_by: guard.actor.id, status: 'draft' })
+    .select('id, count_date')
+    .single()
+
+  if (error) {
+    console.log('[v0] create draft count failed:', error.message)
+    return { ok: false, error: 'Could not start a count session' }
+  }
+  return { ok: true, data }
+}
+
+/**
+ * Adds or updates a counted line.
+ *
+ * `system_qty` and `is_baseline` are read from the database, never from the
+ * client, so the recorded variance reflects real stock at the moment of
+ * counting and cannot be spoofed by a tampered request.
+ */
+export async function saveCountItem(input: {
+  countId: string
+  productId: string
+  countedQty: number
+  notes?: string
+}): Promise<ActionResult> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const qty = Number(input.countedQty)
+  if (!Number.isInteger(qty) || qty < 0) {
+    return { ok: false, error: 'Counted quantity must be a whole number of 0 or more' }
+  }
+  // Guard against a fat-fingered extra digit becoming permanent stock.
+  if (qty > 1_000_000) {
+    return { ok: false, error: 'That quantity looks too large - please re-check' }
+  }
+
+  const adminDb = createAdminClient()
+
+  // Only the session owner may edit it, and only while it is still a draft.
+  const { data: session } = await adminDb
+    .from('stock_counts')
+    .select('id, status, counted_by')
+    .eq('id', input.countId)
+    .single()
+
+  if (!session) return { ok: false, error: 'Count session not found' }
+  if (session.status !== 'draft') {
+    return { ok: false, error: 'This count has already been submitted' }
+  }
+  if (session.counted_by !== guard.actor.id && guard.actor.role !== 'admin') {
+    return { ok: false, error: 'This count belongs to another agent' }
+  }
+
+  const { data: product } = await adminDb
+    .from('products')
+    .select('id, quantity, last_counted_at')
+    .eq('id', input.productId)
+    .single()
+
+  if (!product) return { ok: false, error: 'Product not found' }
+
+  const { error } = await adminDb.from('stock_count_items').upsert(
+    {
+      count_id: input.countId,
+      product_id: input.productId,
+      counted_qty: qty,
+      system_qty: product.quantity || 0,
+      // First-ever count: system stock is meaningless, so this is an opening
+      // baseline rather than a variance against a real figure.
+      is_baseline: !product.last_counted_at,
+      notes: input.notes || null,
+    },
+    { onConflict: 'count_id,product_id' },
+  )
+
+  if (error) {
+    console.log('[v0] saveCountItem failed:', error.message)
+    return { ok: false, error: 'Could not save this count' }
+  }
+
+  revalidatePath('/dashboard/storekeeper/stock-count')
+  return { ok: true }
+}
+
+export async function removeCountItem(itemId: string): Promise<ActionResult> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+  const { data: item } = await adminDb
+    .from('stock_count_items')
+    .select('id, count_id, stock_counts(status, counted_by)')
+    .eq('id', itemId)
+    .single<{ id: string; count_id: string; stock_counts: { status: string; counted_by: string } }>()
+
+  if (!item) return { ok: false, error: 'Line not found' }
+  if (item.stock_counts.status !== 'draft') {
+    return { ok: false, error: 'This count has already been submitted' }
+  }
+  if (item.stock_counts.counted_by !== guard.actor.id && guard.actor.role !== 'admin') {
+    return { ok: false, error: 'This count belongs to another agent' }
+  }
+
+  const { error } = await adminDb.from('stock_count_items').delete().eq('id', itemId)
+  if (error) return { ok: false, error: 'Could not remove this line' }
+
+  revalidatePath('/dashboard/storekeeper/stock-count')
+  return { ok: true }
+}
+
+/** Submits a draft for admin review. Does NOT change stock. */
+export async function submitCount(countId: string, notes?: string): Promise<ActionResult> {
+  const guard = await requireCounter()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+
+  const { data: session } = await adminDb
+    .from('stock_counts')
+    .select('id, status, counted_by')
+    .eq('id', countId)
+    .single()
+
+  if (!session) return { ok: false, error: 'Count session not found' }
+  if (session.status !== 'draft') {
+    return { ok: false, error: 'This count has already been submitted' }
+  }
+  if (session.counted_by !== guard.actor.id && guard.actor.role !== 'admin') {
+    return { ok: false, error: 'This count belongs to another agent' }
+  }
+
+  // An empty submission would create a no-op review task for the admin.
+  const { count } = await adminDb
+    .from('stock_count_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('count_id', countId)
+
+  if (!count) return { ok: false, error: 'Add at least one product before submitting' }
+
+  const { error } = await adminDb
+    .from('stock_counts')
+    .update({
+      status: 'submitted',
+      submitted_at: new Date().toISOString(),
+      notes: notes || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', countId)
+    // Re-assert draft state so two taps cannot submit twice.
+    .eq('status', 'draft')
+
+  if (error) {
+    console.log('[v0] submitCount failed:', error.message)
+    return { ok: false, error: 'Could not submit this count' }
+  }
+
+  revalidatePath('/dashboard/storekeeper/stock-count')
+  revalidatePath('/dashboard/deliveries/stock-counts')
+  return { ok: true }
+}
+
+/**
+ * Approves a count and writes the counted figures into products.quantity.
+ *
+ * The apply loop lives in the approve_stock_count() SQL function so the whole
+ * session commits atomically.
+ */
+export async function approveCount(
+  countId: string,
+  reviewNotes?: string,
+): Promise<ActionResult<{ productsUpdated: number }>> {
+  const guard = await requireApprover()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+  const { data, error } = await adminDb.rpc('approve_stock_count', {
+    p_count_id: countId,
+    p_reviewer: guard.actor.id,
+    p_review_notes: reviewNotes || null,
+  })
+
+  if (error) {
+    console.log('[v0] approveCount failed:', error.message)
+    return { ok: false, error: 'Could not approve this count' }
+  }
+  if (!data?.ok) {
+    return { ok: false, error: data?.error || 'Could not approve this count' }
+  }
+
+  revalidatePath('/dashboard/deliveries/stock-counts')
+  revalidatePath('/dashboard/deliveries/inventory')
+  return { ok: true, data: { productsUpdated: data.productsUpdated } }
+}
+
+/** Rejects a submitted count, leaving stock untouched. */
+export async function rejectCount(countId: string, reviewNotes?: string): Promise<ActionResult> {
+  const guard = await requireApprover()
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const adminDb = createAdminClient()
+  const { error } = await adminDb
+    .from('stock_counts')
+    .update({
+      status: 'rejected',
+      reviewed_by: guard.actor.id,
+      reviewed_at: new Date().toISOString(),
+      review_notes: reviewNotes || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', countId)
+    .eq('status', 'submitted')
+
+  if (error) {
+    console.log('[v0] rejectCount failed:', error.message)
+    return { ok: false, error: 'Could not reject this count' }
+  }
+
+  revalidatePath('/dashboard/deliveries/stock-counts')
+  return { ok: true }
+}
