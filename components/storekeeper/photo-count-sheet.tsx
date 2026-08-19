@@ -94,17 +94,28 @@ export function PhotoCountSheet({
    * Seeded once per photo, and never over the top of typing, so it assists
    * rather than fights whoever is holding the phone.
    */
+  /**
+   * True when nothing offered is worth trusting: either no candidates at all, or
+   * only text-similarity guesses that never saw the image.
+   *
+   * Gating on `candidates.length === 0` was wrong in the common case - a kettle
+   * photo returned five "Weak - name only" rows (Water Bottle Rack, Waterproof
+   * Sealer...), so the AI's own "kettle" was still discarded and the by-hand box
+   * still opened empty. Verified in the browser before and after.
+   */
+  const hasTrustworthyMatch = candidates.some(c => c.visually_compared)
+
   const seededFor = useRef<string | null>(null)
   useEffect(() => {
     if (phase !== 'choose' || analysing) return
-    if (candidates.length > 0 || !aiNames.length) return
+    if (hasTrustworthyMatch || !aiNames.length) return
     const key = photoUrl || 'pending'
     if (seededFor.current === key) return
     if (manualSearch.trim() !== '') return
     seededFor.current = key
     setManualSearch(aiNames[0])
     setShowManual(true)
-  }, [phase, analysing, candidates.length, aiNames, photoUrl, manualSearch])
+  }, [phase, analysing, hasTrustworthyMatch, aiNames, photoUrl, manualSearch])
 
   // Token-aware on purpose: the AI describes the object the way a person would
   // ("stainless steel pot") while the catalogue names it tersely ("Oil Pot"), and
@@ -487,6 +498,40 @@ export function PhotoCountSheet({
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Best matches
                 </p>
+
+                {/*
+                  When every row is a name-only guess, the list alone is
+                  misleading: the reader cannot tell the photo was understood but
+                  unmatched. Verified case - a kettle produced Water Bottle Rack
+                  and Waterproof Sealer while the AI had correctly said "kettle",
+                  and that word was shown nowhere. Say what was seen, and offer
+                  its names as searches.
+                */}
+                {!hasTrustworthyMatch && aiNames.length > 0 && (
+                  <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2.5">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      From the photo this looks like{' '}
+                      <span className="font-medium text-foreground">{aiNames[0]}</span>
+                      , but nothing in the catalogue matched it by sight. The
+                      guesses below are name-only - or search a name instead.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {aiNames.slice(0, 5).map(name => (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => {
+                            setManualSearch(name)
+                            setShowManual(true)
+                          }}
+                          className="rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-foreground transition-colors hover:border-primary hover:text-primary"
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/*
                   Real finding from testing: a bulb-style IP camera and a

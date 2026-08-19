@@ -220,6 +220,18 @@ export function textOnlyConfidence(score: number): number {
  * Substring scoring is kept and ranked highest so typing letter by letter still
  * narrows normally - a token-only search would go blank at "po" and feel broken.
  */
+/**
+ * Head nouns that name a whole product class rather than the object.
+ *
+ * "Smoothie maker" shares only "maker" with Donut Maker and Burger Maker, so an
+ * undamped head match ranked three unrelated appliances as top suggestions.
+ * These still score, just not enough to lead on their own.
+ */
+const GENERIC_HEADS = new Set([
+  'maker', 'machine', 'device', 'tool', 'kit', 'holder', 'stand', 'rack',
+  'bag', 'box', 'case', 'cover', 'organizer', 'organiser', 'cleaner',
+])
+
 export function searchCatalogue<T extends { name: string; category: string | null }>(
   query: string,
   products: T[],
@@ -231,30 +243,41 @@ export function searchCatalogue<T extends { name: string; category: string | nul
   const tokens = tokenise(query)
   // The last significant word carries the object itself - "pot" in "stainless
   // steel pot" - so it is weighted above the adjectives in front of it.
-  const head = tokens[tokens.length - 1]
+  // Falls back to the raw query because tokenise() drops stop words and short
+  // fragments: typing "p" or "set" yields NO tokens, and reading head.length off
+  // undefined threw on the very first keystroke.
+  const head = tokens[tokens.length - 1] ?? q
 
   const scored = products.map(product => {
     const name = product.name.toLowerCase()
     const category = (product.category || '').toLowerCase()
     const productTokens = new Set(tokenise(`${product.name} ${product.category || ''}`))
-    let score = 0
 
-    if (name.includes(q)) score += 4
-    else if (category.includes(q)) score += 1.5
+    const substring = name.includes(q) ? 4 : category.includes(q) ? 1.5 : 0
 
-    for (const token of tokens) {
-      if (productTokens.has(token)) score += 1
-    }
-    if (head && productTokens.has(head)) score += 2
+    let headScore = 0
+    if (head && productTokens.has(head)) headScore = GENERIC_HEADS.has(head) ? 0.75 : 2
     // Prefix match on the word being typed, so "pot" still ranks while the
     // storekeeper is only as far as "po".
-    else if (head && head.length >= 2) {
+    else if (head.length >= 2) {
       for (const token of productTokens) {
         if (token.startsWith(head)) {
-          score += 1.5
+          headScore = 1.5
           break
         }
       }
+    }
+
+    // The head noun IS the object. Without this gate a multi-word name matched
+    // on any shared word, so "Smoothie maker" dragged in Donut Maker and Burger
+    // Maker - noise that makes the suggestions look careless. A modifier alone
+    // is not evidence; only fall through on a real substring hit.
+    if (!headScore && !substring) return { product, score: 0 }
+    if (!headScore && tokens.length > 1) return { product, score: substring }
+
+    let score = substring + headScore
+    for (const token of tokens) {
+      if (token !== head && productTokens.has(token)) score += 1
     }
 
     return { product, score }
