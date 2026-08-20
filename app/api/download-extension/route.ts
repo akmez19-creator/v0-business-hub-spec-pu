@@ -48,9 +48,15 @@ export async function GET() {
       // Use fallback version if manifest can't be parsed
     }
 
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+    // A NextResponse body must be a valid BodyInit. JSZip's 'nodebuffer' (and
+    // even 'uint8array', which may be SharedArrayBuffer-backed) fails that
+    // typecheck and breaks the production build - which in turn blocks every
+    // other route from deploying. Copy into a fresh Uint8Array, then wrap it in
+    // a Blob, which is unambiguously a BodyInit.
+    const zipData = await zip.generateAsync({ type: 'uint8array' })
+    const zipBlob = new Blob([new Uint8Array(zipData)], { type: 'application/zip' })
 
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(zipBlob, {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="akmez-quick-order-v${version}.zip"`,

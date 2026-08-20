@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { ToolsDownloadPage } from '@/components/tools/tools-download-page'
+import { Tools1688Guide } from '@/components/tools/tools-1688-guide'
 
 export default async function ToolsPage() {
   const supabase = await createClient()
@@ -20,5 +21,10 @@ export default async function ToolsPage() {
     redirect('/dashboard')
   }
   
-  return <ToolsDownloadPage />
+  return (
+    <div className="bg-background">
+      <ToolsDownloadPage />
+      <Tools1688Guide />
+    </div>
+  )
 }

@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Akmez Guide",
+  "version": "3.0.0",
+  "description": "An AI co-pilot on any web page: ask what to do and it highlights exactly where to click. Built-in English guidance for Chinese 1688.com pages.",
+  "permissions": ["activeTab", "clipboardWrite", "storage", "scripting"],
+  "host_permissions": ["https://www.akmez.tech/*", "<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "toggle-guide": {
+      "suggested_key": {
+        "default": "Alt+Z"
+      },
+      "description": "Open / close the Akmez guide"
+    }
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

@@ -1,0 +1,1006 @@
+/* Akmez 1688 Guide - all classes are akz- prefixed and heavily scoped so they
+   cannot collide with 1688's own stylesheet. 1688 uses z-index up to ~10000,
+   so everything here sits far above that. */
+
+.akz-root,
+.akz-root * {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* ---------- floating launcher ---------- */
+.akz-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 10px 30px rgba(234, 88, 12, 0.45);
+  z-index: 2147483000;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.akz-fab:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 14px 36px rgba(234, 88, 12, 0.6);
+}
+.akz-fab.akz-hidden {
+  display: none;
+}
+
+/* ---------- side panel ---------- */
+.akz-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 400px;
+  max-width: 96vw;
+  height: 100vh;
+  background: #0f1115;
+  color: #e7e9ee;
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: -18px 0 50px rgba(0, 0, 0, 0.5);
+  z-index: 2147483001;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.akz-panel.akz-open {
+  transform: translateX(0);
+}
+
+.akz-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.22), rgba(249, 115, 22, 0.04));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.akz-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #f97316;
+  color: #fff;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.akz-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.akz-sub {
+  font-size: 11px;
+  color: #98a2b3;
+  margin-top: 2px;
+}
+.akz-x {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #cbd5e1;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+}
+.akz-x:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.akz-pagetag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 11px;
+  color: #98a2b3;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.akz-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex: 0 0 auto;
+}
+.akz-pagename {
+  color: #f97316;
+  font-weight: 700;
+}
+
+.akz-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px 90px;
+}
+.akz-body::-webkit-scrollbar {
+  width: 8px;
+}
+.akz-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+
+.akz-secttl {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin: 16px 0 8px;
+}
+.akz-secttl:first-child {
+  margin-top: 0;
+}
+
+/* ---------- step cards ---------- */
+.akz-step {
+  display: flex;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.akz-step:hover {
+  background: rgba(249, 115, 22, 0.1);
+  border-color: rgba(249, 115, 22, 0.45);
+}
+.akz-step.akz-active {
+  background: rgba(249, 115, 22, 0.16);
+  border-color: #f97316;
+}
+.akz-step.akz-missing {
+  opacity: 0.42;
+}
+.akz-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.akz-step.akz-active .akz-num {
+  background: #f97316;
+  color: #fff;
+}
+.akz-stxt {
+  min-width: 0;
+}
+.akz-sttl {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f3f4f6;
+  line-height: 1.35;
+}
+.akz-sbody {
+  font-size: 11.5px;
+  color: #98a2b3;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.akz-cn {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+  font-size: 12px;
+  font-weight: 600;
+}
+.akz-note {
+  font-size: 10.5px;
+  color: #6b7280;
+  margin-top: 5px;
+  font-style: italic;
+}
+
+/* ---------- captured listing ---------- */
+.akz-cap {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+}
+.akz-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+}
+.akz-row:last-child {
+  border-bottom: none;
+}
+.akz-k {
+  color: #6b7280;
+  flex: 0 0 auto;
+}
+.akz-v {
+  color: #e5e7eb;
+  text-align: right;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.akz-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  background: #f97316;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.akz-btn:hover {
+  background: #ea580c;
+}
+.akz-btn.akz-ghost {
+  background: rgba(255, 255, 255, 0.07);
+  color: #cbd5e1;
+}
+.akz-btn.akz-ghost:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+.akz-empty {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+  padding: 10px 0;
+}
+
+/* ---------- spotlight ---------- */
+.akz-ring {
+  position: absolute;
+  border: 3px solid #f97316;
+  border-radius: 10px;
+  box-shadow: 0 0 0 4000px rgba(6, 8, 12, 0.62), 0 0 22px rgba(249, 115, 22, 0.9);
+  z-index: 2147482000;
+  pointer-events: none;
+  transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.akz-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 10px;
+  border: 3px solid rgba(249, 115, 22, 0.55);
+  animation: akz-pulse 1.5s ease-out infinite;
+}
+@keyframes akz-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.14);
+    opacity: 0;
+  }
+}
+
+.akz-call {
+  position: absolute;
+  max-width: 320px;
+  background: #0f1115;
+  color: #e7e9ee;
+  border: 1px solid #f97316;
+  border-radius: 12px;
+  padding: 12px 14px;
+  z-index: 2147482001;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+}
+.akz-call-n {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f97316;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+.akz-call-t {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.akz-call-b {
+  font-size: 12px;
+  color: #98a2b3;
+  line-height: 1.55;
+  margin-top: 5px;
+}
+.akz-call-close {
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #cbd5e1;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.akz-call-close:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+/* ---------- inline English badges on Chinese controls ---------- */
+.akz-tag {
+  position: absolute;
+  z-index: 2147481000;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  opacity: 0.95;
+}
+.akz-tag.akz-tag-warn {
+  background: #ef4444;
+}
+.akz-tag.akz-tag-go {
+  background: #16a34a;
+}
+
+/* ---------- hover translation bubble ---------- */
+.akz-hover {
+  position: fixed;
+  z-index: 2147483002;
+  background: #0f1115;
+  color: #fff;
+  border: 1px solid rgba(249, 115, 22, 0.6);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  max-width: 280px;
+}
+.akz-hover span {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* ---------- toast ---------- */
+.akz-toast {
+  position: fixed;
+  bottom: 84px;
+  right: 18px;
+  z-index: 2147483003;
+  background: #16a34a;
+  color: #fff;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+.akz-toast.akz-bad {
+  background: #dc2626;
+}
+
+/* ---------- dragging ---------- */
+.akz-head {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.akz-fab {
+  touch-action: none;
+}
+.akz-panel.akz-moving .akz-head,
+.akz-fab.akz-moving {
+  cursor: grabbing;
+}
+/* The hover lift would fight the cursor while dragging. */
+.akz-fab.akz-moving,
+.akz-fab.akz-moving:hover {
+  transform: none;
+}
+/* No transition mid-drag, or the element lags behind the pointer. */
+.akz-moving {
+  transition: none !important;
+}
+/* While a drag is in flight, stop the page underneath selecting text, and stop
+   iframes swallowing the pointer once it leaves our element. */
+body.akz-dragging {
+  user-select: none !important;
+  cursor: grabbing !important;
+}
+body.akz-dragging iframe {
+  pointer-events: none;
+}
+
+/* Undocked: a free-floating window instead of a full-height right rail. */
+.akz-panel.akz-float {
+  height: min(76vh, 720px);
+  max-height: 76vh;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.62);
+  overflow: hidden;
+  /* Docked slides in with translateX; floated is placed with left/top, so it
+     has to fade instead or the slide would fight the drag position. */
+  transform: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.16s ease, visibility 0.16s ease;
+}
+.akz-panel.akz-float.akz-open {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+}
+.akz-panel.akz-float .akz-head {
+  border-radius: 16px 16px 0 0;
+}
+.akz-panel.akz-float .akz-body {
+  padding-bottom: 24px;
+}
+/* Snap-back is only meaningful once it has actually been moved. */
+.akz-panel:not(.akz-float) [data-akz="dock"] {
+  display: none;
+}
+.akz-x[data-akz="dock"] {
+  margin-left: auto;
+}
+.akz-panel.akz-float .akz-x[data-akz="close"] {
+  margin-left: 6px;
+}
+
+/* ---------- AI co-pilot ---------- */
+.akz-ask,
+.akz-signin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.akz-sitxt {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #98a2b3;
+}
+.akz-in,
+.akz-ta {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px 11px;
+  color: #e7e9ee;
+  font-size: 12.5px;
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+}
+.akz-in:focus,
+.akz-ta:focus {
+  border-color: rgba(249, 115, 22, 0.7);
+  background: rgba(249, 115, 22, 0.07);
+}
+.akz-in::placeholder,
+.akz-ta::placeholder {
+  color: #6b7280;
+}
+.akz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.akz-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #b6bdc9;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.akz-chip:hover {
+  border-color: rgba(249, 115, 22, 0.6);
+  color: #fdba74;
+}
+.akz-answer {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  margin-bottom: 10px;
+}
+.akz-err {
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #fca5a5;
+  margin-bottom: 10px;
+}
+.akz-step.akz-ai {
+  border-color: rgba(56, 189, 248, 0.22);
+}
+.akz-num.akz-ainum {
+  background: linear-gradient(135deg, #38bdf8, #0284c7);
+}
+.akz-acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.akz-mini {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #d1d5db;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.akz-mini:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.akz-mini.akz-go {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  border-color: transparent;
+  color: #fff;
+}
+.akz-mini.akz-go:hover {
+  filter: brightness(1.08);
+}
+
+/* ---------- chat shell ---------- */
+/* The header holds three icon buttons now, so the title block takes the slack
+   instead of every button claiming `margin-left: auto`. */
+.akz-htxt {
+  flex: 1;
+  min-width: 0;
+}
+.akz-head .akz-x,
+.akz-panel.akz-float .akz-x[data-akz="close"] {
+  margin-left: 0;
+}
+.akz-head .akz-x + .akz-x {
+  margin-left: 4px;
+}
+
+.akz-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.akz-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #98a2b3;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 6px 10px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.akz-tab:hover {
+  color: #e7e9ee;
+  background: rgba(255, 255, 255, 0.04);
+}
+.akz-tab.akz-on {
+  color: #fff;
+  border-bottom-color: #f97316;
+}
+.akz-count {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 10px;
+}
+.akz-saved {
+  margin-left: auto;
+  font-size: 10px;
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* min-height:0 is what actually lets the transcript scroll instead of pushing
+   the composer off the bottom of a flex column. */
+.akz-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.akz-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.akz-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.akz-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+}
+
+/* ---------- messages ---------- */
+.akz-msg {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  animation: akz-rise 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes akz-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.akz-msg.akz-me {
+  justify-content: flex-end;
+}
+.akz-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.akz-bub {
+  max-width: 84%;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.akz-me .akz-bub {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff;
+  padding: 9px 13px;
+  border-radius: 14px 14px 4px 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.28);
+}
+.akz-ai-msg .akz-bub {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 11px 13px;
+  border-radius: 14px 14px 14px 4px;
+}
+.akz-msg-err .akz-bub {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.32);
+  color: #fca5a5;
+}
+.akz-bub .akz-answer {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font-size: 13px;
+}
+.akz-bub code {
+  background: rgba(255, 255, 255, 0.12);
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.akz-meta {
+  margin-top: 7px;
+  font-size: 10px;
+  color: #6b7280;
+}
+.akz-steps {
+  margin-top: 10px;
+}
+.akz-steps .akz-step {
+  margin-bottom: 8px;
+}
+.akz-stale {
+  font-size: 10px;
+  color: #94a3b8;
+  border-left: 2px solid rgba(148, 163, 184, 0.4);
+  padding-left: 8px;
+}
+
+/* ---------- typing indicator ---------- */
+.akz-typing {
+  display: flex;
+  gap: 4px;
+  padding: 3px 0;
+}
+.akz-typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  animation: akz-bounce 1.1s infinite ease-in-out;
+}
+.akz-typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.akz-typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes akz-bounce {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  35% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* ---------- welcome ---------- */
+.akz-welcome {
+  text-align: center;
+  padding: 26px 6px;
+}
+.akz-wmark {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 12px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff;
+  font-weight: 800;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(234, 88, 12, 0.4);
+}
+.akz-wttl {
+  font-size: 15px;
+  font-weight: 700;
+}
+.akz-wsub {
+  font-size: 12px;
+  color: #98a2b3;
+  margin-top: 5px;
+  line-height: 1.5;
+}
+.akz-welcome .akz-chips {
+  justify-content: center;
+  margin-top: 14px;
+}
+
+/* ---------- composer ---------- */
+.akz-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+.akz-composer .akz-ta {
+  flex: 1;
+  resize: none;
+  max-height: 140px;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e7e9ee;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.akz-composer .akz-ta:focus {
+  border-color: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
+}
+.akz-send {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.akz-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+.akz-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.akz-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: akz-spin 0.7s linear infinite;
+}
+@keyframes akz-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- history ---------- */
+.akz-thread {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.akz-thread:hover {
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateX(2px);
+}
+.akz-thread.akz-tcur {
+  border-color: rgba(249, 115, 22, 0.55);
+  background: rgba(249, 115, 22, 0.08);
+}
+.akz-tmain {
+  flex: 1;
+  min-width: 0;
+}
+.akz-tttl {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.akz-tmeta {
+  font-size: 10.5px;
+  color: #7b8494;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.akz-tdel {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.akz-tdel:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+/* ---------- resize grip ---------- */
+.akz-grip {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
+  z-index: 2;
+}
+.akz-grip::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-left: 2px solid rgba(255, 255, 255, 0.25);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.25);
+}
+.akz-grip:hover::before {
+  border-color: rgba(249, 115, 22, 0.9);
+}
+
+/* Respect a reduced-motion preference: the panel still works, it just stops
+   sliding, bouncing and spinning. */
+@media (prefers-reduced-motion: reduce) {
+  .akz-panel,
+  .akz-msg,
+  .akz-fab,
+  .akz-thread,
+  .akz-send {
+    transition: none !important;
+    animation: none !important;
+  }
+  .akz-typing i,
+  .akz-spin {
+    animation-duration: 2.4s;
+  }
+}
