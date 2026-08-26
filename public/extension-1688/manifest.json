@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Akmez Guide",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "description": "An AI co-pilot on any web page: ask what to do and it highlights exactly where to click. Built-in English guidance for Chinese 1688.com pages.",
   "permissions": [
     "activeTab",

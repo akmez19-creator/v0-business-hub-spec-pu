@@ -1397,8 +1397,10 @@
     db.currentId = next.currentId || db.currentId
     db.drafts = next.drafts || {}
     // Never yank the panel open or shut underneath someone, and never re-render
-    // over a half-typed question or a request that is still in flight.
-    if (!aiBusy && document.activeElement?.dataset?.akz !== 'q') render()
+    // over a half-typed question or a request that is still in flight. This
+    // covers every panel field - checking only 'q' let a change in another tab
+    // wipe the sign-in inputs.
+    if (!aiBusy && !typingInPanel()) render()
   })
 
   // A queued save must not be lost when the page is being torn down.
@@ -2279,6 +2281,25 @@
       <div class="akz-supnote">Nothing is ever sent for you. Edit it, then press 发送 yourself.</div>`
   }
 
+  /**
+   * Every text field in the panel, so a re-render can put focus and the caret
+   * back into whichever one the user was actually in. This used to cover only
+   * the chat box, which is why the sign-in fields were wiped mid-typing.
+   */
+  const TEXT_FIELDS = ['q', 'email', 'pass']
+
+  /**
+   * The half-typed sign-in values, held in memory ONLY so they survive the
+   * `innerHTML` re-render. Deliberately not persisted: a password must never be
+   * written to chrome.storage, and it is cleared as soon as sign-in succeeds.
+   */
+  let loginDraft = { email: '', pass: '' }
+
+  /** True while the user is typing in one of the panel's own fields. */
+  function typingInPanel() {
+    return TEXT_FIELDS.includes(document.activeElement?.dataset?.akz)
+  }
+
   function render(toEnd) {
     const kind = detectPage()
     // 'other' has no hand-written playbook - that is what the AI is for.
@@ -2292,8 +2313,11 @@
     const oldScroll = panel.querySelector('.akz-scroll')
     const keepScroll = oldScroll ? oldScroll.scrollTop : null
     const atBottom = oldScroll ? oldScroll.scrollHeight - oldScroll.scrollTop - oldScroll.clientHeight < 40 : true
-    const focused = document.activeElement?.dataset?.akz === 'q'
-    const caret = focused ? document.activeElement.selectionStart : null
+    // Any of the panel's text fields, not just the chat box. Restricting this
+    // to 'q' meant a background re-render dropped focus out of Email/Password
+    // on every tick, which read as "the panel won't let me type".
+    const activeKey = typingInPanel() ? document.activeElement.dataset.akz : null
+    const caret = activeKey ? document.activeElement.selectionStart : null
 
     const tab = db.tab || 'chat'
 
@@ -2519,19 +2543,52 @@
     const emailIn = panel.querySelector('[data-akz=email]')
     const passIn = panel.querySelector('[data-akz=pass]')
     const signBtn = panel.querySelector('[data-akz=signin]')
-    if (signBtn)
+
+    // Put back whatever was already typed. `innerHTML` above replaced these
+    // inputs with empty ones, so without this the values are gone even when
+    // focus is correctly restored.
+    if (emailIn) {
+      emailIn.value = loginDraft.email
+      emailIn.oninput = () => {
+        loginDraft.email = emailIn.value
+      }
+    }
+    if (passIn) {
+      passIn.value = loginDraft.pass
+      passIn.oninput = () => {
+        loginDraft.pass = passIn.value
+      }
+    }
+
+    if (signBtn) {
       signBtn.onclick = async () => {
         signBtn.disabled = true
         signBtn.textContent = 'Signing in...'
         try {
           await signIn(emailIn.value.trim(), passIn.value)
           aiError = ''
+          // Never keep the password around once it has been exchanged.
+          loginDraft = { email: '', pass: '' }
           toast('Signed in')
         } catch (err) {
           aiError = err?.message || 'Sign in failed'
+          // Keep the email so a wrong password does not mean retyping both.
+          loginDraft.pass = ''
         }
         render()
       }
+
+      // Enter submits, as on any other login form. isComposing/229 guards CJK
+      // IMEs, where Enter is confirming a candidate rather than submitting -
+      // this panel runs on Chinese sites, so that case is routine here.
+      const onEnter = e => {
+        if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return
+        e.preventDefault()
+        signBtn.click()
+      }
+      if (emailIn) emailIn.onkeydown = onEnter
+      if (passIn) passIn.onkeydown = onEnter
+    }
 
     const qBox = panel.querySelector('[data-akz=q]')
     const askBtn = panel.querySelector('[data-akz=ask]')
@@ -2689,13 +2746,17 @@
       if (toEnd || atBottom) scroller.scrollTop = scroller.scrollHeight
       else if (keepScroll !== null) scroller.scrollTop = keepScroll
     }
-    if (focused) {
-      const box = panel.querySelector('[data-akz=q]')
+    if (activeKey) {
+      const box = panel.querySelector(`[data-akz=${activeKey}]`)
       if (box) {
         box.focus()
         if (caret !== null) {
           const at = Math.min(caret, box.value.length)
-          box.setSelectionRange(at, at)
+          // setSelectionRange throws InvalidStateError on input[type=email],
+          // which would abort the rest of render() and leave the panel broken.
+          try {
+            box.setSelectionRange(at, at)
+          } catch {}
         }
       }
     }
@@ -2935,10 +2996,40 @@
   })
 
   // 1688 is a single-page app in places, so re-render when the URL changes.
-  let lastUrl = location.href
+  //
+  // Comparing raw `location.href` made this fire constantly: 1688 rewrites its
+  // own tracking parameters and hash while you sit on a page, so the panel was
+  // re-rendering roughly every 1.2s. Since a re-render replaces the whole panel
+  // via innerHTML, the sign-in inputs were destroyed mid-keystroke - the form
+  // looked like it was "refreshing" and refused to accept typing.
+  //
+  // The hash and the known Alibaba tracking params are ignored, so only real
+  // navigation counts. Any other query parameter is still significant (search
+  // keywords, for instance), so those are preserved.
+  const TRACKING_PARAMS =
+    /^(spm|scm|tracelog|traceid|trace|sk|cosite|keywordid|resourceid|from|fromsite|clickid|impression|umid|ali_trackid|pvid|object_id|_t)$/i
+
+  function navKey() {
+    try {
+      const u = new URL(location.href)
+      const keep = new URLSearchParams()
+      for (const [k, v] of u.searchParams) if (!TRACKING_PARAMS.test(k)) keep.append(k, v)
+      const q = keep.toString()
+      return u.origin + u.pathname + (q ? `?${q}` : '')
+    } catch {
+      return location.href
+    }
+  }
+
+  let lastNav = navKey()
   setInterval(() => {
-    if (location.href === lastUrl) return
-    lastUrl = location.href
+    const now = navKey()
+    if (now === lastNav) return
+    // Do not consume the change while a panel field has focus - re-rendering
+    // would replace the input the user is typing into. `lastNav` is left alone
+    // so this runs as soon as they are finished.
+    if (typingInPanel()) return
+    lastNav = now
     clearSpot()
     if (panel.classList.contains('akz-open')) {
       render()
