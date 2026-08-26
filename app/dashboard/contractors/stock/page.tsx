@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server'
 import { ContractorMobileLayout } from '@/components/contractor/mobile-layout'
 import { StockValidation } from '@/components/contractor/stock-validation'
 import { RiderStockCards } from '@/components/contractor/rider-stock-cards'
+import { OnVanPanel } from '@/components/stock/on-van-panel'
+import { buildVanPiles } from '@/lib/van-stock'
+import { resolveStockDate, STOCK_DATE_COLUMN } from '@/lib/stock-date'
+import { isPendingReattempt } from '@/lib/reschedule-stock'
 
 export default async function ContractorStockPage() {
   const supabase = await createClient()
@@ -62,36 +66,10 @@ export default async function ContractorStockPage() {
 
   const riderIds = allRiders.map(r => r.id)
 
-  // Find the active delivery date (latest date with assigned deliveries)
-  let activeDate = new Date().toISOString().split('T')[0]
-  if (riderIds.length > 0) {
-    const { data: latestMain } = await supabase
-      .from('deliveries')
-      .select('delivery_date')
-      .in('rider_id', riderIds)
-      .not('products', 'is', null)
-      .order('delivery_date', { ascending: false })
-      .limit(1)
-
-    const { data: latestPartner } = await supabase
-      .from('partner_deliveries')
-      .select('order_date')
-      .eq('contractor_id', contractor.id)
-      .in('rider_id', riderIds)
-      .not('product', 'is', null)
-      .order('order_date', { ascending: false })
-      .limit(1)
-
-    const mainDate = latestMain?.[0]?.delivery_date || null
-    const partnerDate = latestPartner?.[0]?.order_date || null
-    if (mainDate && partnerDate) {
-      activeDate = mainDate >= partnerDate ? mainDate : partnerDate
-    } else if (mainDate) {
-      activeDate = mainDate
-    } else if (partnerDate) {
-      activeDate = partnerDate
-    }
-  }
+  // ONE resolver, shared with `generateDailyStock()`. This used to be an inline
+  // copy, and the generator's copy keyed off `delivery_date` - so the screen
+  // could show a day the generator would not build for.
+  const activeDate = await resolveStockDate(supabase, riderIds, contractor.id)
 
   // Fetch daily stock items for the active date
   const { data: stockItems } = await supabase
@@ -116,9 +94,12 @@ export default async function ContractorStockPage() {
   if (riderIds.length > 0) {
     const { data: md } = await supabase
       .from('deliveries')
-      .select('id, products, qty, status, rider_id, locality, customer_name, sales_type, return_product')
+      .select('id, products, qty, status, rider_id, locality, customer_name, sales_type, return_product, delivery_date, rescheduled_to')
       .in('rider_id', riderIds)
-      .eq('delivery_date', activeDate)
+      // Due-day basis, so an order rescheduled onto this day is part of the
+      // load the contractor has to account for. Same constant the generator
+      // uses, so the two can never diverge again.
+      .eq(STOCK_DATE_COLUMN, activeDate)
     mainDeliveries = md || []
 
     const { data: pd } = await supabase
@@ -128,6 +109,34 @@ export default async function ContractorStockPage() {
       .in('rider_id', riderIds)
       .eq('order_date', activeDate)
     partnerDeliveries = pd || []
+  }
+
+  // NWD stays on the van, so it is NOT bounded by `activeDate`: refusals from
+  // earlier days are still physically with the riders. Not date-filtered for
+  // that reason - a date filter is what made 63 live units invisible.
+  let vanPiles: ReturnType<typeof buildVanPiles> = []
+  if (riderIds.length > 0) {
+    const { data: vanRows } = await supabase
+      .from('deliveries')
+      .select('id, products, qty, status, delivery_date, customer_name, rider_id')
+      .in('rider_id', riderIds)
+      .eq('status', 'nwd')
+      // `IS NOT TRUE`, never `= false` - `= false` drops NULLs in Postgres and
+      // would hide van stock instead of showing it.
+      .not('stock_verified', 'is', true)
+      .order('delivery_date', { ascending: false })
+
+    vanPiles = buildVanPiles(
+      (vanRows || []).map(r => ({
+        id: r.id,
+        product: r.products,
+        qty: r.qty,
+        status: r.status,
+        deliveryDate: r.delivery_date,
+        customerName: r.customer_name,
+      })),
+      activeDate,
+    )
   }
 
   const riderProducts = allRiders.map(rider => {
@@ -157,7 +166,14 @@ export default async function ContractorStockPage() {
       }
       const entry = productMap.get(key)!
       entry.totalQty += qty
-      if (d.status === 'delivered' || d.status === 'picked_up') entry.deliveredQty += qty
+      // A rescheduled order carries the status of the attempt that FAILED, so
+      // reading `status` literally on the NEW date reported goods "returning"
+      // that came back on the ORIGINAL date - and Stock In already counts those
+      // off `delivery_date`. It is open work for this day, so it counts as
+      // pending. The rider's own stock page already does this; this screen (the
+      // one the contractor actually looks at) was still literal.
+      if (isPendingReattempt(d)) entry.pendingQty += qty
+      else if (d.status === 'delivered' || d.status === 'picked_up') entry.deliveredQty += qty
       else if (d.status === 'nwd') entry.postponedQty += qty
       else if (d.status === 'cms') { entry.returningQty += qty; entry.cmsQty += qty }
       else entry.pendingQty += qty
@@ -271,6 +287,10 @@ export default async function ContractorStockPage() {
           today={activeDate}
         />
 
+        {/* STILL ON THE VANS - above the general per-rider list. Validation
+            above concerns the NEW load; this is stock already being carried, so
+            it belongs before the general list, not buried inside it. */}
+        <OnVanPanel piles={vanPiles} activeDate={activeDate} heading="Still on the vans" />
 
         <RiderStockCards riderProducts={riderProducts} />
       </div>

@@ -916,18 +916,27 @@ function RiderStockBreakdown({ riderProducts }: { riderProducts: RiderProducts[]
 
   if (activeRiders.length === 0) return null
 
+  // Solo contractor - he is the rider, so there is nothing to group by. Same
+  // rule as RiderStockCards: detected by COUNT, because `has_partners` is
+  // false on all 18 contractors and the names do not reliably match
+  // ("AnChal" the contractor vs "AANCHAL" the rider is one man).
+  const solo = activeRiders.length === 1
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <Users className="w-4 h-4 text-primary" />
-          Stock by Rider
+          {solo ? <Package className="w-4 h-4 text-primary" /> : <Users className="w-4 h-4 text-primary" />}
+          {solo ? 'Your stock' : 'Stock by Rider'}
         </h2>
-        <span className="text-[10px] text-muted-foreground">{activeRiders.length} rider{activeRiders.length !== 1 ? 's' : ''}</span>
+        {!solo && (
+          <span className="text-[10px] text-muted-foreground">{activeRiders.length} riders</span>
+        )}
       </div>
 
       {activeRiders.map(rider => {
-        const isExpanded = expandedRider === rider.riderId
+        // Solo: open, because there is no other rider to switch to.
+        const isExpanded = solo || expandedRider === rider.riderId
         const processed = rider.delivered + rider.postponed + rider.returning
         const progress = rider.totalItems > 0 ? Math.round((processed / rider.totalItems) * 100) : 0
         const activeCat = expandedCategory[rider.riderId] || null
@@ -962,30 +971,44 @@ function RiderStockBreakdown({ riderProducts }: { riderProducts: RiderProducts[]
 
         return (
           <div key={rider.riderId} className="rounded-2xl border border-border bg-card overflow-hidden">
-            {/* Rider header - always visible */}
-            <button
-              onClick={() => setExpandedRider(isExpanded ? null : rider.riderId)}
-              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/30 transition-colors"
-            >
-              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                <span className="text-xs font-bold text-primary">
-                  {rider.riderName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+            {/* SOLO: summary strip only - his own name and initials told him
+                nothing, and there was nothing to expand. Counts kept. */}
+            {solo ? (
+              <div className="px-4 py-2.5 flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground">{rider.totalItems} items</span>
+                <span className="text-[10px] font-semibold text-foreground">{progress}% processed</span>
+                <span className="ml-auto flex items-center gap-1.5">
+                  {rider.delivered > 0 && <span className="text-[10px] font-bold text-emerald-500">{rider.delivered}</span>}
+                  {rider.postponed > 0 && <span className="text-[10px] font-bold text-amber-500">{rider.postponed}</span>}
+                  {rider.returning > 0 && <span className="text-[10px] font-bold text-red-500">{rider.returning}</span>}
                 </span>
               </div>
-              <div className="flex-1 text-left min-w-0">
-                <p className="text-xs font-semibold text-foreground truncate">{rider.riderName}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-muted-foreground">{rider.totalItems} items</span>
-                  <span className="text-[10px] text-muted-foreground">{progress}% processed</span>
+            ) : (
+              /* TEAM: rider header, tap to expand one at a time. */
+              <button
+                onClick={() => setExpandedRider(isExpanded ? null : rider.riderId)}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/30 transition-colors"
+              >
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-primary">
+                    {rider.riderName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                  </span>
                 </div>
-              </div>
-              <div className="flex items-center gap-1">
-                {rider.delivered > 0 && <span className="text-[10px] font-bold text-emerald-500">{rider.delivered}</span>}
-                {rider.postponed > 0 && <span className="text-[10px] font-bold text-amber-500">{rider.postponed}</span>}
-                {rider.returning > 0 && <span className="text-[10px] font-bold text-red-500">{rider.returning}</span>}
-                <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", isExpanded && "rotate-180")} />
-              </div>
-            </button>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-xs font-semibold text-foreground truncate">{rider.riderName}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-muted-foreground">{rider.totalItems} items</span>
+                    <span className="text-[10px] text-muted-foreground">{progress}% processed</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {rider.delivered > 0 && <span className="text-[10px] font-bold text-emerald-500">{rider.delivered}</span>}
+                  {rider.postponed > 0 && <span className="text-[10px] font-bold text-amber-500">{rider.postponed}</span>}
+                  {rider.returning > 0 && <span className="text-[10px] font-bold text-red-500">{rider.returning}</span>}
+                  <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", isExpanded && "rotate-180")} />
+                </div>
+              </button>
+            )}
 
             {/* Expanded: progress + categories + products */}
             {isExpanded && (

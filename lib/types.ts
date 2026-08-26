@@ -24,7 +24,44 @@ export interface Delivery {
   id: string
   rte: string | null
   entry_date: string
+  /**
+   * The day the goods PHYSICALLY WENT OUT on the van. IMMUTABLE.
+   * Van stock, cash collection, stock validation and the storekeeper's returns
+   * are all keyed to it, so moving it makes goods sitting in the warehouse
+   * vanish from that day's returns. A reschedule NEVER writes here.
+   */
   delivery_date: string | null
+  /** The confirmed new day. Null = never rescheduled. */
+  rescheduled_to: string | null
+  /** A rider's proposal, not yet approved. Does NOT move active_date. */
+  reschedule_requested_to: string | null
+  /**
+   * The day it is now DUE. Generated in the DB as
+   * `coalesce(rescheduled_to, delivery_date)` - read-only, never written.
+   * Forward-looking screens (rounds, loads) should read this; history keeps
+   * reading delivery_date.
+   */
+  active_date: string | null
+  /**
+   * Permanent human-readable order number, e.g. AK-1042, assigned by a DB
+   * trigger on insert. This is what ties the several ATTEMPTS of one
+   * rescheduled order together on screen, and what can be said out loud on the
+   * phone - the row UUID cannot.
+   */
+  order_code: string | null
+  /** Why the order was moved. Shown on the preserved failed-attempt row. */
+  reschedule_reason: string | null
+  /**
+   * Where the goods physically are. Declared because the deliveries table reads
+   * them through `staysOnVan()`: the query is `select('*')` so they arrive at
+   * runtime regardless, and leaving them off this type made TypeScript treat
+   * them as permanently undefined - the guard would have compiled clean and
+   * silently never fired.
+   */
+  stock_out: boolean | null
+  stock_verified: boolean | null
+  van_confirmed_by: string | null
+  reschedule_stock_mode: string | null
   index_no: string | null
   customer_name: string
   contact_1: string | null

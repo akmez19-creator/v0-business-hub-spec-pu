@@ -13,8 +13,23 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Search, TruckIcon, DollarSign, Package, ExternalLink, Boxes } from 'lucide-react'
+import { Search, TruckIcon, DollarSign, Package, ExternalLink, Boxes, MessageSquare } from 'lucide-react'
 import { formatCurrency, formatDate, statusColor } from './po-columns'
+import { SupplierDetailSheet } from './supplier-detail-sheet'
+
+/** Messages stored across every captured conversation with this supplier. */
+function totalMessages(s: SupplierSummary) {
+  return s.threads.reduce((n, t) => n + t.messages, 0)
+}
+
+export interface SupplierThread {
+  id: string
+  handle: string
+  platform: string
+  messages: number
+  complete: boolean
+  lastCaptured: string | null
+}
 
 export interface SupplierSummary {
   name: string
@@ -27,10 +42,23 @@ export interface SupplierSummary {
   lastOrder: string | null
   statuses: Record<string, number>
   sampleLink: string | null
+  threads: SupplierThread[]
+  manualProducts: { id: string; name: string }[]
 }
 
-export function SuppliersContent({ suppliers }: { suppliers: SupplierSummary[] }) {
+export function SuppliersContent({
+  suppliers,
+  allProducts,
+}: {
+  suppliers: SupplierSummary[]
+  allProducts: { id: string; name: string }[]
+}) {
   const [search, setSearch] = useState('')
+  // Only the NAME is held. Keeping the whole row would freeze a snapshot taken
+  // at click time, so after router.refresh() the sheet would keep rendering the
+  // pre-save data and a successful save would look like it did nothing.
+  const [openName, setOpenName] = useState<string | null>(null)
+  const openSupplier = openName ? (suppliers.find(s => s.name === openName) ?? null) : null
 
   const filtered = useMemo(() => {
     if (!search) return suppliers
@@ -128,6 +156,7 @@ export function SuppliersContent({ suppliers }: { suppliers: SupplierSummary[] }
               <TableHead className="min-w-[120px] text-right">Spend (Yuan)</TableHead>
               <TableHead className="min-w-[130px] text-right">Landed Cost</TableHead>
               <TableHead className="min-w-[200px]">Products</TableHead>
+              <TableHead className="min-w-[150px]">Conversations</TableHead>
               <TableHead className="min-w-[160px]">Status</TableHead>
               <TableHead className="min-w-[120px]">Last Order</TableHead>
               <TableHead className="min-w-[60px]">Link</TableHead>
@@ -136,7 +165,7 @@ export function SuppliersContent({ suppliers }: { suppliers: SupplierSummary[] }
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
                   <TruckIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
                   <p>
                     {suppliers.length === 0
@@ -176,6 +205,25 @@ export function SuppliersContent({ suppliers }: { suppliers: SupplierSummary[] }
                     </span>
                   </TableCell>
                   <TableCell>
+                    {s.threads.length === 0 ? (
+                      <span className="text-sm text-muted-foreground">-</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setOpenName(s.name)}
+                        className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                        {totalMessages(s)} message{totalMessages(s) === 1 ? '' : 's'}
+                        {s.threads.some(t => !t.complete) && (
+                          <span className="text-muted-foreground" title="Some history has not been captured yet">
+                            (partial)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {Object.entries(s.statuses).map(([status, count]) => (
                         <Badge
@@ -212,6 +260,12 @@ export function SuppliersContent({ suppliers }: { suppliers: SupplierSummary[] }
           </TableBody>
         </Table>
       </Card>
+
+      <SupplierDetailSheet
+        supplier={openSupplier}
+        allProducts={allProducts}
+        onClose={() => setOpenName(null)}
+      />
     </div>
   )
 }

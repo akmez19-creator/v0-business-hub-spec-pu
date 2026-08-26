@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import {
@@ -54,9 +55,20 @@ interface AdminRegionsContentProps {
   contractors: PersonOption[]
   riders: PersonOption[]
   canEdit: boolean
+  /**
+   * Real coverage of the work, not of the permanent map. `null` means the read
+   * failed - shown as "could not check" rather than a reassuring zero.
+   */
+  orderCoverage: { open: number; noRider: number; localitiesAffected: number } | null
 }
 
-export function AdminRegionsContent({ localities: initialLocalities, contractors, riders, canEdit }: AdminRegionsContentProps) {
+export function AdminRegionsContent({
+  localities: initialLocalities,
+  contractors,
+  riders,
+  canEdit,
+  orderCoverage,
+}: AdminRegionsContentProps) {
   const [localities, setLocalities] = useState<Locality[]>(initialLocalities)
   const [search, setSearch] = useState('')
   const [filterRegion, setFilterRegion] = useState<string>('all')
@@ -106,6 +118,34 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
 
   const contractorName = (id: string | null) => contractors.find(c => c.id === id)?.name || null
   const riderName = (id: string | null) => riders.find(r => r.id === id)?.name || null
+
+  /**
+   * Contractor -> its ONE active rider, or absent when the contractor has
+   * several and the rider therefore cannot be inferred. 8 of the 10 contractors
+   * holding localities have exactly one rider, so most localities already have
+   * a determined rider even with `default_rider_id` empty.
+   */
+  const soleRiderByContractor = useMemo(() => {
+    const crews = new Map<string, string[]>()
+    for (const r of riders) {
+      if (!r.contractor_id) continue
+      const list = crews.get(r.contractor_id)
+      if (list) list.push(r.name)
+      else crews.set(r.contractor_id, [r.name])
+    }
+    const out = new Map<string, string>()
+    for (const [cid, names] of crews) if (names.length === 1) out.set(cid, names[0])
+    return out
+  }, [riders])
+
+  /**
+   * The rider actually covering a locality: the explicit one, else inherited
+   * from a single-rider contractor. Counting only `rider_name` reported
+   * "0/42 with rider" for a zone TARIK plainly runs - true to the column, but
+   * false about the island.
+   */
+  const effectiveRider = (l: Locality) =>
+    l.rider_name ?? (l.contractor_id ? (soleRiderByContractor.get(l.contractor_id) ?? null) : null)
 
   const startEdit = (l: Locality) => {
     setEditingId(l.id)
@@ -410,17 +450,64 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
           </div>
           <p className="text-lg font-bold text-foreground">{uniqueDistricts.length}</p>
         </div>
-        <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
+        {/* Was "Assigned 493 / 493" - a constant, because every active locality
+            has a contractor, so it could only ever read as "fully covered".
+            The number that actually costs money is orders with nobody to
+            deliver them, which that badge hid completely. */}
+        <div
+          className={`rounded-lg border px-3 py-2.5 ${
+            orderCoverage && orderCoverage.noRider > 0
+              ? 'border-destructive/40 bg-destructive/10'
+              : 'border-border/60 bg-card'
+          }`}
+        >
           <div className="flex items-center gap-1.5 text-muted-foreground mb-0.5">
             <UserCheck className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-medium">Assigned</span>
+            <span className="text-[10px] font-medium">Orders with no rider</span>
           </div>
-          <p className="text-lg font-bold text-foreground">
-            {localities.filter(l => l.contractor_id).length}
-            <span className="text-[10px] font-normal text-muted-foreground ml-1">/ {localities.length}</span>
-          </p>
+          {orderCoverage ? (
+            <p
+              className={`text-lg font-bold ${
+                orderCoverage.noRider > 0 ? 'text-destructive' : 'text-foreground'
+              }`}
+            >
+              {orderCoverage.noRider}
+              <span className="text-[10px] font-normal text-muted-foreground ml-1">
+                / {orderCoverage.open} open
+                {orderCoverage.noRider > 0 && ` \u00b7 ${orderCoverage.localitiesAffected} localities`}
+              </span>
+            </p>
+          ) : (
+            // Never render a failed read as zero.
+            <p className="text-lg font-bold text-muted-foreground">
+              {'\u2014'}
+              <span className="text-[10px] font-normal ml-1">could not check</span>
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Entry point to the day-by-day page. This screen edits the PERMANENT
+          map (who covers a locality by default); that one plans a single date
+          and needs validating before it routes anything. Saying which is which
+          here, because both are "placement" and the distinction is the whole
+          point of the new page. */}
+      {canEdit && (
+        <Link
+          href="/dashboard/admin/placement"
+          className="flex items-center gap-2.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5 transition-colors hover:bg-primary/10"
+        >
+          <CalendarClock className="w-4 h-4 shrink-0 text-primary" />
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold text-foreground">Plan a single day</span>
+            <span className="block text-[10px] leading-relaxed text-muted-foreground">
+              Move riders for one date on a map, then validate before it goes live. This page below sets the
+              permanent default instead.
+            </span>
+          </span>
+          <ChevronRight className="w-4 h-4 ml-auto shrink-0 text-muted-foreground" />
+        </Link>
+      )}
 
       {/* Placement plans: save today's scenario, repeat it any other day */}
       {canEdit && (
@@ -751,10 +838,27 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
       {viewMode === 'groups' && (
         <div className="space-y-2">
           {zoneGroups.map(([zone, locs]) => {
-            const assigned = locs.filter(l => l.contractor_id).length
+            // Counts the EFFECTIVE rider: explicit, or inherited from a
+            // single-rider contractor. Counting `contractor_id` made this a
+            // constant green "N/N"; counting `rider_name` alone swung it to a
+            // false "0/42" for zones that visibly have a rider. Only a
+            // contractor with several riders is a genuine gap.
+            const assigned = locs.filter(l => effectiveRider(l)).length
             // Who currently covers this zone (unique contractor/rider pairs)
-            const coverage = [...new Set(locs.filter(l => l.contractor_name).map(l => `${l.contractor_name}${l.rider_name ? ` / ${l.rider_name}` : ''}`))]
-            const fullyCovered = assigned === locs.length && coverage.length === 1
+            // Uses the effective rider so a zone covered through its
+            // contractor names that rider instead of showing the contractor
+            // alone and looking rider-less.
+            const coverage = [...new Set(locs.filter(l => l.contractor_name).map(l => {
+              const r = effectiveRider(l)
+              return `${l.contractor_name}${r ? ` / ${r}` : ''}`
+            }))]
+            // Only true when the ENTIRE zone shares one contractor and one
+            // rider. Used to prefill the bulk form, so it must never seed a
+            // value that only some of the zone actually has.
+            const fullyCovered =
+              coverage.length === 1 &&
+              new Set(locs.map(l => l.contractor_id ?? '')).size === 1 &&
+              new Set(locs.map(l => l.default_rider_id ?? '')).size === 1
             return (
               <div key={zone} className="rounded-xl border border-border/60 overflow-hidden">
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-muted/30">
@@ -775,13 +879,16 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
                         ? 'text-amber-600 bg-amber-500/10 border-amber-500/20'
                         : 'text-blue-600 bg-blue-500/10 border-blue-500/20'
                   )}>
-                    {assigned}/{locs.length} assigned
+                    {assigned}/{locs.length} with rider
                   </span>
                   {/* Current coverage summary */}
                   {coverage.length > 0 && (
                     <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground truncate max-w-[280px]" title={coverage.join(', ')}>
                       <Bike className="w-3 h-3 shrink-0" />
-                      {fullyCovered ? coverage[0] : `${coverage.length} different assignments`}
+                      {/* `coverage.length === 1` rather than `fullyCovered`:
+                          that flag now tracks rider coverage, so a zone with one
+                          contractor and no riders read "1 different assignments". */}
+                      {coverage.length === 1 ? coverage[0] : `${coverage.length} different assignments`}
                     </span>
                   )}
                   <div className="ml-auto">
@@ -826,7 +933,17 @@ export function AdminRegionsContent({ localities: initialLocalities, contractors
                       )}
                     >
                       {l.name}
-                      {l.rider_name && <span className="text-muted-foreground">· {l.rider_name}</span>}
+                      {/* Show the inherited rider too, but dimmer and in
+                          parentheses: it comes from the contractor having one
+                          rider, not from anyone choosing this locality. An
+                          inferred name must not look like a set one. */}
+                      {l.rider_name ? (
+                        <span className="text-muted-foreground">· {l.rider_name}</span>
+                      ) : (
+                        effectiveRider(l) && (
+                          <span className="text-muted-foreground/60">({effectiveRider(l)})</span>
+                        )
+                      )}
                     </button>
                   ))}
                 </div>

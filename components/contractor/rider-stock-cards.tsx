@@ -69,6 +69,24 @@ export function RiderStockCards({ riderProducts }: { riderProducts: RiderData[] 
   const [riderFilters, setRiderFilters] = useState<Record<string, StatusFilter>>({})
   const activeRiders = riderProducts.filter(r => r.totalItems > 0)
 
+  // SOLO CONTRACTOR - he does the deliveries himself, so there is nobody to
+  // group by. 15 of the 18 contractors are in this state (only JASSAM 9,
+  // Divesh 4 and Patrice 2 have a real team), so this is the normal case, not
+  // the edge case.
+  //
+  // Grouping by rider then costs him three things and buys nothing: a section
+  // header counting "1 rider", a card labelled with his own name, and a TAP he
+  // must make before he can see any product at all. So for a solo contractor
+  // the grouping layer is dropped and the list is shown open.
+  //
+  // Detected by COUNT, never by matching the rider's name to the contractor's:
+  // `has_partners` is false on all 18 rows (never populated, so it means
+  // nothing), the shared-profile link is set on only the 3 team contractors,
+  // and name matching already fails on the real data - contractor "AnChal" vs
+  // rider "AANCHAL" is one man spelled two ways. One rider is one rider
+  // whatever he is called.
+  const solo = activeRiders.length === 1
+
   function setFilter(riderId: string, filter: StatusFilter) {
     setRiderFilters(prev => ({
       ...prev,
@@ -83,18 +101,24 @@ export function RiderStockCards({ riderProducts }: { riderProducts: RiderData[] 
       {/* Section header */}
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
-          <User className="w-4 h-4 text-primary" />
-          <h2 className="text-sm font-semibold text-foreground">Stock by Rider</h2>
+          {solo ? <Package className="w-4 h-4 text-primary" /> : <User className="w-4 h-4 text-primary" />}
+          <h2 className="text-sm font-semibold text-foreground">
+            {solo ? 'Your stock' : 'Stock by Rider'}
+          </h2>
         </div>
         <span className="text-[10px] text-muted-foreground">
-          {activeRiders.length} rider{activeRiders.length !== 1 ? 's' : ''} &middot; {activeRiders.reduce((s, r) => s + r.totalItems, 0)} items
+          {/* "1 rider" is dropped when he IS the rider - it told him nothing. */}
+          {!solo && <>{activeRiders.length} riders &middot; </>}
+          {activeRiders.reduce((s, r) => s + r.totalItems, 0)} items
         </span>
       </div>
 
       {/* Rider cards */}
       {activeRiders.map((rider, idx) => {
         const c = COLORS[idx % COLORS.length]
-        const isExpanded = expandedRider === rider.riderId
+        // Solo: always open. There is no second rider to collapse this one in
+        // favour of, so a closed card is just a wall between him and his list.
+        const isExpanded = solo || expandedRider === rider.riderId
         const processed = rider.delivered + rider.postponed + rider.returning
         const progressPct = rider.totalItems > 0 ? Math.round((processed / rider.totalItems) * 100) : 0
         const activeFilter = riderFilters[rider.riderId] || 'all'
@@ -102,35 +126,47 @@ export function RiderStockCards({ riderProducts }: { riderProducts: RiderData[] 
 
         return (
           <div key={rider.riderId} className={cn('rounded-2xl border bg-card overflow-hidden', c.border)}>
-            {/* Header - tap to expand */}
-            <button
-              onClick={() => setExpandedRider(isExpanded ? null : rider.riderId)}
-              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/20 transition-colors"
-            >
-              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', c.bg)}>
-                <span className={cn('text-xs font-bold', c.text)}>{getInitials(rider.riderName)}</span>
+            {/* SOLO: a plain summary strip. No avatar and no name (it is his own,
+                shown in the page header already), no chevron, and crucially not
+                a button - there is nothing to expand. The counts stay, because
+                "% done" lives nowhere else on the screen. */}
+            {solo ? (
+              <div className="px-4 py-2.5 flex items-center gap-2 text-[10px]">
+                <span className="text-muted-foreground">{rider.totalItems} items</span>
+                <span className="text-muted-foreground">{rider.products.length} products</span>
+                <span className="font-semibold text-foreground">{progressPct}% done</span>
               </div>
-              <div className="flex-1 text-left min-w-0">
-                <p className="text-sm font-semibold text-foreground truncate">{rider.riderName}</p>
-                <div className="flex items-center gap-2 mt-0.5 text-[10px]">
-                  <span className="text-muted-foreground">{rider.totalItems} items</span>
-                  <span className="text-muted-foreground">{rider.products.length} products</span>
-                  <span className="text-muted-foreground">{progressPct}% done</span>
+            ) : (
+              /* TEAM: tap to expand, so one rider can be read at a time. */
+              <button
+                onClick={() => setExpandedRider(isExpanded ? null : rider.riderId)}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/20 transition-colors"
+              >
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', c.bg)}>
+                  <span className={cn('text-xs font-bold', c.text)}>{getInitials(rider.riderName)}</span>
                 </div>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {rider.delivered > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-emerald-500/15 text-emerald-500">{rider.delivered}</span>
-                )}
-                {rider.cms > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-500/15 text-amber-500">{rider.cms}</span>
-                )}
-                {rider.exchangeReturns > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-violet-500/15 text-violet-500">{rider.exchangeReturns}</span>
-                )}
-                <ChevronDown className={cn('w-4 h-4 text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
-              </div>
-            </button>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{rider.riderName}</p>
+                  <div className="flex items-center gap-2 mt-0.5 text-[10px]">
+                    <span className="text-muted-foreground">{rider.totalItems} items</span>
+                    <span className="text-muted-foreground">{rider.products.length} products</span>
+                    <span className="text-muted-foreground">{progressPct}% done</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {rider.delivered > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-emerald-500/15 text-emerald-500">{rider.delivered}</span>
+                  )}
+                  {rider.cms > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-500/15 text-amber-500">{rider.cms}</span>
+                  )}
+                  {rider.exchangeReturns > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-violet-500/15 text-violet-500">{rider.exchangeReturns}</span>
+                  )}
+                  <ChevronDown className={cn('w-4 h-4 text-muted-foreground transition-transform', isExpanded && 'rotate-180')} />
+                </div>
+              </button>
+            )}
 
             {/* Expanded */}
             {isExpanded && (

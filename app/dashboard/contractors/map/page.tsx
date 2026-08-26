@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { MapPageContent } from './map-content'
 
@@ -61,7 +62,7 @@ export default async function ContractorMapPage() {
   )
 
   // Get today's date
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
 
   // Fetch deliveries for today (or latest available date)
   let deliveries: any[] = []
@@ -69,9 +70,11 @@ export default async function ContractorMapPage() {
     // Try today first
     const { data: todayData } = await supabase
       .from('deliveries')
-      .select('id, customer_name, contact_1, contact_2, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at, pending_modification_id, rider_priority, rider_remarks')
+      .select('id, customer_name, contact_1, contact_2, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, active_date, rescheduled_to, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at, pending_modification_id, rider_priority, rider_remarks')
       .in('rider_id', riderIds)
-      .eq('delivery_date', today)
+      // Due-day basis - a rescheduled stop must appear on the map for the day
+      // it is actually being driven.
+      .eq('active_date', today)
       .order('delivery_sequence', { ascending: true })
 
     if (todayData && todayData.length > 0) {
@@ -80,14 +83,16 @@ export default async function ContractorMapPage() {
       // Fall back to latest date with deliveries
       const { data: latestData } = await supabase
         .from('deliveries')
-      .select('id, customer_name, contact_1, contact_2, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at, pending_modification_id, rider_priority, rider_remarks')
+      .select('id, customer_name, contact_1, contact_2, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, active_date, rescheduled_to, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at, pending_modification_id, rider_priority, rider_remarks')
       .in('rider_id', riderIds)
-      .order('delivery_date', { ascending: false })
+      // Ordered and grouped on the same column as the primary query, or the
+      // "latest day" could be chosen by one date and filtered by the other.
+      .order('active_date', { ascending: false })
         .limit(200)
 
-      const latestDate = latestData?.[0]?.delivery_date
+      const latestDate = latestData?.[0]?.active_date
       if (latestDate) {
-        deliveries = latestData!.filter(d => d.delivery_date === latestDate)
+        deliveries = latestData!.filter(d => d.active_date === latestDate)
       }
     }
   }
@@ -95,10 +100,10 @@ export default async function ContractorMapPage() {
   // Also fetch unassigned deliveries for this contractor
   const { data: unassignedData } = await supabase
     .from('deliveries')
-    .select('id, customer_name, contact_1, contact_2, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at, pending_modification_id, rider_priority, rider_remarks')
+    .select('id, customer_name, contact_1, contact_2, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, active_date, rescheduled_to, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at, pending_modification_id, rider_priority, rider_remarks')
     .eq('contractor_id', contractor.id)
     .is('rider_id', null)
-    .eq('delivery_date', deliveries[0]?.delivery_date || today)
+    .eq('active_date', deliveries[0]?.active_date || today)
 
   if (unassignedData) {
     const existingIds = new Set(deliveries.map(d => d.id))

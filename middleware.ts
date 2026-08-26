@@ -1,11 +1,34 @@
 import { updateSession } from '@/lib/supabase/proxy'
 import { type NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+
+/**
+ * Sends an unauthenticated visitor to the login form, remembering exactly
+ * where they were so they can be put back there afterwards.
+ *
+ * Two bugs this fixes, both reported as "I have to log in again and it dumps
+ * me at the top":
+ *  - the destination was thrown away entirely, so every recovery landed on
+ *    /dashboard - a storekeeper mid-count lost his place and his scroll;
+ *  - `nextUrl.clone()` keeps the SEARCH PARAMS, so a redirect from
+ *    `/stock-in?date=2026-08-24` produced `/auth/login?date=2026-08-24`,
+ *    leaking a stale filter onto the login screen.
+ */
+function redirectToLogin(request: NextRequest) {
+  const url = request.nextUrl.clone()
+  const from = `${request.nextUrl.pathname}${request.nextUrl.search}`
+  url.pathname = '/auth/login'
+  url.search = '' // drop the previous page's params before adding our own
+  // Only ever a path on this site, never an absolute URL - an open `next=`
+  // that accepts a full URL is a redirect vector.
+  if (from !== '/' && !from.startsWith('//')) url.searchParams.set('next', from)
+  return NextResponse.redirect(url)
+}
 
 export async function middleware(request: NextRequest) {
-  // First update the session
-  const response = await updateSession(request)
-  
+  // ONE client, ONE getUser. This call is what refreshes the auth cookie, and
+  // it is the only place allowed to write it.
+  const { response, user } = await updateSession(request)
+
   const { pathname } = request.nextUrl
 
   // Public routes that don't need auth
@@ -13,22 +36,6 @@ export async function middleware(request: NextRequest) {
   if (publicRoutes.some(route => pathname.startsWith(route))) {
     return response
   }
-
-  // Create a Supabase client to check auth status
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll() {},
-      },
-    }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
 
   // ---- API auth gate ----
   // Every /api route requires a signed-in session, EXCEPT routes that
@@ -55,9 +62,7 @@ export async function middleware(request: NextRequest) {
 
   // Redirect to login if not authenticated and trying to access protected routes
   if (!user && pathname.startsWith('/dashboard')) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth/login'
-    return NextResponse.redirect(url)
+    return redirectToLogin(request)
   }
 
   // Redirect root path based on auth status

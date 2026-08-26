@@ -88,14 +88,17 @@ export default async function ContractorOrdersPage({
     // Only include dates that have validated stock AND deliveries
     const { data: dateRows } = await supabase
       .from('deliveries')
-      .select('delivery_date')
+      .select('active_date')
       .in('rider_id', riderIds)
-      .in('delivery_date', Array.from(validatedDateSet))
-      .order('delivery_date', { ascending: false })
+      // Still intersected with VALIDATED stock dates - that gate is deliberate
+      // and unchanged. Only the delivery side moves to the due day, so an order
+      // rescheduled onto an already-validated day shows up on that day.
+      .in('active_date', Array.from(validatedDateSet))
+      .order('active_date', { ascending: false })
 
     const dateSet = new Set<string>()
     for (const row of dateRows || []) {
-      if (row.delivery_date) dateSet.add(row.delivery_date)
+      if (row.active_date) dateSet.add(row.active_date)
     }
     availableDates = Array.from(dateSet).sort().reverse()
   }
@@ -113,9 +116,9 @@ export default async function ContractorOrdersPage({
     if (riderIds.length > 0) {
       const { data } = await supabase
         .from('deliveries')
-        .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, rider_id, index_no, qty, products, amount, payment_method, payment_juice, payment_cash, payment_bank, payment_status, notes, delivery_notes, client_response, created_at, latitude, longitude, delivery_sequence, sales_type, return_product')
+        .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, active_date, rescheduled_to, reschedule_requested_to, rider_id, index_no, qty, products, amount, payment_method, payment_juice, payment_cash, payment_bank, payment_status, notes, delivery_notes, client_response, created_at, latitude, longitude, delivery_sequence, sales_type, return_product')
         .in('rider_id', riderIds)
-        .eq('delivery_date', selectedDate)
+        .eq('active_date', selectedDate)
         .order('locality', { ascending: true })
         .order('created_at', { ascending: true })
 
@@ -129,9 +132,9 @@ export default async function ContractorOrdersPage({
     // 2. Unassigned deliveries linked to this contractor
     const { data: unassigned } = await supabase
       .from('deliveries')
-      .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, rider_id, index_no, qty, products, amount, payment_method, payment_juice, payment_cash, payment_bank, payment_status, notes, delivery_notes, client_response, created_at, latitude, longitude, delivery_sequence, sales_type, return_product')
+      .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, active_date, rescheduled_to, reschedule_requested_to, rider_id, index_no, qty, products, amount, payment_method, payment_juice, payment_cash, payment_bank, payment_status, notes, delivery_notes, client_response, created_at, latitude, longitude, delivery_sequence, sales_type, return_product')
       .eq('contractor_id', contractor.id)
-      .eq('delivery_date', selectedDate)
+      .eq('active_date', selectedDate)
       .is('rider_id', null)
       .order('locality', { ascending: true })
 
@@ -146,7 +149,8 @@ export default async function ContractorOrdersPage({
   // Group by unique client to get correct counts
   const clientMap = new Map<string, { status: string }>()
   for (const d of deliveries) {
-    const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}|${d.delivery_date}|${d.rider_id || ''}`
+    // Keyed on the DUE day to match the filter - see riders/deliveries/page.tsx.
+    const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}|${d.active_date || d.delivery_date}|${d.rider_id || ''}`
     if (!clientMap.has(key)) {
       clientMap.set(key, { status: d.status })
     }

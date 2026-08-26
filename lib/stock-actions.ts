@@ -1,6 +1,8 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { resolveStockDate, STOCK_DATE_COLUMN } from '@/lib/stock-date'
+import { isPendingReattempt } from '@/lib/reschedule-stock'
 import { revalidatePath } from 'next/cache'
 
 const REVALIDATE_PATH = '/dashboard/contractors/stock'
@@ -48,12 +50,17 @@ export async function syncContractorStock(contractorId: string) {
   const riderIds = (riders || []).map(r => r.id)
   if (riderIds.length === 0) return
 
-  // Fetch ALL main deliveries for the stock date with current statuses
+  // Fetch ALL main deliveries for the stock date with current statuses.
+  // Must use the SAME column the list was generated from, or a generated row
+  // could never receive its counts and would sit permanently at 0% done.
   const { data: mainDeliveries } = await supabase
     .from('deliveries')
-    .select('products, qty, status, sales_type, return_product')
+    // `delivery_date` + `rescheduled_to` are needed by `isPendingReattempt()`
+    // below - without them every rescheduled row looks un-rescheduled and the
+    // guard silently never fires.
+    .select('products, qty, status, sales_type, return_product, delivery_date, rescheduled_to')
     .in('rider_id', riderIds)
-    .eq('delivery_date', stockDate)
+    .eq(STOCK_DATE_COLUMN, stockDate)
 
   // Fetch partner deliveries for the stock date with current statuses
   const { data: partnerDeliveries } = await supabase
@@ -75,7 +82,17 @@ export async function syncContractorStock(contractorId: string) {
     const key = `main:${product}`
     if (!counts.has(key)) counts.set(key, { delivered: 0, postponed: 0, returning: 0 })
     const entry = counts.get(key)!
-    if (d.status === 'delivered' || d.status === 'picked_up') {
+    // A RESCHEDULED ROW'S STATUS DESCRIBES A DAY THAT IS OVER.
+    // Once this query moved to `active_date`, a CMS order postponed onto this
+    // day arrived here still reading 'cms' - and fell into `returning`, telling
+    // the storekeeper 11 units were coming BACK on 26 Aug. They already came
+    // back on 24 Aug, where Stock In counts them correctly off `delivery_date`.
+    // So the same unit was counted as both outgoing load AND an inbound return
+    // on the new day, and double-counted across the two days.
+    // It is neither delivered nor returning yet: it is outstanding work.
+    if (isPendingReattempt(d)) {
+      // no-op on purpose: not delivered, not postponed, not returning.
+    } else if (d.status === 'delivered' || d.status === 'picked_up') {
       entry.delivered += qty
     } else if (d.status === 'nwd') {
       entry.postponed += qty
@@ -164,42 +181,6 @@ export async function getContractorIdFromPartnerDelivery(deliveryId: string): Pr
 }
 
 /**
- * Find the latest delivery date that has assigned deliveries for a contractor's riders.
- */
-async function getActiveDeliveryDate(supabase: any, riderIds: string[], contractorId: string): Promise<string> {
-  const today = new Date().toISOString().split('T')[0]
-
-  // Check main deliveries - find latest date with assigned riders
-  const { data: latestMain } = await supabase
-    .from('deliveries')
-    .select('delivery_date')
-    .in('rider_id', riderIds)
-    .not('products', 'is', null)
-    .order('delivery_date', { ascending: false })
-    .limit(1)
-
-  const mainDate = latestMain?.[0]?.delivery_date || null
-
-  // Check partner deliveries - find latest date with assigned riders
-  const { data: latestPartner } = await supabase
-    .from('partner_deliveries')
-    .select('order_date')
-    .eq('contractor_id', contractorId)
-    .in('rider_id', riderIds)
-    .not('product', 'is', null)
-    .order('order_date', { ascending: false })
-    .limit(1)
-
-  const partnerDate = latestPartner?.[0]?.order_date || null
-
-  // Use the most recent date, or today as fallback
-  if (mainDate && partnerDate) {
-    return mainDate >= partnerDate ? mainDate : partnerDate
-  }
-  return mainDate || partnerDate || today
-}
-
-/**
  * Generate stock from assigned deliveries (main + partner) for the active delivery date.
  * Called when the contractor taps "Generate Stock" on the stock page.
  */
@@ -230,8 +211,10 @@ export async function generateDailyStock(contractorId: string) {
 
   if (riderIds.length === 0) return { error: 'No riders found' }
 
-  // Find the active delivery date (latest date with assigned deliveries)
-  const activeDate = await getActiveDeliveryDate(supabase, riderIds, contractorId)
+  // Shared with the stock page, so the day the screen SHOWS and the day this
+  // generates FOR are always the same day. They were computed separately
+  // before, on different columns, and disagreed.
+  const activeDate = await resolveStockDate(supabase, riderIds, contractorId)
 
   // Check if already generated for this date
   const { data: existing } = await supabase
@@ -245,12 +228,16 @@ export async function generateDailyStock(contractorId: string) {
     return { success: true, alreadyExists: true, stockDate: activeDate }
   }
 
-  // Aggregate main deliveries by product for the active date
+  // Aggregate main deliveries by product for the active date.
+  // DUE-DAY basis (`active_date`), not `delivery_date`: an order postponed onto
+  // this day must appear in the load the rider is about to carry. Filtering
+  // `delivery_date` here is what produced an empty stock list - that column
+  // still holds the day the goods first went out and never moves.
   const { data: mainDeliveries } = await supabase
     .from('deliveries')
     .select('products, qty, sales_type, return_product')
     .in('rider_id', riderIds)
-    .eq('delivery_date', activeDate)
+    .eq(STOCK_DATE_COLUMN, activeDate)
 
   const productMap = new Map<string, { qty: number; source: string }>()
 

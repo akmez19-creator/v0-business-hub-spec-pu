@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, Phone, MapPin, Calendar, Clock, Bike, Building2, Package, StickyNote, RefreshCw, DollarSign, Edit, RotateCcw } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { AlertTriangle, Calendar, Clock, RefreshCw, DollarSign, Truck, ShieldCheck, Check } from 'lucide-react'
+import { buildVanPiles, vanTotal, carriedOverTotal } from '@/lib/van-stock'
 import Link from 'next/link'
 import { getPendingCmsModifications } from '@/lib/admin-actions'
-import { CmsReviewActions } from '@/components/admin/cms-review-actions'
-import { CmsEditActions } from '@/components/admin/cms-edit-actions'
+import { cmsStage } from '@/components/admin/cms-delivery-row'
+import { CmsStageSection } from '@/components/admin/cms-stage-section'
+import { CmsVanStock } from '@/components/admin/cms-van-stock'
+import { CmsPriceReview } from '@/components/admin/cms-price-review'
 
 export default async function CMSAdminPage() {
   const supabase = await createClient()
@@ -35,6 +37,7 @@ export default async function CMSAdminPage() {
     .from('deliveries')
     .select(`
       id,
+      order_code,
       customer_name,
       contact_1,
       contact_2,
@@ -45,6 +48,12 @@ export default async function CMSAdminPage() {
       status,
       delivery_notes,
       delivery_date,
+      rescheduled_to,
+      reschedule_requested_to,
+      reschedule_reason,
+      reschedule_validated_at,
+      reschedule_declined_at,
+      active_date,
       status_updated_at,
       rider_id,
       contractor_id,
@@ -55,6 +64,28 @@ export default async function CMSAdminPage() {
     .eq('status', 'cms')
     .order('status_updated_at', { ascending: false })
   
+  // NWD - refused on delivery, goods STAYED ON THE VAN (owner-confirmed).
+  //
+  // Queried SEPARATELY rather than widening the CMS query above to
+  // `.in('status', ['cms','nwd'])`, on purpose: every stat card, reason group
+  // and rider group on this page means "CMS". Folding NWD in would silently
+  // turn "Total CMS 114" into 172 and mix in 58 rows whose goods are on a van,
+  // not in the store. Two different physical facts must not share one number.
+  //
+  // NOT date-filtered: nothing collects NWD, so it carries over. All 58 live
+  // rows sit on 24 Aug - a date filter is what made them invisible everywhere.
+  const { data: nwdRows } = await adminDb
+    .from('deliveries')
+    .select(`
+      id, customer_name, contact_1, locality, products, qty, amount,
+      status, delivery_notes, delivery_date, rescheduled_to, rider_id
+    `)
+    // `IS NOT TRUE`, never `= false`: `= false` drops NULLs in Postgres and
+    // would hide van stock instead of surfacing it.
+    .eq('status', 'nwd')
+    .not('stock_verified', 'is', true)
+    .order('delivery_date', { ascending: false })
+
   // Fetch ALL riders from the riders table (rider_id in deliveries references riders.id, NOT profiles.id)
   const { data: allRidersData } = await adminDb
     .from('riders')
@@ -105,61 +136,89 @@ export default async function CMSAdminPage() {
     .order('name')
   const allProducts = (productsData || []).map(p => p.name)
   
-  // Count reviewed vs pending vs postponed
-  const reviewedCms = (cmsDeliveries || []).filter(d => d.delivery_notes?.startsWith('[REVIEWED]'))
-  const postponedCms = (cmsDeliveries || []).filter(d => {
-    const notes = d.delivery_notes || ''
-    return notes.includes('Postponed to') && !notes.startsWith('[REVIEWED]')
-  })
-  const pendingCms = (cmsDeliveries || []).filter(d => {
-    const notes = d.delivery_notes || ''
-    return !notes.startsWith('[REVIEWED]') && !notes.includes('Postponed to')
-  })
-  
-  // Group by reason (excluding [REVIEWED] prefix)
-  const reasonCounts: Record<string, number> = {}
-  for (const d of (cmsDeliveries || [])) {
-    let reason = d.delivery_notes || 'No Reason Given'
-    if (reason.startsWith('[REVIEWED] ')) {
-      reason = reason.replace('[REVIEWED] ', '')
-    }
-    reasonCounts[reason] = (reasonCounts[reason] || 0) + 1
+  // STAGES OF THE FLOW - one classifier, shared with the row component, so a
+  // section, a stat card and a row badge can never contradict each other.
+  //
+  // Replaces three overlapping note-text filters. Those read only
+  // `delivery_notes` for the word "Postponed to", which misses every order
+  // whose new day lives in `rescheduled_to` / `reschedule_requested_to` and
+  // nowhere in the text - and 28 of the 32 live postponements are exactly that
+  // shape, written by day-closure with no note and no audit row.
+  const staged = (cmsDeliveries || []).map(d => ({ d, stage: cmsStage(d) }))
+
+  // Needs a decision from this page. Soonest day first: the order due tomorrow
+  // matters more than the one due next week.
+  const toValidate = staged
+    .filter(s => s.stage.kind === 'validate')
+    .sort((a, b) => (a.stage.postponedTo || '').localeCompare(b.stage.postponedTo || ''))
+  const scheduledCms = staged.filter(s => s.stage.kind === 'scheduled')
+  const pendingCms = staged.filter(s => s.stage.kind === 'pending')
+  const reviewedCms = staged.filter(s => s.stage.kind === 'reviewed')
+
+  // Everything the row component needs, passed once instead of at five call sites.
+  const rowProps = {
+    riderMap,
+    riders: allRiders || [],
+    regions: uniqueRegions,
+    products: allProducts,
+    today: new Date().toISOString().split('T')[0],
   }
   
-  // Group by rider
-  const riderCounts: Record<string, { name: string, count: number, deliveries: typeof cmsDeliveries }> = {}
-  for (const d of (cmsDeliveries || [])) {
-    const riderId = d.rider_id || 'unassigned'
-    const riderName = d.rider_id ? (riderMap[d.rider_id] || 'Unknown Rider') : 'Unassigned'
-    if (!riderCounts[riderId]) {
-      riderCounts[riderId] = { name: riderName, count: 0, deliveries: [] }
-    }
-    riderCounts[riderId].count++
-    riderCounts[riderId].deliveries?.push(d)
-  }
-  
-  // Sort riders by CMS count (highest first)
-  const sortedRiders = Object.entries(riderCounts)
-    .sort((a, b) => b[1].count - a[1].count)
-  
-  // Group by date
+  // `reasonCounts`, `riderCounts`, `sortedRiders` and `olderCms` used to be
+  // built here. All four were computed on every request and rendered nowhere -
+  // three of them looping the full CMS list to produce groupings no section
+  // consumed. Removed rather than left as decoration; the stage sections below
+  // are what this page actually shows.
   const today = new Date().toISOString().split('T')[0]
   const todayCms = (cmsDeliveries || []).filter(d => d.delivery_date === today)
-  const olderCms = (cmsDeliveries || []).filter(d => d.delivery_date !== today)
-  
-  // Format time
-  const formatTime = (dateStr: string | null) => {
-    if (!dateStr) return '-'
-    const date = new Date(dateStr)
-    return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+
+  // Van stock grouped BY RIDER, then merged per product.
+  //
+  // By rider first because the goods are physically on ONE named van - a
+  // company-wide product total would tell him 6 Salt Cups exist somewhere but
+  // not whose van to call. Product merge inside each rider reuses the same
+  // `buildVanPiles` as the rider and contractor screens, so a product collapses
+  // identically on every screen.
+  const nwdByRider = new Map<string, { name: string; rows: typeof nwdRows }>()
+  for (const d of (nwdRows || [])) {
+    const key = d.rider_id || 'unassigned'
+    const name = d.rider_id ? (riderMap[d.rider_id] || 'Unknown rider') : 'Unassigned'
+    if (!nwdByRider.has(key)) nwdByRider.set(key, { name, rows: [] })
+    nwdByRider.get(key)!.rows!.push(d)
   }
+
+  const vanByRider = [...nwdByRider.entries()]
+    .map(([riderId, v]) => {
+      const piles = buildVanPiles(
+        (v.rows || []).map(r => ({
+          id: r.id,
+          product: r.products,
+          qty: r.qty,
+          status: r.status,
+          deliveryDate: r.delivery_date,
+          customerName: r.customer_name,
+        })),
+        today,
+      )
+      return {
+        riderId,
+        name: v.name,
+        piles,
+        units: vanTotal(piles),
+        orders: (v.rows || []).length,
+        stuckUnits: carriedOverTotal(piles, today),
+      }
+    })
+    // Most stuck stock first - that is the rider to chase.
+    .sort((a, b) => b.stuckUnits - a.stuckUnits || b.units - a.units)
+
+  const vanUnitsTotal = vanByRider.reduce((s, r) => s + r.units, 0)
+  const vanStuckTotal = vanByRider.reduce((s, r) => s + r.stuckUnits, 0)
   
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return '-'
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-  }
-  
+  // `formatTime` and `formatDate` lived here and were never called - date
+  // formatting belongs to the row and section components that actually render
+  // dates, and each already has it.
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -169,7 +228,7 @@ export default async function CMSAdminPage() {
             CMS Management
           </h2>
           <p className="text-muted-foreground">
-            Review and manage all &quot;Could Not Serve&quot; deliveries
+            Review &quot;Could Not Serve&quot; deliveries, plus refused stock still on the vans
           </p>
         </div>
         <Link href="/dashboard/admin/cms" className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 text-sm font-medium transition-colors">
@@ -178,271 +237,189 @@ export default async function CMSAdminPage() {
         </Link>
       </div>
       
-      {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-5">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total CMS
-            </CardTitle>
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-500">{cmsDeliveries?.length || 0}</div>
-            <p className="text-xs text-muted-foreground">{todayCms.length} today</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pending Review
-            </CardTitle>
-            <Clock className="w-4 h-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-amber-500">{pendingCms.length}</div>
-            <p className="text-xs text-muted-foreground">Needs attention</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Postponed
-            </CardTitle>
-            <Calendar className="w-4 h-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-purple-500">{postponedCms.length}</div>
-            <p className="text-xs text-muted-foreground">Scheduled for later</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Reviewed
-            </CardTitle>
-            <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-500">{reviewedCms.length}</div>
-            <p className="text-xs text-muted-foreground">Handled by admin</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Price Reviews
-            </CardTitle>
-            <DollarSign className="w-4 h-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-purple-500">{pendingModifications.length}</div>
-            <p className="text-xs text-muted-foreground">Pending approval</p>
-          </CardContent>
-        </Card>
-      </div>
+      {/* NEEDS YOU vs FOR REFERENCE.
+          The six cards used to sit in one undifferentiated strip, so a figure
+          you must act on looked exactly like a figure you cannot act on. Split
+          into two labelled bands instead. */}
+      <section aria-labelledby="needs-you">
+        <h3 id="needs-you" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Waiting on you
+        </h3>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Card className={toValidate.length > 0 ? 'border-amber-500/40' : undefined}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                To validate
+              </CardTitle>
+              <ShieldCheck className="h-4 w-4 text-amber-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-amber-500">{toValidate.length}</div>
+              <p className="text-xs text-muted-foreground">Postponed, not yet confirmed</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                To review
+              </CardTitle>
+              <Clock className="h-4 w-4 text-amber-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-amber-500">{pendingCms.length}</div>
+              <p className="text-xs text-muted-foreground">Failed, no decision yet</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Price reviews
+              </CardTitle>
+              <DollarSign className="h-4 w-4 text-violet-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-violet-500">{pendingModifications.length}</div>
+              <p className="text-xs text-muted-foreground">Pending approval</p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section aria-labelledby="for-reference">
+        <h3 id="for-reference" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          For reference
+        </h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total CMS
+              </CardTitle>
+              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{cmsDeliveries?.length || 0}</div>
+              <p className="text-xs text-muted-foreground">{todayCms.length} today</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Confirmed for a new day
+              </CardTitle>
+              <Calendar className="h-4 w-4 text-violet-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-violet-500">{scheduledCms.length}</div>
+              <p className="text-xs text-muted-foreground">Validated, in the flow</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Reviewed
+              </CardTitle>
+              <Check className="h-4 w-4 text-emerald-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-emerald-500">{reviewedCms.length}</div>
+              <p className="text-xs text-muted-foreground">Handled by admin</p>
+            </CardContent>
+          </Card>
+          {/* Kept as its OWN figure, never added to "Total CMS": CMS goods come
+              back to the store, these stayed on a van. One number cannot mean
+              both places. */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                On vans (NWD)
+              </CardTitle>
+              <Truck className="h-4 w-4 text-sky-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-sky-500">{vanUnitsTotal}</div>
+              <p className="text-xs text-muted-foreground">
+                {vanStuckTotal > 0 ? `${vanStuckTotal} carried over` : 'Not in store stock'}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      {/* STAGE 1 - THE GATE. First on the page because it is the only section
+          where an order is waiting on a decision that changes where it goes.
+          A postponed date is NOT a plan until somebody validates it. */}
+      <CmsStageSection
+        title="Postponements to validate"
+        description="Soonest day first. Validate to confirm the order into the flow, change the day if it does not suit, or reject to put it back on its original date."
+        icon={<ShieldCheck className="h-5 w-5" />}
+        rows={toValidate}
+        rowProps={rowProps}
+        cardClassName="border-amber-500/40 bg-amber-500/[0.04]"
+        titleClassName="text-amber-500"
+      />
       
-      {/* Pending Price Reviews - Priority Section */}
-      {pendingModifications.length > 0 && (
-        <Card className="border-purple-500/30 bg-purple-500/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-purple-600">
-              <DollarSign className="w-5 h-5" />
-              Price Adjustments Pending Review ({pendingModifications.length})
-            </CardTitle>
-            <CardDescription>
-              Riders have made price adjustments that need your approval
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {pendingModifications.map(mod => (
-                <div 
-                  key={mod.id} 
-                  className="p-4 rounded-lg border border-purple-500/20 bg-background"
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                    {/* Order Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
-                        <h4 className="font-semibold truncate">{mod.customer_name}</h4>
-                        <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/20 text-[10px]">
-                          Price Review
-                        </Badge>
-                      </div>
-                      
-                      <div className="mb-3 p-2 rounded-md bg-muted/50">
-                        <p className="text-sm font-medium">{mod.qty}x {mod.product_name}</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          CMS Reason: <span className="font-medium">{mod.notes}</span>
-                        </p>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <MapPin className="w-3.5 h-3.5" />
-                          <span className="truncate">{mod.locality}</span>
-                        </div>
-                        {mod.rider_name && (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Bike className="w-3.5 h-3.5" />
-                            <span>{mod.rider_name}</span>
-                          </div>
-                        )}
-                        {mod.contractor_name && (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Building2 className="w-3.5 h-3.5" />
-                            <span>{mod.contractor_name}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Review Actions */}
-                    <div className="lg:w-64 shrink-0">
-                      <CmsReviewActions modification={mod} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      
-      {/* All CMS Deliveries - Unified View */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-            All CMS Deliveries ({cmsDeliveries?.length || 0})
-          </CardTitle>
-          <CardDescription>
-            All failed deliveries sorted by date - newest first. 
-            <span className="ml-2 text-green-600">{reviewedCms.length} reviewed</span>
-            <span className="ml-2 text-purple-600">{postponedCms.length} postponed</span>
-            <span className="ml-2 text-amber-600">{pendingCms.length} pending</span>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {(cmsDeliveries || []).map(delivery => {
-              const isReviewed = delivery.delivery_notes?.startsWith('[REVIEWED]')
-              const isPostponed = delivery.delivery_notes?.includes('Postponed to') && !isReviewed
-              let displayReason = delivery.delivery_notes || 'No reason'
-              if (isReviewed) {
-                displayReason = displayReason.replace('[REVIEWED] ', '')
-              }
-              
-              // Extract postponed date if present
-              const postponedMatch = displayReason.match(/Postponed to (\d{1,2} \w+ \d{4})/)
-              const postponedDateStr = postponedMatch ? postponedMatch[1] : null
-              
-              return (
-                <div 
-                  key={delivery.id} 
-                  className={`p-4 rounded-lg border transition-colors ${
-                    isReviewed
-                      ? 'border-green-500/30 bg-green-500/5 opacity-70 hover:opacity-100'
-                      : isPostponed
-                        ? 'border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10'
-                        : delivery.delivery_date === today 
-                          ? 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10' 
-                          : 'border-border bg-muted/30 hover:bg-muted/50'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                    {/* Customer & Delivery Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        {isReviewed && (
-                          <span className="w-5 h-5 rounded-full bg-green-500/20 flex items-center justify-center shrink-0">
-                            <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          </span>
-                        )}
-                        {isPostponed && (
-                          <span className="w-5 h-5 rounded-full bg-purple-500/20 flex items-center justify-center shrink-0">
-                            <Calendar className="w-3 h-3 text-purple-600" />
-                          </span>
-                        )}
-                        <span className={`font-semibold truncate ${isReviewed ? 'text-muted-foreground' : ''}`}>{delivery.customer_name}</span>
-                        <Badge variant="outline" className={`text-[10px] shrink-0 ${
-                          isReviewed 
-                            ? 'bg-green-500/10 text-green-600 border-green-500/20' 
-                            : isPostponed
-                              ? 'bg-purple-500/10 text-purple-600 border-purple-500/20'
-                              : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
-                        }`}>
-                          {isPostponed && postponedDateStr ? `Postponed: ${postponedDateStr}` : displayReason}
-                        </Badge>
-                        {delivery.delivery_date === today && !isReviewed && !isPostponed && (
-                          <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] shrink-0">
-                            Today
-                          </Badge>
-                        )}
-                      </div>
-                      
-                      {/* Show full reason for postponed entries */}
-                      {isPostponed && (
-                        <p className="text-xs text-purple-400 mb-2 pl-7">{displayReason}</p>
-                      )}
-                      
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          {delivery.contact_1}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          {delivery.locality}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Package className="w-3 h-3" />
-                          {delivery.qty || 1}x {delivery.products}
-                        </span>
-                        {delivery.rider_id && riderMap[delivery.rider_id] && (
-                          <span className="flex items-center gap-1">
-                            <Bike className="w-3 h-3" />
-                            {riderMap[delivery.rider_id]}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Amount, Date & Actions */}
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
-                        <span className="font-mono text-sm font-medium">Rs {delivery.amount || 0}</span>
-                        <p className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</p>
-                      </div>
-                      <CmsEditActions
-                        delivery={delivery}
-                        riders={allRiders || []}
-                        regions={uniqueRegions}
-                        products={allProducts}
-                        riderMap={riderMap}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-      
+      {/* PRICE ADJUSTMENTS - pending above, already-decided collapsed at the
+          foot of its own component. The decided half was computed on this page
+          and never rendered; it is now shown. */}
+      <CmsPriceReview pending={pendingModifications} reviewed={reviewedModifications} />
+
+      {/* NWD / STILL ON THE VANS - above the CMS list because these goods are
+          in the field, not in the store, and nothing has ever reviewed them:
+          all 58 live rows were unreviewed because this page filtered on
+          status='cms' and never showed them at all. */}
+      <CmsVanStock
+        vanByRider={vanByRider}
+        vanUnitsTotal={vanUnitsTotal}
+        vanStuckTotal={vanStuckTotal}
+      />
+
+      {/* STAGE 2 - failed, and nobody has decided anything yet. */}
+      <CmsStageSection
+        title="Awaiting a decision"
+        description="The rider could not serve these and no one has reviewed, postponed or resolved them yet."
+        icon={<Clock className="h-5 w-5 text-amber-500" />}
+        rows={pendingCms}
+        rowProps={rowProps}
+        cardClassName="border-amber-500/25"
+      />
+
+      {/* STAGE 3 - validated, so these ARE the plan now. */}
+      <CmsStageSection
+        title="Confirmed for a new day"
+        description="Validated by an admin, so these are counted in the flow for the day shown. Use Reschedule to move one again - it will come back for validation."
+        icon={<Calendar className="h-5 w-5" />}
+        rows={scheduledCms}
+        rowProps={rowProps}
+        cardClassName="border-violet-500/25"
+        titleClassName="text-violet-500"
+      />
+
+      {/* STAGE 4 - done. Collapsed: it is the longest list and the least
+          urgent, and it used to sit interleaved with live work. */}
+      <CmsStageSection
+        title="Reviewed and closed"
+        icon={<Check className="h-5 w-5 text-emerald-500" />}
+        rows={reviewedCms}
+        rowProps={rowProps}
+        collapsible
+      />
+
       {/* Empty State */}
+      {/* Only claims success when BOTH lists are empty. With no CMS rows but
+          refused stock on a van, "all deliveries completed successfully" would
+          be a false all-clear. */}
       {(cmsDeliveries?.length || 0) === 0 && (
         <Card>
           <CardContent className="py-12">
             <div className="text-center">
               <AlertTriangle className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-muted-foreground">No CMS Deliveries</h3>
-              <p className="text-sm text-muted-foreground/70">All deliveries have been completed successfully</p>
+              <p className="text-sm text-muted-foreground/70">
+                {vanUnitsTotal > 0
+                  ? `No client was missed, but ${vanUnitsTotal} refused ${vanUnitsTotal === 1 ? 'unit is' : 'units are'} still on a van above.`
+                  : 'All deliveries have been completed successfully'}
+              </p>
             </div>
           </CardContent>
         </Card>

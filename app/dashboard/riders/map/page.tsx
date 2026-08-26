@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { RiderMobileLayout } from '@/components/rider/mobile-layout'
 import { MapPageContent } from '@/app/dashboard/contractors/map/map-content'
@@ -56,15 +57,18 @@ export default async function RiderMapPage() {
   const xpInCurrentLevel = deliveryCount % 50
 
   // Get today's date
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
 
   // Fetch rider's deliveries for today
   let deliveries: any[] = []
   const { data: todayData } = await supabase
     .from('deliveries')
-    .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at')
+    .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, active_date, rescheduled_to, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at')
     .eq('rider_id', rider.id)
-    .eq('delivery_date', today)
+    // The day it is TO BE delivered - see riders/stock/page.tsx. Filtering the
+    // immutable `delivery_date` kept a rescheduled stop off the rider's map on
+    // the very day he had to drive to it.
+    .eq('active_date', today)
     .order('delivery_sequence', { ascending: true })
 
   if (todayData && todayData.length > 0) {
@@ -73,14 +77,17 @@ export default async function RiderMapPage() {
     // Fall back to latest date with deliveries
     const { data: latestData } = await supabase
       .from('deliveries')
-      .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at')
+      .select('id, customer_name, contact_1, locality, products, qty, amount, status, rider_id, latitude, longitude, delivery_notes, client_response, delivery_date, active_date, rescheduled_to, location_flagged, client_lat, client_lng, location_source, sales_type, return_product, is_modified, modification_count, delivered_at')
       .eq('rider_id', rider.id)
-      .order('delivery_date', { ascending: false })
+      // Ordered and grouped by `active_date` to match the primary query above.
+      // Mixing the two would pick a "latest day" by one date and then filter by
+      // the other, which can return an empty map on a day that has work.
+      .order('active_date', { ascending: false })
       .limit(100)
 
-    const latestDate = latestData?.[0]?.delivery_date
+    const latestDate = latestData?.[0]?.active_date
     if (latestDate) {
-      deliveries = latestData!.filter(d => d.delivery_date === latestDate)
+      deliveries = latestData!.filter(d => d.active_date === latestDate)
     }
   }
 

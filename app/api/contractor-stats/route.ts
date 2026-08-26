@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
+import { muToday } from '@/lib/business-date'
 import { NextResponse } from 'next/server'
 import { NON_PAYOUT_FILTER } from '@/lib/types'
+import { isPendingReattempt } from '@/lib/reschedule-stock'
 
 export async function GET() {
   const supabase = await createClient()
@@ -102,20 +104,30 @@ export async function GET() {
   const balanceBeforeSalary = walletAdjustments + calculatedEarnings
   const balanceAfterSalary = Math.max(0, balanceBeforeSalary - monthlySalary)
 
-  // Count active deliveries (today, not delivered/nwd/cms)
-  const today = new Date().toISOString().split('T')[0]
+  // Count active deliveries (DUE today, not delivered/nwd/cms)
+  const today = muToday()
   const { data: activeRows } = await supabase
     .from('deliveries')
-    .select('id')
+    // `delivery_date`/`rescheduled_to` are needed by `isPendingReattempt()`.
+    .select('id, status, delivery_date, rescheduled_to')
     .in('rider_id', riderIds)
-    .eq('delivery_date', today)
-    .in('status', ['pending', 'assigned', 'picked_up'])
+    // Open work DUE today, matching the contractor's own delivery and stock
+    // screens. The earnings and balance figures above stay on `delivery_date`.
+    .eq('active_date', today)
+    // 'cms'/'nwd' are fetched then narrowed in JS: a rescheduled order keeps
+    // the status of the attempt that failed, so filtering the open statuses in
+    // SQL hid real outstanding stops from this count.
+    .in('status', ['pending', 'assigned', 'picked_up', 'cms', 'nwd'])
+
+  const openToday = (activeRows || []).filter(
+    d => !['cms', 'nwd'].includes(d.status) || isPendingReattempt(d),
+  )
 
   return NextResponse.json({
     balanceOwed: balanceBeforeSalary,
     balanceAfterSalary,
     monthlySalary,
-    activeDeliveries: activeRows?.length || 0,
+    activeDeliveries: openToday.length,
     activeRiders,
     riderCount,
   })

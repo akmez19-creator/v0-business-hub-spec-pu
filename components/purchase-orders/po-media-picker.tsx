@@ -29,7 +29,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { mediaSrc } from '@/lib/media-url'
 
-interface MediaItem {
+export interface MediaItem {
   url: string
   kind: 'image' | 'video'
   poster?: string | null
@@ -90,7 +90,7 @@ type FailReason =
   | 'unknown'
 
 /** Carries the route's classification alongside the message. */
-class MediaError extends Error {
+export class MediaError extends Error {
   reason: FailReason
   constructor(message: string, reason: FailReason) {
     super(message)
@@ -98,7 +98,7 @@ class MediaError extends Error {
   }
 }
 
-async function loadMedia(link: string): Promise<MediaItem[]> {
+export async function loadMedia(link: string): Promise<MediaItem[]> {
   const res = await fetch('/api/purchase-orders/product-media', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -133,7 +133,7 @@ async function loadMedia(link: string): Promise<MediaItem[]> {
  * both produce identical records - the ordering rules below are subtle enough
  * that a second copy would drift out of step.
  */
-async function persistPicks({
+export async function persistPicks({
   item,
   images,
   videos,

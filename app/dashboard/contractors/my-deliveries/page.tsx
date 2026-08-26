@@ -65,26 +65,27 @@ export default async function ContractorAssignPage({
   // Get all dates for deliveries assigned to this contractor (directly via contractor_id)
   const { data: contractorDates } = await supabase
     .from('deliveries')
-    .select('delivery_date')
+    .select('active_date')
     .eq('contractor_id', contractor.id)
-    .not('delivery_date', 'is', null)
-    .order('delivery_date', { ascending: false })
+    // Days work is DUE, so a day created purely by a reschedule is offered.
+    .not('active_date', 'is', null)
+    .order('active_date', { ascending: false })
 
   for (const row of contractorDates || []) {
-    if (row.delivery_date) dateSet.add(row.delivery_date)
+    if (row.active_date) dateSet.add(row.active_date)
   }
 
   // Also get dates for deliveries assigned to the contractor's riders
   if (riderIds.length > 0) {
     const { data: riderDates } = await supabase
       .from('deliveries')
-      .select('delivery_date')
+      .select('active_date')
       .in('rider_id', riderIds)
-      .not('delivery_date', 'is', null)
-      .order('delivery_date', { ascending: false })
+      .not('active_date', 'is', null)
+      .order('active_date', { ascending: false })
 
     for (const row of riderDates || []) {
-      if (row.delivery_date) dateSet.add(row.delivery_date)
+      if (row.active_date) dateSet.add(row.active_date)
     }
   }
 
@@ -100,9 +101,9 @@ export default async function ContractorAssignPage({
   if (riderIds.length > 0) {
     const { data } = await supabase
       .from('deliveries')
-      .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, rider_id, index_no, qty, products, amount, notes, sales_type, return_product')
+      .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, active_date, rescheduled_to, rider_id, index_no, qty, products, amount, notes, sales_type, return_product')
       .in('rider_id', riderIds)
-      .eq('delivery_date', selectedDate)
+      .eq('active_date', selectedDate)
       .order('locality', { ascending: true })
       .order('created_at', { ascending: true })
 
@@ -112,10 +113,10 @@ export default async function ContractorAssignPage({
   // Also get unassigned deliveries for this date
   const { data: unassigned } = await supabase
     .from('deliveries')
-    .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, rider_id, index_no, qty, products, amount, notes, sales_type, return_product')
+    .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, active_date, rescheduled_to, rider_id, index_no, qty, products, amount, notes, sales_type, return_product')
     .eq('contractor_id', contractor.id)
     .is('rider_id', null)
-    .eq('delivery_date', selectedDate)
+    .eq('active_date', selectedDate)
     .order('locality', { ascending: true })
 
   if (unassigned && unassigned.length > 0) {

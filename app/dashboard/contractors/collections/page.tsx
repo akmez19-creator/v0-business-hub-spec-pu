@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { ContractorMobileLayout } from '@/components/contractor/mobile-layout'
 import { CollectionsOverview } from '@/components/deliveries/collections-overview'
@@ -62,7 +63,7 @@ export default async function ContractorCollectionsPage() {
   }
 
   // Fetch last 7 days of DELIVERED deliveries for those riders
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = muToday()
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
   const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0]

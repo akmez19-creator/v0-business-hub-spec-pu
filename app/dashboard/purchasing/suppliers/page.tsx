@@ -47,6 +47,8 @@ export default async function SuppliersPage() {
         lastOrder: null,
         statuses: {},
         sampleLink: null,
+        threads: [],
+        manualProducts: [],
       }
       bySupplier.set(name, s)
     }
@@ -69,7 +71,51 @@ export default async function SuppliersPage() {
     if (!s.sampleLink && r.link) s.sampleLink = r.link
   }
 
+  // Conversations captured from the 1688 messenger by the browser extension.
+  const { data: threads } = await adminDb
+    .from('supplier_threads')
+    .select('id, supplier_name, chat_handle, platform, message_count, history_complete, last_captured_at')
+    .order('last_captured_at', { ascending: false })
+
+  for (const t of threads || []) {
+    const s = bySupplier.get((t.supplier_name || '').trim())
+    if (!s) continue
+    s.threads.push({
+      id: t.id,
+      handle: t.chat_handle,
+      platform: t.platform,
+      messages: t.message_count || 0,
+      complete: !!t.history_complete,
+      lastCaptured: t.last_captured_at,
+    })
+  }
+
+  // Products attached by hand - things discussed but never ordered, which by
+  // definition cannot come from purchase_orders.
+  const { data: manual } = await adminDb
+    .from('supplier_products')
+    .select('supplier_name, source, products(id, name)')
+    .eq('source', 'manual')
+
+  for (const m of manual || []) {
+    const s = bySupplier.get((m.supplier_name || '').trim())
+    const p = m.products as unknown as { id: string; name: string } | null
+    if (!s || !p) continue
+    s.manualProducts.push({ id: p.id, name: p.name })
+  }
+
   const suppliers = [...bySupplier.values()].sort((a, b) => b.spend - a.spend)
 
-  return <SuppliersContent suppliers={suppliers} />
+  // Only products that are still active are worth offering as new links.
+  const { data: allProducts } = await adminDb
+    .from('products')
+    .select('id, name')
+    .order('name')
+
+  return (
+    <SuppliersContent
+      suppliers={suppliers}
+      allProducts={(allProducts || []).map(p => ({ id: p.id, name: p.name }))}
+    />
+  )
 }

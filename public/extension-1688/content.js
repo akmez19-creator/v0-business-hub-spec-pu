@@ -313,6 +313,670 @@
     return /(^|\.)1688\.com$/i.test(location.hostname)
   }
 
+  // ---------------------------------------------------------------------------
+  // 1688 supplier messenger
+  // ---------------------------------------------------------------------------
+
+  const IN_FRAME = (() => {
+    try {
+      return window.self !== window.top
+    } catch {
+      return true // cross-origin access threw, so we are certainly framed
+    }
+  })()
+
+  /**
+   * What the top frame last heard from a child frame.
+   *
+   * The 1688 messenger renders the conversation inside a nested frame, so the
+   * top document does NOT contain the header or the contact list at all. No
+   * selector can fix that - the markup is in another document. Child frames
+   * therefore read their own DOM and post the result up here.
+   */
+  const FRAME_REPORT = { names: [], profile: {}, turns: [], at: 0 }
+
+  const FRAME_MSG = 'akz-supplier-frame'
+
+  /** Fresh enough to trust: stale frame data would describe the previous chat. */
+  function frameFresh() {
+    return FRAME_REPORT.at && Date.now() - FRAME_REPORT.at < 8000
+  }
+
+  if (IN_FRAME) {
+    // Child frames are silent readers. They own no UI; they answer the top
+    // frame's polling with whatever their own document can see.
+    window.addEventListener('message', e => {
+      if (!e.data || e.data.type !== FRAME_MSG + '-ask') return
+      let payload
+      try {
+        payload = {
+          type: FRAME_MSG,
+          names: readSupplierNames(true),
+          profile: readSupplierProfile(),
+          turns: readConversation(),
+        }
+      } catch {
+        return
+      }
+      // Only worth waking the top frame if this frame actually saw something.
+      if (!payload.names.length && !payload.turns.length) return
+      try {
+        window.top.postMessage(payload, '*')
+      } catch {
+        /* top is cross-origin and refused the message */
+      }
+    })
+  } else {
+    window.addEventListener('message', e => {
+      if (!e.data || e.data.type !== FRAME_MSG) return
+      const names = Array.isArray(e.data.names) ? e.data.names.filter(n => typeof n === 'string') : []
+      FRAME_REPORT.names = names.slice(0, 4)
+      FRAME_REPORT.profile = e.data.profile && typeof e.data.profile === 'object' ? e.data.profile : {}
+      FRAME_REPORT.turns = Array.isArray(e.data.turns) ? e.data.turns.slice(-30) : []
+      FRAME_REPORT.at = Date.now()
+    })
+  }
+
+  /** Ask every child frame what it can see. */
+  function pollFrames() {
+    let frames
+    try {
+      frames = document.querySelectorAll('iframe')
+    } catch {
+      return
+    }
+    for (const f of frames) {
+      if (f.closest('.akz-root, .akz-panel, .akz-call')) continue
+      try {
+        f.contentWindow?.postMessage({ type: FRAME_MSG + '-ask' }, '*')
+      } catch {
+        /* unreachable frame */
+      }
+    }
+  }
+
+  /** The chat workbench, wherever Alibaba happens to host it. */
+  function isMessenger() {
+    const u = location.href
+    return /onetalk|air\.1688\.com|message|wangwang|talk|im\.1688/i.test(u)
+  }
+
+  /**
+   * True when the messenger is on screen, whether this document renders it or a
+   * child frame does. detectPage() only ever sees the top URL, so gating on it
+   * alone hid the Supplier tab whenever the chat lived in a frame.
+   */
+  function isMessengerContext() {
+    return isMessenger() || frameFresh()
+  }
+
+  /**
+   * True when the node sits inside the left-hand conversation LIST rather than
+   * the open conversation.
+   *
+   * Every "conversation title" selector matches both places, and the list wins
+   * on DOM order, so without this the sidebar's first row is mistaken for the
+   * chat that is actually open. Walks through shadow boundaries because the
+   * messenger nests these panels in shadow roots.
+   */
+  function inConversationList(el) {
+    for (let n = el, hops = 0; n && hops < 30; hops++) {
+      const c = typeof n.className === 'string' ? n.className : ''
+      const id = typeof n.id === 'string' ? n.id : ''
+      // Reaching the message panel first means we are NOT in the list.
+      if (/chat-?main|message-?(list|panel|main)|conversation-?(main|detail|content)|right-?(panel|side)/i.test(c + ' ' + id)) return false
+      if (/(conversation|session|contact|chat|talk|msg|message)-?(list|s\b)|sidebar|sider|left-?(panel|side)|aside/i.test(c + ' ' + id)) return true
+      if (n.tagName === 'ASIDE') return true
+      const parent = n.parentElement || (n.getRootNode && n.getRootNode() !== n && n.getRootNode().host)
+      if (!parent) break
+      n = parent
+    }
+    return false
+  }
+
+  /**
+   * The supplier's name as shown in the open conversation.
+   *
+   * Two names are collected because they match our records differently: the
+   * chat nickname (e.g. "ruipan") is what the purchaser typed into the PO, while
+   * the registered company name (e.g. 深圳市硅魅电子科技有限公司) is what the
+   * profile card shows. The server decides which one it trusts.
+   */
+  function readSupplierNames(local) {
+    const names = []
+    const push = t => {
+      const s = String(t || '').replace(/\s+/g, ' ').trim()
+      // Skip our own account and obvious UI chrome.
+      if (!s || s.length > 60 || /^(全部|消息|联系人|档案|商品|我的订单|进厂)$/.test(s)) return
+      if (!names.includes(s)) names.push(s)
+    }
+
+    // A manual override always wins: if the purchaser told us who this is,
+    // guessing from the DOM can only make it worse.
+    if (!local && SUP.manual) {
+      push(SUP.manual)
+      return names.slice(0, 4)
+    }
+
+    // The conversation header - the most reliable nickname.
+    //
+    // Both the descendant form ([class*=conversation] [class*=title]) and the
+    // single-element form (class="conversation-title") appear in the wild, so
+    // the self-matching selectors are listed too. Missing them left the name
+    // blank and silently disabled the whole feature.
+    //
+    // CRITICAL: every one of these selectors ALSO matches each row of the
+    // left-hand conversation LIST, and the list comes first in DOM order. The
+    // old `.slice(0, 4)` therefore returned the first four names in the
+    // sidebar and never the open chat - so the key never changed and clicking
+    // another supplier did nothing at all. Rows in the list are skipped, and
+    // the selected row is only used as a fallback.
+    for (const sel of [
+      '[class*=conversation][class*=title]',
+      '[class*=conversation] [class*=title]',
+      '[class*=session][class*=name], [class*=session] [class*=name]',
+      '[class*=chat][class*=title], [class*=chat] [class*=header] [class*=name]',
+      '[class*=talk][class*=nick], [class*=talk] [class*=nick]',
+      'h1, h2',
+    ]) {
+      for (const el of qsaDeep(sel)) {
+        if (!isVisible(el) || inConversationList(el)) continue
+        push(el.innerText ?? el.textContent)
+        if (names.length) break
+      }
+      if (names.length) break
+    }
+
+    // Fallback: the highlighted row in the list names the open conversation
+    // too. Only the SELECTED one - any other row is a chat we are not in.
+    if (!names.length) {
+      for (const el of qsaDeep('[class*=item][class*=selected], [class*=item][class*=active], [class*=contact][class*=active]')) {
+        if (!isVisible(el)) continue
+        const t = String(el.innerText ?? el.textContent ?? '').split('\n')[0]
+        push(t)
+        if (names.length) break
+      }
+    }
+
+    // The registered company name on the profile card ("您正在沟通的商家").
+    //
+    // This sweeps every element for a company suffix, so it happily matched a
+    // ROW OF THE SIDEBAR (汕头诺亚五金厂 ends in 厂) and reported a company we
+    // were not talking to as "Also matched" - complete with that supplier's
+    // orders and spend. Wrong history beside the right name is worse than no
+    // history, so list rows are excluded here too.
+    for (const el of qsaDeep('a, div, span')) {
+      const t = String(el.innerText ?? el.textContent ?? '').trim()
+      if (t && t.length <= 40 && /(有限公司|商行|经营部|工厂|厂|店)$/.test(t) && isVisible(el) && !inConversationList(el)) {
+        push(t)
+        break
+      }
+    }
+
+    // Nothing in this document. On the messenger the conversation lives in a
+    // nested frame, so fall back to what a child frame reported - otherwise we
+    // would claim the name is unreadable when it is simply elsewhere.
+    if (!local && !names.length && frameFresh()) {
+      for (const n of FRAME_REPORT.names) push(n)
+    }
+    return names.slice(0, 4)
+  }
+
+  /** The supplier profile card: 经营模式, 成立日期, 加工定制, 回头率 and friends. */
+  function readSupplierProfile(local) {
+    const out = {}
+    const WANT =
+      /^(经营模式|成立日期|主营信息|生产档期|加工定制|认证信息|厂房面积|员工人数|货描相符|响应速度|发货速度|回头率|会员勋章)$/
+    for (const el of qsaDeep('div, li, tr, span')) {
+      const t = String(el.innerText ?? el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (!t || t.length > 90) continue
+      const m = t.match(/^([\u4e00-\u9fa5]{2,6})[:：]?\s*(.+)$/)
+      if (!m) continue
+      const [, k, v] = m
+      if (WANT.test(k) && !out[k] && v.length <= 60) out[k] = v
+    }
+    if (!local && !Object.keys(out).length && frameFresh()) {
+      return FRAME_REPORT.profile || {}
+    }
+    return out
+  }
+
+  /** The visible chat bubbles, oldest first, tagged by who sent them. */
+  function readConversation() {
+    const turns = []
+    const nodes = msgNodes()
+    for (const el of nodes.slice(-120)) {
+      const t = String(el.innerText ?? el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (!t || t.length < 2 || t.length > 500) continue
+      const cls = String(el.className || '')
+      // 1688 marks our own bubbles with right/self/mine/out variants.
+      const mine = /right|self|mine|\bout\b|send/i.test(cls)
+      const last = turns[turns.length - 1]
+      if (last && last.text === t) continue
+      turns.push({ from: mine ? 'me' : 'them', text: t })
+    }
+    if (!turns.length && !IN_FRAME && frameFresh()) return FRAME_REPORT.turns
+    return turns.slice(-30)
+  }
+
+  /**
+   * The scrollable element holding the messages.
+   *
+   * Picked by measuring rather than by class name: the tallest overflowing box
+   * that actually contains message bubbles. Class names on this messenger are
+   * hashed and change between releases, so a name-based guess rots silently.
+   */
+  function messageScroller() {
+    let best = null
+    // A picked area is often itself the scroller, so try it before measuring.
+    const picked = pickedRoot()
+    if (picked && picked.scrollHeight > picked.clientHeight + 40) return picked
+    for (const el of msgNodes()) {
+      for (let n = el.parentElement, hops = 0; n && hops < 8; n = n.parentElement, hops++) {
+        if (n.scrollHeight > n.clientHeight + 40 && n.clientHeight > 120) {
+          if (!best || n.clientHeight > best.clientHeight) best = n
+          break
+        }
+      }
+    }
+    return best
+  }
+
+  /**
+   * Scrolls the message list up until 1688 stops adding older messages.
+   *
+   * Bounded on all three axes - passes, wall clock, and "nothing new arrived" -
+   * because an unbounded loop on someone's real browser is how a page freezes.
+   * Restores the original scroll position so the purchaser's view is unchanged.
+   */
+  async function loadFullHistory(maxPasses = 25, budgetMs = 20000) {
+    const box = messageScroller()
+    if (!box) return { complete: false, reason: 'no-scroller' }
+    const startedAt = Date.now()
+    const originalTop = box.scrollTop
+    let lastCount = msgNodes().length
+    let stagnant = 0
+
+    for (let pass = 0; pass < maxPasses; pass++) {
+      if (Date.now() - startedAt > budgetMs) return { complete: false, reason: 'timeout' }
+      box.scrollTop = 0
+      await new Promise(r => setTimeout(r, 550))
+      const now = msgNodes().length
+      if (now <= lastCount) {
+        // Two quiet passes in a row means we are at the top of the history.
+        if (++stagnant >= 2) {
+          box.scrollTop = originalTop
+          return { complete: true, reason: 'reached-top' }
+        }
+      } else {
+        stagnant = 0
+      }
+      lastCount = now
+    }
+    box.scrollTop = originalTop
+    return { complete: false, reason: 'max-passes' }
+  }
+
+  /** Every message currently in the page, oldest first and uncapped. */
+  function readFullConversation() {
+    const turns = []
+    for (const el of msgNodes()) {
+      const t = String(el.innerText ?? el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      if (!t || t.length < 2 || t.length > 2000) continue
+      const cls = String(el.className || '')
+      const mine = /right|self|mine|\bout\b|send/i.test(cls)
+      const last = turns[turns.length - 1]
+      if (last && last.text === t && last.from === (mine ? 'me' : 'them')) continue
+      turns.push({ from: mine ? 'me' : 'them', text: t })
+    }
+    return turns
+  }
+
+  // ---------------------------------------------------------------------------
+  // Where the messages are
+  //
+  // Guessing the message area from class names is the weakest part of the
+  // capture. `[class*=message]` matches the left-hand conversation LIST, unread
+  // banners and notification toasts just as happily as the open chat, so a bad
+  // guess quietly archives the wrong text under the right supplier's name.
+  //
+  // So the purchaser can point at it directly. A picked area is remembered per
+  // site and always wins; automatic detection stays as the fallback, but it now
+  // excludes anything inside the conversation list.
+  // ---------------------------------------------------------------------------
+
+  /** Bubble-ish nodes. One definition - it used to be copy-pasted four times. */
+  const MSG_SEL = '[class*=message], [class*=bubble], [class*=msg-item]'
+
+  const MSG_ROOT_KEY = 'akzMsgRootV1'
+
+  /**
+   * Saved picks are per site AND per frame position: the messenger lives in a
+   * nested frame whose document is not the top one, so a path recorded in one
+   * is meaningless in the other.
+   */
+  function rootScopeKey() {
+    return location.host + (IN_FRAME ? '|frame' : '|top')
+  }
+
+  /** { path, at } for this frame, or null when nothing was ever picked. */
+  let MSG_ROOT = null
+
+  /**
+   * A structural path to an element: child indices and tag names from the root
+   * down, hopping through open shadow roots.
+   *
+   * Deliberately NOT a CSS selector. This messenger's class names are hashed
+   * and change between releases, so a stored selector would rot silently and
+   * start reading nothing - or worse, something else.
+   */
+  function pathOf(el) {
+    const steps = []
+    let n = el
+    let hops = 0
+    // The class is recorded only to tell same-tag siblings apart. Pages insert
+    // and remove nodes constantly, so the index alone would drift onto a
+    // neighbour - and neighbours here are the sidebar and the chat.
+    const cls = e => (typeof e.className === 'string' ? e.className.trim().slice(0, 120) : '')
+    while (n && n !== document.documentElement && hops++ < 60) {
+      const parent = n.parentElement
+      if (parent) {
+        steps.unshift({ t: n.tagName, i: [...parent.children].indexOf(n), c: cls(n) })
+        n = parent
+        continue
+      }
+      // No element parent: we are at the top of a shadow root, so step out
+      // through its host and record that this hop crossed a boundary.
+      const root = n.getRootNode && n.getRootNode()
+      const host = root && root.host
+      if (!host) return null
+      steps.unshift({ s: 1, t: n.tagName, i: [...root.children].indexOf(n), c: cls(n) })
+      n = host
+    }
+    return steps.length ? steps : null
+  }
+
+  /**
+   * Walk a stored path back to a live element.
+   *
+   * Tolerates the index moving - pages insert and remove siblings constantly -
+   * by falling back to the first sibling with the same tag. Returns null rather
+   * than a wrong guess when the shape no longer matches at all.
+   */
+  function resolvePath(steps) {
+    if (!Array.isArray(steps) || !steps.length) return null
+    let n = document.documentElement
+    for (const s of steps) {
+      if (!n) return null
+      const container = s.s ? n.shadowRoot : n
+      if (!container) return null
+      const kids = [...container.children]
+      const cls = e => (typeof e.className === 'string' ? e.className.trim().slice(0, 120) : '')
+      const sameTag = kids.filter(k => k.tagName === s.t)
+      const exact = kids[s.i]
+      // Strongest evidence first. The index is checked against the class before
+      // it is trusted: a node inserted above the target shifts every index by
+      // one, and silently resolving to the neighbour is how the wrong panel
+      // gets read while everything still looks fine.
+      if (exact && exact.tagName === s.t && (!s.c || cls(exact) === s.c)) n = exact
+      else {
+        const byClass = s.c ? sameTag.filter(k => cls(k) === s.c) : []
+        n = byClass.length === 1 ? byClass[0] : byClass[0] || (exact?.tagName === s.t ? exact : sameTag[0]) || null
+      }
+    }
+    return n
+  }
+
+  /** querySelectorAll inside one element, still reaching into shadow roots. */
+  function qsaIn(root, sel) {
+    const out = []
+    const walk = (node, depth) => {
+      if (!node || depth > 4 || out.length > 4000) return
+      try {
+        for (const el of node.querySelectorAll(sel)) out.push(el)
+        for (const el of node.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot, depth + 1)
+      } catch {
+        /* skip unreadable roots */
+      }
+    }
+    walk(root, 0)
+    return out
+  }
+
+  /**
+   * The picked message area, or null.
+   *
+   * Validated on every use: a saved path that now resolves to something with no
+   * messages in it is treated as broken and ignored, so a site redesign degrades
+   * to automatic detection instead of silently capturing an empty conversation.
+   */
+  function pickedRoot() {
+    if (!MSG_ROOT?.path) return null
+    const el = resolvePath(MSG_ROOT.path)
+    if (!el || !el.isConnected) return null
+    return qsaIn(el, MSG_SEL).length ? el : null
+  }
+
+  /**
+   * Every message node, oldest first.
+   *
+   * With a picked area this is simply everything inside it. Without one it is
+   * the old page-wide sweep, minus the conversation list - the sidebar rows are
+   * what made the automatic guess untrustworthy in the first place.
+   */
+  function msgNodes() {
+    const root = pickedRoot()
+    if (root) return qsaIn(root, MSG_SEL)
+    return qsaDeep(MSG_SEL).filter(el => {
+      try {
+        return !inConversationList(el)
+      } catch {
+        return true
+      }
+    })
+  }
+
+  /** How the messages are being found right now, for display in the panel. */
+  function msgSource() {
+    if (!MSG_ROOT?.path) return { mode: 'auto', count: msgNodes().length }
+    return pickedRoot()
+      ? { mode: 'picked', count: msgNodes().length }
+      : { mode: 'stale', count: msgNodes().length }
+  }
+
+  // --- Point-at-it picker ------------------------------------------------
+  //
+  // Runs in EVERY frame. The top frame owns the button, but the messages are
+  // usually in a child frame, and a frame can only see its own document - so
+  // the top frame broadcasts "start picking" and whichever frame the purchaser
+  // actually clicks in records the pick and reports back.
+
+  const PICK_MSG = 'akz-pick-msg-root'
+  let PICKING = false
+  let pickBox = null
+  let pickTip = null
+  let pickTarget = null
+
+  /** Our own UI must never be pickable, or the panel would capture itself. */
+  function isOurs(el) {
+    try {
+      return !!(el.closest && el.closest('.akz-root, .akz-panel, .akz-call, .akz-pick'))
+    } catch {
+      return false
+    }
+  }
+
+  /** Deepest real element under the pointer, seeing through shadow roots. */
+  function elAtPoint(e) {
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : []
+    for (const n of path) if (n && n.nodeType === 1 && !isOurs(n)) return n
+    const el = document.elementFromPoint(e.clientX, e.clientY)
+    return el && !isOurs(el) ? el : null
+  }
+
+  function startPicking() {
+    if (PICKING) return
+    PICKING = true
+    pickBox = document.createElement('div')
+    pickBox.className = 'akz-pick akz-pickbox'
+    pickTip = document.createElement('div')
+    pickTip.className = 'akz-pick akz-picktip'
+    pickTip.textContent = IN_FRAME
+      ? 'Click the area holding the messages'
+      : 'Click the area holding the messages - Esc to cancel'
+    document.documentElement.append(pickBox, pickTip)
+    document.addEventListener('mousemove', onPickMove, true)
+    document.addEventListener('click', onPickClick, true)
+    document.addEventListener('keydown', onPickKey, true)
+  }
+
+  function stopPicking() {
+    if (!PICKING) return
+    PICKING = false
+    pickTarget = null
+    pickBox?.remove()
+    pickTip?.remove()
+    pickBox = pickTip = null
+    document.removeEventListener('mousemove', onPickMove, true)
+    document.removeEventListener('click', onPickClick, true)
+    document.removeEventListener('keydown', onPickKey, true)
+  }
+
+  function onPickMove(e) {
+    const el = elAtPoint(e)
+    if (!el || el === pickTarget) return
+    pickTarget = el
+    const r = el.getBoundingClientRect()
+    Object.assign(pickBox.style, {
+      top: r.top + 'px',
+      left: r.left + 'px',
+      width: r.width + 'px',
+      height: r.height + 'px',
+    })
+    // The live count is the whole point: it tells the purchaser whether they
+    // are hovering the real conversation or the sidebar BEFORE they commit.
+    const n = qsaIn(el, MSG_SEL).length
+    pickTip.textContent = n
+      ? `${n} message${n === 1 ? '' : 's'} in here - click to use this area`
+      : 'No messages in here - keep looking'
+    pickTip.classList.toggle('akz-pickgood', n > 0)
+    const top = r.top > 34 ? r.top - 30 : r.bottom + 6
+    Object.assign(pickTip.style, { top: top + 'px', left: Math.max(4, r.left) + 'px' })
+  }
+
+  function onPickKey(e) {
+    if (e.key !== 'Escape') return
+    e.preventDefault()
+    e.stopPropagation()
+    cancelPickEverywhere()
+  }
+
+  async function onPickClick(e) {
+    if (!PICKING) return
+    // Swallow the click: the page must not also act on it.
+    e.preventDefault()
+    e.stopPropagation()
+    const el = elAtPoint(e)
+    if (!el) return
+    const count = qsaIn(el, MSG_SEL).length
+    const path = pathOf(el)
+    if (!path) {
+      stopPicking()
+      return
+    }
+    MSG_ROOT = { path, at: Date.now() }
+    const all = (await store.get(MSG_ROOT_KEY))?.[MSG_ROOT_KEY] || {}
+    all[rootScopeKey()] = MSG_ROOT
+    await store.set({ [MSG_ROOT_KEY]: all })
+    stopPicking()
+    // Tell the top frame what happened so the panel can confirm it.
+    if (IN_FRAME) {
+      try {
+        window.top.postMessage({ type: PICK_MSG + '-done', count }, '*')
+      } catch {
+        /* top is cross-origin */
+      }
+    } else {
+      onPickDone(count)
+    }
+  }
+
+  /** Broadcast so the frame the purchaser is looking at enters picking mode. */
+  function beginPickEverywhere() {
+    startPicking()
+    for (const f of document.querySelectorAll('iframe')) {
+      if (f.closest('.akz-root, .akz-panel, .akz-call')) continue
+      try {
+        f.contentWindow?.postMessage({ type: PICK_MSG + '-start' }, '*')
+      } catch {
+        /* unreachable frame */
+      }
+    }
+  }
+
+  function cancelPickEverywhere() {
+    stopPicking()
+    if (IN_FRAME) return
+    for (const f of document.querySelectorAll('iframe')) {
+      try {
+        f.contentWindow?.postMessage({ type: PICK_MSG + '-cancel' }, '*')
+      } catch {
+        /* unreachable frame */
+      }
+    }
+    SUP.pick = null
+    render()
+  }
+
+  window.addEventListener('message', e => {
+    const t = e.data?.type
+    if (t === PICK_MSG + '-start') startPicking()
+    else if (t === PICK_MSG + '-cancel') stopPicking()
+    else if (t === PICK_MSG + '-done' && !IN_FRAME) {
+      // A child frame recorded the pick; stop our own overlay and confirm.
+      stopPicking()
+      onPickDone(Number(e.data.count) || 0, true)
+    }
+  })
+
+  /** Load whatever was picked for this frame on a previous visit. */
+  async function loadMsgRoot() {
+    try {
+      const all = (await store.get(MSG_ROOT_KEY))?.[MSG_ROOT_KEY] || {}
+      const mine = all[rootScopeKey()]
+      if (mine?.path) MSG_ROOT = mine
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  async function clearMsgRoot() {
+    MSG_ROOT = null
+    try {
+      const all = (await store.get(MSG_ROOT_KEY))?.[MSG_ROOT_KEY] || {}
+      delete all[rootScopeKey()]
+      await store.set({ [MSG_ROOT_KEY]: all })
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  /** querySelectorAll that also reaches into open shadow roots. */
+  function qsaDeep(sel) {
+    const out = []
+    const walk = (root, depth) => {
+      if (!root || depth > 4 || out.length > 4000) return
+      try {
+        for (const el of root.querySelectorAll(sel)) out.push(el)
+        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot, depth + 1)
+      } catch {
+        /* skip unreadable roots */
+      }
+    }
+    walk(document, 0)
+    return out
+  }
+
   function detectPage() {
     const h = location.hostname
     const p = location.pathname
@@ -321,6 +985,9 @@
     // instead, so the guide still works on any site.
     if (!on1688()) return 'other'
     if (/login|passport/i.test(h) || /login/i.test(p)) return 'login'
+    // The supplier messenger (onetalk / air.1688 "AI询盘"). Checked before the
+    // generic rules because its URL also matches the loose search test below.
+    if (isMessenger()) return 'messenger'
     if (/\/offer\/\d+/.test(p) || /detail\.1688\.com/i.test(h)) return 'detail'
     if (/cart/i.test(h) || /cart/i.test(p)) return 'cart'
     if (/trade|buy|order/i.test(h) || /(submit|buy|order)/i.test(p)) return 'order'
@@ -601,6 +1268,38 @@
     drafts: {},
   }
 
+  /**
+   * The supplier brief for the conversation currently open in the messenger.
+   * Deliberately NOT persisted: it is per-conversation, and a stale brief shown
+   * against a different supplier is exactly the mistake this feature exists to
+   * prevent.
+   */
+  const SUP = {
+    key: '',        // identity of the conversation the brief belongs to
+    loading: false,
+    error: '',
+    names: [],
+    summary: null,
+    orders: [],
+    draft: '',
+    draftError: '',
+    manual: '', // purchaser-supplied name, overrides whatever the DOM says
+    capture: null, // { state: reading|saved|unmatched|empty|session|error, ... }
+    pick: null, // { picking } | { count } - state of the point-at-it picker
+  }
+
+  /**
+   * A freshly picked area changes what "this conversation" even means, so the
+   * once-per-conversation guard is lifted and the thread is read again. Without
+   * this the purchaser would fix the area and see the old, wrong capture stand.
+   */
+  function onPickDone(count, fromFrame) {
+    SUP.pick = { count, fromFrame: !!fromFrame }
+    CAPTURED.clear()
+    render()
+    if (SUP.key && authToken) captureThread(SUP.key)
+  }
+
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
   function currentChat() {
@@ -739,10 +1438,73 @@
     return bits.join(', ').slice(0, 70)
   }
 
+  const CONTROL_SEL =
+    'a[href], button, input, select, textarea, [role=button], [role=link], [role=tab], [role=checkbox], [role=menuitem], summary'
+
+  /**
+   * Collect controls from a root AND from any open shadow roots inside it.
+   *
+   * `querySelectorAll` does not pierce shadow DOM, so every control inside a
+   * web-component widget was invisible to the page map. The model was then told
+   * that list was "the controls visible on the page" and duly reported that a
+   * feature the user could plainly see did not exist.
+   */
+  function collectControls(root, acc, depth) {
+    if (!root || depth > 4 || acc.length >= 600) return acc
+    try {
+      for (const el of root.querySelectorAll(CONTROL_SEL)) {
+        acc.push(el)
+        if (acc.length >= 600) return acc
+      }
+      // Only open shadow roots are reachable; closed ones stay opaque and are
+      // reported as regions instead.
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) collectControls(el.shadowRoot, acc, depth + 1)
+      }
+    } catch {
+      /* a hostile or detached root - skip it rather than lose the whole map */
+    }
+    return acc
+  }
+
+  /**
+   * Areas of the page whose contents cannot be read: cross-origin iframes and
+   * embedded widgets. They are never click targets (their coordinates are in
+   * another frame, so the spotlight would land in the wrong place) - they exist
+   * purely so the assistant knows there is something there and says "I cannot
+   * read inside that panel" instead of "this page has no such feature".
+   */
+  function findOpaqueRegions() {
+    const out = []
+    let frames = []
+    try {
+      frames = document.querySelectorAll('iframe')
+    } catch {
+      return out
+    }
+    for (const f of frames) {
+      if (f.closest('.akz-root, .akz-panel, .akz-call')) continue
+      if (!isVisible(f)) continue
+      const r = f.getBoundingClientRect()
+      if (r.bottom < 0 || r.top > window.innerHeight) continue
+      if (r.width < 80 || r.height < 60) continue
+      let host = ''
+      try {
+        host = f.src ? new URL(f.src, location.href).hostname : ''
+      } catch {
+        host = ''
+      }
+      const label = (f.title || f.name || f.getAttribute('aria-label') || '').trim().slice(0, 60)
+      const vy = r.top + r.height / 2 < window.innerHeight / 2 ? 'upper' : 'lower'
+      const vx = r.left + r.width / 2 < window.innerWidth / 2 ? 'left' : 'right'
+      out.push({ where: vy + '-' + vx, label, host: host.slice(0, 60) })
+      if (out.length >= 8) break
+    }
+    return out
+  }
+
   function buildPageMap() {
-    const nodes = document.querySelectorAll(
-      'a[href], button, input, select, textarea, [role=button], [role=link], [role=tab], [role=checkbox], [role=menuitem], summary',
-    )
+    const nodes = collectControls(document, [], 0)
     AI_MAP = []
     // Indices from the previous map are now meaningless; a new token marks the
     // boundary so older messages fall back to resolving by label.
@@ -791,6 +1553,204 @@
     authName = json.user?.name || ''
   }
 
+  // ---------------------------------------------------------------------------
+  // Supplier brief: our own purchase history for whoever is on screen
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Load the brief for the open conversation.
+   *
+   * @param {boolean} withDraft also ask the model for the next message to send
+   */
+  async function loadSupplierBrief(withDraft) {
+    const names = readSupplierNames()
+    if (!names.length) {
+      SUP.error = 'Could not read which supplier this conversation is with.'
+      SUP.loading = false
+      render()
+      return
+    }
+    if (!authToken) {
+      SUP.error = 'Sign in on the Chat tab to see purchase history.'
+      SUP.loading = false
+      render()
+      return
+    }
+
+    SUP.key = names.join('|')
+    SUP.loading = true
+    SUP.error = ''
+    SUP.draftError = ''
+    if (!withDraft) SUP.draft = ''
+    SUP.names = names
+    render()
+
+    const keyAtStart = SUP.key
+    try {
+      const res = await fetch(APP + '/api/extension/supplier-brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify({
+          names,
+          draft: !!withDraft,
+          turns: withDraft ? readConversation() : [],
+          profile: readSupplierProfile(),
+        }),
+      })
+
+      // The purchaser switched conversation while this was in flight - dropping
+      // the response is the only safe outcome, since attaching it to a
+      // different supplier is what would mislead the negotiation.
+      if (SUP.key !== keyAtStart) return
+
+      // Branch on the status BEFORE reading the body: an HTML error page makes
+      // res.json() throw, which would surface as whatever the catch block says.
+      if (res.status === 401) {
+        authToken = null
+        SUP.error = 'Your session expired. Sign in again on the Chat tab.'
+        return
+      }
+      if (!res.ok) {
+        SUP.error = 'Could not load purchase history (server said ' + res.status + ').'
+        return
+      }
+
+      const json = await res.json()
+      if (!json.success) {
+        SUP.error = json.error || 'Could not load purchase history.'
+        return
+      }
+      SUP.summary = json.summary || null
+      SUP.orders = Array.isArray(json.orders) ? json.orders : []
+      if (withDraft) {
+        SUP.draft = String(json.draft || '')
+        SUP.draftError = String(json.draftError || '')
+      }
+      // Archive the conversation once the supplier is known. Deliberately not
+      // awaited: the history scroll takes seconds and the purchaser should
+      // never wait on it to see their order history.
+      captureThread(keyAtStart)
+    } catch (e) {
+      if (SUP.key !== keyAtStart) return
+      SUP.error = 'Could not reach Akmez. Check your connection.'
+    } finally {
+      if (SUP.key === keyAtStart) {
+        SUP.loading = false
+        render()
+      }
+    }
+  }
+
+  /**
+   * Pulls the full history for the open chat and stores it in Akmez.
+   *
+   * Runs at most once per conversation per page life: the auto-scroll is the
+   * expensive, most visible part and repeating it on every poll would yank the
+   * purchaser's message list around while they are reading it.
+   */
+  const CAPTURED = new Set()
+  async function captureThread(keyAtStart) {
+    if (!keyAtStart || CAPTURED.has(keyAtStart) || !authToken) return
+    CAPTURED.add(keyAtStart)
+    SUP.capture = { state: 'reading' }
+    render()
+    try {
+      const scan = await loadFullHistory()
+      // The purchaser moved on while we were scrolling - storing now would
+      // file this history under whoever is open instead.
+      if (SUP.key !== keyAtStart) return
+
+      const turns = readFullConversation()
+      if (!turns.length) {
+        SUP.capture = { state: 'empty' }
+        return
+      }
+      const res = await fetch(APP + '/api/extension/supplier-thread', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify({
+          names: SUP.names,
+          turns,
+          complete: scan.complete,
+          company: SUP.names[1] || null,
+        }),
+      })
+      if (SUP.key !== keyAtStart) return
+      if (res.status === 401) {
+        SUP.capture = { state: 'session' }
+        return
+      }
+      if (!res.ok) {
+        SUP.capture = { state: 'error', detail: 'server said ' + res.status }
+        return
+      }
+      const json = await res.json()
+      if (!json.success) {
+        SUP.capture = { state: 'error', detail: json.error || '' }
+      } else if (!json.matched) {
+        // Not a failure: the purchaser chose to archive only suppliers that
+        // already appear in purchase orders. Saying so beats a silent no-op.
+        SUP.capture = { state: 'unmatched', reason: json.reason || '' }
+      } else {
+        SUP.capture = { state: 'saved', total: json.total || 0, complete: scan.complete }
+      }
+    } catch {
+      if (SUP.key === keyAtStart) SUP.capture = { state: 'error', detail: 'could not reach Akmez' }
+    } finally {
+      if (SUP.key === keyAtStart) render()
+    }
+  }
+
+  /** Put the drafted message into the 1688 send box without sending it. */
+  function insertDraft(text) {
+    const box = qsaDeep('textarea, [contenteditable=true]').filter(isVisible).pop()
+    if (!box) return false
+    if (box.tagName === 'TEXTAREA') {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )?.set
+      if (setter) setter.call(box, text)
+      else box.value = text
+    } else {
+      box.textContent = text
+    }
+    box.dispatchEvent(new Event('input', { bubbles: true }))
+    box.dispatchEvent(new Event('change', { bubbles: true }))
+    box.focus()
+    return true
+  }
+
+  /**
+   * Watch for the purchaser clicking a different supplier in the contact list.
+   *
+   * 1688 is a single-page app, so there is no navigation to hook: the header
+   * simply changes. Polling the visible names is cheap and, unlike a
+   * MutationObserver on the whole document, cannot be starved by the constant
+   * re-rendering of the message list.
+   */
+  let supTimer = null
+  function watchSupplierSwitch() {
+    if (supTimer) clearInterval(supTimer)
+    supTimer = setInterval(() => {
+      // Ask the child frames first: on the messenger they hold the only copy
+      // of the conversation, and their reply lands before the next tick.
+      pollFrames()
+      if (!isMessengerContext()) return
+      const key = readSupplierNames().join('|')
+      if (!key || key === SUP.key) return
+      // Reset first so the previous supplier's orders can never be shown
+      // beside the new supplier's name.
+      SUP.summary = null
+      SUP.orders = []
+      SUP.draft = ''
+      SUP.draftError = ''
+      SUP.error = ''
+      SUP.capture = null
+      loadSupplierBrief(false)
+    }, 1200)
+  }
+
   async function askAI(question) {
     aiBusy = true
     aiError = ''
@@ -801,8 +1761,37 @@
     delete db.drafts[chat.id]
     render(true)
 
+    /**
+     * Is the Akmez server itself reachable?
+     *
+     * A failed guide-ai call has two completely different causes that look
+     * identical in the panel: the user's connection is down, or the server is
+     * healthy but this one route is missing from the deployment. Ask a SIBLING
+     * route that is always present - any HTTP reply at all (its 401 included)
+     * proves the host is up, so the fault is guide-ai alone. Telling someone to
+     * check their wifi when the wifi is fine is what got this asked four times
+     * in a row. Declared outside the try so the catch below can use it too.
+     */
+    const serverReachable = async () => {
+      try {
+        const ctl = new AbortController()
+        const t = setTimeout(() => ctl.abort(), 8000)
+        await fetch(APP + '/api/extension/ai-reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          signal: ctl.signal,
+        })
+        clearTimeout(t)
+        return true
+      } catch {
+        return false
+      }
+    }
+
     try {
       const elements = buildPageMap()
+      const regions = findOpaqueRegions()
       // Everything before this question, so follow-ups like "and then?" or
       // "do that one instead" actually resolve. Trimmed to the last few turns:
       // the model only needs the thread of the conversation, not the whole
@@ -822,6 +1811,7 @@
           title: document.title,
           pageText: readText(document.body).replace(/\s+/g, ' ').trim().slice(0, 3000),
           elements,
+          regions,
         }),
       })
 
@@ -841,9 +1831,14 @@
       // Reporting it as "AI request failed" sends the user rewording the same
       // question forever at an endpoint that can never answer.
       if (res.status === 404) {
-        throw new Error(
-          'The Akmez AI service is not live on the server yet, so nothing can answer this. Your question is fine.',
-        )
+        const up = await serverReachable()
+        addMessage('assistant', {
+          text: up
+            ? 'The Akmez server is up, but the AI service is not part of the deployment currently live, so nothing can answer this. Your question is fine - the backend needs to be republished. Nothing you retype here will help until then.'
+            : 'Could not reach the Akmez server at all, so this never got asked. Check your internet connection, then try again.',
+          error: true,
+        })
+        return
       }
       if (res.status === 429) {
         throw new Error('The AI is rate limited right now. Wait a moment, then ask again.')
@@ -884,12 +1879,17 @@
       // instead of checking their connection. Translate it into the real cause.
       const raw = err?.message || ''
       const networkFail = /failed to fetch|networkerror|load failed|fetch failed/i.test(raw)
-      addMessage('assistant', {
-        text: networkFail
-          ? 'Could not reach the Akmez server. Check your internet connection - and if it is fine, the AI service may not be deployed yet.'
-          : raw || 'Could not reach the AI',
-        error: true,
-      })
+      let text = raw || 'Could not reach the AI'
+      if (networkFail) {
+        // Don't guess between "you are offline" and "the route is missing" -
+        // a browser reports both as the same bare "Failed to fetch". A 404 HTML
+        // page carries no CORS header, so the browser blocks it and the real
+        // status never reaches this code; probing a sibling settles which it is.
+        text = (await serverReachable())
+          ? 'The Akmez server is up, but its AI service did not respond, so this was never answered. It is almost certainly not included in the deployment currently live - the backend needs republishing. Your question is fine.'
+          : 'Could not reach the Akmez server, so this never got asked. Check your internet connection, then try again.'
+      }
+      addMessage('assistant', { text, error: true })
     } finally {
       aiBusy = false
       save(true)
@@ -1100,6 +2100,185 @@
       .join('')
   }
 
+  const yuan = v => {
+    const n = Number(v)
+    return Number.isFinite(n) && n !== 0 ? '¥' + (Math.round(n * 100) / 100).toLocaleString() : '—'
+  }
+
+  /** The Supplier tab: our own purchase history for the open conversation. */
+  function supplierHtml() {
+    if (!isMessengerContext()) {
+      return `<div class="akz-empty">Open a supplier conversation in the 1688 messenger and their Akmez order history appears here automatically.</div>`
+    }
+    if (SUP.loading && !SUP.summary) {
+      return `<div class="akz-empty">Looking up ${esc(SUP.names.join(' / ') || 'this supplier')}…</div>`
+    }
+    if (SUP.error) {
+      return `<div class="akz-empty">${esc(SUP.error)}
+        <div style="margin-top:10px"><button class="akz-btn" data-akz="supreload">Try again</button></div></div>`
+    }
+
+    const s = SUP.summary
+    const who = esc(SUP.names[0] || 'this supplier')
+
+    // No match is a real, useful answer - but it must never be dressed up as
+    // "no such supplier". We only know that nothing in OUR records matches.
+    if (!s || !s.orderCount) {
+      // Distinguish "we could not read the name" from "we read it and found
+      // nothing". Reporting the second when the first is true is what makes a
+      // purchaser think a supplier is new when they are not.
+      const unread = !SUP.names.length
+      return `<div class="akz-supwrap">
+        <div class="akz-supname">${unread ? 'Supplier not identified' : who}</div>
+        <div class="akz-empty">${
+          unread
+            ? `Could not read the supplier name from this page.<div class="akz-supnote">Type it below and Akmez will look up their orders.</div>`
+            : `No purchase orders on file under this name.<div class="akz-supnote">This is a first order, or they are saved in Akmez under a different name. Nothing was matched by guesswork.</div>`
+        }</div>
+        ${captureHtml()}
+        ${overrideHtml()}
+        ${unread ? '' : draftHtml()}
+      </div>`
+    }
+
+    const conf =
+      s.confidence === 'exact'
+        ? `<span class="akz-chip akz-ok">exact name match</span>`
+        : `<span class="akz-chip akz-warn">matched on name core - confirm it is the same company</span>`
+
+    const stats = `<div class="akz-supstats">
+        <div><b>${s.orderCount}</b><span>orders</span></div>
+        <div><b>${s.productCount}</b><span>products</span></div>
+        <div><b>${yuan(s.lowestUnitPrice)}</b><span>best unit</span></div>
+        <div><b>${s.totalSpendYuan ? yuan(s.totalSpendYuan) : '—'}</b><span>total spend</span></div>
+      </div>`
+
+    const rows = SUP.orders
+      .slice(0, 25)
+      .map(o => {
+        const unit = o.discounted_unit_price || o.unit_price
+        const date = String(o.order_date || o.created_at || '').slice(0, 10)
+        return `<tr>
+          <td class="akz-idx">${esc(o.index_no || '—')}</td>
+          <td>${esc(String(o.product_name || 'unnamed').slice(0, 44))}</td>
+          <td class="akz-n">${esc(String(o.qty ?? '—'))}</td>
+          <td class="akz-n">${yuan(unit)}</td>
+          <td class="akz-n">${yuan(o.total_payment_supplier_yuan)}</td>
+          <td>${esc(String(o.status || '—'))}</td>
+          <td class="akz-dt">${esc(date)}</td>
+        </tr>`
+      })
+      .join('')
+
+    return `<div class="akz-supwrap">
+      <div class="akz-supname">${who} ${conf}</div>
+      ${s.matchedNames.length > 1 ? `<div class="akz-supnote">Also matched: ${esc(s.matchedNames.slice(1).join(', '))}</div>` : ''}
+      ${stats}
+      <div class="akz-supnote">${esc(s.firstOrder || '?')} to ${esc(s.lastOrder || '?')}</div>
+      <div class="akz-secttl">Past orders</div>
+      <div class="akz-tblwrap"><table class="akz-tbl">
+        <thead><tr><th>Index</th><th>Product</th><th>Qty</th><th>Unit</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${SUP.orders.length > 25 ? `<div class="akz-supnote">Showing 25 of ${SUP.orders.length}.</div>` : ''}
+      ${captureHtml()}
+      ${s.confidence === 'exact' ? '' : overrideHtml()}
+      ${msgAreaHtml()}
+      ${draftHtml()}
+    </div>`
+  }
+
+  /**
+   * Escape hatch for when the page markup changes and the name cannot be read,
+   * or is read wrongly. Without this a selector break is a dead end.
+   */
+  /**
+   * What happened to the conversation archive.
+   *
+   * "unmatched" is stated in full rather than hidden: the purchaser limited
+   * storage to suppliers that already appear in purchase orders, so a chat
+   * handle like hsmart4 saves nothing, and a blank panel would look identical
+   * to a broken capture.
+   */
+  function captureHtml() {
+    const c = SUP.capture
+    if (!c) return ''
+    const line = {
+      reading: 'Reading the conversation history…',
+      empty: 'No messages could be read from this conversation.',
+      session: 'Not saved - your session expired. Sign in again on the Chat tab.',
+    }[c.state]
+    if (line) return `<div class="akz-supnote">${esc(line)}</div>`
+    if (c.state === 'saved') {
+      return `<div class="akz-supnote">Conversation saved to Akmez - ${c.total} message${
+        c.total === 1 ? '' : 's'
+      }${c.complete ? ' (full history)' : ' (visible history so far)'}.</div>`
+    }
+    if (c.state === 'unmatched') {
+      return `<div class="akz-supnote">Not saved: this chat name is not one of your purchase-order suppliers. Use <strong>Wrong supplier?</strong> below to point it at the right one, then it will be archived.</div>`
+    }
+    return `<div class="akz-supnote">Conversation not saved${c.detail ? ' (' + esc(c.detail) + ')' : ''}.</div>`
+  }
+
+  /**
+   * What the capture is reading, and how to correct it.
+   *
+   * Shown always, not only on failure: the count is what lets the purchaser
+   * notice that 3 messages were found in a chat that plainly has 40, which is
+   * the case that used to pass silently.
+   */
+  function msgAreaHtml() {
+    const src = msgSource()
+    if (SUP.pick?.picking) {
+      return `<div class="akz-secttl">Which messages?</div>
+        <div class="akz-supnote">Click the part of the page holding the conversation. Press Esc to cancel.</div>
+        <div class="akz-suprow"><button class="akz-btn akz-ghost" data-akz="pickcancel">Cancel</button></div>`
+    }
+    const just = SUP.pick
+      ? `<div class="akz-supnote">Message area set - ${SUP.pick.count} message${
+          SUP.pick.count === 1 ? '' : 's'
+        } found${SUP.pick.fromFrame ? ' in the chat frame' : ''}. Re-reading this conversation now.</div>`
+      : ''
+    let line
+    if (src.mode === 'picked') {
+      line = `Reading ${src.count} message${src.count === 1 ? '' : 's'} from the area you picked.`
+    } else if (src.mode === 'stale') {
+      // Never silently fall back: a redesign moving the area is exactly when a
+      // wrong capture would look normal.
+      line = `The area you picked is no longer on the page, so this is falling back to automatic detection (${src.count} found). Pick it again to be sure.`
+    } else {
+      line = `Finding the messages automatically (${src.count} found). If that is wrong, point at the right area.`
+    }
+    return `<div class="akz-secttl">Which messages?</div>
+      <div class="akz-supnote">${esc(line)}</div>
+      ${just}
+      <div class="akz-suprow">
+        <button class="akz-btn" data-akz="pickstart">Pick the message area</button>
+        ${MSG_ROOT ? `<button class="akz-btn akz-ghost" data-akz="pickreset">Use automatic</button>` : ''}
+      </div>`
+  }
+
+  function overrideHtml() {
+    return `<div class="akz-secttl">Wrong supplier?</div>
+      <div class="akz-suprow">
+        <input class="akz-supinput" data-akz="supname" placeholder="Type the supplier name as saved in Akmez" value="${esc(SUP.manual)}" />
+        <button class="akz-btn" data-akz="supsetname">Look up</button>
+      </div>
+      ${SUP.manual ? `<div class="akz-supnote">Using the name you typed. <a href="#" data-akz="supclear">Go back to reading it from the page</a>.</div>` : ''}`
+  }
+
+  function draftHtml() {
+    return `<div class="akz-secttl">Reply</div>
+      ${SUP.draftError ? `<div class="akz-supnote">Draft failed: ${esc(SUP.draftError)}</div>` : ''}
+      ${SUP.draft ? `<div class="akz-draft">${esc(SUP.draft)}</div>` : ''}
+      <div class="akz-suprow">
+        <button class="akz-btn" data-akz="supdraft"${SUP.loading ? ' disabled' : ''}>${SUP.loading ? 'Writing…' : SUP.draft ? 'Rewrite' : 'Draft reply'}</button>
+        ${SUP.draft ? `<button class="akz-btn" data-akz="supinsert">Put in send box</button>` : ''}
+        <button class="akz-btn akz-ghost" data-akz="supreload">Refresh</button>
+      </div>
+      <div class="akz-supnote">Nothing is ever sent for you. Edit it, then press 发送 yourself.</div>`
+  }
+
   function render(toEnd) {
     const kind = detectPage()
     // 'other' has no hand-written playbook - that is what the AI is for.
@@ -1202,6 +2381,8 @@
         ${historyHtml()}
       </div>`
 
+    const supTab = `<div class="akz-scroll">${supplierHtml()}</div>`
+
     panel.innerHTML = `
       <div class="akz-head">
         <div class="akz-logo">A</div>
@@ -1225,6 +2406,7 @@
         <button class="akz-tab${tab === 'chat' ? ' akz-on' : ''}" data-akz="tab" data-t="chat">Chat</button>
         <button class="akz-tab${tab === 'history' ? ' akz-on' : ''}" data-akz="tab" data-t="history">History${db.chats.length ? ` <span class="akz-count">${db.chats.length}</span>` : ''}</button>
         <button class="akz-tab${tab === 'guide' ? ' akz-on' : ''}" data-akz="tab" data-t="guide">Guide</button>
+        ${isMessengerContext() ? `<button class="akz-tab${tab === 'supplier' ? ' akz-on' : ''}" data-akz="tab" data-t="supplier">Supplier${SUP.summary?.orderCount ? ` <span class="akz-count">${SUP.summary.orderCount}</span>` : ''}</button>` : ''}
       </div>
 
       <div class="akz-pagetag">
@@ -1233,7 +2415,7 @@
         ${chat && chat.messages.length ? `<span class="akz-saved">saved</span>` : ''}
       </div>
 
-      <div class="akz-main">${tab === 'chat' ? chatTab : tab === 'history' ? histTab : guideTab}</div>
+      <div class="akz-main">${tab === 'chat' ? chatTab : tab === 'history' ? histTab : tab === 'supplier' ? supTab : guideTab}</div>
       <div class="akz-grip" data-akz="grip" title="Drag to resize"></div>`
 
     panel.querySelector('[data-akz=close]').onclick = () => togglePanel(false)
@@ -1268,6 +2450,70 @@
         render()
       }
     })
+
+    // --- Supplier tab handlers ---
+    const supName = panel.querySelector('[data-akz=supname]')
+    const applyName = () => {
+      const v = String(supName?.value || '').trim()
+      if (!v) return
+      SUP.manual = v
+      SUP.key = '' // force the watcher to treat this as a new conversation
+      SUP.summary = null
+      SUP.orders = []
+      SUP.draft = ''
+      loadSupplierBrief(false)
+    }
+    const supSet = panel.querySelector('[data-akz=supsetname]')
+    if (supSet) supSet.onclick = applyName
+    if (supName)
+      supName.onkeydown = e => {
+        // Enter may be confirming a CJK composition rather than submitting.
+        if (e.key === 'Enter' && !e.nativeEvent?.isComposing && !e.isComposing && e.keyCode !== 229) {
+          e.preventDefault()
+          applyName()
+        }
+      }
+    const supClear = panel.querySelector('[data-akz=supclear]')
+    if (supClear)
+      supClear.onclick = e => {
+        e.preventDefault()
+        SUP.manual = ''
+        SUP.key = ''
+        SUP.summary = null
+        SUP.orders = []
+        loadSupplierBrief(false)
+      }
+
+    const pickStart = panel.querySelector('[data-akz=pickstart]')
+    if (pickStart)
+      pickStart.onclick = () => {
+        SUP.pick = { picking: true }
+        render()
+        beginPickEverywhere()
+      }
+    const pickCancel = panel.querySelector('[data-akz=pickcancel]')
+    if (pickCancel) pickCancel.onclick = () => cancelPickEverywhere()
+    const pickReset = panel.querySelector('[data-akz=pickreset]')
+    if (pickReset)
+      pickReset.onclick = async () => {
+        await clearMsgRoot()
+        SUP.pick = null
+        CAPTURED.clear()
+        render()
+        if (SUP.key && authToken) captureThread(SUP.key)
+      }
+
+    const supReload = panel.querySelector('[data-akz=supreload]')
+    if (supReload) supReload.onclick = () => loadSupplierBrief(false)
+    const supDraft = panel.querySelector('[data-akz=supdraft]')
+    if (supDraft) supDraft.onclick = () => loadSupplierBrief(true)
+    const supInsert = panel.querySelector('[data-akz=supinsert]')
+    if (supInsert)
+      supInsert.onclick = () => {
+        const ok = insertDraft(SUP.draft)
+        supInsert.textContent = ok ? 'Added to send box' : 'No send box found'
+        setTimeout(() => render(), 1600)
+      }
 
     // --- AI handlers ---
     const emailIn = panel.querySelector('[data-akz=email]')
@@ -1604,13 +2850,31 @@
    * user left them on the previous page.
    */
   async function boot() {
-    await Promise.all([restorePos(), loadDb(), loadAuth()])
+    // Child frames are readers only. Without this every nested frame would
+    // build its own floating panel and FAB on top of the page.
+    if (IN_FRAME) {
+      try {
+        fab?.remove()
+        panel?.remove()
+      } catch {
+        /* nothing rendered yet */
+      }
+      // Still needed here: the frame owns no UI but does ALL the reading, so
+      // without its saved pick it would go back to guessing.
+      await loadMsgRoot()
+      return
+    }
+    await Promise.all([restorePos(), loadDb(), loadAuth(), loadMsgRoot()])
     if (db.open) {
       // silent: this is restoring the stored state, not a new user decision.
       togglePanel(true, true)
     } else {
       render()
     }
+    // Picks up the first conversation and every supplier clicked after it.
+    // Started for any framed page too: the messenger is often hosted under a
+    // different host than the frame that actually renders the chat.
+    if (on1688() || document.querySelector('iframe')) watchSupplierSwitch()
   }
   boot()
 

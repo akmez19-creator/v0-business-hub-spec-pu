@@ -1,8 +1,10 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { ContractorMobileLayout } from '@/components/contractor/mobile-layout'
 import { ContractorDashboardContent } from '@/components/contractor/dashboard-content'
 import { NON_PAYOUT_FILTER, isPayoutEligible } from '@/lib/types'
+import { isPendingReattempt } from '@/lib/reschedule-stock'
 
 export default async function ContractorDashboardPage() {
   const supabase = await createClient()
@@ -85,7 +87,7 @@ export default async function ContractorDashboardPage() {
   }
 
   // Date helpers
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
   const weekStart = new Date()
   weekStart.setDate(weekStart.getDate() - weekStart.getDay())
   const weekStartStr = weekStart.toISOString().split('T')[0]
@@ -110,22 +112,36 @@ export default async function ContractorDashboardPage() {
   if (allRiderIds.length > 0) {
     const { data } = await supabase
       .from('deliveries')
-      .select('customer_name, contact_1, delivery_date, status, rider_id, sales_type')
+      .select('customer_name, contact_1, delivery_date, active_date, status, rider_id, sales_type, rescheduled_to')
       .in('rider_id', allRiderIds)
-      .eq('delivery_date', today)
+      // Work DUE today, so the today/left/failed tiles and the per-rider
+      // breakdown agree with the contractor's delivery and stock screens.
+      // The month/lifetime earnings queries below stay on `delivery_date`:
+      // money belongs to the day the goods physically went out.
+      .eq('active_date', today)
     todayDeliveries = data || []
   }
 
-  const todayClientMap = new Map<string, { status: string; rider_id: string; sales_type: string | null }>()
+  const todayClientMap = new Map<string, { status: string; rider_id: string; sales_type: string | null; reattempt: boolean }>()
   for (const d of todayDeliveries) {
     const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}|${d.rider_id}`
-    if (!todayClientMap.has(key)) todayClientMap.set(key, { status: d.status, rider_id: d.rider_id, sales_type: d.sales_type })
+    // `reattempt` is carried on the entry because these tiles read `status`
+    // alone, and a rescheduled row's status belongs to the day it FAILED.
+    if (!todayClientMap.has(key)) todayClientMap.set(key, {
+      status: d.status,
+      rider_id: d.rider_id,
+      sales_type: d.sales_type,
+      reattempt: isPendingReattempt(d),
+    })
   }
   const todayEntries = Array.from(todayClientMap.values())
   const todayTotal = todayClientMap.size
   const todayDelivered = todayEntries.filter(e => e.status === 'delivered').length
-  const todayLeft = todayEntries.filter(e => ['pending', 'assigned', 'picked_up'].includes(e.status)).length
-  const todayFailed = todayEntries.filter(e => ['nwd', 'cms'].includes(e.status)).length
+  // A postponed order is work still OUTSTANDING today, so it belongs in Left.
+  // It used to fall in neither Delivered nor Left while still inflating Failed -
+  // the tiles reported failures for attempts that have not happened yet.
+  const todayLeft = todayEntries.filter(e => e.reattempt || ['pending', 'assigned', 'picked_up'].includes(e.status)).length
+  const todayFailed = todayEntries.filter(e => !e.reattempt && ['nwd', 'cms'].includes(e.status)).length
   const todayEarnings = todayEntries
     .filter(e => e.status === 'delivered' && isPayoutEligible(e.sales_type))
     .reduce((s, e) => s + (riderRateMap[e.rider_id] || 90), 0)
@@ -175,10 +191,10 @@ export default async function ContractorDashboardPage() {
   // Per-rider breakdown for today
   const riderBreakdown = allRiders?.map(r => {
     const rDeliveries = todayDeliveries.filter(d => d.rider_id === r.id)
-    const clientMap = new Map<string, { status: string; sales_type: string | null }>()
+    const clientMap = new Map<string, { status: string; sales_type: string | null; reattempt: boolean }>()
     for (const d of rDeliveries) {
       const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}`
-      if (!clientMap.has(key)) clientMap.set(key, { status: d.status, sales_type: d.sales_type })
+      if (!clientMap.has(key)) clientMap.set(key, { status: d.status, sales_type: d.sales_type, reattempt: isPendingReattempt(d) })
     }
     const entries = Array.from(clientMap.values())
     const delivered = entries.filter(e => e.status === 'delivered').length
@@ -189,8 +205,9 @@ export default async function ContractorDashboardPage() {
       name: r.name,
       total: clientMap.size,
       delivered,
-      left: entries.filter(e => ['pending', 'assigned', 'picked_up'].includes(e.status)).length,
-      failed: entries.filter(e => ['nwd', 'cms'].includes(e.status)).length,
+      // Same rule as the tiles above: a postponed order is outstanding, not failed.
+      left: entries.filter(e => e.reattempt || ['pending', 'assigned', 'picked_up'].includes(e.status)).length,
+      failed: entries.filter(e => !e.reattempt && ['nwd', 'cms'].includes(e.status)).length,
       earnings: payableDelivered * rate,
       rate,
       isContractorSelf: contractorAsRider?.id === r.id,

@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { RiderMobileLayout } from '@/components/rider/mobile-layout'
 import { RiderEarningsContent } from '@/components/rider/earnings-content'
@@ -57,7 +58,7 @@ export default async function RiderEarningsPage() {
   const riderRate = Number(paymentSettings?.per_delivery_rate || 90)
 
   // Date helpers
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
   const weekStart = new Date()
   weekStart.setDate(weekStart.getDate() - weekStart.getDay())
   const weekStartStr = weekStart.toISOString().split('T')[0]

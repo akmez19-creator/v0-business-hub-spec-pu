@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { RiderMobileLayout } from '@/components/rider/mobile-layout'
 import { CollectionsOverview } from '@/components/deliveries/collections-overview'
@@ -47,7 +48,7 @@ export default async function RiderCollectionsPage() {
   }
 
   // Default to today
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
 
   const { data: deliveries } = await supabase
     .from('deliveries')

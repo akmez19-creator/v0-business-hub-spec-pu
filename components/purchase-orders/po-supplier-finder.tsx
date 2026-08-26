@@ -21,6 +21,8 @@ interface SupplierHit {
     years: number
     repurchaseRate: number
     verified: boolean
+    /** 1688 super factory / powerful seller - can quote OEM and own-brand runs. */
+    factory: boolean
     rating: number
   }
 }
@@ -51,11 +53,14 @@ export function SupplierFinder({
   currentImage,
   onPick,
   onClose,
+  autoSearchName = true,
 }: {
   productName: string
   currentImage?: string | null
   onPick: (url: string) => void
   onClose: () => void
+  /** Keep false when the user explicitly wants visually similar products. */
+  autoSearchName?: boolean
 }) {
   const [reference, setReference] = useState<string | null>(currentImage ?? null)
   const [preview, setPreview] = useState<string | null>(currentImage ?? null)
@@ -131,7 +136,9 @@ export function SupplierFinder({
         // products are actually bought from. Its platform id is 'alibaba' -
         // '1688' matches no platform and the search is rejected outright.
         platforms: ['alibaba'],
-        sort: 'best',
+        // Start with market proof. Verified/factory status, trading history and
+        // repeat buyers break ties between listings with the same sales volume.
+        sort: 'volume',
       }),
     })
     // middleware.ts answers any unauthenticated /api call with the bare body
@@ -220,13 +227,13 @@ export function SupplierFinder({
       // Strictly a name the vision pass read - NOT `suggestions[0]`, which falls
       // back to the spreadsheet name when the vision pass fails and would spend
       // a call re-running the search that was already coming up short.
-      if (read[0]) {
+      if (autoSearchName && read[0]) {
         try {
           const byName = await runSearch(read[0])
           setActiveTerm(read[0])
-          // Name matches lead: they describe the object, whereas a visual match
-          // can be any object of that shape. De-duplicated by listing id so a
-          // listing found both ways is not shown twice.
+          // In the replacement-listing workflow, name matches lead because
+          // they filter out visually similar objects from another category.
+          // Image-first callers skip this paid keyword call entirely.
           const seen = new Set(byName.map(h => h.id))
           merged = [...byName, ...merged.filter(h => !seen.has(h.id))]
         } catch {
@@ -318,7 +325,7 @@ export function SupplierFinder({
               disabled={!reference || busy !== null}
             >
               {busy === 'search' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              Search 1688
+              {autoSearchName ? 'Search 1688' : 'Search 1688 by image'}
             </Button>
           </div>
         </div>
@@ -369,8 +376,9 @@ export function SupplierFinder({
       {hits.length > 0 && (
         <>
           <p className="text-[11px] text-muted-foreground">
-            {hits.length} listings, best sellers first - ranked on units sold, years trading, repeat buyers and
-            verified status.
+            {autoSearchName
+              ? `${hits.length} listings — highest sales volume first. Verified suppliers, trading history and repeat buyers break ties.`
+              : `${hits.length} visually similar listings — highest sales volume first. Verified, established suppliers are the strongest OEM candidates; choose a Looks like term only to switch to name search.`}
           </p>
           <ScrollArea className="min-h-0 flex-1">
             <div className="grid grid-cols-2 gap-2 pr-2 md:grid-cols-3 xl:grid-cols-4">
@@ -407,7 +415,7 @@ export function SupplierFinder({
                     {hit.seller.verified && (
                       <span className="flex items-center gap-0.5 text-primary">
                         <ShieldCheck className="h-3 w-3" />
-                        verified
+                        {hit.seller.factory ? 'factory / OEM' : 'verified'}
                       </span>
                     )}
                   </div>

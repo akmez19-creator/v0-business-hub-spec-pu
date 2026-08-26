@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { RiderMobileLayout } from '@/components/rider/mobile-layout'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,6 +12,15 @@ import {
   Clock,
   ShoppingBag,
 } from 'lucide-react'
+import { OnVanPanel } from '@/components/stock/on-van-panel'
+import { buildVanPiles } from '@/lib/van-stock'
+import { RescheduleStockPanel } from '@/components/stock/reschedule-stock-panel'
+import {
+  isPendingReattempt,
+  staysOnVan,
+  awaitingIssue,
+  buildReschedulePiles,
+} from '@/lib/reschedule-stock'
 
 interface ProductStock {
   product: string
@@ -19,6 +29,14 @@ interface ProductStock {
   pendingQty: number
   nwdQty: number
   cmsQty: number
+  /** Never loaded - tracked apart from nwdQty so it is not read as on-van. */
+  cancelledQty: number
+  /**
+   * Units carried over from a failed earlier attempt. Part of `pendingQty`,
+   * counted separately only to badge the row - a re-attempt and a fresh order
+   * are both outstanding work, so they must share one "left" figure.
+   */
+  reattemptQty: number
 }
 
 export default async function RiderStockPage() {
@@ -64,16 +82,75 @@ export default async function RiderStockPage() {
     )
   }
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
 
   const { data: deliveries } = await supabase
     .from('deliveries')
-    .select('id, customer_name, products, qty, status, locality, amount, sales_type, return_product')
+    .select('id, customer_name, products, qty, status, locality, amount, sales_type, return_product, delivery_date, rescheduled_to, reschedule_stock_mode, stock_out, stock_out_at, van_confirmed_by')
     .eq('rider_id', rider.id)
-    .eq('delivery_date', today)
+    // `active_date`, NOT `delivery_date`. This is the day the order is TO BE
+    // delivered; `delivery_date` is the immutable day it first went out on the
+    // van. Filtering the old column is why a rescheduled order never appeared
+    // on its new day - 45 orders (59 units) were invisible today, 4 of them
+    // JEFFREY's. `active_date` is a generated column
+    // (`coalesce(rescheduled_to, delivery_date)`), so orders that were never
+    // rescheduled are completely unaffected.
+    .eq('active_date', today)
     .order('locality', { ascending: true })
 
   const allDeliveries = deliveries || []
+
+  // NWD stays on the van, so it is NOT a today-only fact: unreconciled refusals
+  // from earlier days are still physically with the rider. Queried separately
+  // and NOT date-filtered, otherwise the panel shows 0 on any day he happens to
+  // have no fresh refusals while older units ride around unnoticed.
+  const { data: vanRows } = await supabase
+    .from('deliveries')
+    .select('id, products, qty, status, delivery_date, customer_name')
+    .eq('rider_id', rider.id)
+    .eq('status', 'nwd')
+    // `IS NOT TRUE`, never `= false`: in Postgres `stock_verified = false`
+    // silently DROPS a NULL, which would hide van stock rather than show it.
+    // No NULLs today, but that is luck and not a constraint.
+    .not('stock_verified', 'is', true)
+    .order('delivery_date', { ascending: false })
+
+  const vanPiles = buildVanPiles(
+    (vanRows || []).map(r => ({
+      id: r.id,
+      product: r.products,
+      qty: r.qty,
+      status: r.status,
+      deliveryDate: r.delivery_date,
+      customerName: r.customer_name,
+    })),
+    today,
+  )
+
+  // RESCHEDULED STOCK, split by where the goods physically are.
+  //
+  // `staysOnVan()` answers this from EITHER an agent's tick at reschedule time
+  // or - authoritatively - a storekeeper's confirmation at the shelf
+  // (`van_confirmed_by`). The agent's tick alone was never enough to rely on:
+  // it exists on 1 of 66 rescheduled orders, because the dialog left 38 blank
+  // and day-closure never asks. So when the storekeeper cannot find goods and
+  // records it, this panel moves them to "keep on your van" with no re-entry.
+  const reattempts = allDeliveries.filter(isPendingReattempt)
+  const toPileRow = (d: (typeof allDeliveries)[number]) => ({
+    product: d.products,
+    qty: d.qty,
+    customerName: d.customer_name,
+    deliveryDate: d.delivery_date,
+  })
+
+  const keepPiles = buildReschedulePiles(reattempts.filter(staysOnVan).map(toPileRow))
+  // Only what the store has NOT already handed over for THIS day. `stock_out`
+  // is one undated boolean, so a re-issue can carry a `true` left over from the
+  // attempt that failed - `awaitingIssue()` treats that as stale rather than
+  // telling him to collect something already in his hands.
+  const collectPiles = buildReschedulePiles(
+    reattempts.filter(d => awaitingIssue(d, today)).map(toPileRow),
+  )
 
   // Build product stock map
   const productMap = new Map<string, ProductStock>()
@@ -94,16 +171,35 @@ export default async function RiderStockPage() {
         pendingQty: 0,
         nwdQty: 0,
         cmsQty: 0,
+        cancelledQty: 0,
+        reattemptQty: 0,
       })
     }
 
     const entry = productMap.get(productName)!
-    entry.totalQty += qty
+    // A cancelled order was never loaded, so it is not part of the day's load
+    // and must not dilute the progress bar's denominator.
+    if (d.status !== 'cancelled') entry.totalQty += qty
 
-    if (d.status === 'delivered') {
+    // A RESCHEDULED ORDER'S STATUS DESCRIBES A DAY THAT IS OVER.
+    // A reschedule cannot clear `status` (the storekeeper's returns view needs
+    // it to stay 'cms' on the original day), so on the new day the row still
+    // reads 'cms' or 'nwd' from the failed attempt. Read literally, that put
+    // JEFFREY's Make Up Pen, Mirror Film and Grinding Head in the "CMS" bucket
+    // with "0 remaining" - struck through as finished on a day he still had to
+    // deliver all three. Counted as outstanding work instead.
+    if (isPendingReattempt(d)) {
+      entry.pendingQty += qty
+      entry.reattemptQty += qty
+    } else if (d.status === 'delivered') {
       entry.deliveredQty += qty
-    } else if (d.status === 'nwd' || d.status === 'cancelled') {
+    } else if (d.status === 'nwd') {
+      // `cancelled` was lumped in here. It NEVER LEFT THE BUILDING, so adding
+      // it told the rider he was carrying stock he was never handed. It is now
+      // counted separately below and excluded from the load total.
       entry.nwdQty += qty
+    } else if (d.status === 'cancelled') {
+      entry.cancelledQty += qty
     } else if (d.status === 'cms') {
       entry.cmsQty += qty
     } else {
@@ -258,6 +354,16 @@ export default async function RiderStockPage() {
           </div>
         )}
 
+        {/* STILL ON THE VAN - deliberately ABOVE the general list. This is
+            stock he is already carrying, so he must see it before reading
+            through the day's new orders. */}
+        <OnVanPanel piles={vanPiles} activeDate={today} />
+
+        {/* RESCHEDULED ORDERS - also above the general list, and for the same
+            reason: what to keep and what to collect both have to be settled
+            before he starts loading, not discovered afterwards. */}
+        <RescheduleStockPanel keepPiles={keepPiles} collectPiles={collectPiles} />
+
         {/* Product Breakdown */}
         <div className="space-y-2">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
@@ -305,6 +411,14 @@ export default async function RiderStockPage() {
                             {p.pendingQty > 0 && (
                               <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-500/20">
                                 {p.pendingQty} left
+                              </Badge>
+                            )}
+                            {/* Says WHY an item he already tried is back on the
+                                list, so a re-attempt does not read as a
+                                duplicate or a mistake. */}
+                            {p.reattemptQty > 0 && (
+                              <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-primary/10 text-primary border-primary/20">
+                                {p.reattemptQty} retry
                               </Badge>
                             )}
                           </div>
@@ -374,6 +488,7 @@ export default async function RiderStockPage() {
               {allDeliveries.map((d) => (
                 <div key={d.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-card border border-border/50">
                   <div className={`w-2 h-2 rounded-full shrink-0 ${
+                    isPendingReattempt(d) ? 'bg-primary' :
                     d.status === 'delivered' ? 'bg-emerald-500' :
                     d.status === 'nwd' || d.status === 'cancelled' ? 'bg-red-500' :
                     d.status === 'cms' ? 'bg-amber-500' :
@@ -397,13 +512,20 @@ export default async function RiderStockPage() {
                     {d.return_product && <p className="text-[9px] text-amber-600 truncate">Pickup: {d.return_product}</p>}
                   </div>
                   <div className="text-right shrink-0">
+                    {/* A re-attempt is OUTSTANDING, whatever the stored status
+                        says. Showing the old 'CMS' here told him this stop was
+                        already closed. */}
                     <Badge variant="outline" className={`text-[9px] ${
+                      isPendingReattempt(d) ? 'bg-primary/10 text-primary border-primary/20' :
                       d.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' :
                       d.status === 'nwd' ? 'bg-red-500/10 text-red-600 border-red-500/20' :
                       d.status === 'cms' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
                       'bg-blue-500/10 text-blue-600 border-blue-500/20'
                     }`}>
-                      {d.status === 'delivered' ? 'Done' : d.status === 'nwd' ? 'NWD' : d.status === 'cms' ? 'CMS' : 'Pending'}
+                      {isPendingReattempt(d) ? 'Retry'
+                        : d.status === 'delivered' ? 'Done'
+                        : d.status === 'nwd' ? 'NWD'
+                        : d.status === 'cms' ? 'CMS' : 'Pending'}
                     </Badge>
                     <p className="text-[10px] text-muted-foreground mt-0.5">{d.locality || '-'}</p>
                   </div>

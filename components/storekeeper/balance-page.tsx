@@ -91,8 +91,13 @@ export function BalancePage({ entries, deposits, totals, denomTotals, userId }: 
     setSaving(false)
   }
 
+  // Natural flow. This was `h-[calc(100dvh-4rem)] overflow-y-auto`, which
+  // nested a SECOND scroller inside the layout's `<main>`. Content stayed
+  // reachable (unlike returns-page, which had no inner scroller and so sliced
+  // rows away), but a nested scroller swallows touch momentum and the 4rem
+  // reservation was wrong regardless: the chrome is pt-28 + pb-20 = 192px.
   return (
-    <div className="px-4 pb-24 h-[calc(100dvh-4rem)] overflow-y-auto">
+    <div className="px-4 pb-24">
       {/* Header */}
       <div className="flex items-center gap-4 py-4">
         <button

@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, Suspense } from "react"
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { AlertCircle, Loader2, ArrowRight } from 'lucide-react'
 import dynamic from 'next/dynamic'
@@ -12,7 +12,8 @@ const Futuristic3DBackground = dynamic(
   { ssr: false }
 )
 
-export default function LoginPage() {
+function LoginForm() {
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +59,14 @@ export default function LoginPage() {
         .eq('id', user.id)
     }
 
-    router.push('/dashboard')
+    // Back to whatever the middleware interrupted, not a generic landing page.
+    // Re-checked here rather than trusted: only a same-site path is allowed,
+    // so a crafted ?next=https://evil.example cannot bounce anyone off-site.
+    const next = searchParams.get('next')
+    const safeNext =
+      next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+
+    router.push(safeNext)
     router.refresh()
   }
 
@@ -334,5 +342,17 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * useSearchParams() needs a Suspense boundary above it, or the build fails
+ * with "useSearchParams should be wrapped in a suspense boundary".
+ */
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-black" />}>
+      <LoginForm />
+    </Suspense>
   )
 }

@@ -1,6 +1,15 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+/**
+ * Refreshes the session cookie and returns BOTH the response and the user.
+ *
+ * The user is returned deliberately. Callers used to build a second
+ * `createServerClient` and call `getUser()` again, which cost an extra auth
+ * round-trip on every request and - because that second client had a no-op
+ * `setAll` - threw away any rotated refresh token it happened to fetch. This
+ * is the one client allowed to touch auth cookies.
+ */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -41,17 +50,6 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (
-    // if the user is not logged in and the app path, in this case, /protected, is accessed, redirect to the login page
-    request.nextUrl.pathname.startsWith('/protected') &&
-    !user
-  ) {
-    // no user, potentially respond by redirecting the user to the login page
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth/login'
-    return NextResponse.redirect(url)
-  }
-
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
   // If you're creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:
@@ -65,5 +63,7 @@ export async function updateSession(request: NextRequest) {
   // If this is not done, you may be causing the browser and server to go out
   // of sync and terminate the user's session prematurely!
 
-  return supabaseResponse
+  // The route gating that used to live here now happens in middleware.ts, which
+  // owns every redirect so the "where was I" handling exists in one place.
+  return { response: supabaseResponse, user }
 }

@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, bulkUpdateDeliveryDate, markRiderPaid, updateDeliveryPrice, updateDeliveryFields } from '@/lib/delivery-actions'
 import type { Delivery, Profile, Rider, DeliveryStatus, SalesType } from '@/lib/types'
 import { STATUS_LABELS, SALES_TYPE_LABELS, SALES_TYPE_COLORS } from '@/lib/types'
+import { isPendingReattempt, staysOnVan } from '@/lib/reschedule-stock'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -45,6 +46,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { MoreHorizontal, Trash2, UserPlus, CheckCircle, Clock, Package, Banknote, CalendarDays, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit } from 'lucide-react'
+import { DeliveryDateCell } from '@/components/deliveries/delivery-date-cell'
 
 interface Props {
   deliveries: Delivery[]
@@ -439,6 +441,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                   onCheckedChange={handleSelectAll}
                 />
               </TableHead>
+              <TableHead className="w-[84px]">Order ID</TableHead>
               <TableHead className="w-[60px]">RTE</TableHead>
               <TableHead className="w-[72px]">Entry Date</TableHead>
               <TableHead className="w-[90px]">Agent</TableHead>
@@ -469,13 +472,61 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
               </TableRow>
             ) : (
               deliveries.map((delivery) => (
-                <TableRow key={delivery.id} className="odd:bg-muted/30 hover:bg-muted/50">
+                <Fragment key={delivery.id}>
+                {/* THE ATTEMPT THAT FAILED, PRESERVED AS ITS OWN ROW.
+                    One `status` column cannot describe two days, which is why
+                    CMS kept resurfacing on the new date. So a rescheduled order
+                    now shows TWO lines sharing one Order ID: this one records
+                    what happened on the original day and keeps its CMS, and the
+                    live row below carries the new date.
+                    It is deliberately read-only - no checkbox, no status
+                    dropdown, no actions - because `deliveries` is still ONE row
+                    underneath. It is the unit of money and of the client's order
+                    count, so a real second row would double the amount, double
+                    the rating through `deliveries_rating_sync`, and trip the
+                    duplicate-order detector. The durable per-attempt history
+                    lives in the `delivery_attempts` table. */}
+                {isPendingReattempt(delivery) && (
+                  <TableRow className="bg-muted/10 text-muted-foreground border-l-2 border-l-muted">
+                    <TableCell />
+                    <TableCell className="font-mono text-[11px] whitespace-nowrap">{delivery.order_code || '-'}</TableCell>
+                    <TableCell />
+                    <TableCell />
+                    <TableCell />
+                    <TableCell className="text-xs whitespace-nowrap">
+                      <span className="line-through">
+                        {/* `delivery_date` is nullable in the schema, so it must
+                            be guarded before Date() - a null here would render
+                            "Invalid Date" on the row. */}
+                        {delivery.delivery_date
+                          ? new Date(delivery.delivery_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+                          : '-'}
+                      </span>
+                    </TableCell>
+                    <TableCell colSpan={11} className="text-xs italic">
+                      Attempt 1 - not delivered on this day
+                      {delivery.reschedule_reason ? `: ${delivery.reschedule_reason}` : ''}
+                    </TableCell>
+                    <TableCell className="text-xs whitespace-nowrap">
+                      {riders.find(r => r.id === delivery.rider_id)?.name || '-'}
+                    </TableCell>
+                    <TableCell>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/15 text-red-400">
+                        {STATUS_LABELS[delivery.status] || delivery.status}
+                      </span>
+                    </TableCell>
+                    <TableCell />
+                    <TableCell />
+                  </TableRow>
+                )}
+                <TableRow className="odd:bg-muted/30 hover:bg-muted/50">
                   <TableCell>
                     <Checkbox
                       checked={selectedIds.includes(delivery.id)}
                       onCheckedChange={(checked) => handleSelectOne(delivery.id, !!checked)}
                     />
                   </TableCell>
+                  <TableCell className="font-mono text-[11px] whitespace-nowrap">{delivery.order_code || '-'}</TableCell>
                   <TableCell className="font-mono text-xs">{delivery.rte || '-'}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
                     <div>
@@ -491,7 +542,11 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                     {delivery.agent_name || '-'}
                   </TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
-                    {delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                    <DeliveryDateCell
+                      deliveryDate={delivery.delivery_date}
+                      rescheduledTo={delivery.rescheduled_to}
+                      requestedTo={delivery.reschedule_requested_to}
+                    />
                   </TableCell>
                   <TableCell className="font-mono text-xs">{delivery.index_no || '-'}</TableCell>
                   <TableCell className="max-w-[200px]">
@@ -553,20 +608,58 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Select
-                      value={delivery.status}
-                      onValueChange={(v) => handleStatusChange(delivery.id, v as DeliveryStatus)}
-                      disabled={loading === delivery.id}
-                    >
-                      <SelectTrigger className="w-[110px] h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>{label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex flex-col gap-1 items-start">
+                      <Select
+                        value={delivery.status}
+                        onValueChange={(v) => handleStatusChange(delivery.id, v as DeliveryStatus)}
+                        disabled={loading === delivery.id}
+                      >
+                        <SelectTrigger className="w-[110px] h-8 text-xs">
+                          {/* SHOW "Rescheduled", NOT THE STALE CMS.
+                              `status` records how the LAST attempt ended, and on
+                              a rescheduled row that attempt is over - so the
+                              cell was describing a day that has passed while the
+                              order is live again for the new date.
+                              Only the LABEL is overridden. `value` is still the
+                              real stored status, so opening the dropdown shows
+                              the true current value and picking an option writes
+                              exactly what it says: this cannot write one thing
+                              while showing another. The stored 'cms' also has to
+                              survive untouched because `incomingToStore()` only
+                              returns the original day's stock while status is
+                              EXACTLY 'cms'. */}
+                          {isPendingReattempt(delivery)
+                            ? <span className="text-primary">Rescheduled</span>
+                            : <SelectValue />}
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>{label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      {/* WHERE THE GOODS ARE - the thing that decides whether
+                          anyone has to hand stock out again, and which no other
+                          column in this table states. */}
+                      {isPendingReattempt(delivery) && (
+                        <span
+                          className={cn(
+                            'px-1.5 py-0.5 rounded text-[9px] font-semibold leading-none whitespace-nowrap',
+                            staysOnVan(delivery)
+                              ? 'bg-violet-500/15 text-violet-400'
+                              : 'bg-amber-500/15 text-amber-500'
+                          )}
+                          title={
+                            staysOnVan(delivery)
+                              ? 'Rider still has these goods - nothing to issue again'
+                              : 'Goods are in the store - issue them on the new date'
+                          }
+                        >
+                          {staysOnVan(delivery) ? 'with rider' : 'issue from store'}
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-xs">
                     {delivery.contractor_id
@@ -603,6 +696,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
+                </Fragment>
               ))
             )}
           </TableBody>
@@ -752,7 +846,25 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                   type="date"
                   value={editForm.delivery_date}
                   onChange={(e) => setEditForm({ ...editForm, delivery_date: e.target.value })}
+                  aria-describedby={editDelivery?.rescheduled_to ? 'edit-date-resched' : undefined}
                 />
+                {/* Editing this field was completely blind to a reschedule:
+                    this box holds the day the goods WENT OUT, but the order may
+                    already be due on another day, and overwriting it silently
+                    re-dates the van stock and returns that hang off it. */}
+                {editDelivery?.rescheduled_to &&
+                  editDelivery.rescheduled_to !== editDelivery.delivery_date && (
+                    <p id="edit-date-resched" className="text-xs text-amber-600">
+                      Already rescheduled to{' '}
+                      <span className="font-medium">
+                        {new Date(editDelivery.rescheduled_to).toLocaleDateString('en-GB', {
+                          weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+                        })}
+                      </span>
+                      . This box is the day it went out - change it only to correct a mistake,
+                      not to move the delivery.
+                    </p>
+                  )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-qty">Qty</Label>

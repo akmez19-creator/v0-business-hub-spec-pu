@@ -1152,17 +1152,17 @@ export async function getPendingCmsModifications() {
   const contractorIds = [...new Set((modifications || []).map(m => m.contractor_id).filter(Boolean))]
 
   const [deliveriesResult, ridersResult, contractorsResult] = await Promise.all([
-    admin.from('deliveries').select('id, customer_name, locality, products').in('id', deliveryIds.length > 0 ? deliveryIds : ['none']),
+    admin.from('deliveries').select('id, customer_name, locality, products, order_code').in('id', deliveryIds.length > 0 ? deliveryIds : ['none']),
     admin.from('profiles').select('id, name, email').in('id', riderIds.length > 0 ? riderIds : ['none']),
     admin.from('profiles').select('id, name, email').in('id', contractorIds.length > 0 ? contractorIds : ['none']),
   ])
 
-  const deliveryMap: Record<string, { customer_name: string; locality: string; products: string }> = {}
+  const deliveryMap: Record<string, { customer_name: string; locality: string; products: string; order_code: string | null }> = {}
   const riderMap: Record<string, string> = {}
   const contractorMap: Record<string, string> = {}
 
   for (const d of (deliveriesResult.data || [])) {
-    deliveryMap[d.id] = { customer_name: d.customer_name, locality: d.locality, products: d.products }
+    deliveryMap[d.id] = { customer_name: d.customer_name, locality: d.locality, products: d.products, order_code: d.order_code }
   }
   for (const r of (ridersResult.data || [])) {
     riderMap[r.id] = r.name || r.email
@@ -1176,6 +1176,9 @@ export async function getPendingCmsModifications() {
     ...m,
     customer_name: deliveryMap[m.target_delivery_id]?.customer_name || 'Unknown',
     locality: deliveryMap[m.target_delivery_id]?.locality || 'Unknown',
+    // Left NULL when absent rather than defaulted to a placeholder: a made-up
+    // order code is worse than none, because it would be read out on the phone.
+    order_code: deliveryMap[m.target_delivery_id]?.order_code || null,
     delivery_products: deliveryMap[m.target_delivery_id]?.products || '',
     rider_name: m.rider_id ? riderMap[m.rider_id] : undefined,
     contractor_name: m.contractor_id ? contractorMap[m.contractor_id] : undefined,

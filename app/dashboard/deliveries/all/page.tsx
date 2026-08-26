@@ -97,8 +97,12 @@ export default async function AllDeliveriesPage({ searchParams }: Props) {
   }
   
   if (params.delivery_date) {
-    query = query.eq('delivery_date', params.delivery_date)
-    countQuery = countQuery.eq('delivery_date', params.delivery_date)
+    // Matches on the DUE day. Someone picking a date here is asking "what is
+    // happening that day", and a rescheduled order belongs to its new day.
+    // The table still shows both dates via DeliveryDateCell, so the original
+    // van-day stays visible rather than being hidden by this filter.
+    query = query.eq('active_date', params.delivery_date)
+    countQuery = countQuery.eq('active_date', params.delivery_date)
   }
   
   if (params.search) {

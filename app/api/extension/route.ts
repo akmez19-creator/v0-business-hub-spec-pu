@@ -341,6 +341,31 @@ export async function POST(request: NextRequest) {
     while (isNonWorkingDay(safeDate) && guard < 60) { safeDate.setUTCDate(safeDate.getUTCDate() + 1); guard++ }
     const resolvedDeliveryDate = ymdUTC(safeDate)
 
+    // A VALIDATED day placement outranks the standing map. Orders are taken up
+    // to 18 days ahead, so `localities.default_rider_id` is whoever covered the
+    // locality on the day the ORDER was typed - not necessarily the day it
+    // ships. If someone has planned and validated that delivery day, that plan
+    // is the answer.
+    // Only 'validated' counts: a draft is inert by design and must never route.
+    let dayPlanRiderId: string | null = null
+    const { data: dayPlan } = await supabase
+      .from('day_placements')
+      .select('id')
+      .eq('place_date', resolvedDeliveryDate)
+      .eq('status', 'validated')
+      .maybeSingle()
+    if (dayPlan) {
+      const { data: dpEntry } = await supabase
+        .from('day_placement_entries')
+        .select('rider_id')
+        .eq('day_placement_id', dayPlan.id)
+        .eq('locality', localityName.toLowerCase())
+        .maybeSingle()
+      // No entry means the day did not override this locality, so the standing
+      // map below is still correct - absence is not a change.
+      dayPlanRiderId = dpEntry?.rider_id ?? null
+    }
+
     // Fields shared by every row created for this order (mirrors the import
     // sheet: INDEX and Payment Method stay blank, RTE comes from the locality)
     const nowIso = new Date().toISOString()
@@ -351,7 +376,7 @@ export async function POST(request: NextRequest) {
       locality: localityName,
       rte: loc?.route_code || null,
       contractor_id: loc?.contractor_id || null,
-      rider_id: loc?.default_rider_id || null,
+      rider_id: dayPlanRiderId || loc?.default_rider_id || null,
       assigned_at: loc?.contractor_id ? nowIso : null,
       sales_type: orderSalesType,
       notes: notes?.trim() || null,

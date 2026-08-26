@@ -168,7 +168,12 @@ export function ContractorMobileLayout({
               </span>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Users className="w-3 h-3" />
-                <span>{liveRiderCount} riders</span>
+                {/* Was always "N riders", so a one-man contractor read
+                    "1 riders" - and 15 of the 18 contractors are one man. He
+                    is not managing a team of one; he is out doing it himself. */}
+                <span>
+                  {liveRiderCount <= 1 ? 'On the road yourself' : `${liveRiderCount} riders`}
+                </span>
                 <span className="text-border">|</span>
                 <Zap className="w-3 h-3 text-primary" />
                 <span className="text-primary font-medium">Active</span>

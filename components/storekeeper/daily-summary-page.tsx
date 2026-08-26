@@ -66,8 +66,12 @@ export function DailySummaryPage({ selectedDate, sessions, returns = [], totals,
   const totalNotes = NOTES.reduce((t, d) => t + (totals.denominations[d] || 0), 0)
   const totalCoins = COINS.reduce((t, d) => t + (totals.denominations[d] || 0), 0)
 
+  // Natural flow - the layout's `<main>` already scrolls. Was
+  // `h-[calc(100dvh-4rem)] overflow-y-auto`: a nested scroller that swallows
+  // touch momentum, with a 4rem reservation that never matched the real
+  // pt-28 + pb-20 = 192px of layout chrome.
   return (
-    <div className="px-4 pb-24 h-[calc(100dvh-4rem)] overflow-y-auto">
+    <div className="px-4 pb-24">
       {/* Header */}
       <div className="flex items-center gap-4 py-4">
         <button

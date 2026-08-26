@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { PaymentsPage } from '@/components/storekeeper/payments-page'
 
@@ -17,7 +18,7 @@ export default async function PaymentsRoute({ searchParams }: { searchParams: Pr
   if (!profile || (profile.role !== 'storekeeper' && profile.role !== 'admin')) redirect('/dashboard')
 
   // Get last 30 days of delivered orders
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
   const thirtyDaysAgo = new Date()
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
   const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0]

@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
+import { muToday } from '@/lib/business-date'
 import { NextResponse } from 'next/server'
 import { NON_PAYOUT_FILTER } from '@/lib/types'
+import { isPendingReattempt } from '@/lib/reschedule-stock'
 
 export async function GET() {
   const supabase = await createClient()
@@ -73,18 +75,31 @@ export async function GET() {
   const totalPaidOut = (payouts || []).reduce((s, p) => s + Number(p.amount || 0), 0)
   const balanceOwed = totalEarnings - totalPaidOut
 
-  // Count active deliveries (today, not yet done)
-  const today = new Date().toISOString().split('T')[0]
+  // Count active deliveries (DUE today, not yet done)
+  const today = muToday()
   const { data: activeRows } = await supabase
     .from('deliveries')
-    .select('id')
+    // `delivery_date`/`rescheduled_to` are needed by `isPendingReattempt()`.
+    .select('id, status, delivery_date, rescheduled_to')
     .eq('rider_id', rider.id)
-    .eq('delivery_date', today)
-    .in('status', ['pending', 'assigned', 'picked_up'])
+    // Open work DUE today, so this badge agrees with the rider's own delivery
+    // list, map and stock screen. The earnings query above deliberately stays
+    // on `delivery_date`: money belongs to the day the goods physically went
+    // out, and that day never moves.
+    .eq('active_date', today)
+    // 'cms'/'nwd' are fetched too, then narrowed in JS. A rescheduled order
+    // still carries the status of the attempt that FAILED, so the old
+    // `.in(['pending','assigned','picked_up'])` silently dropped it and the
+    // badge under-reported the stops the rider still had to make.
+    .in('status', ['pending', 'assigned', 'picked_up', 'cms', 'nwd'])
+
+  const openToday = (activeRows || []).filter(
+    d => !['cms', 'nwd'].includes(d.status) || isPendingReattempt(d),
+  )
 
   return NextResponse.json({
     balanceOwed,
-    activeDeliveries: activeRows?.length || 0,
+    activeDeliveries: openToday.length,
     riderRate,
   })
 }

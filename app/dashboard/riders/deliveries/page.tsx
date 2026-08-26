@@ -66,14 +66,18 @@ export default async function RiderOrdersPage({
 
   const { data: dateRows } = await supabase
     .from('deliveries')
-    .select('delivery_date')
+    .select('active_date')
     .eq('rider_id', rider.id)
-    .gte('delivery_date', sixtyDaysAgo.toISOString().split('T')[0])
-    .order('delivery_date', { ascending: false })
+    // Days on which work is DUE, so a day that exists only because orders were
+    // rescheduled onto it still appears in the picker. Reschedules run as far
+    // out as 12 Sep, and there is deliberately no upper bound so a future
+    // re-attempt day is reachable rather than silently absent.
+    .gte('active_date', sixtyDaysAgo.toISOString().split('T')[0])
+    .order('active_date', { ascending: false })
 
   const dateSet = new Set<string>()
   for (const row of dateRows || []) {
-    if (row.delivery_date) dateSet.add(row.delivery_date)
+    if (row.active_date) dateSet.add(row.active_date)
   }
   const availableDates = Array.from(dateSet).sort().reverse()
 
@@ -85,9 +89,9 @@ export default async function RiderOrdersPage({
   // Fetch all deliveries for the selected date
   const { data } = await supabase
     .from('deliveries')
-    .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, rider_id, index_no, qty, products, amount, payment_method, payment_juice, payment_cash, payment_bank, payment_status, notes, delivery_notes, client_response, created_at, latitude, longitude, delivery_sequence, sales_type, return_product')
+    .select('id, customer_name, contact_1, contact_2, locality, status, delivery_date, active_date, rescheduled_to, reschedule_requested_to, rider_id, index_no, qty, products, amount, payment_method, payment_juice, payment_cash, payment_bank, payment_status, notes, delivery_notes, client_response, created_at, latitude, longitude, delivery_sequence, sales_type, return_product')
     .eq('rider_id', rider.id)
-    .eq('delivery_date', selectedDate)
+    .eq('active_date', selectedDate)
     .order('locality', { ascending: true })
     .order('created_at', { ascending: true })
 
@@ -96,7 +100,10 @@ export default async function RiderOrdersPage({
   // Group by unique client to get correct counts
   const clientMap = new Map<string, { status: string }>()
   for (const d of deliveries) {
-    const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}|${d.delivery_date}|${d.rider_id || ''}`
+    // Keyed on the DUE day to match the filter above: a client with one order
+    // rescheduled onto this day and one fresh order is a single stop, and
+    // keying on `delivery_date` would count them as two.
+    const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}|${d.active_date || d.delivery_date}|${d.rider_id || ''}`
     if (!clientMap.has(key)) {
       clientMap.set(key, { status: d.status })
     }

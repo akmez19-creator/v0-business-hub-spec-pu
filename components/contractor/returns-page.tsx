@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { RotateCcw, Package, CheckCircle2, Clock, ChevronDown, Calendar } from 'lucide-react'
+import { RotateCcw, Package, CheckCircle2, Clock, ChevronDown, Calendar, ArrowLeftRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
@@ -16,6 +16,44 @@ interface ReturnItem {
   verified_at?: string | null
   notes?: string | null
   source?: 'delivery' | 'return_collection'
+  /** exchange | trade_in | refund - a client to settle, not just goods. */
+  salesType?: string | null
+  customerName?: string | null
+  /** From incomingToStore(): 'unsold' | 'collected' | 'cms'. */
+  incomingKind?: 'unsold' | 'collected' | 'cms' | null
+  /** What went OUT to this client, so the row reads as an exchange. */
+  gaveProduct?: string | null
+  fromVan?: boolean
+}
+
+const FOLLOW_UP_TYPES = ['exchange', 'trade_in', 'refund']
+
+function isFollowUpItem(i: ReturnItem) {
+  return !!i.salesType && FOLLOW_UP_TYPES.includes(i.salesType)
+}
+
+/**
+ * OWNER'S RULE: exchange / trade-in / refund are handled FIRST - each has a
+ * client waiting to be settled, so they are pinned above the date groups.
+ *
+ * A follow-up whose client was MISSED is deliberately NOT pinned. Nothing was
+ * collected from that client, so there is nobody to settle; the replacement
+ * simply came back unsold. It stays in the plain list, labelled, so it cannot
+ * read as an ordinary return either.
+ *
+ * These are NOT merged by product. Two clients returning the same item are two
+ * separate conversations - the storekeeper merges a pile because he is counting
+ * stock, the contractor must not because he is settling people.
+ */
+function isHandleFirst(i: ReturnItem) {
+  return isFollowUpItem(i) && i.incomingKind !== 'cms'
+}
+
+function followUpLabel(t?: string | null) {
+  if (t === 'trade_in') return 'Trade-in'
+  if (t === 'exchange') return 'Exchange'
+  if (t === 'refund') return 'Refund'
+  return 'Follow-up'
 }
 
 interface Props {
@@ -50,7 +88,16 @@ export function ContractorReturnsPage({ pendingReturns, verifiedByStore }: Props
     return [...byDate.entries()].sort((a, b) => b[0].localeCompare(a[0]))
   }
 
-  const pendingByDate = groupByDate(pendingReturns, 'collection_date')
+  // Follow-ups to settle, lifted out of the date groups entirely.
+  const handleFirst = pendingReturns.filter(isHandleFirst)
+  const plainPending = pendingReturns.filter(i => !isHandleFirst(i))
+
+  // The "Pending Returns" header must count only what its own list shows, or
+  // it contradicts itself.
+  const totalPlainPending = plainPending.reduce((s, r) => s + r.quantity, 0)
+  const totalHandleFirst = handleFirst.reduce((s, r) => s + r.quantity, 0)
+
+  const pendingByDate = groupByDate(plainPending, 'collection_date')
   const verifiedByDate = groupByDate(verifiedByStore, 'verified_at')
 
   return (
@@ -81,6 +128,55 @@ export function ContractorReturnsPage({ pendingReturns, verifiedByStore }: Props
         </Card>
       </div>
 
+      {/* HANDLE FIRST - one row per client, never merged by product. */}
+      {handleFirst.length > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/[0.07]">
+          <div className="px-4 py-3 flex items-center gap-2 border-b border-amber-500/20">
+            <ArrowLeftRight className="w-4 h-4 text-amber-400" />
+            <span className="font-semibold text-amber-400">Handle first</span>
+            <span className="text-xs text-muted-foreground">
+              {handleFirst.length} {handleFirst.length === 1 ? 'client' : 'clients'} to settle
+              {' · '}{totalHandleFirst} {totalHandleFirst === 1 ? 'unit' : 'units'}
+            </span>
+          </div>
+          <CardContent className="p-3 space-y-2">
+            {handleFirst.map(item => (
+              <div key={item.id} className="rounded-xl border border-amber-500/25 bg-background/40 px-3 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400">
+                        {followUpLabel(item.salesType)}
+                      </span>
+                      {item.customerName && (
+                        <span className="text-sm font-medium truncate">{item.customerName}</span>
+                      )}
+                    </div>
+                    {/* Both directions stated. Naming only one item is what made
+                        the old screen ambiguous about which way goods moved. */}
+                    <p className="text-sm mt-1">
+                      <span className="text-muted-foreground">Take back </span>
+                      <span className="font-medium">{item.product_name}</span>
+                      {item.quantity > 1 && <span className="font-medium"> x{item.quantity}</span>}
+                    </p>
+                    {item.gaveProduct && item.gaveProduct !== item.product_name && (
+                      <p className="text-xs text-muted-foreground">
+                        Gave {item.gaveProduct}
+                        {item.fromVan && ' - off your van'}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {item.rider_name || 'Unknown rider'} · {fmtDate(item.collection_date)}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold text-amber-400 shrink-0">x{item.quantity}</span>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Pending Returns */}
       <Card className="border-orange-500/20">
         <button
@@ -89,8 +185,10 @@ export function ContractorReturnsPage({ pendingReturns, verifiedByStore }: Props
         >
           <div className="flex items-center gap-2">
             <RotateCcw className="w-4 h-4 text-orange-400" />
-            <span className="font-semibold text-orange-400">Pending Returns</span>
-            <span className="text-xs text-muted-foreground">({totalPending})</span>
+            <span className="font-semibold text-orange-400">
+              {handleFirst.length > 0 ? 'Unsold returns' : 'Pending Returns'}
+            </span>
+            <span className="text-xs text-muted-foreground">({totalPlainPending})</span>
           </div>
           <ChevronDown className={cn("w-4 h-4 transition-transform", expandPending && "rotate-180")} />
         </button>
@@ -118,6 +216,16 @@ export function ContractorReturnsPage({ pendingReturns, verifiedByStore }: Props
                               {item.rider_name || 'Unknown rider'}
                               {item.condition && ` • ${item.condition}`}
                             </p>
+                            {/* A follow-up whose client was never met. It sits
+                                here rather than in "Handle first" because
+                                nothing was collected - but it must not read as
+                                an ordinary unsold return either. */}
+                            {isFollowUpItem(item) && item.incomingKind === 'cms' && (
+                              <p className="text-[10px] text-amber-500/90">
+                                {followUpLabel(item.salesType)} not completed - client missed.
+                                Their old item is still with them.
+                              </p>
+                            )}
                           </div>
                         </div>
                         <div className="text-right shrink-0 ml-2">

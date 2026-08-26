@@ -39,6 +39,7 @@ import {
   User,
   AlertTriangle,
   CalendarDays,
+  CalendarClock,
   Megaphone,
 } from 'lucide-react'
 
@@ -249,6 +250,13 @@ const navItems: NavItem[] = [
     href: '/dashboard/admin/cms',
     label: 'CMS Review',
     icon: AlertTriangle,
+    roles: ['admin', 'manager'],
+    color: '#f59e0b',
+  },
+  {
+    href: '/dashboard/admin/placement',
+    label: 'Day Placement',
+    icon: CalendarClock,
     roles: ['admin', 'manager'],
     color: '#f59e0b',
   },

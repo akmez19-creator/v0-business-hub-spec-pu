@@ -1,8 +1,10 @@
 import { redirect } from 'next/navigation'
+import { muToday } from '@/lib/business-date'
 import { createClient } from '@/lib/supabase/server'
 import { RiderMobileLayout } from '@/components/rider/mobile-layout'
 import { RiderDashboardContent } from '@/components/rider/dashboard-content'
 import { NON_PAYOUT_FILTER, isPayoutEligible } from '@/lib/types'
+import { isPendingReattempt } from '@/lib/reschedule-stock'
 
 export default async function RiderDashboardPage() {
   const supabase = await createClient()
@@ -68,17 +70,29 @@ export default async function RiderDashboardPage() {
   const riderRate = Number(paymentSettings?.per_delivery_rate || 90)
 
   // Date helpers
-  const today = new Date().toISOString().split('T')[0]
+  const today = muToday()
   const weekStart = new Date()
   weekStart.setDate(weekStart.getDate() - weekStart.getDay())
   const weekStartStr = weekStart.toISOString().split('T')[0]
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   const monthStartStr = monthStart.toISOString().split('T')[0]
 
-  function countUniqueClients(rows: { customer_name: string; contact_1: string; delivery_date: string }[]) {
+  /**
+   * Groups by the day the order is DUE (`active_date`), falling back to
+   * `delivery_date` for the history queries that do not select it.
+   *
+   * Using `delivery_date` here once the caller filters on `active_date` would
+   * SPLIT one client into two: a client with an order rescheduled onto today
+   * plus a fresh order today has two different `delivery_date` values but is
+   * one stop, so the round count would over-report.
+   */
+  function countUniqueClients(
+    rows: { customer_name: string; contact_1: string; delivery_date: string; active_date?: string | null }[],
+  ) {
     const seen = new Set<string>()
     for (const r of rows) {
-      seen.add(`${(r.customer_name || '').trim().toLowerCase()}|${(r.contact_1 || '').trim()}|${r.delivery_date}`)
+      const day = r.active_date || r.delivery_date
+      seen.add(`${(r.customer_name || '').trim().toLowerCase()}|${(r.contact_1 || '').trim()}|${day}`)
     }
     return seen.size
   }
@@ -86,22 +100,32 @@ export default async function RiderDashboardPage() {
   // Today's deliveries (all statuses for progress) - same client
   const { data: allTodayRows } = await supabase
     .from('deliveries')
-    .select('customer_name, contact_1, delivery_date, status, sales_type')
+    .select('customer_name, contact_1, delivery_date, active_date, status, sales_type, rescheduled_to')
     .eq('rider_id', rider.id)
-    .eq('delivery_date', today)
+    // The day it is TO BE delivered - see the note in riders/stock/page.tsx.
+    // Rescheduled orders were missing from the rider's own round count.
+    .eq('active_date', today)
 
   const allToday = allTodayRows || []
-  const todayClientMap = new Map<string, { status: string; sales_type: string | null }>()
+  const todayClientMap = new Map<string, { status: string; sales_type: string | null; reattempt: boolean }>()
   for (const d of allToday) {
     const key = `${(d.customer_name || '').trim().toLowerCase()}|${(d.contact_1 || '').trim()}`
-    if (!todayClientMap.has(key)) todayClientMap.set(key, { status: d.status, sales_type: d.sales_type })
+    if (!todayClientMap.has(key)) todayClientMap.set(key, {
+      status: d.status,
+      sales_type: d.sales_type,
+      reattempt: isPendingReattempt(d),
+    })
   }
   const todayEntries = Array.from(todayClientMap.values())
   const todayTotal = todayClientMap.size
   const todayDelivered = todayEntries.filter(e => e.status === 'delivered').length
   const todayPayableDelivered = todayEntries.filter(e => e.status === 'delivered' && isPayoutEligible(e.sales_type)).length
-  const todayLeft = todayEntries.filter(e => ['pending', 'assigned', 'picked_up'].includes(e.status)).length
-  const todayFailed = todayEntries.filter(e => ['nwd', 'cms'].includes(e.status)).length
+  // A rescheduled order carries the status of the day it FAILED, so reading
+  // status alone told the rider his round was already part-failed before he
+  // set off - and left those stops out of "Left" entirely. They are the work
+  // he still has to do today.
+  const todayLeft = todayEntries.filter(e => e.reattempt || ['pending', 'assigned', 'picked_up'].includes(e.status)).length
+  const todayFailed = todayEntries.filter(e => !e.reattempt && ['nwd', 'cms'].includes(e.status)).length
 
   // Month delivered rows (covers week too) - same client
   const { data: monthRows } = await supabase

@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { ContractorMobileLayout } from '@/components/contractor/mobile-layout'
 import { ContractorReturnsPage } from '@/components/contractor/returns-page'
+import { incomingToStore } from '@/lib/stock-direction'
+import { logReturnExpectations } from '@/lib/return-expectation-log'
 
 export default async function Page() {
   const supabase = await createClient()
@@ -76,9 +78,14 @@ export default async function Page() {
     .order('verified_at', { ascending: false })
 
   // 3. From deliveries table - CMS/exchange/refund items pending verification
+  //
+  // `customer_name` and `replacement_from_van` are REQUIRED in this select.
+  // Supabase silently omits a column it was not asked for, so the flag would
+  // read `undefined`, vanReplacementQty() would return 0 and the deduction
+  // would never happen - no error, no type complaint, green build.
   const { data: pendingDeliveryReturns } = await adminDb
     .from('deliveries')
-    .select('id, rider_id, delivery_date, products, return_product, qty, sales_type, status, stock_verified')
+    .select('id, rider_id, delivery_date, customer_name, products, return_product, qty, sales_type, status, stock_verified, replacement_from_van')
     .in('rider_id', riderIds.length > 0 ? riderIds : ['none'])
     .or('status.eq.cms,sales_type.in.(exchange,trade_in,refund)')
     .eq('stock_verified', false)
@@ -88,12 +95,16 @@ export default async function Page() {
   // 4. From deliveries table - CMS/exchange/refund items verified by store
   const { data: verifiedDeliveryReturns } = await adminDb
     .from('deliveries')
-    .select('id, rider_id, delivery_date, products, return_product, qty, sales_type, status, stock_verified, stock_verified_at')
+    .select('id, rider_id, delivery_date, customer_name, products, return_product, qty, sales_type, status, stock_verified, stock_verified_at, replacement_from_van')
     .in('rider_id', riderIds.length > 0 ? riderIds : ['none'])
     .or('status.eq.cms,sales_type.in.(exchange,trade_in,refund)')
     .eq('stock_verified', true)
     .gte('delivery_date', startOfMonth.toISOString().split('T')[0])
     .order('stock_verified_at', { ascending: false })
+
+  // Record what each client owes back, and flag any row where the status-aware
+  // rule names a different product than the old rule did.
+  await logReturnExpectations([...(pendingDeliveryReturns || []), ...(verifiedDeliveryReturns || [])])
 
   // Combine pending items from both sources
   const pending = [
@@ -109,20 +120,32 @@ export default async function Page() {
       notes: d.notes,
       source: 'return_collection' as const,
     })),
-    // From deliveries (CMS/exchange/refund)
-    ...(pendingDeliveryReturns || []).map(d => {
-      const isReturnType = d.sales_type && ['exchange', 'trade_in', 'refund'].includes(d.sales_type)
-      return {
+    // From deliveries (CMS/exchange/refund).
+    //
+    // `incomingToStore()` decides BOTH whether the row belongs here at all and
+    // which product to name. It returns null for the 9 rows the old rule got
+    // wrong - not yet out, refund with the client missed, etc - and `flatMap`
+    // drops those instead of listing something nobody can find.
+    ...(pendingDeliveryReturns || []).flatMap(d => {
+      const incoming = incomingToStore(d)
+      if (!incoming) return []
+      return [{
         id: d.id,
-        product_name: isReturnType ? (d.return_product || d.products || 'Unknown') : (d.products || 'Unknown'),
-        quantity: Number(d.qty || 1),
+        product_name: incoming.product,
+        quantity: incoming.qty,
         condition: d.sales_type || (d.status === 'cms' ? 'CMS' : 'return'),
         collection_date: d.delivery_date,
         rider_id: d.rider_id,
         rider_name: d.rider_id ? riderMap[d.rider_id] || null : null,
         notes: null,
         source: 'delivery' as const,
-      }
+        // Drives the "Handle first" pinning and the per-client labels.
+        salesType: d.sales_type || null,
+        customerName: d.customer_name || null,
+        incomingKind: incoming.kind,
+        gaveProduct: d.products || null,
+        fromVan: !!d.replacement_from_van,
+      }]
     }),
   ]
 
@@ -141,13 +164,14 @@ export default async function Page() {
       notes: d.notes,
       source: 'return_collection' as const,
     })),
-    // From deliveries (CMS/exchange/refund)
-    ...(verifiedDeliveryReturns || []).map(d => {
-      const isReturnType = d.sales_type && ['exchange', 'trade_in', 'refund'].includes(d.sales_type)
-      return {
+    // From deliveries (CMS/exchange/refund) - same rule as pending.
+    ...(verifiedDeliveryReturns || []).flatMap(d => {
+      const incoming = incomingToStore(d)
+      if (!incoming) return []
+      return [{
         id: d.id,
-        product_name: isReturnType ? (d.return_product || d.products || 'Unknown') : (d.products || 'Unknown'),
-        quantity: Number(d.qty || 1),
+        product_name: incoming.product,
+        quantity: incoming.qty,
         condition: d.sales_type || (d.status === 'cms' ? 'CMS' : 'return'),
         collection_date: d.delivery_date,
         rider_id: d.rider_id,
@@ -155,7 +179,12 @@ export default async function Page() {
         verified_at: d.stock_verified_at,
         notes: null,
         source: 'delivery' as const,
-      }
+        salesType: d.sales_type || null,
+        customerName: d.customer_name || null,
+        incomingKind: incoming.kind,
+        gaveProduct: d.products || null,
+        fromVan: !!d.replacement_from_van,
+      }]
     }),
   ]
 
