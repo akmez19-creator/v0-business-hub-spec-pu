@@ -43,14 +43,27 @@ export async function uploadPartnerDeliveries(
     addressToLocality.set(m.address_pattern.toLowerCase().trim(), m.locality)
   }
 
-  // Load localities from the master table (source of truth)
-  const { data: localityRows } = await supabase
+  // Load localities from the master table (source of truth).
+  //
+  // Only `name` is used below. This used to select `name, region`, but there is
+  // no `region` column on `localities` - the zone lives in `district`. PostgREST
+  // rejected the whole query, the `|| []` turned that error into an empty list,
+  // and `resolveLocality()` then matched nothing: every imported row fell
+  // through to `locality: null` unless an explicit address mapping existed.
+  const { data: localityRows, error: localityError } = await supabase
     .from('localities')
-    .select('name, region')
+    .select('name')
     .eq('is_active', true)
+
+  // An unreadable table must not look like "no locality matched" - that silently
+  // imports the whole sheet with no locality and no warning.
+  if (localityError) {
+    return { error: `Could not load localities: ${localityError.message}` }
+  }
 
   const localityLookup = new Map<string, string>() // name -> name (canonical casing)
   for (const l of localityRows || []) {
+    if (!l.name) continue
     localityLookup.set(l.name.toLowerCase().trim(), l.name)
   }
 
@@ -484,11 +497,18 @@ export async function saveAddressRegionMapping(
 
 export async function getLocalities() {
   const supabase = await createClient()
-  const { data } = await supabase
+  // `district` is the zone column - `localities.region` does not exist. Aliased
+  // to `region` so the returned shape stays what callers expect.
+  const { data, error } = await supabase
     .from('localities')
-    .select('name, region')
+    .select('name, region:district')
     .eq('is_active', true)
     .order('name')
+
+  if (error) {
+    throw new Error(`Could not load localities: ${error.message}`)
+  }
+
   return data || []
 }
 

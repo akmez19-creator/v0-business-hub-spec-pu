@@ -48,6 +48,38 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders })
   }
 
+  // Orders still in flight, looked up from deliveries directly rather than from
+  // the clients rollup. The rollup's total_orders counts only delivered+CMS
+  // (delivery_contribution() scores pending as 0), which is right for RATING a
+  // client but reads as "0 orders" on the order form - that is what let two
+  // agents each create the same Rs 475 order 55 minutes apart. Rating and
+  // "have we seen this person today" are different questions; the second one
+  // is answered here.
+  // Goes through the RPC, not a .eq() on contact_1: 127 open deliveries store
+  // the number with spaces ('5820 7097'), and a literal match would report
+  // "no open orders" for precisely the clients most at risk of a duplicate.
+  const { data: openRows } = await adminDb.rpc('get_client_open_orders', { p_phone: phone })
+
+  const openOrders = (openRows || []).map((o: {
+    id: string
+    products: string | null
+    qty: number | null
+    amount: number | null
+    delivery_date: string | null
+    status: string
+    created_at: string
+    agent: string | null
+  }) => ({
+    id: o.id,
+    products: o.products,
+    qty: o.qty,
+    amount: Number(o.amount || 0),
+    deliveryDate: o.delivery_date,
+    createdAt: o.created_at,
+    status: o.status,
+    agent: o.agent,
+  }))
+
   const { data: client } = await adminDb
     .from('clients')
     .select('id, name, phone, region, city, client_status, total_orders, delivered_orders, cms_orders, total_sales, last_order_date')
@@ -55,7 +87,9 @@ export async function GET(request: NextRequest) {
     .maybeSingle()
 
   if (!client) {
-    return NextResponse.json({ found: false, phone, rating: 'new' }, { headers: corsHeaders })
+    // No rollup row yet, but there may still be open orders - a client created
+    // minutes ago is exactly the duplicate-prone case, so report them anyway.
+    return NextResponse.json({ found: false, phone, rating: 'new', openOrders }, { headers: corsHeaders })
   }
 
   const rated = (client.delivered_orders || 0) + (client.cms_orders || 0)
@@ -79,5 +113,8 @@ export async function GET(request: NextRequest) {
     totalSales: Number(client.total_sales || 0),
     lastOrderDate: client.last_order_date,
     badSeverity,
+    // Separate from totalOrders on purpose: totalOrders is the rating figure
+    // (delivered + CMS only), these are orders still in flight.
+    openOrders,
   }, { headers: corsHeaders })
 }

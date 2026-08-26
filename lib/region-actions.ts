@@ -10,14 +10,21 @@ import { revalidatePath } from 'next/cache'
 export async function getRegionResolverData() {
   const supabase = await createClient()
 
-  const { data: localities } = await supabase
+  // `district` is the zone column; `localities` has no `region` column. The old
+  // select errored out and `|| []` reported "no localities" instead of failing.
+  const { data: localities, error } = await supabase
     .from('localities')
-    .select('name, region')
+    .select('name, district')
     .eq('is_active', true)
     .order('name')
 
+  if (error) {
+    throw new Error(`Could not load localities: ${error.message}`)
+  }
+
+  // Output key stays `region` - it maps onto `deliveries.region` downstream.
   return {
-    localities: (localities || []).map(l => ({ name: l.name, region: l.region })),
+    localities: (localities || []).map(l => ({ name: l.name, region: l.district })),
   }
 }
 
@@ -39,25 +46,40 @@ export async function getLocalityNames() {
  */
 export async function getRegionNames() {
   const supabase = await createClient()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('localities')
-    .select('region')
+    .select('district')
     .eq('is_active', true)
-  const regions = new Set((data || []).map(l => l.region))
+
+  if (error) {
+    throw new Error(`Could not load zones: ${error.message}`)
+  }
+
+  const regions = new Set((data || []).map(l => l.district).filter(Boolean))
   return Array.from(regions).sort()
 }
 
 /**
  * Admin: add a new locality.
  */
-export async function addLocality(name: string, region: string, district: string, routeCode: string) {
+/**
+ * `district` IS the zone - there is no separate `region` column on this table,
+ * so the old four-argument form could never insert: Postgres rejected the
+ * unknown `region` key and every add failed. `district` and `route_code` are
+ * both NOT NULL, so they are validated here rather than surfacing as a raw
+ * constraint violation.
+ */
+export async function addLocality(name: string, district: string, routeCode: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
+  if (!name.trim()) return { error: 'Locality name is required.' }
+  if (!district.trim()) return { error: 'District is required.' }
+  if (!routeCode.trim()) return { error: 'Route code is required.' }
+
   const { error } = await supabase.from('localities').insert({
     name: name.trim(),
-    region: region.trim(),
     district: district.trim(),
     route_code: routeCode.trim(),
   })

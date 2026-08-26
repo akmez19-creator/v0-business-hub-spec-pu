@@ -142,9 +142,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'getClientLastDelivered') {
-      // Most recent delivered product for a phone (to gate Exchange / Trade In)
+      // Most recent delivered product for a phone. This gated Exchange / Trade
+      // In in the widget; those moved to the dashboard Overview in v4.62.0, so
+      // the current content.js no longer calls it. Kept deliberately: agents on
+      // an older zip still send this action, and dropping the handler would
+      // leave their widget hanging on a message that never gets a reply.
       try {
         const data = await fetchWithAuth(API_BASE + '/api/clients/last-delivered?phone=' + encodeURIComponent(request.phone), {
+          method: 'GET'
+        });
+        sendResponse({ success: true, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+      return;
+    }
+
+    if (request.action === 'findClientByName') {
+      // The chat gives us a name but rarely a phone. Look the client up on it
+      // so a known customer's details are not retyped from scratch.
+      try {
+        const data = await fetchWithAuth(API_BASE + '/api/clients/find-by-name?name=' + encodeURIComponent(request.name), {
           method: 'GET'
         });
         sendResponse({ success: true, data });

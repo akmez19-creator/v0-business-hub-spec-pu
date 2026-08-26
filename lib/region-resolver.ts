@@ -26,20 +26,36 @@ export interface RegionResolver {
 export async function createRegionResolver(): Promise<RegionResolver> {
   const supabase = await createClient()
 
-  const { data: localities } = await supabase
+  // `district` is the zone column on `localities`. There is NO `region` column
+  // on this table - selecting one made PostgREST reject the whole query, and
+  // the `|| []` below turned that error into an empty resolver that silently
+  // matched nothing. Every caller then wrote a NULL region and believed it had
+  // simply found no match.
+  //
+  // The OUTPUT field stays named `region` on purpose: it feeds
+  // `deliveries.region`, which does exist. Only the source column was wrong.
+  const { data: localities, error } = await supabase
     .from('localities')
-    .select('name, region')
+    .select('name, district')
     .eq('is_active', true)
+
+  // A failed read must never degrade into "no localities". Silently resolving
+  // nothing is indistinguishable from a legitimately unknown address, which is
+  // exactly why this stayed invisible.
+  if (error) {
+    throw new Error(`Could not load localities for region resolution: ${error.message}`)
+  }
 
   const localityList = localities || []
 
   // Build lookup: lowercase name -> { name, region }
   const localityMap = new Map<string, { name: string; region: string }>()
   for (const loc of localityList) {
-    localityMap.set(loc.name.toLowerCase().trim(), { name: loc.name, region: loc.region })
+    if (!loc.name) continue
+    localityMap.set(loc.name.toLowerCase().trim(), { name: loc.name, region: loc.district })
   }
 
-  const uniqueRegions = [...new Set(localityList.map(l => l.region))].sort()
+  const uniqueRegions = [...new Set(localityList.map(l => l.district).filter(Boolean))].sort()
   const allLocalityNames = localityList.map(l => l.name).sort()
 
   const resolve = (input: string): ResolvedLocation | null => {

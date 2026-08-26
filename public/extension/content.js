@@ -210,14 +210,14 @@ style.textContent = `
 .akmez-st-pill.active{background:linear-gradient(135deg,#34d399,#10b981);border-color:#10b981;color:#04110b;box-shadow:0 2px 10px rgba(16,185,129,0.35);}
 .akmez-label{font-size:10px;color:#8b93a7;text-transform:uppercase;letter-spacing:0.7px;margin-bottom:5px;font-weight:700;}
 .akmez-label .req{color:#f97316;}
-.akmez-oldprod-status{font-size:11px;margin-bottom:6px;line-height:1.4;}
-.akmez-oldprod-status.loading{color:#94a3b8;}
-.akmez-oldprod-status.ok{color:#34d399;font-weight:600;}
-.akmez-oldprod-status.blocked{color:#f87171;font-weight:600;}
-.akmez-oldprod-picked{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 8px;margin-top:2px;}
-.akmez-oldprod-hint{font-size:11px;color:#94a3b8;margin-top:6px;}
-.akmez-oldprod-hint.nil{color:#34d399;}
-.akmez-oldprod-hint.pay{color:#fbbf24;font-weight:600;}
+.akmez-st-top{padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);}
+.akmez-known{margin-top:5px;font-size:11px;line-height:1.5;}
+.akmez-known.ok{color:#86efac;}
+.akmez-known.ask{color:#fbbf24;}
+.akmez-known-t{margin-bottom:4px;font-weight:600;}
+.akmez-known-pick{display:block;width:100%;text-align:left;margin-bottom:3px;padding:5px 8px;border-radius:6px;
+  border:1px solid rgba(251,191,36,0.35);background:rgba(251,191,36,0.08);color:#fde68a;font-size:11px;cursor:pointer;}
+.akmez-known-pick:hover{background:rgba(251,191,36,0.18);}
 .akmez-input-wrap{position:relative;}
 .akmez-input{width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 50px 10px 12px;color:white;font-size:13px;outline:none;transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;}
 .akmez-input:focus{border-color:#f97316;background:rgba(249,115,22,0.06);box-shadow:0 0 0 3px rgba(249,115,22,0.18);}
@@ -350,7 +350,21 @@ style.textContent = `
 .akmez-var-opts{display:flex;flex-wrap:wrap;gap:6px;}
 .akmez-var-chip{background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.4);color:#fb923c;font-size:11px;font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer;}
 .akmez-var-chip:hover{background:rgba(249,115,22,0.28);}
-.akmez-var-chip.sold{opacity:0.45;cursor:not-allowed;background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12);color:#94a3b8;}
+/* Dimmed but still selectable: a sold-out product often has incoming stock. */
+.akmez-var-chip.sold{opacity:0.6;cursor:pointer;background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.12);color:#94a3b8;}
+/* Photo chip: the picture carries the recognition, the caption confirms it.
+   Fixed 76px so a 20-model watch range stays a scannable grid. */
+.akmez-var-chip.photo{display:flex;flex-direction:column;align-items:center;gap:4px;width:76px;padding:5px;}
+.akmez-var-chip.photo img{width:64px;height:64px;object-fit:cover;border-radius:6px;background:rgba(255,255,255,0.06);display:block;}
+.akmez-var-chip.photo .cap{font-size:10px;line-height:1.25;text-align:center;word-break:break-word;}
+.akmez-var-chip.photo.sold img{filter:grayscale(1);}
+/* B1G1 free-unit picker inside a cart line. Amber marks it as a giveaway so it
+   reads differently from the paid line it sits under. */
+.akmez-free-pick{display:flex;align-items:center;gap:6px;margin-top:5px;}
+.akmez-free-lbl{font-size:10px;font-weight:600;color:#fbbf24;text-transform:uppercase;letter-spacing:0.03em;white-space:nowrap;}
+.akmez-free-sel{flex:1;min-width:0;font-size:11px;padding:3px 6px;border-radius:5px;background:rgba(251,191,36,0.08);color:#fde68a;border:1px solid rgba(251,191,36,0.35);cursor:pointer;}
+.akmez-free-sel:focus{outline:none;border-color:rgba(251,191,36,0.7);}
+.akmez-free-auto{flex:1;min-width:0;font-size:11px;color:#fde68a;font-weight:600;}
 .akmez-var-cancel{width:calc(100% - 20px);margin:4px 10px 10px;padding:7px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#e2e8f0;font-size:11px;font-weight:600;cursor:pointer;}
 .akmez-cart-item-price s{color:#64748b;font-weight:400;margin-left:4px;}
 #akmez-img-overlay{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,0.82);display:none;align-items:center;justify-content:center;padding:24px;}
@@ -545,6 +559,11 @@ let cartOwner = null;
 // put in the cart by itself; anything the agent adds or touches is removed from
 // this map and is then never auto-removed.
 let cartFromAd = {};
+// cart key -> variant id chosen as the B1G1 free unit. Kept separate from the
+// cart itself because the free unit is a DIFFERENT model of the same product:
+// it cannot be a cart line of its own (it would be priced) and it cannot live
+// on the paid line (one line names one variant).
+let cartFree = {};
 
 // Clicking another chat does NOT repaint the contact panel instantly - Messenger
 // reuses the DOM and the previous client's ad_id chips stay on screen for a few
@@ -2179,11 +2198,27 @@ function renderOrdersForm() {
         <button type="button" class="akmez-ai-regen" id="ak-ai-regen">Regenerate</button>
       </div>
     </div>
+    <div class="akmez-field akmez-st-top">
+      <div class="akmez-label">Sales Type</div>
+      <div class="akmez-salestype" id="ak-salestype">
+        <button type="button" class="akmez-st-pill active" data-st="sale">Sale</button>
+        <button type="button" class="akmez-st-pill" data-st="drop_off">Drop Off</button>
+      </div>
+      <!--
+        Exchange / Trade In / Refund deliberately do NOT live here. All three
+        are raised against an already-DELIVERED order, and the agent is looking
+        at that order in the dashboard Overview when they decide to raise one.
+        Doing it here meant re-finding the client by phone and re-picking the
+        order they were already looking at, and only 2,841 of 30,341 eligible
+        clients have an itemised row to pick at all. Overview owns them now.
+      -->
+    </div>
     <div class="akmez-row">
       <div class="akmez-field">
         <div class="akmez-label">Name <span class="req">*</span></div>
         <div class="akmez-input-wrap">
           <input type="text" id="ak-name" class="akmez-input" placeholder="Auto-filled from conversation">
+          <div id="ak-knownclient" class="akmez-known" style="display:none;"></div>
         </div>
       </div>
     </div>
@@ -2204,6 +2239,7 @@ function renderOrdersForm() {
       </div>
     </div>
     <div id="ak-rating" class="akmez-rating" style="display:none;"></div>
+    <div id="ak-open-orders" style="display:none;"></div>
     <div class="akmez-row">
       <div class="akmez-field akmez-autocomplete">
         <div class="akmez-label">Region <span class="req">*</span></div>
@@ -2217,24 +2253,6 @@ function renderOrdersForm() {
     </div>
     <div class="akmez-delivery-info" id="ak-delivery-info" style="display:none;"></div>
     <div class="akmez-region-delivery" id="ak-region-delivery" style="display:none;"></div>
-    <div class="akmez-field">
-      <div class="akmez-label">Sales Type</div>
-      <div class="akmez-salestype" id="ak-salestype">
-        <button type="button" class="akmez-st-pill active" data-st="sale">Sale</button>
-        <button type="button" class="akmez-st-pill" data-st="exchange">Exchange</button>
-        <button type="button" class="akmez-st-pill" data-st="trade_in">Trade In</button>
-        <button type="button" class="akmez-st-pill" data-st="refund">Refund</button>
-        <button type="button" class="akmez-st-pill" data-st="drop_off">Drop Off</button>
-      </div>
-    </div>
-    <div class="akmez-field akmez-autocomplete" id="ak-oldprod-field" style="display:none;">
-      <div class="akmez-label" id="ak-oldprod-label">Product client currently has <span class="req">*</span></div>
-      <div id="ak-oldprod-status" class="akmez-oldprod-status"></div>
-      <input type="text" id="ak-oldprod-search" class="akmez-input akmez-input-plain" placeholder="Search the product being returned..." autocomplete="off">
-      <div class="akmez-suggest" id="ak-oldprod-suggest"></div>
-      <div id="ak-oldprod-picked" class="akmez-oldprod-picked" style="display:none;"></div>
-      <div id="ak-oldprod-hint" class="akmez-oldprod-hint"></div>
-    </div>
     <div class="akmez-ad-missing" id="ak-ad-missing" style="display:none;">
       No ad label on this chat. Add the product and we&rsquo;ll offer the
       <b>live ad</b> selling it &mdash; or pick one below. You can create the
@@ -2335,53 +2353,22 @@ function renderOrdersForm() {
     });
   };
 
-  // The product the client is returning (Exchange / Trade In). Held here so the
-  // submit handler and the difference calculator can both read it.
-  let oldProduct = null; // { id, name, price }
-  let oldProductAuto = false; // true when auto-filled from delivery history (agent hasn't overridden)
-
-  // Eligibility gate: Exchange / Trade In require a past DELIVERED order.
-  // state: idle | loading | ok | none
-  let deliveredElig = { phone: null, state: 'idle', count: 0, product: null };
-  let __deliveredTimer = null;
-
-  // Reflect the selected sales type in the "current product" sub-form:
-  //  - Exchange  : defective unit swapped for the same product, no charge
-  //  - Trade In  : swapped for an equivalent product, client pays any price gap
-  function updateSalesTypeUI() {
-    const active = body.querySelector('#ak-salestype .akmez-st-pill.active');
-    const st = active ? active.dataset.st : 'sale';
-    const field = document.getElementById('ak-oldprod-field');
-    const label = document.getElementById('ak-oldprod-label');
-    const search = document.getElementById('ak-oldprod-search');
-    if (!field) return;
-    if (st === 'exchange' || st === 'trade_in') {
-      field.style.display = '';
-      if (st === 'exchange') {
-        label.innerHTML = 'Defective product being returned <span class="req">*</span>';
-        search.placeholder = 'Search the defective product...';
-      } else {
-        label.innerHTML = 'Product client currently has (trading in) <span class="req">*</span>';
-        search.placeholder = 'Search the product being traded in...';
-      }
-      // Verify the client has a past delivered order and auto-fill from history
-      lookupLastDelivered();
-    } else {
-      field.style.display = 'none';
-    }
-    updateEligUI();
-    updateOldProdHint();
-    updateCart();
+  function currentSalesType() {
+    const active = document.querySelector('#ak-salestype .akmez-st-pill.active');
+    return active ? active.dataset.st : 'sale';
   }
 
-  // Sales type pills: Sale / Exchange / Trade In / Refund / Drop Off
+  // Sales type pills: Sale / Drop Off. Both are ordinary outgoing orders, so
+  // there is no sub-form to reveal - the follow-up types that needed one were
+  // moved to the dashboard Overview.
   body.querySelectorAll('.akmez-st-pill').forEach(p => {
     p.onclick = () => {
       body.querySelectorAll('.akmez-st-pill').forEach(x => x.classList.remove('active'));
       p.classList.add('active');
-      updateSalesTypeUI();
+      updateCart();
     };
   });
+
   
   // Auto-fill name + phone + ad id - continuously follows the currently open conversation
   const fields = {
@@ -2390,6 +2377,189 @@ function renderOrdersForm() {
     adid:  { input: document.getElementById('ak-adid'), edited: false, last: null, emptyStreak: 0 },
   };
   Object.values(fields).forEach(f => f.input.addEventListener('input', () => { f.edited = true; }));
+
+  // ===== Known client: fill from the name the chat already gives us =====
+  //
+  // The order form used to start empty for everyone. But a Facebook thread
+  // carries the client's full name, and 22,033 clients with a delivered order
+  // have one - so for a returning customer the phone and region are already
+  // ours and were being retyped (or worse, guessed) on every follow-up.
+  //
+  // Only ever fills BLANK fields, and never overrides the agent. Names are
+  // matched exactly: 762 full names in the table are shared by more than one
+  // client, so a single hit fills silently and multiple hits ask.
+  let lastNameLookup = null;
+  function lookupClientByName(name) {
+    const clean = String(name || '').trim();
+    if (!clean || clean === lastNameLookup) return;
+    lastNameLookup = clean;
+    chrome.runtime.sendMessage({ action: 'findClientByName', name: clean }, res => {
+      if (chrome.runtime.lastError) return;
+      if (!res || !res.success || !res.data) return;
+      // Guard against a slow reply landing after the agent moved on.
+      if ((fields.name.input.value || '').trim() !== clean) return;
+      const matches = res.data.matches || [];
+      if (matches.length === 1) applyKnownClient(matches[0]);
+      else if (matches.length > 1) renderClientChoices(matches);
+      else renderClientChoices([]);
+    });
+  }
+
+  function applyKnownClient(c) {
+    if (!c) return;
+    const phoneInput = fields.phone.input;
+    if (phoneInput && !phoneInput.value.trim() && c.phone) {
+      phoneInput.value = c.phone;
+      fields.phone.last = c.phone;
+      refreshClientRating();
+    }
+    // Region is a typeahead over the master locality list, so only set it when
+    // the stored value is one the picker actually knows - a free-text region
+    // would fail the server's locality resolve and lose the route code.
+    const regionInput = document.getElementById('ak-region');
+    if (regionInput && !regionInput.value.trim() && c.region) {
+      const known = regions.some(r => String(r).toLowerCase() === String(c.region).toLowerCase());
+      if (known) {
+        regionInput.value = c.region;
+        regionInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    renderClientChoices([], c);
+  }
+
+  // One line under the name saying who we matched, or offering the choice when
+  // the name is shared. Silence here would be worse than noise: the agent has
+  // no other way to tell a prefilled phone from one they typed.
+  function renderClientChoices(matches, applied) {
+    const host = document.getElementById('ak-knownclient');
+    if (!host) return;
+    if (applied) {
+      host.style.display = '';
+      host.className = 'akmez-known ok';
+      host.innerHTML = 'Known client \u00b7 ' + statsEsc(applied.phone)
+        + (applied.region ? ' \u00b7 ' + statsEsc(applied.region) : '')
+        + (applied.deliveredCount ? ' \u00b7 ' + applied.deliveredCount + ' delivered' : '');
+      return;
+    }
+    if (!matches || !matches.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    host.className = 'akmez-known ask';
+    host.innerHTML = '<div class="akmez-known-t">' + matches.length + ' clients share this name \u2013 pick one:</div>'
+      + matches.map((m, i) =>
+          '<button type="button" class="akmez-known-pick" data-i="' + i + '">'
+          + statsEsc(m.phone) + (m.region ? ' \u00b7 ' + statsEsc(m.region) : '')
+          + (m.deliveredCount ? ' \u00b7 ' + m.deliveredCount + ' delivered' : ' \u00b7 no delivery yet')
+          + '</button>').join('');
+    host.querySelectorAll('.akmez-known-pick').forEach(btn => {
+      btn.addEventListener('click', () => applyKnownClient(matches[Number(btn.dataset.i)]));
+    });
+  }
+
+  // Reachable from the field sync loop, which is defined outside this scope -
+  // same pattern as __akmezRenderOpenOrders below.
+  window.__akmezLookupClientByName = lookupClientByName;
+
+  // ===== Open orders: what this client already has in flight =====
+  //
+  // Exists because "NEW CLIENT - 0 orders" was technically true and practically
+  // misleading. The rollup that feeds the badge counts delivered + CMS only
+  // (pending orders score zero, correctly, since a client cannot be judged on a
+  // delivery nobody has attempted). Reused as "have we served this person
+  // already?", that number said no while two pending orders sat in the system.
+  //
+  // Shows every open order, and flags the ones whose product the agent is about
+  // to add again. Adding to an existing order is legitimate and common, so this
+  // informs rather than blocks - only an exact product repeat asks for a second
+  // click, in submitOrder().
+  function openOrderDupes() {
+    const open = window.__akmezOpenOrders || [];
+    if (!open.length) return [];
+    // Compare on the product names in the cart right now.
+    const inCart = Object.entries(cart)
+      .filter(([, q]) => q > 0)
+      .map(([id]) => {
+        const p = products.find(pr => String(pr.id) === String(id));
+        return p ? String(p.name || '').trim().toLowerCase() : '';
+      })
+      .filter(Boolean);
+    if (!inCart.length) return [];
+    // An open order's `products` is one free-text line that may list several
+    // items ("Shampoo Brush, Bidet"), so the cart product has to be found
+    // WITHIN it - but only as a complete comma-separated entry.
+    //
+    // Plain substring matching is wrong here: 53 of the 843 active product
+    // names are contained in another name ("Shampoo" in "Shampoo Brush",
+    // "Bidet" in "Bidet v1", "Car Brush" in "Microfibre Car Brush"). Ordering
+    // a Shampoo while a Shampoo Brush is out for delivery is a normal second
+    // order, and crying duplicate at it would train agents to click through
+    // the warning - which costs more than the warning saves.
+    return open.filter(o => {
+      const line = String(o.products || '').trim().toLowerCase();
+      if (!line) return false;
+      const parts = line.split(/\s*[,;+]\s*|\s+x\d+\b/).map(s => s.trim()).filter(Boolean);
+      return inCart.some(n => line === n || parts.includes(n));
+    });
+  }
+
+  // submitOrder() and updateCart() are top-level, so they reach these through
+  // window - the same pattern the ad hint and live-ad panels already use.
+  window.__akmezOpenOrderDupes = openOrderDupes;
+  window.__akmezRenderOpenOrders = renderOpenOrders;
+
+  // Local escaper. The shared `esc` further down is a `const` declared after
+  // this point in the same function scope, so calling it from here would hit
+  // the temporal dead zone. Product and agent names reach innerHTML, and
+  // product names originate from Facebook ad text, so escaping is mandatory.
+  const escOpen = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  function renderOpenOrders() {
+    const box = document.getElementById('ak-open-orders');
+    if (!box) return;
+    const open = window.__akmezOpenOrders || [];
+    if (!open.length) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    const dupes = openOrderDupes();
+    const dupeIds = new Set(dupes.map(d => d.id));
+    const warn = dupes.length > 0;
+
+    const rows = open.map(o => {
+      const isDupe = dupeIds.has(o.id);
+      const when = o.createdAt ? new Date(o.createdAt) : null;
+      const time = when
+        ? when.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+        : '';
+      const agent = o.agent ? escOpen(o.agent) : 'unknown agent';
+      const amt = o.amount ? `Rs ${Number(o.amount).toLocaleString()}` : '';
+      return `<div style="padding:6px 8px;border-radius:6px;margin-top:4px;background:${isDupe ? 'rgba(220,38,38,0.12)' : 'rgba(148,163,184,0.12)'};border-left:3px solid ${isDupe ? '#dc2626' : '#94a3b8'};">
+        <div style="font-size:11px;font-weight:600;color:${isDupe ? '#b91c1c' : '#334155'};">
+          ${isDupe ? '&#9888; SAME PRODUCT &middot; ' : ''}${escOpen(o.products || 'No product listed')} ${amt ? '&middot; ' + amt : ''}
+        </div>
+        <div style="font-size:10px;color:#64748b;margin-top:1px;">
+          ${escOpen(o.status)} &middot; taken by ${agent}${time ? ' &middot; ' + time : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    box.innerHTML = `<div style="padding:8px;border-radius:8px;background:${warn ? 'rgba(220,38,38,0.08)' : 'rgba(148,163,184,0.08)'};border:1px solid ${warn ? 'rgba(220,38,38,0.45)' : 'rgba(148,163,184,0.35)'};margin-top:6px;">
+      <div style="font-size:11px;font-weight:700;color:${warn ? '#b91c1c' : '#475569'};">
+        ${warn
+          ? '&#9888; THIS PRODUCT IS ALREADY ON AN OPEN ORDER'
+          : `${open.length} order${open.length === 1 ? '' : 's'} already open for this client`}
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-top:2px;">
+        ${warn
+          ? 'Check with the agent below before creating another - it may be a duplicate.'
+          : 'Not yet delivered. Adding to what they already ordered is fine.'}
+      </div>
+      ${rows}
+    </div>`;
+    box.style.display = 'block';
+  }
 
   // ===== Client rating lookup: shows Good/Average/Bad badge for the current phone =====
   let __ratingLastPhone = null;
@@ -2402,10 +2572,20 @@ function renderOrdersForm() {
       __ratingLastPhone = null;
       box.style.display = 'none';
       box.innerHTML = '';
+      // Drop the previous client's open orders, or switching chats would show
+      // one client's pending order as a duplicate warning against another.
+      window.__akmezOpenOrders = [];
+      window.__akmezDupOk = null;
+      renderOpenOrders();
       return;
     }
     if (digits === __ratingLastPhone) return; // same client - keep current badge
     __ratingLastPhone = digits;
+    // New client in the form: the old open-order list is now wrong, and the
+    // duplicate confirmation the agent may have given no longer applies.
+    window.__akmezOpenOrders = [];
+    window.__akmezDupOk = null;
+    renderOpenOrders();
     clearTimeout(__ratingTimer);
     __ratingTimer = setTimeout(() => {
       chrome.runtime.sendMessage({ action: 'getClientRating', phone: digits }, resp => {
@@ -2414,6 +2594,12 @@ function renderOrdersForm() {
         if (nowDigits !== digits) return;
         if (!resp || !resp.success || !resp.data) { box.style.display = 'none'; return; }
         const d = resp.data;
+        // Orders still in flight for this client. Kept separate from the rating
+        // figure below: the rating counts only delivered/CMS orders, so a client
+        // with two pending orders still reads "NEW CLIENT - 0 orders". That gap
+        // is what let two agents create the same order 55 minutes apart.
+        window.__akmezOpenOrders = Array.isArray(d.openOrders) ? d.openOrders : [];
+        renderOpenOrders();
         const colors = {
           good:    { bg: '#dcfce7', fg: '#15803d', label: 'GOOD CLIENT' },
           average: { bg: '#fef9c3', fg: '#a16207', label: 'AVERAGE CLIENT' },
@@ -2425,9 +2611,16 @@ function renderOrdersForm() {
         if (d.found) {
           const pct = (d.deliveredPct !== null && d.deliveredPct !== undefined) ? ` &middot; ${d.deliveredPct}% delivered` : '';
           const sales = d.totalSales ? ` &middot; Rs ${Number(d.totalSales).toLocaleString()}` : '';
-          detail = `<span style="color:#64748b;font-size:11px;">${d.totalOrders} orders${pct}${sales}</span>`;
+          detail = `<span style="color:#64748b;font-size:11px;">${d.totalOrders} completed${pct}${sales}</span>`;
         } else {
-          detail = '<span style="color:#64748b;font-size:11px;">No order history</span>';
+          detail = '<span style="color:#64748b;font-size:11px;">No completed orders</span>';
+        }
+        // Open orders are worth saying out loud even next to "NEW CLIENT",
+        // because that label refers to delivery track record, not to whether
+        // this person is already in today's run.
+        const openN = (window.__akmezOpenOrders || []).length;
+        if (openN) {
+          detail += `<span style="color:#b45309;font-size:11px;font-weight:600;"> &middot; ${openN} order${openN === 1 ? '' : 's'} already open</span>`;
         }
         // For bad clients, grade severity by failed (CMS) orders
         let severity = '';
@@ -2443,7 +2636,7 @@ function renderOrdersForm() {
       });
     }, 350);
   }
-  fields.phone.input.addEventListener('input', () => { refreshClientRating(); lookupLastDelivered(); });
+  fields.phone.input.addEventListener('input', () => { refreshClientRating(); });
 
   // Apply a freshly detected value, or clear the field once its selector stops matching.
   function applyField(f, val) {
@@ -2483,7 +2676,7 @@ function renderOrdersForm() {
     // wipe products the agent adds for this new client.
     cartOwner = akmezConvKey();
     if (Object.keys(cart).length) {
-      cart = {};
+      cart = {}; cartFree = {};
       cartFromAd = {};
       updateCart();
     }
@@ -2546,8 +2739,11 @@ function renderOrdersForm() {
       if (txt && fields.name.last !== prevName && prevName !== null) {
         resetForConversation();
       }
+      // Facebook gives a name but almost never a phone, so a client we have
+      // served for years still opened a blank form. Look them up on the name.
+      if (fields.name.input.value) lookupClientByName(fields.name.input.value);
     });
-    readCustomerPhone(num => { applyField(fields.phone, num); refreshClientRating(); lookupLastDelivered(); });
+    readCustomerPhone(num => { applyField(fields.phone, num); refreshClientRating(); });
     readCustomerAdId(id => {
       // The agent deliberately chose an ad for THIS conversation - never let
       // the page scan overwrite it. Cleared on conversation switch.
@@ -2710,18 +2906,53 @@ function renderOrdersForm() {
     let html = `<div class="akmez-var-head">${p.name.replace(/</g, '&lt;')} &mdash; choose an option</div>`;
     Object.keys(groups).forEach(attr => {
       html += `<div class="akmez-var-group"><div class="akmez-var-attr">${String(attr).replace(/</g, '&lt;')}</div><div class="akmez-var-opts">`;
+      // A photo chip when the variant has one, plain text when it does not.
+      // Mixed is fine and deliberate: a half-photographed watch range should
+      // still be pickable, and a missing photo must never hide the option.
       groups[attr].forEach(v => {
-        const soldOut = (v.quantity != null && Number(v.quantity) <= 0);
-        const hasOverride = v.price_override != null && v.price_override !== '';
-        const priceTag = hasOverride ? ` (Rs ${Math.round(parseFloat(v.price_override))})` : '';
-        html += `<button class="akmez-var-chip${soldOut ? ' sold' : ''}" data-vid="${v.id}"${soldOut ? ' disabled' : ''}>${String(v.attribute_value).replace(/</g, '&lt;')}${priceTag}${soldOut ? ' &middot; out of stock' : ''}</button>`;
+        // A model quantity of 0 means NOBODY HAS COUNTED IT, not "none left" -
+        // product_variants has no last_counted_at, so the column cannot express
+        // the difference. Treating 0 as sold out disabled every model of 22 of
+        // 49 variants, including 66W Powerbank (11 in zone D) and Vacuum Flask
+        // Set (32 in zone D), and froze all 10 Crrju Watch models so the
+        // product could not be sold at all. Never block on an unknown: only the
+        // owner-set product flag `sold_out` is a real zero, and even that stays
+        // clickable because sold-out items still have incoming PO stock.
+        const known = v.quantity != null && Number(v.quantity) > 0;
+        const stockTag = known ? ` &middot; ${Number(v.quantity)} left` : '';
+        const flagged = p.sold_out === true;
+        // Show the price the model will actually SELL at. A non-positive
+        // override is not a price (W-008 = -1375), so it falls back to the
+        // parent's - matching akmezCartResolve(), or the chip would advertise
+        // one figure and the cart would charge another.
+        const ovrN = v.price_override != null && v.price_override !== ''
+          ? Number(v.price_override) : NaN;
+        const eff = Number.isFinite(ovrN) && ovrN > 0 ? ovrN : Number(p.price);
+        const priceTag = Number.isFinite(eff) ? ` (Rs ${Math.round(eff)})` : '';
+        const label = String(v.attribute_value).replace(/</g, '&lt;');
+        // Inside an attribute a bare quote ends it early, so title=/alt= need
+        // the quote escaped too - escaping only "<" is enough for text but not
+        // for attributes. Product names are hand-typed, e.g. Cable 3" .
+        const attrLabel = label.replace(/"/g, '&quot;');
+        const note = flagged ? ' &middot; sold out' : stockTag;
+        if (v.image_url) {
+          const src = String(v.image_url).replace(/"/g, '&quot;');
+          html += `<button class="akmez-var-chip photo${flagged ? ' sold' : ''}" data-vid="${v.id}" title="${attrLabel}${priceTag}">
+            <img src="${src}" alt="${attrLabel}" loading="lazy">
+            <span class="cap">${label}${priceTag}${note}</span>
+          </button>`;
+        } else {
+          html += `<button class="akmez-var-chip${flagged ? ' sold' : ''}" data-vid="${v.id}">${label}${priceTag}${note}</button>`;
+        }
       });
       html += `</div></div>`;
     });
     html += `<button class="akmez-var-cancel" data-cancel="1">Cancel</button>`;
     prodSuggest.innerHTML = html;
     prodSuggest.style.display = 'block';
-    prodSuggest.querySelectorAll('.akmez-var-chip:not(.sold)').forEach(chip => {
+    // Every chip is clickable - `.sold` now only tints the tile. An owner-set
+    // sold-out product can still be ordered against incoming stock.
+    prodSuggest.querySelectorAll('.akmez-var-chip').forEach(chip => {
       chip.onmousedown = e => {
         e.preventDefault();
         const key = p.id + '::' + chip.dataset.vid;
@@ -2734,232 +2965,6 @@ function renderOrdersForm() {
     });
     const cancel = prodSuggest.querySelector('[data-cancel]');
     if (cancel) cancel.onmousedown = e => { e.preventDefault(); prodSuggest.style.display = 'none'; prodInput.focus(); };
-  }
-
-  // ===== "Current product" picker for Exchange / Trade In =====
-  const oldInput = document.getElementById('ak-oldprod-search');
-  const oldSuggest = document.getElementById('ak-oldprod-suggest');
-  const oldPicked = document.getElementById('ak-oldprod-picked');
-  let oldMatches = [];
-  let oldActive = -1;
-
-  // Current cart total (after B1G1 / bundle pricing) - the value of the new product(s)
-  function cartTotalAmount() {
-    let amt = 0;
-    Object.entries(cart).forEach(([key, q]) => {
-      if (q > 0) { const r = akmezCartResolve(key); if (r) amt += akmezPriceFor(r.priced, q); }
-    });
-    return amt;
-  }
-
-  // Show the charge outcome under the picker: nil for a defective exchange,
-  // else the price difference the client must pay on a trade in.
-  function updateOldProdHint() {
-    const hint = document.getElementById('ak-oldprod-hint');
-    if (!hint) return;
-    const active = document.querySelector('#ak-salestype .akmez-st-pill.active');
-    const st = active ? active.dataset.st : 'sale';
-    if (st !== 'exchange' && st !== 'trade_in') { hint.textContent = ''; return; }
-    if (st === 'exchange') {
-      hint.textContent = 'Defective swap - no charge (Rs 0).';
-      hint.className = 'akmez-oldprod-hint nil';
-      return;
-    }
-    // Trade In: difference = new product total - returned product price (min 0)
-    const oldPrice = oldProduct ? (parseFloat(oldProduct.price) || 0) : 0;
-    const diff = Math.max(0, cartTotalAmount() - oldPrice);
-    if (!oldProduct) {
-      hint.textContent = 'Select the product being traded in to compute the difference.';
-      hint.className = 'akmez-oldprod-hint';
-    } else if (diff <= 0) {
-      hint.textContent = 'Equivalent price - no difference to pay (Rs 0).';
-      hint.className = 'akmez-oldprod-hint nil';
-    } else {
-      hint.textContent = 'Difference to pay: Rs ' + diff.toFixed(0);
-      hint.className = 'akmez-oldprod-hint pay';
-    }
-  }
-
-  // Best-effort match of a historical product name to the current catalog
-  // (to recover its price/image for the trade-in difference calculation).
-  function matchCatalog(name) {
-    if (!name) return null;
-    const low = name.toLowerCase().trim();
-    return products.find(x => x.name.toLowerCase() === low)
-      || products.find(x => { const n = x.name.toLowerCase(); return n.startsWith(low) || low.startsWith(n); })
-      || products.find(x => { const n = x.name.toLowerCase(); return n.includes(low) || low.includes(n); })
-      || null;
-  }
-
-  // Auto-fill the returned product from the client's most recent delivered order.
-  function autofillReturnedProduct(rawName) {
-    const p = matchCatalog(rawName);
-    if (p) {
-      oldProduct = { id: p.id, name: p.name, price: p.price, image_url: p.image_url };
-    } else if (rawName) {
-      // Product no longer in the catalog - keep the historical name, price unknown
-      oldProduct = { id: null, name: rawName, price: 0, image_url: null };
-    } else {
-      return;
-    }
-    oldProductAuto = true;
-    window.__akmezOldProduct = oldProduct;
-    renderOldPicked();
-    updateOldProdHint();
-  }
-
-  // Reflect the eligibility gate in the UI and enable/disable the picker.
-  function updateEligUI() {
-    window.__akmezDeliveredState = deliveredElig.state; // mirror for submit handler
-    const status = document.getElementById('ak-oldprod-status');
-    if (!status) return;
-    const active = document.querySelector('#ak-salestype .akmez-st-pill.active');
-    const st = active ? active.dataset.st : 'sale';
-    if (st !== 'exchange' && st !== 'trade_in') { status.textContent = ''; status.className = 'akmez-oldprod-status'; return; }
-    const kind = st === 'exchange' ? 'Exchange' : 'Trade In';
-    if (deliveredElig.state === 'idle') {
-      status.textContent = "Enter the client's phone to verify a past delivered order.";
-      status.className = 'akmez-oldprod-status loading';
-      if (oldInput) oldInput.disabled = true;
-    } else if (deliveredElig.state === 'loading') {
-      status.textContent = 'Checking delivery history...';
-      status.className = 'akmez-oldprod-status loading';
-      if (oldInput) oldInput.disabled = true;
-    } else if (deliveredElig.state === 'ok') {
-      status.innerHTML = '\u2713 Verified: ' + deliveredElig.count + ' delivered order'
-        + (deliveredElig.count !== 1 ? 's' : '')
-        + (deliveredElig.product ? ' \u00b7 last: ' + deliveredElig.product.replace(/</g, '&lt;') : '');
-      status.className = 'akmez-oldprod-status ok';
-      if (oldInput) oldInput.disabled = false;
-    } else { // none
-      status.textContent = '\u26A0 No delivered order found for this number - ' + kind + ' is only allowed for past customers.';
-      status.className = 'akmez-oldprod-status blocked';
-      if (oldInput) oldInput.disabled = true;
-    }
-  }
-
-  // Look up the client's most recent delivered product to gate Exchange / Trade In.
-  function lookupLastDelivered() {
-    const active = body.querySelector('#ak-salestype .akmez-st-pill.active');
-    const st = active ? active.dataset.st : 'sale';
-    if (st !== 'exchange' && st !== 'trade_in') return;
-    const digits = (fields.phone.input.value || '').replace(/\D/g, '');
-    if (digits.length < 7) {
-      deliveredElig = { phone: null, state: 'idle', count: 0, product: null };
-      window.__akmezDeliveredOk = false;
-      updateEligUI();
-      return;
-    }
-    // Reuse a resolved result for the same phone
-    if (deliveredElig.phone === digits && (deliveredElig.state === 'ok' || deliveredElig.state === 'none')) {
-      window.__akmezDeliveredOk = deliveredElig.state === 'ok';
-      updateEligUI();
-      return;
-    }
-    deliveredElig = { phone: digits, state: 'loading', count: 0, product: null };
-    window.__akmezDeliveredOk = false;
-    updateEligUI();
-    clearTimeout(__deliveredTimer);
-    __deliveredTimer = setTimeout(() => {
-      chrome.runtime.sendMessage({ action: 'getClientLastDelivered', phone: digits }, resp => {
-        // Ignore stale responses (phone changed meanwhile)
-        const now = (fields.phone.input.value || '').replace(/\D/g, '');
-        if (now !== digits) return;
-        if (resp && resp.success && resp.data && resp.data.found && resp.data.deliveredCount > 0) {
-          const d = resp.data;
-          deliveredElig = { phone: digits, state: 'ok', count: d.deliveredCount, product: d.lastProduct };
-          window.__akmezDeliveredOk = true;
-          // Auto-fill from history unless the agent already picked one manually
-          if (!oldProduct || oldProductAuto) autofillReturnedProduct(d.lastProduct);
-        } else {
-          deliveredElig = { phone: digits, state: 'none', count: 0, product: null };
-          window.__akmezDeliveredOk = false;
-          // Clear any auto-filled product since the client isn't eligible
-          if (oldProductAuto) { oldProduct = null; oldProductAuto = false; window.__akmezOldProduct = null; renderOldPicked(); }
-        }
-        updateEligUI();
-        updateOldProdHint();
-      });
-    }, 300);
-  }
-
-  function renderOldPicked() {
-    if (!oldProduct) { oldPicked.style.display = 'none'; oldPicked.innerHTML = ''; oldInput.style.display = ''; return; }
-    oldInput.style.display = 'none';
-    oldPicked.style.display = 'flex';
-    oldPicked.innerHTML = `
-      ${akmezThumb(oldProduct, 'akmez-cart-thumb')}
-      <div class="akmez-cart-item-info">
-        <div class="akmez-cart-item-name">${oldProduct.name.replace(/</g, '&lt;')}</div>
-        <div class="akmez-cart-item-price">Rs ${(parseFloat(oldProduct.price) || 0).toFixed(0)}</div>
-      </div>
-      <button class="akmez-qty-btn akmez-qty-del" id="ak-oldprod-clear" title="Change">&times;</button>`;
-    const clr = document.getElementById('ak-oldprod-clear');
-    if (clr) clr.onclick = () => { oldProduct = null; oldProductAuto = false; window.__akmezOldProduct = null; renderOldPicked(); updateOldProdHint(); oldInput.focus(); };
-  }
-
-  function showOldSuggestions() {
-    const q = oldInput.value.toLowerCase().trim();
-    oldMatches = rankProducts(q);
-    if (!oldMatches.length) { oldSuggest.style.display = 'none'; return; }
-    oldActive = 0;
-    oldSuggest.innerHTML = oldMatches.map((p, i) => {
-      return `
-      <div class="akmez-suggest-item${i === 0 ? ' active' : ''}" data-i="${i}">
-        ${akmezThumb(p, 'akmez-suggest-thumb')}
-        <span class="akmez-suggest-name">${p.name.replace(/</g, '&lt;')}</span>
-        <span class="akmez-suggest-price">Rs ${p.price}</span>
-      </div>`;
-    }).join('');
-    oldSuggest.style.display = 'block';
-    oldSuggest.querySelectorAll('.akmez-suggest-item').forEach(it => {
-      it.onmousedown = e => {
-        if (e.target.classList.contains('akmez-suggest-thumb')) {
-          e.preventDefault();
-          const p = oldMatches[parseInt(it.dataset.i, 10)];
-          if (p) akmezShowImage(p.image_url, p.name);
-          return;
-        }
-        e.preventDefault();
-        pickOldProduct(parseInt(it.dataset.i, 10));
-      };
-    });
-  }
-
-  function pickOldProduct(i) {
-    if (i < 0 || i >= oldMatches.length) return;
-    const p = oldMatches[i];
-    oldProduct = { id: p.id, name: p.name, price: p.price, image_url: p.image_url };
-    oldProductAuto = false; // agent overrode the auto-filled product
-    window.__akmezOldProduct = oldProduct; // mirror so submitOrder can read it
-    oldInput.value = '';
-    oldSuggest.style.display = 'none';
-    renderOldPicked();
-    updateOldProdHint();
-  }
-
-  if (oldInput) {
-    oldInput.addEventListener('input', showOldSuggestions);
-    oldInput.addEventListener('focus', showOldSuggestions);
-    oldInput.addEventListener('blur', () => setTimeout(() => { oldSuggest.style.display = 'none'; }, 150));
-    oldInput.addEventListener('keydown', e => {
-      const open = oldSuggest.style.display === 'block' && oldMatches.length;
-      if (e.key === 'ArrowDown') {
-        if (!open) { showOldSuggestions(); return; }
-        e.preventDefault();
-        oldActive = (oldActive + 1) % oldMatches.length;
-        oldSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => el.classList.toggle('active', i === oldActive));
-      } else if (e.key === 'ArrowUp') {
-        if (!open) return;
-        e.preventDefault();
-        oldActive = (oldActive - 1 + oldMatches.length) % oldMatches.length;
-        oldSuggest.querySelectorAll('.akmez-suggest-item').forEach((el, i) => el.classList.toggle('active', i === oldActive));
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
-        if (open && oldActive >= 0) { if (e.key === 'Enter') e.preventDefault(); pickOldProduct(oldActive); }
-      } else if (e.key === 'Escape') {
-        oldSuggest.style.display = 'none';
-      }
-    });
   }
 
   // How many times we've waited for the products catalog for the current ad.
@@ -3133,13 +3138,11 @@ function renderOrdersForm() {
     }
   });
 
-  // Reset the returned-product selection for this fresh form, and let updateCart
-  // (module scope) refresh the trade-in difference hint whenever the cart changes.
-  window.__akmezOldProduct = null;
-  window.__akmezDeliveredOk = false;
-  window.__akmezDeliveredState = 'idle';
-  window.__akmezOnCartChange = updateOldProdHint;
-  updateSalesTypeUI();
+  // Must stay, even though nothing here hooks the cart any more: the ad-linkage
+  // block below chains onto whatever is already in __akmezOnCartChange, so
+  // without this per-render reset every re-render would wrap the previous
+  // wrapper and the chain would grow for the life of the tab.
+  window.__akmezOnCartChange = null;
   updateCart();
   document.getElementById('ak-submit').onclick = submitOrder;
 
@@ -3519,7 +3522,7 @@ function renderOrdersForm() {
       if (fix) fix.onclick = () => {
         const match = products.find(p => p.id === linked.id);
         if (!match) { toast('That product is not in your list'); return; }
-        cart = {};
+        cart = {}; cartFree = {};
         cartFromAd = {};
         cart[match.id] = 1;
         updateCart();
@@ -3809,28 +3812,65 @@ function renderOrdersForm() {
 //     discount, so the client pays full unit price for every unit ordered.
 //   - Bundle prices e.g. { "2": 775 }: "2 for 775". Uses DP to find the
 //     cheapest combination of bundles + singles for the chosen quantity.
+function akmezTiers(p) {
+  const bp = p && p.bundle_prices && typeof p.bundle_prices === 'object' ? p.bundle_prices : null;
+  if (!bp) return [];
+  return Object.keys(bp)
+    .map(k => ({ n: parseInt(k, 10), price: parseFloat(bp[k]) }))
+    .filter(t => t.n > 0 && t.price > 0);
+}
+
+// Units in one sellable set, or 0 when the product is sold singly.
+// MIRRORS setSize() in lib/orders/quick-order.ts - keep both in step.
+// No single price + a bundle tier is the owner's existing "sold only in sets"
+// convention: Cozy Stool {"4":1075}, Microfiber Towel {"6":475}.
+function akmezSetSize(p) {
+  if ((parseFloat(p && p.price) || 0) > 0) return 0;
+  const tiers = akmezTiers(p);
+  if (!tiers.length) return 0;
+  return Math.min.apply(null, tiers.map(t => t.n));
+}
+
 function akmezPriceFor(p, q) {
   q = Math.max(0, parseInt(q, 10) || 0);
   if (q === 0 || !p) return 0;
   const unit = parseFloat(p.price) || 0;
   // Note: B1G1 does NOT discount the price - the free unit is bonus stock
   // shipped, so the client still pays full unit price for every unit ordered.
-  const bp = p.bundle_prices && typeof p.bundle_prices === 'object' ? p.bundle_prices : null;
-  if (bp) {
-    const tiers = Object.keys(bp)
-      .map(k => ({ n: parseInt(k, 10), price: parseFloat(bp[k]) }))
-      .filter(t => t.n > 0 && t.price > 0);
-    if (tiers.length) {
-      const cost = new Array(q + 1).fill(Infinity);
-      cost[0] = 0;
-      for (let i = 1; i <= q; i++) {
-        cost[i] = cost[i - 1] + unit; // one more at unit price
-        for (const t of tiers) {
-          if (t.n <= i && cost[i - t.n] + t.price < cost[i]) cost[i] = cost[i - t.n] + t.price;
-        }
+  const tiers = akmezTiers(p);
+  const set = akmezSetSize(p);
+
+  // SET-ONLY PRODUCTS QUOTED RS 0 HERE TOO. With price 0 the "one more at unit
+  // price" step below costs nothing, so the DP bought singles for free and
+  // every quantity came back Rs 0 - all 8 set products, at every quantity
+  // including the correct set size. Singles are not purchasable when there is
+  // no single price: charge for the cheapest whole SETS covering the quantity,
+  // so asking for 1 of a set of 4 still pays for the whole set.
+  if (set > 0) {
+    const biggest = Math.max.apply(null, tiers.map(t => t.n));
+    const cap = q + biggest;
+    const cost = new Array(cap + 1).fill(Infinity);
+    cost[0] = 0;
+    for (let i = 1; i <= cap; i++) {
+      for (const t of tiers) {
+        if (t.n <= i && cost[i - t.n] + t.price < cost[i]) cost[i] = cost[i - t.n] + t.price;
       }
-      if (isFinite(cost[q])) return cost[q];
     }
+    let best = Infinity;
+    for (let i = q; i <= cap; i++) if (cost[i] < best) best = cost[i];
+    return isFinite(best) ? best : 0;
+  }
+
+  if (tiers.length) {
+    const cost = new Array(q + 1).fill(Infinity);
+    cost[0] = 0;
+    for (let i = 1; i <= q; i++) {
+      cost[i] = cost[i - 1] + unit; // one more at unit price
+      for (const t of tiers) {
+        if (t.n <= i && cost[i - t.n] + t.price < cost[i]) cost[i] = cost[i - t.n] + t.price;
+      }
+    }
+    if (isFinite(cost[q])) return cost[q];
   }
   return unit * q;
 }
@@ -3839,11 +3879,12 @@ function akmezPriceFor(p, q) {
 function akmezOfferLabel(p) {
   if (!p) return '';
   if (p.is_b1g1) return 'B1G1';
-  const bp = p.bundle_prices && typeof p.bundle_prices === 'object' ? p.bundle_prices : null;
-  if (bp) {
-    const keys = Object.keys(bp).map(k => parseInt(k, 10)).filter(n => n > 0).sort((a, b) => a - b);
-    if (keys.length) { const n = keys[0]; return n + ' for Rs' + Math.round(parseFloat(bp[String(n)])); }
-  }
+  // A set is packaging, not a discount - "4 for Rs1075" reads as an optional
+  // deal on something you could also buy singly, which these cannot be.
+  const set = akmezSetSize(p);
+  if (set > 0) return 'Set of ' + set;
+  const tiers = akmezTiers(p).sort((a, b) => a.n - b.n);
+  if (tiers.length) return tiers[0].n + ' for Rs' + Math.round(tiers[0].price);
   return '';
 }
 
@@ -3902,8 +3943,11 @@ document.addEventListener('mouseout', e => {
 });
 
 // Small helper to render a product thumbnail (or a placeholder square)
-function akmezThumb(p, cls) {
-  const url = p && p.image_url ? p.image_url : '';
+// `variant` is optional. When the agent picked a specific model its own photo
+// wins over the product's - otherwise every model of a watch shows the same
+// generic picture in the cart and the agent cannot tell the lines apart.
+function akmezThumb(p, cls, variant) {
+  const url = (variant && variant.image_url) ? variant.image_url : (p && p.image_url ? p.image_url : '');
   if (url) return '<img src="' + url + '" alt="" class="' + cls + '" data-img="' + url.replace(/"/g, '&quot;') + '">';
   return '<span class="' + cls + ' placeholder"></span>';
 }
@@ -3957,11 +4001,27 @@ function akmezCartResolve(key) {
   let variant = null;
   if (vid && Array.isArray(p.variants)) variant = p.variants.find(v => v.id === vid) || null;
   let priced = p;
-  const hasOverride = variant && variant.price_override != null && variant.price_override !== '';
-  if (hasOverride) {
-    priced = Object.assign({}, p, { price: variant.price_override, bundle_prices: null, is_b1g1: false });
+  // A model price replaces the price and the parent's qty bundle tiers (those
+  // tiers are multiples of the base price), but it does NOT cancel B1G1: what a
+  // unit COSTS and whether a second is GIVEN are different facts. Forcing
+  // is_b1g1 false here is why every Crrju Watch model - all 10 carry an
+  // override - lost the offer and never showed the free-model picker.
+  // A non-positive override is not a price (W-008 is stored as -1375.00), so it
+  // falls back to the parent price instead of booking a negative sale.
+  const ovr = variant && variant.price_override != null && variant.price_override !== ''
+    ? Number(variant.price_override) : NaN;
+  if (Number.isFinite(ovr) && ovr > 0) {
+    priced = Object.assign({}, p, { price: variant.price_override, bundle_prices: null });
   }
-  const label = variant ? (p.name + ' - ' + variant.attribute_value) : p.name;
+  // Set size only when there is no variant: "Cozy Stool - Blue" but
+  // "Mirror Film - Set of 4". Matches the dashboard's orderTextFor and what
+  // agents already write (Cozy Stool 0/20 carry the set, Welding Rod 100/100).
+  // Read off the PARENT, not `priced` - a model override blanks bundle_prices,
+  // which is where the set size is derived from.
+  var setN = variant ? 0 : akmezSetSize(p);
+  const label = variant
+    ? (p.name + ' - ' + variant.attribute_value)
+    : (setN > 0 ? p.name + ' - Set of ' + setN : p.name);
   return { p, variant, priced, label };
 }
 
@@ -4019,7 +4079,7 @@ function akmezCartGuard() {
   if (cartOwner === key) return;                       // same chat, keep the cart
   cartOwner = key;
   if (Object.keys(cart).length) {
-    cart = {};
+    cart = {}; cartFree = {};
     cartFromAd = {};
     try { updateCart(); } catch (e) { /* panel not built yet */ }
   }
@@ -4033,6 +4093,12 @@ function updateCart() {
   // product is in the cart and come back if the agent removes it again.
   if (typeof window.__akmezRenderAdProductHint === 'function') {
     setTimeout(window.__akmezRenderAdProductHint, 0);
+  }
+  // The duplicate flag compares the cart against the client's open orders, so
+  // it only becomes true once a product is added - it has to be recomputed here
+  // rather than only when the phone number changes.
+  if (typeof window.__akmezRenderOpenOrders === 'function') {
+    setTimeout(window.__akmezRenderOpenOrders, 0);
   }
   // The "live ad for this product" offer is derived from the cart, so it has to
   // be recomputed whenever the products change.
@@ -4066,12 +4132,49 @@ function updateCart() {
       : `Rs ${line.toFixed(0)}`;
     // For variants show the attribute (e.g. colour) as a small chip under the name
     const varTag = r.variant ? ` <span class="akmez-var-tag">${String(r.variant.attribute_value).replace(/</g, '&lt;')}</span>` : '';
+
+    // B1G1 = a second unit of THE SAME product, never a different one. The only
+    // open question is WHICH MODEL of it, so the dropdown lists this product's
+    // own models and nothing else. A product with no models has no question to
+    // ask: the free unit is implied and is added automatically on submit, so no
+    // picker is drawn and the agent cannot forget to set it.
+    let freeHtml = '';
+    const freeOpts = (priced.is_b1g1 && Array.isArray(r.p.variants)) ? r.p.variants : [];
+    if (priced.is_b1g1 && freeOpts.length) {
+      const chosen = cartFree[id] || '';
+      const esc = s => String(s).replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      // Same rule as the model chips: 0 means uncounted, so it must never read
+      // as "sold out" and must never be unselectable.
+      const opts = freeOpts.map(v => {
+        const known = v.quantity != null && Number(v.quantity) > 0;
+        return `<option value="${v.id}"${v.id === chosen ? ' selected' : ''}>${esc(v.attribute_value)}${known ? ` (${Number(v.quantity)} left)` : ''}</option>`;
+      }).join('');
+      // One free unit PER PAID UNIT, so say the count out loud - the agent is
+      // reading this to the client and "Free model" alone hides that qty 2
+      // ships four watches.
+      freeHtml = `
+        <div class="akmez-free-pick">
+          <span class="akmez-free-lbl">Free model${q > 1 ? ` &times;${q}` : ''}</span>
+          <select class="akmez-free-sel" data-id="${id}">
+            <option value="">Choose free model...</option>
+            ${opts}
+          </select>
+        </div>`;
+    } else if (priced.is_b1g1) {
+      freeHtml = `
+        <div class="akmez-free-pick">
+          <span class="akmez-free-lbl">Free item</span>
+          <span class="akmez-free-auto">+${q} ${r.p.name.replace(/</g, '&lt;')} free</span>
+        </div>`;
+    }
+
     return `
       <div class="akmez-cart-item" data-id="${id}">
-        ${akmezThumb(r.p, 'akmez-cart-thumb')}
+        ${akmezThumb(r.p, 'akmez-cart-thumb', r.variant)}
         <div class="akmez-cart-item-info">
           <div class="akmez-cart-item-name">${r.p.name.replace(/</g, '&lt;')}${varTag}</div>
           <div class="akmez-cart-item-price">${priceHtml}</div>
+          ${freeHtml}
         </div>
         <div class="akmez-qty">
           <button class="akmez-qty-btn" data-act="dec" data-id="${id}">-</button>
@@ -4095,6 +4198,15 @@ function updateCart() {
     };
   });
 
+  // Remember the chosen free model. Not a re-render: repainting the cart on
+  // every change would close the dropdown mid-choice.
+  list.querySelectorAll('.akmez-free-sel').forEach(sel => {
+    sel.onchange = () => {
+      if (sel.value) cartFree[sel.dataset.id] = sel.value;
+      else delete cartFree[sel.dataset.id];
+    };
+  });
+
   // Clicking a cart thumbnail enlarges the product photo
   list.querySelectorAll('.akmez-cart-thumb[data-img]').forEach(img => {
     img.onclick = () => akmezShowImage(img.getAttribute('data-img'), '');
@@ -4104,7 +4216,8 @@ function updateCart() {
   c.querySelector('.items').textContent = qty + ' item' + (qty !== 1 ? 's' : '');
   c.querySelector('.total').textContent = 'Rs ' + amt.toFixed(0);
 
-  // Keep the Trade In price-difference hint in sync with the cart total
+  // Cart-change hook. The trade-in difference hint that used to ride on this is
+  // gone, but the ad-linkage block still chains onto it - keep the call.
   if (typeof window.__akmezOnCartChange === 'function') window.__akmezOnCartChange();
 }
 
@@ -4133,6 +4246,8 @@ function submitOrder() {
   }
 
   const entries = Object.entries(cart).filter(([,q]) => q > 0);
+  // Refund was the one type that legitimately shipped nothing, and it no longer
+  // lives here - every order raised from a chat now carries goods out.
   if (!entries.length) {
     err.textContent = 'Please select at least one product';
     err.style.display = 'block';
@@ -4146,6 +4261,25 @@ function submitOrder() {
   //
   // A mismatch is still worth one confirmation click: clients do change their
   // mind mid-chat, but a wrong ad silently misprices a whole campaign.
+  // Same client already has an open order for a product in this cart. Two
+  // agents did exactly this 55 minutes apart, so it costs one confirming
+  // click - but it is never a hard block: a client really can order the same
+  // item twice, and refusing outright would make that impossible.
+  const dupes = typeof window.__akmezOpenOrderDupes === 'function'
+    ? window.__akmezOpenOrderDupes()
+    : [];
+  if (dupes.length) {
+    const sig = c1 + '|' + Object.entries(cart).filter(([, q]) => q > 0).map(([id, q]) => id + 'x' + q).sort().join(',');
+    if (window.__akmezDupOk !== sig) {
+      window.__akmezDupOk = sig;
+      const who = dupes[0].agent ? ` by ${dupes[0].agent}` : '';
+      err.textContent = `This client already has an open order for this product, taken${who}. Check the red panel above - press Create Order again if it is genuinely a new order.`;
+      err.style.display = 'block';
+      btn.textContent = 'Confirm duplicate';
+      return;
+    }
+  }
+
   const matchState = typeof window.__akmezAdMatchState === 'function'
     ? window.__akmezAdMatchState()
     : 'ok';
@@ -4163,20 +4297,68 @@ function submitOrder() {
   // Build one line per product so the server can create a separate delivery
   // entry for each. Each carries its own name (with B1G1 flag), quantity and
   // line amount (after B1G1 / bundle pricing).
-  const productLines = entries.map(([key, q]) => {
+  // Not const: a refund clears these, since nothing leaves the warehouse.
+  let productLines = entries.map(([key, q]) => {
     const r = akmezCartResolve(key);
     if (!r) return null;
     // r.label already includes the chosen variety (e.g. "M8 Smartband - Red").
     // Flag B1G1 so the picking list shows the offer.
     return {
       name: r.priced.is_b1g1 ? r.label + ' - B1G1' : r.label,
+      // Stock resolves a row by product_id first and only falls back to an
+      // EXACT name match. "Watch - W-001 - B1G1" matches no product row, which
+      // is why B1G1 sales have never come off the shelf. Sending the id fixes
+      // that for every new order, variant or not.
+      productId: r.p.id,
       qty: q,
       amount: akmezPriceFor(r.priced, q),
     };
   }).filter(Boolean);
 
-  // Aggregate string / totals kept for Exchange & Trade In (order-level amount)
-  const prods = productLines.map(l => l.name).join(', ');
+  // The B1G1 free units, as their own lines. They carry no price and are NOT
+  // added into qty/amt: the client pays for one, and the paid line already
+  // holds the whole charge. `parentName` ties each gift to the line that
+  // earned it so the server can link the two rows together.
+  const missingFree = [];
+  let freeLines = entries.map(([key, q]) => {
+    const r = akmezCartResolve(key);
+    if (!r || !r.priced.is_b1g1) return null;
+    // The gift is always a second unit of the SAME product. When the product
+    // has models the agent must say which one; when it has none the free unit
+    // is unambiguous, so it is emitted without anyone having to pick it.
+    const opts = Array.isArray(r.p.variants) ? r.p.variants : [];
+    const vid = cartFree[key];
+    const fv = opts.length ? opts.find(v => v.id === vid) : null;
+    // Never drop the gift quietly - an unanswered model question has to stop
+    // the order, or the client is promised a free unit that no row records.
+    if (opts.length && !fv) { missingFree.push(r.p.name); return null; }
+    // The offer is one free unit PER PAID UNIT ("buy one get one", one by one),
+    // so the gift quantity tracks the paid quantity - qty 2 ships 4. This was
+    // hardcoded to a single free unit, so a client buying 2 was given 1 and
+    // one free watch was never recorded or deducted from stock.
+    const fq = Math.max(1, parseInt(q, 10) || 1);
+    return {
+      // Named exactly like the paid line - same set-only-when-no-variant rule -
+      // so the gifted row refers to the same sellable thing and the two cannot
+      // disagree about what is being shipped.
+      name:
+        (fv
+          ? r.p.name + ' - ' + fv.attribute_value
+          : (akmezSetSize(r.p) > 0 ? r.p.name + ' - Set of ' + akmezSetSize(r.p) : r.p.name)) +
+        ' - B1G1 FREE',
+      productId: r.p.id,
+      qty: fq,
+      parentName: r.label + ' - B1G1',
+    };
+  }).filter(Boolean);
+
+  if (missingFree.length) {
+    toast('Choose the free model for: ' + missingFree.join(', '));
+    return;
+  }
+
+  // Order-level aggregate string and totals, alongside the itemised lines
+  let prods = productLines.map(l => l.name).join(', ');
   let qty = 0, amt = 0;
   productLines.forEach(l => { qty += l.qty; amt += l.amount; });
   
@@ -4184,60 +4366,18 @@ function submitOrder() {
   // matching the import sheet. Falls back to "Extension" server-side if unknown.
   const pageCode = (window.__akmezDetectedPage && window.__akmezDetectedPage.code) || null;
 
-  // Selected sales type pill (sale / exchange / trade_in / refund / drop_off)
+  // Selected sales type pill. Only `sale` and `drop_off` can be raised here -
+  // both are ordinary outgoing orders, so there is no settlement to compute.
+  // Exchange / trade-in / refund moved to the dashboard Overview, where the
+  // agent already has the delivered order in front of them.
   const stActive = document.querySelector('#ak-salestype .akmez-st-pill.active');
   const salesType = stActive ? stActive.dataset.st : 'sale';
 
-  // Agent-typed note (shown for every sales type). Merged with any auto-generated
-  // exchange / trade-in note below.
-  const agentNote = (document.getElementById('ak-notes')?.value || '').trim();
-
-  // Exchange / Trade In carry the returned product (in notes + return_product)
-  // and adjust the amount charged.
-  let notes = agentNote || null;
-  let returnProduct = null;
-  if (salesType === 'exchange' || salesType === 'trade_in') {
-    // Gate: only genuine past customers (with a delivered order) may exchange / trade in
-    if (window.__akmezDeliveredOk !== true) {
-      const kind = salesType === 'exchange' ? 'Exchange' : 'Trade In';
-      err.textContent = window.__akmezDeliveredState === 'loading'
-        ? 'Still verifying the delivery history, please wait a moment...'
-        : 'This client has no delivered order in our database - ' + kind + ' is only allowed for past customers.';
-      err.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Create Order';
-      return;
-    }
-    const oldP = window.__akmezOldProduct;
-    if (!oldP || !oldP.name) {
-      err.textContent = salesType === 'exchange'
-        ? 'Select the defective product being returned'
-        : 'Select the product the client is trading in';
-      err.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Create Order';
-      return;
-    }
-    returnProduct = oldP.name;
-    if (salesType === 'exchange') {
-      // Defective unit swapped for the same product - no charge
-      amt = 0;
-      notes = 'Exchange (defective) - returned: ' + oldP.name;
-    } else {
-      // Trade In - client pays only the price difference (never negative)
-      const oldPrice = parseFloat(oldP.price) || 0;
-      const diff = Math.max(0, amt - oldPrice);
-      amt = diff;
-      notes = 'Trade In - returned: ' + oldP.name + ' (Rs ' + oldPrice.toFixed(0) + ')'
-        + (diff > 0 ? ' | difference paid: Rs ' + diff.toFixed(0) : ' | no difference');
-    }
-    // Keep the agent's own note alongside the auto-generated return note
-    if (agentNote) notes = agentNote + ' | ' + notes;
-  }
+  const notes = (document.getElementById('ak-notes')?.value || '').trim() || null;
 
   chrome.runtime.sendMessage({
     action: 'createOrder',
-    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, productLines, adId, pageCode, salesType, notes, returnProduct }
+    data: { customerName: name, contact1: c1, contact2: c2, region, deliveryDate: date, products: prods, qty, amount: amt, productLines, freeLines, adId, pageCode, salesType, notes }
   }, response => {
     if (!response || !response.success) {
       err.textContent = 'Connection failed';
@@ -4273,7 +4413,7 @@ function submitOrder() {
     // the "New Order" button. The agent normally just clicks the next chat in
     // Messenger instead of that button, and the products used to survive into
     // the new client's form.
-    cart = {};
+    cart = {}; cartFree = {};
     cartFromAd = {};
     cartOwner = null;
 
@@ -4326,7 +4466,7 @@ function submitOrder() {
       };
     });
     document.getElementById('ak-new').onclick = () => {
-      cart = {};
+      cart = {}; cartFree = {};
       cartFromAd = {};
       cartOwner = null;   // re-adopt whichever chat is open now
       renderOrdersForm();

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import type { DeliveryStatus } from './types'
 import { createRegionResolver } from './region-resolver'
 import { syncContractorStock, getContractorIdFromDelivery } from '@/lib/stock-actions'
+import { canonicalMethod, splitForMethod } from '@/lib/payment-method'
 
 /** Revalidate all delivery-related pages so data stays in sync */
 function revalidateAllDeliveryPaths() {
@@ -733,24 +734,44 @@ export async function updateDeliveryPrice(deliveryId: string, amount: number) {
     return { error: 'Only admins can edit delivery prices' }
   }
   
-  // Get current delivery to track original price
+  // Get current delivery to track original price. `payment_method` is needed
+  // too - see the split sync below.
   const { data: delivery, error: fetchError } = await adminDb
     .from('deliveries')
-    .select('amount, original_amount, is_modified')
+    .select('amount, original_amount, is_modified, payment_method')
     .eq('id', deliveryId)
     .single()
-  
-  console.log('[v0] Fetched delivery:', delivery, 'error:', fetchError)
-  
+
+  // Without the current row we cannot preserve `original_amount` or move the
+  // payment split, and writing the new price anyway would lose the old one and
+  // desync the money. Fail instead of half-applying the edit.
+  if (fetchError || !delivery) {
+    return { error: `Could not load the order to reprice: ${fetchError?.message ?? 'not found'}` }
+  }
+
   const updateData: Record<string, unknown> = {
     amount,
     is_modified: true,
     updated_at: new Date().toISOString(),
   }
-  
+
   // Store original amount if this is the first modification
-  if (delivery && !delivery.is_modified) {
+  if (!delivery.is_modified) {
     updateData.original_amount = delivery.amount || 0
+  }
+
+  // `amount` is only the TOTAL. The money itself lives in the three split
+  // columns (payment_cash / payment_juice / payment_bank), and every cash count
+  // and juice transfer sums the SPLIT, not the total. Writing `amount` alone
+  // left the two contradicting each other - one contractor came up Rs 1,450
+  // short and a Rs 13,873 juice transfer summed to Rs 3,898.
+  //
+  // Guarded on `method` because canonicalMethod() returns null for the NULL
+  // payment_method that every undelivered order carries. Splitting those would
+  // stamp a payment onto an order nobody has collected yet.
+  const method = canonicalMethod(delivery.payment_method)
+  if (method) {
+    Object.assign(updateData, splitForMethod(method, amount))
   }
   
   console.log('[v0] Updating with:', updateData)
