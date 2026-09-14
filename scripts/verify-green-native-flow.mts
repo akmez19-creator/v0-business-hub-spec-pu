@@ -118,6 +118,19 @@ async function webhook(waId: string, direction: 'in' | 'out', text: string, seco
   history.set(chatId, recs)
   return idMessage
 }
+/** The provider's live webhooks are DOWN: the message reaches us only through the journal poll (production shape:
+ * `type`, `sendByApi`, `statusMessage`, no trustworthy time) and, on the next pass, the fresh history snapshot. */
+async function journal(waId: string, direction: 'in' | 'out', text: string, secondsAgo: number, opts: { api?: boolean; idMessage?: string } = {}) {
+  const idMessage = opts.idMessage ?? 'JRN' + String(++seq).padStart(8, '0'), timestamp = await nextStamp(secondsAgo), chatId = waId + '@c.us'
+  const raw = { type: direction === 'in' ? 'incoming' : 'outgoing', chatId, idMessage, timestamp, typeMessage: 'textMessage', textMessage: text, isEdited: false, isDeleted: false,
+    sendByApi: direction === 'out' && !!opts.api, statusMessage: direction === 'in' ? 'delivered' : 'sent', editedMessageId: '' }
+  await store.ingest(binding, normalise.normaliseHistory(binding, raw, new Date().toISOString(), 'journal'))
+  await db.query("update public.whatsapp_green_bindings set connection_state='authorized',last_reconcile_at=clock_timestamp(),last_error=null where phone_number_id=$1", [PHONE])
+  const recs = history.get(chatId) ?? []
+  recs.push({ type: raw.type as Rec['type'], idMessage, timestamp, chatId, typeMessage: 'textMessage', textMessage: text, ...(raw.sendByApi ? { sendByApi: true } : {}) })
+  history.set(chatId, recs)
+  return idMessage
+}
 // --- real runtime with production-shaped wiring ---------------------------------------------------------------
 const products: CatalogueProduct[] = [
   { id: '11111111-1111-4111-8111-111111111111', name: 'Air Fryer', price: 1500, bundle_prices: null, is_b1g1: false, sold_out: false, has_variants: false } as CatalogueProduct,
@@ -318,9 +331,59 @@ await test('daily budget exhausted: reservation fails inside the intent transact
   await webhook(F, 'in', 'Air Fryer price?', 0)
   decisionFor = ctx => priceDecision(ctx, products[0].id, 'Air Fryer')
   const out = await runtime.runScope(scopeFor(F))
+  await scheduleModule.recordNativePass(db, scopeFor(F), (await one('select provider_message_id from public.whatsapp_green_messages where wa_id=$1', [F])).provider_message_id, out)
   assert.deepEqual(out, { state: 'needs_review', reason: 'daily_budget_exhausted' }); assert.equal(sentBodies.length, sends)
   assert.equal(await count('inbox_autopilot_green_sends', 'wa_id=$1', [F]), 0)
   await db.query('update public.inbox_autopilot_config set max_daily_replies=30,version=version+1 where business_code=$1', [CODE])
+})
+
+const H = '23057000008'
+let hSentText = ''
+await test('webhooks down, journal only (14 Sep production shape): the inbound is witnessed and ONE reply goes out', async () => {
+  const sends = sentBodies.length, calls = classifyCalls
+  const inboundId = await journal(H, 'in', 'Bonjour, prix du Sweeping Robot svp?', 45)
+  assert.equal(await count('whatsapp_green_events', "wa_id=$1 and origin='webhook'", [H]), 0, 'no webhook ever arrived for H')
+  assert.equal(await count('whatsapp_green_events', "wa_id=$1 and origin='journal' and state='processed'", [H]), 1)
+  // A journal record carries no trusted time: the row exists but is untimed, so the selector cannot see it yet.
+  assert.equal((await one('select provider_accepted_at from public.whatsapp_green_messages where wa_id=$1', [H])).provider_accepted_at, null)
+  assert.equal(await pick(), null, 'untimed inbound is invisible to selection')
+  // The reconcile job's history step (real store method) names the chat, then the snapshot supplies the time.
+  assert.deepEqual(await store.historyCandidates(binding, 8), [H + '@c.us'])
+  for (const rec of history.get(H + '@c.us')!) await store.ingest(binding, normalise.normaliseHistory(binding, rec, new Date().toISOString(), 'history'))
+  assert.deepEqual(await store.historyCandidates(binding, 8), [], 'timed rows leave the candidate list')
+  const cand = await pick(); assert.equal(cand?.waId, H); assert.equal(cand!.inboundMessageId, inboundId)
+  decisionFor = ctx => priceDecision(ctx, products[1].id, 'Sweeping Robot')
+  const out = await runtime.runScope(scopeFor(H))
+  await scheduleModule.recordNativePass(db, scopeFor(H), inboundId, out)
+  assert.equal(out.state, 'accepted', JSON.stringify(out)); assert.equal(out.reason, 'catalogue_price')
+  assert.equal(classifyCalls, calls + 1); assert.equal(sentBodies.length, sends + 1)
+  hSentText = sentBodies.at(-1)!.body.message
+  assert.equal(sentBodies.at(-1)!.body.chatId, H + '@c.us'); assert.match(hSentText, /Sweeping Robot/); assert.match(hSentText, /Rs 2,200/)
+  const job = await one('select * from public.inbox_autopilot_green_jobs where wa_id=$1', [H])
+  const journalEvent = await one("select event_key from public.whatsapp_green_events where wa_id=$1 and origin='journal' and provider_message_id=$2", [H, inboundId])
+  assert.equal(job.state, 'accepted'); assert.equal(job.inbound_message_id, inboundId); assert.equal(job.inbound_event_key, journalEvent.event_key, 'the journal record is the witness of record')
+  const send = await one('select state,inbound_event_key,provider_message_id from public.inbox_autopilot_green_sends where wa_id=$1', [H])
+  assert.deepEqual(send, { state: 'accepted', inbound_event_key: journalEvent.event_key, provider_message_id: sentBodies.at(-1)!.body.idMessage ?? send.provider_message_id })
+})
+
+await test('journal-only staff reply typed on the phone (sendByApi false) is still NOT ours: next inbound is held for staff', async () => {
+  const sends = sentBodies.length, calls = classifyCalls
+  // The provider echoes OUR send under the id sendMessage returned; the phone reply is a different id with sendByApi false.
+  const ownId = (await one('select provider_message_id from public.inbox_autopilot_green_sends where wa_id=$1', [H])).provider_message_id
+  assert.equal(ownId, 'BAE5QA000003')
+  await journal(H, 'out', hSentText, 30, { api: true, idMessage: ownId })
+  await journal(H, 'out', 'Je vous appelle tout de suite', 20)
+  await journal(H, 'in', 'Ok merci', 10)
+  for (const rec of history.get(H + '@c.us')!) await store.ingest(binding, normalise.normaliseHistory(binding, rec, new Date().toISOString(), 'history'))
+  assert.equal((await pick())?.waId, H, 'the new inbound is selectable once timed')
+  const out = await runtime.runScope(scopeFor(H))
+  // The real handover reconciler reads the journal too: the phone reply becomes a held handover and the
+  // controls gate closes before any context evaluation - the same protection webhooks used to give.
+  assert.deepEqual(out, { state: 'needs_review', reason: 'native_controls_unavailable' })
+  const held = await one("select native_message_id,disposition from public.inbox_autopilot_handoff_events where customer_id=$1 and disposition<>'proven_bot'", [H])
+  assert.deepEqual(held, { native_message_id: 'JRN00000013', disposition: 'held' }, 'the phone-typed reply, not our echo, is the held handover')
+  assert.equal(classifyCalls, calls, 'no model call'); assert.equal(sentBodies.length, sends, 'no second send')
+  assert.equal(await count('inbox_autopilot_green_sends', 'wa_id=$1', [H]), 1)
 })
 
 await test('no Meta-side tables were written by the whole native flow', async () => {
@@ -330,8 +393,9 @@ await test('no Meta-side tables were written by the whole native flow', async ()
   // must be proven ours; the Business Suite reply to A must be a held handover; nothing may come from Meta.
   const ledger = (await db.query("select customer_id,source,native_message_id,disposition from public.inbox_autopilot_handoff_events order by native_message_id")).rows
   assert.ok(ledger.length > 0, 'the real reconciler wrote nothing'); assert.ok(ledger.every(r => r.source === 'green_whatsapp'))
-  assert.deepEqual(ledger.filter(r => r.disposition === 'proven_bot').map(r => r.native_message_id), ['BAE5QA000001', 'BAE5QA000002'], 'exactly the two accepted own sends echoed by the provider')
-  assert.deepEqual(ledger.filter(r => r.disposition !== 'proven_bot').map(r => [r.customer_id, r.disposition]), [[A, 'held']])
+  console.log('      ledger:', JSON.stringify(ledger.map(r => [r.customer_id, r.native_message_id, r.disposition])))
+  assert.deepEqual(ledger.filter(r => r.disposition === 'proven_bot').map(r => r.native_message_id), ['BAE5QA000001', 'BAE5QA000002', 'BAE5QA000003'], 'exactly the three accepted own sends echoed by the provider (H via journal only)')
+  assert.deepEqual(ledger.filter(r => r.disposition !== 'proven_bot').map(r => [r.customer_id, r.disposition]), [[H, 'held'], [A, 'held']], 'Business Suite reply to A and the phone-typed journal reply to H are both held handovers')
   assert.equal(await count('inbox_autopilot_handoff_observations'), 0)
 })
 

@@ -2,7 +2,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { validateGreenBinding, GREEN_CLIENT_LIMITS } from '@/lib/whatsapp-green/client'
 import { GREEN_SCOPES, type GreenBinding } from '@/lib/whatsapp-green/contract'
-import { normaliseWebhook, stableGreenJson, greenHash } from '@/lib/whatsapp-green/normalise'
+import { normaliseWebhook, normaliseHistory, stableGreenJson, greenHash } from '@/lib/whatsapp-green/normalise'
 
 export type GreenSendScope = { businessKey: 'made_by_moris' | 'destockage'; channel: 'whatsapp'; phoneNumberId: string; waId: string }
 export type GreenSendInput = { scope: GreenSendScope; inboundMessageId: string; inboundEventKey: string;
@@ -57,15 +57,23 @@ const view = (row: Record<string, any>, dispatched: boolean, savedLocally = true
  * No journal last-action timestamp, text similarity or Meta-ID conversion. */
 export function verifiedNativeEvent(row: Record<string, any>, binding: GreenBinding, direction: 'in' | 'out') {
   try {
-    if (row.origin !== 'webhook' || row.state !== 'processed' || row.reason != null || row.phone_number_id !== binding.phoneNumberId ||
+    if (!['webhook', 'journal'].includes(row.origin) || row.state !== 'processed' || row.reason != null || row.phone_number_id !== binding.phoneNumberId ||
       row.instance_id !== binding.instanceId || !Number.isFinite(utc(row.received_at))) return null
     const raw = stableGreenJson(row.raw)
-    if (Buffer.byteLength(raw) > 1024 * 1024 || greenHash(raw) !== row.payload_hash || greenHash('webhook\0' + row.payload_hash) !== row.event_key) return null
-    const event = normaliseWebhook(binding, row.raw, new Date(utc(row.received_at)).toISOString()), o = event.observation
+    if (Buffer.byteLength(raw) > 1024 * 1024 || greenHash(raw) !== row.payload_hash || greenHash(row.origin + '\0' + row.payload_hash) !== row.event_key) return null
+    const receivedAt = new Date(utc(row.received_at)).toISOString()
+    const event = row.origin === 'webhook' ? normaliseWebhook(binding, row.raw, receivedAt) : normaliseHistory(binding, row.raw, receivedAt, 'journal'), o = event.observation
     if (!o || o.direction !== direction || o.kind !== 'text' || !o.text || o.edited || event.quarantineReason ||
       event.eventKey !== row.event_key || event.eventType !== row.event_type || o.providerMessageId !== row.provider_message_id ||
-      o.providerChatId !== row.provider_chat_id || o.waId !== row.wa_id || !event.providerTimestamp ||
-      utc(event.providerTimestamp) !== utc(row.provider_timestamp) || event.eventType !== (direction === 'in' ? 'incomingMessageReceived' : 'outgoingAPIMessageReceived')) return null
+      o.providerChatId !== row.provider_chat_id || o.waId !== row.wa_id) return null
+    if (row.origin === 'webhook') {
+      if (!event.providerTimestamp || utc(event.providerTimestamp) !== utc(row.provider_timestamp) ||
+        event.eventType !== (direction === 'in' ? 'incomingMessageReceived' : 'outgoingAPIMessageReceived')) return null
+    } else {
+      // Journal timestamps can be last-action time, so the record proves identity, direction and text only; callers
+      // take the message time from the stored row. An outbound journal record is ours only when the provider says so.
+      if (event.providerTimestamp != null || row.provider_timestamp != null || (direction === 'out' && (row.raw as Record<string, any>)?.sendByApi !== true)) return null
+    }
     return event
   } catch { return null }
 }
@@ -136,8 +144,13 @@ export function createGreenNativeSender(deps: GreenSendDependencies) {
         const inbound = (await db.query('SELECT * FROM public.whatsapp_green_events WHERE phone_number_id=$1 AND instance_id=$2 AND wa_id=$3 AND event_key=$4 AND provider_message_id=$5',
           [binding.phoneNumberId,binding.instanceId,input.scope.waId,input.inboundEventKey,input.inboundMessageId])).rows[0]
         const event = inbound && verifiedNativeEvent(inbound,binding,'in')
-        if (!Number.isFinite(time) || !event?.observation || event.observation.providerChatId !== input.scope.waId + '@c.us' ||
-          utc(event.providerTimestamp) > time || time - utc(event.providerTimestamp) >= 24 * 60 * 60 * 1000) fail('INBOUND_NOT_VERIFIED')
+        // The 24h window is measured from the stored message time, which the history proof pinned; a journal
+        // witness has no time of its own and `utc(null)` is NaN, which would pass every comparison silently.
+        const stored = event && (await db.query("SELECT provider_accepted_at FROM public.whatsapp_green_messages WHERE phone_number_id=$1 AND instance_id=$2 AND wa_id=$3 AND provider_message_id=$4 AND direction='in' AND kind='text'",
+          [binding.phoneNumberId,binding.instanceId,input.scope.waId,input.inboundMessageId])).rows[0]
+        const messageTime = event?.providerTimestamp ? utc(event.providerTimestamp) : utc(stored?.provider_accepted_at)
+        if (!Number.isFinite(time) || !event?.observation || event.observation.providerChatId !== input.scope.waId + '@c.us' || !Number.isFinite(messageTime) ||
+          messageTime > time || time - messageTime >= 24 * 60 * 60 * 1000) fail('INBOUND_NOT_VERIFIED')
         const unresolved = (await db.query("SELECT attempt_id FROM public.inbox_autopilot_green_sends WHERE phone_number_id=$1 AND wa_id=$2 AND state IN ('sending','unknown') LIMIT 1",[binding.phoneNumberId,input.scope.waId])).rows[0]
         if (unresolved) fail('PRIOR_ATTEMPT_UNRESOLVED')
         const recent = (await db.query("SELECT attempt_id FROM public.inbox_autopilot_green_sends WHERE phone_number_id=$1 AND instance_id=$2 AND started_at>clock_timestamp()-interval '1050 milliseconds' LIMIT 1",[binding.phoneNumberId,binding.instanceId])).rows[0]

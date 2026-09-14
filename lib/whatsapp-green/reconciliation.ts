@@ -4,7 +4,7 @@ import { currentHistoryText, normaliseHistory } from './normalise'
 import { GreenReadClient, GreenClientError, GREEN_CLIENT_LIMITS, isGreenChatId, type GreenRecord } from './client'
 
 export const GREEN_RECONCILIATION_LIMITS = Object.freeze({
-  runMs: 50_000, leaseMs: 90_000, overlapMinutes: 10, maxWindowMinutes: 1440, historyChats: 5, storedQuotedEvents: 25,
+  runMs: 50_000, leaseMs: 90_000, overlapMinutes: 10, maxWindowMinutes: 1440, historyChats: 8, storedQuotedEvents: 25,
 })
 
 /** Implement these operations with a database lease and atomic enabled/version checks.

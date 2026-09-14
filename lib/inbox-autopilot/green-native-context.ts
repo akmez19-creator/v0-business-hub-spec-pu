@@ -53,13 +53,21 @@ export function evaluateNativeSnapshot(s:NativeSnapshot):NativeContext {
       else history.set(o.providerMessageId,h)
     }catch{fail('unsupported_history')}
   }
+  /** A witness is an authenticated provider delivery of this exact message: a live webhook, or a journal poll
+   * record fetched with the instance token. Journal records carry no trustworthy message time (their timestamp
+   * can be last-action time) so they prove identity, direction and text only; the time is pinned separately by
+   * the fresh provider-history proof (`history_not_caught_up` requires exact equality with the stored row).
+   * Measured 14 Sep: live webhooks stopped for 15h while the journal kept the inbox complete, and every customer
+   * was sent to staff review because only webhook witnesses counted. */
   const events=new Map<string,Array<{row:Row;event:ReturnType<typeof normaliseWebhook>}>>()
   for(const row of s.events.slice(0,500)){
-    try{if(row.origin!=='webhook'||row.state!=='processed'||row.reason!=null||row.phone_number_id!==b.phoneNumberId||row.instance_id!==b.instanceId||row.wa_id!==s.scope.waId)continue
-      const raw=stableGreenJson(row.raw);if(Buffer.byteLength(raw)>1048576||greenHash(raw)!==row.payload_hash||greenHash('webhook\0'+row.payload_hash)!==row.event_key)continue
-      const event=normaliseWebhook(b,row.raw,new Date(nativeTime(row.received_at)).toISOString()),o=event.observation
+    try{if(!['webhook','journal'].includes(row.origin)||row.state!=='processed'||row.reason!=null||row.phone_number_id!==b.phoneNumberId||row.instance_id!==b.instanceId||row.wa_id!==s.scope.waId)continue
+      const raw=stableGreenJson(row.raw);if(Buffer.byteLength(raw)>1048576||greenHash(raw)!==row.payload_hash||greenHash(row.origin+'\0'+row.payload_hash)!==row.event_key)continue
+      const at=new Date(nativeTime(row.received_at)).toISOString()
+      const event=row.origin==='webhook'?normaliseWebhook(b,row.raw,at):normaliseHistory(b,row.raw,at,'journal'),o=event.observation
       if(!o||event.quarantineReason||o.kind!=='text'||!o.text||o.edited||o.providerChatId!==chat||o.waId!==s.scope.waId||o.providerMessageId!==row.provider_message_id||
-        event.eventKey!==row.event_key||event.eventType!==row.event_type||!exactTime(event.providerTimestamp,row.provider_timestamp))continue
+        event.eventKey!==row.event_key||event.eventType!==row.event_type)continue
+      if(row.origin==='webhook'?!exactTime(event.providerTimestamp,row.provider_timestamp):(event.providerTimestamp!=null||row.provider_timestamp!=null))continue
       const entries=events.get(o.providerMessageId)??[];entries.push({row,event});events.set(o.providerMessageId,entries)
     }catch{/* Invalid evidence never qualifies. */}
   }
@@ -77,8 +85,11 @@ export function evaluateNativeSnapshot(s:NativeSnapshot):NativeContext {
       row.semantic_hash!==nativeDigest([s.scope.waId,row.direction,'text',row.body])||!Number.isFinite(at)||at>s.now){fail('unreadable_context');continue}
     if(!o||o.direction!==row.direction||o.text!==row.body||!exactTime(o.providerAcceptedAt,row.provider_accepted_at))fail('history_not_caught_up')
     if(times.has(at))fail('ambiguous_message_order');times.add(at)
-    const witnesses=(events.get(id)??[]).filter(x=>x.event.observation?.direction===row.direction&&x.event.observation?.text===row.body&&exactTime(x.event.providerTimestamp,row.provider_accepted_at))
+    const witnesses=(events.get(id)??[]).filter(x=>x.event.observation?.direction===row.direction&&x.event.observation?.text===row.body&&
+      (x.event.providerTimestamp==null?x.row.origin==='journal':exactTime(x.event.providerTimestamp,row.provider_accepted_at)))
+    // An outbound journal record counts only when the provider itself marks it as an API send, matching outgoingAPIMessageReceived.
     const live=witnesses.find(x=>x.event.eventType===(row.direction==='in'?'incomingMessageReceived':'outgoingAPIMessageReceived'))
+      ??witnesses.find(x=>x.row.origin==='journal'&&(row.direction==='in'||(x.row.raw as Row)?.sendByApi===true))
     const reviewed=!!e&&at<=nativeTime(e.cutoff)
     if(!reviewed&&!live)fail('live_message_unverified')
     if(row.direction==='out'&&!reviewed){const a=own.get(id);if(!a||a.reply_text!==row.body||!live||h?.raw==null||(h.raw as Row).sendByApi!==true)fail('staff_reply_requires_handover')}
@@ -111,7 +122,7 @@ export async function readNativeContext(db:GreenSendDb,scope:GreenSendScope,bind
     WHERE s.phone_number_id=$1 AND s.wa_id=$2 AND s.enabled=true`,pair)).rows[0]??null
   const proof=(await db.query('SELECT * FROM public.inbox_autopilot_green_history WHERE phone_number_id=$1 AND wa_id=$2 ORDER BY fetched_at DESC,id DESC LIMIT 1',pair)).rows[0]??null
   const rows=(await db.query('SELECT * FROM public.whatsapp_green_messages WHERE phone_number_id=$1 AND wa_id=$2 ORDER BY provider_accepted_at,id LIMIT 100',pair)).rows
-  const events=(await db.query("SELECT * FROM public.whatsapp_green_events WHERE phone_number_id=$1 AND wa_id=$2 AND origin='webhook' ORDER BY received_at DESC,id DESC LIMIT 500",pair)).rows
+  const events=(await db.query("SELECT * FROM public.whatsapp_green_events WHERE phone_number_id=$1 AND wa_id=$2 AND origin IN ('webhook','journal') ORDER BY received_at DESC,id DESC LIMIT 500",pair)).rows
   const attempts=(await db.query('SELECT * FROM public.inbox_autopilot_green_sends WHERE phone_number_id=$1 AND wa_id=$2 ORDER BY started_at LIMIT 100',pair)).rows
   const pending=Number((await db.query("SELECT count(*) AS count FROM public.whatsapp_green_events WHERE phone_number_id=$1 AND (wa_id=$2 OR wa_id IS NULL) AND state='quarantined'",pair)).rows[0]?.count??-1)
   const number=(await db.query('SELECT * FROM public.whatsapp_inbox_numbers WHERE phone_number_id=$1',[scope.phoneNumberId])).rows[0]

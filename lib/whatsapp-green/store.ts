@@ -142,6 +142,18 @@ export class PgGreenStore {
     this.assertCurrent(b)
     return{events,hasMore:rows.length>limit}
   }
+  /** Chats holding readable messages that still have no provider acceptance time. A journal record deliberately
+   * carries no trusted time, so a journal-only message stays untimed until a getChatHistory snapshot arrives -
+   * and untimed rows are invisible to the Autopilot selector (ORDER BY provider_accepted_at ... NULLS LAST,
+   * 24h window). Measured 14 Sep after live webhooks stopped: 317 of 369 inbound messages sat untimed. */
+  async historyCandidates(b:GreenBinding,limit:number):Promise<string[]>{
+    this.assertCurrent(b)
+    if(!Number.isSafeInteger(limit)||limit<1||limit>50)greenFail('HISTORY_CANDIDATE_BUDGET_INVALID')
+    return(await this.db.query(`select m.provider_chat_id from public.whatsapp_green_messages m
+      where m.phone_number_id=$1 and m.instance_id=$2 and m.provider_accepted_at is null and m.kind='text'
+        and not m.conflicted and not m.deleted_observed and m.wa_id ~ '^[0-9]{5,20}$' and m.provider_chat_id=m.wa_id||'@c.us'
+      group by m.provider_chat_id order by max(m.first_observed_at) desc,m.provider_chat_id limit $3`,[b.phoneNumberId,b.instanceId,limit])).rows.map(r=>String(r.provider_chat_id))
+  }
   async acquire(b:GreenBinding,runId:string,expiresAt:string):Promise<boolean>{return this.tx(async()=>{await this.binding(b);const key=activeKey(b);await this.db.query('insert into public.inbox_sync_state(key,cursor) values($1,$2) on conflict do nothing',[key,'{}']);const row=(await this.db.query('select cursor from public.inbox_sync_state where key=$1 for update',[key])).rows[0];const state=JSON.parse(row.cursor||'{}');if(state.runId&&Date.parse(state.expiresAt)>Date.now())return false;await this.db.query('update public.inbox_sync_state set cursor=$2,last_run_at=clock_timestamp(),updated_at=clock_timestamp() where key=$1',[key,JSON.stringify({...state,runId,expiresAt,version:b.version})]);return true})}
   async isCurrent(b:GreenBinding,runId:string):Promise<boolean>{try{this.assertCurrent(b);const row=(await this.db.query('select cursor from public.inbox_sync_state where key=$1',[activeKey(b)])).rows[0];const state=JSON.parse(row?.cursor||'{}');return state.runId===runId&&state.version===b.version&&Date.parse(state.expiresAt)>Date.now()}catch{return false}}
   async readCheckpoint(b:GreenBinding):Promise<string|null>{const row=(await this.db.query('select cursor from public.inbox_sync_state where key=$1',[activeKey(b)])).rows[0];const state=JSON.parse(row?.cursor||'{}');return typeof state.checkpoint==='string'?state.checkpoint:null}
