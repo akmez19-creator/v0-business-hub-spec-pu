@@ -82,21 +82,31 @@ export default function ProductMasterPage() {
       </Dialog>
 
       {/* ---- Tool popups, pre-loaded with the clicked product ---- */}
+      {/*
+        Studio runs nearly full-screen, laid out as a two-page book spread.
+
+        CRITICAL: `sm:max-w-none` is not redundant. DialogContent's own class
+        list ENDS with `sm:max-w-lg`, and tailwind-merge does not dedupe that
+        against an unprefixed `max-w-none` - they are different variant groups,
+        so both survive and the `sm:` rule wins above 640px. A plain
+        `max-w-none` silently left this dialog 512px wide.
+      */}
       <Dialog open={request?.tool === 'reels'} onOpenChange={(o) => !o && close()}>
-        <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-          <DialogHeader className="border-b px-6 py-4">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15">
-                <Clapperboard className="h-4 w-4 text-sky-500" />
+        <DialogContent className="flex h-[96vh] max-h-[96vh] w-[98vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-2.5">
+            <DialogTitle className="flex items-center gap-2.5 text-sm">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-sky-500/15">
+                <Clapperboard className="h-3.5 w-3.5 text-sky-500" />
               </span>
-              Reels Studio
+              <span className="font-serif text-base tracking-tight">Reels Studio</span>
               <span className="truncate font-normal text-muted-foreground">{productName}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">
               Cut scenes and merge clips into a reel, all in your browser
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          {/* No scroll here: the two pages scroll independently inside. */}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
             {/* Mount only while open so the ~30MB ffmpeg wasm core never loads early */}
             {request?.tool === 'reels' && (
               <ReelsStudioTab
@@ -119,14 +129,17 @@ export default function ProductMasterPage() {
       </Dialog>
 
       {/* ---- Poster Studio ---- */}
+      {/* Poster is also a look-at-pictures screen (photo grid + generated
+          posters), so it gets the same room. `sm:max-w-none` for the same
+          tailwind-merge reason as the Studio dialog above. */}
       <Dialog open={request?.tool === 'poster'} onOpenChange={(o) => !o && close()}>
-        <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-          <DialogHeader className="border-b px-6 py-4">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-fuchsia-500/15">
-                <Sparkles className="h-4 w-4 text-fuchsia-400" />
+        <DialogContent className="flex h-[96vh] max-h-[96vh] w-[96vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-2.5">
+            <DialogTitle className="flex items-center gap-2.5 text-sm">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/15">
+                <Sparkles className="h-3.5 w-3.5 text-fuchsia-400" />
               </span>
-              Poster Studio
+              <span className="font-serif text-base tracking-tight">Poster Studio</span>
               <span className="truncate font-normal text-muted-foreground">{productName}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">

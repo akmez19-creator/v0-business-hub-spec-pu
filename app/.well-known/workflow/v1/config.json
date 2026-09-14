@@ -1,0 +1,27 @@
+{
+  "version": "0",
+  "steps": {
+    "maxDuration": "max",
+    "experimentalTriggers": [
+      {
+        "type": "queue/v2beta",
+        "topic": "__wkf_step_*",
+        "consumer": "default",
+        "retryAfterSeconds": 5,
+        "initialDelaySeconds": 0
+      }
+    ]
+  },
+  "workflows": {
+    "maxDuration": "max",
+    "experimentalTriggers": [
+      {
+        "type": "queue/v2beta",
+        "topic": "__wkf_workflow_*",
+        "consumer": "default",
+        "retryAfterSeconds": 5,
+        "initialDelaySeconds": 0
+      }
+    ]
+  }
+}

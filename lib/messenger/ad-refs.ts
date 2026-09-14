@@ -2,6 +2,7 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/server'
 import { productFromAdName } from '@/lib/facebook/ad-product-name'
 import { getProductMatcher } from '@/lib/products/catalogue'
+import { after } from 'next/server'
 
 const GRAPH = 'https://graph.facebook.com/v23.0'
 
@@ -34,7 +35,9 @@ async function resolveAdName(adId: string): Promise<string | null> {
   const token = process.env.FACEBOOK_ACCESS_TOKEN
   if (!token) return null
   try {
-    const res = await fetch(`${GRAPH}/${adId}?fields=name,campaign{name},adset{name}&access_token=${token}`)
+    const res = await fetch(`${GRAPH}/${adId}?fields=name,campaign{name},adset{name}&access_token=${token}`, {
+      signal: AbortSignal.timeout(5000),
+    })
     const j = (await res.json()) as {
       name?: string
       campaign?: { name?: string }
@@ -80,39 +83,40 @@ export async function recordAdRef(input: {
   if (!adId && !input.ref) return
 
   const db = createAdminClient()
-  const adName = adId ? await resolveAdName(adId) : null
-
-  await db.from('messenger_ad_refs').upsert(
+  const { error: referralError } = await db.from('messenger_ad_refs').upsert(
     {
       page_id: pageId,
       sender_id: senderId,
       ad_id: adId ?? null,
-      ad_name: adName,
+      ad_name: null,
       ref: input.ref ?? null,
       source: input.source ?? null,
       ad_type: input.adType ?? null,
     },
     { onConflict: 'page_id,sender_id', ignoreDuplicates: true },
   )
+  if (referralError) throw new Error('Could not persist Messenger referral')
 
-  // Stamp an already-existing thread immediately. Without this, a referral
-  // that lands after the person's last message would sit in this table unused
-  // until they happened to write again - the attribution is captured but the
-  // inbox keeps showing no product.
-  if (!adName) return
-  const product = productFromAdName(adName)
-  const match = product ? (await getProductMatcher())(product) : null
-  await db
-    .from('messenger_conversations')
-    .update({
-      ad_id: adId ?? null,
-      ad_name: adName,
-      product,
-      product_id: match?.productId ?? null,
-    })
-    .eq('page_id', pageId)
-    .eq('psid', senderId)
-    .is('ad_id', null) // never overwrite the ad that originally found them
+  // Capture the first-touch payload durably before contacting Graph. Naming
+  // an ad must not delay the customer message or the webhook acknowledgment.
+  after(async () => {
+    try {
+      const { data: first, error } = await db.from('messenger_ad_refs')
+        .select('ad_id,ad_name').eq('page_id',pageId).eq('sender_id',senderId).maybeSingle()
+      if (error || !first?.ad_id) return
+      const firstAdId = first.ad_id as string
+      const adName = (first.ad_name as string | null) ?? await resolveAdName(firstAdId)
+      if (!adName) return
+      await db.from('messenger_ad_refs').update({ad_name:adName})
+        .eq('page_id',pageId).eq('sender_id',senderId).is('ad_name',null)
+      const product = productFromAdName(adName)
+      const match = product ? (await getProductMatcher())(product) : null
+      const { error: attributionError } = await db.from('messenger_conversations')
+        .update({ad_id:firstAdId,ad_name:adName,product,product_id:match?.productId ?? null})
+        .eq('page_id',pageId).eq('psid',senderId).is('ad_id',null)
+      if (attributionError) console.log('[v0] messenger: ad enrichment could not be saved')
+    } catch { console.log('[v0] messenger: ad enrichment deferred') }
+  })
 }
 
 /**

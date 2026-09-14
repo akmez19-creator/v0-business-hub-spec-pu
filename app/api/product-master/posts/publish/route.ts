@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getManageablePages } from '@/lib/facebook/pages'
+import { rankPagesByUse } from '@/lib/facebook/page-usage'
 
 // Publish a finished Reels Studio video straight to a Facebook Page.
 // GET  -> list all Pages the token can manage (name + id). Pages are
@@ -30,7 +31,16 @@ export async function GET() {
         { status: 404 },
       )
     }
-    return NextResponse.json({ success: true, pages: pages.map((p) => ({ id: p.id, name: p.name })) })
+    // Most-used Page first. Every consumer of this list defaults to pages[0],
+    // and alphabetical order made that "Alf Trading Ltd" (6 posts ever) rather
+    // than "Made By Moris" (1132). `posts` travels with each Page so the UI can
+    // show WHY the order is what it is - an unexplained non-alphabetical list
+    // reads as randomly sorted.
+    const ranked = await rankPagesByUse(pages)
+    return NextResponse.json({
+      success: true,
+      pages: ranked.map((p) => ({ id: p.id, name: p.name, posts: p.posts })),
+    })
   } catch (error) {
     console.error('publish page lookup error:', error)
     return NextResponse.json({ success: false, error: 'Failed to look up Facebook Pages' }, { status: 500 })
@@ -51,11 +61,20 @@ export async function POST(request: Request) {
     // The video is uploaded to Supabase Storage by the browser (sending the
     // bytes through this API hits the request body size limit) - we only
     // receive its public URL and hand it to Facebook via file_url
-    const body = (await request.json()) as { videoUrl?: string; description?: string; productName?: string; pageId?: string }
+    const body = (await request.json()) as {
+      videoUrl?: string
+      description?: string
+      productName?: string
+      pageId?: string
+      messengerCta?: boolean
+    }
     const videoUrl = String(body.videoUrl || '')
     const description = String(body.description || '').slice(0, 6000)
     const productName = String(body.productName || '').slice(0, 200)
     const pageId = String(body.pageId || '')
+    // Defaults ON: every caption already says "Order now via inbox", so the
+    // button is what that sentence is asking for. Explicit `false` opts out.
+    const messengerCta = body.messengerCta !== false
 
     // Only accept URLs from our own Supabase Storage reels bucket
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || ''
@@ -70,8 +89,11 @@ export async function POST(request: Request) {
         { status: 404 },
       )
     }
-    // Publish to the chosen page; fall back to the first if none was picked
-    const page = (pageId && pages.find((p) => p.id === pageId)) || pages[0]
+    // Publish to the chosen page. The fallback matters: an alphabetical
+    // pages[0] would put an unattended post on a Page with 6 posts in its
+    // entire history, so fall back to the Page we actually post to most.
+    const asked = pageId ? pages.find((p) => p.id === pageId) : undefined
+    const page = asked ?? (await rankPagesByUse(pages))[0]
 
     // Publish to the Page feed - Facebook downloads the video from the URL.
     // Uses the PAGE token (separate rate limit from the app token) and
@@ -83,6 +105,19 @@ export async function POST(request: Request) {
       const fd = new FormData()
       fd.append('file_url', videoUrl)
       fd.append('description', description)
+      // The organic "Send message" button. Verified against the live Graph API
+      // with an A/B control: with this param the wrapping post reads back
+      // call_to_action MESSAGE_PAGE, without it the field is absent.
+      //
+      // Do NOT look for call_to_action on the VIDEO node to check this - it is
+      // a nonexisting field there, which is what made me wrongly conclude that
+      // organic Messenger buttons were impossible. It lives on the post.
+      if (messengerCta) {
+        fd.append(
+          'call_to_action',
+          JSON.stringify({ type: 'MESSAGE_PAGE', value: { link: `https://m.me/${page.id}` } }),
+        )
+      }
       fd.append('access_token', page.access_token)
       const upRes = await fetch(`${GRAPH}/${page.id}/videos`, { method: 'POST', body: fd })
       upJson = (await upRes.json().catch(() => ({}))) as typeof upJson
@@ -99,6 +134,12 @@ export async function POST(request: Request) {
       )
     }
     const postUrl = `https://www.facebook.com/${page.id}/videos/${upJson.id}`
+
+    // The button is NOT verified here. Measured against the live API: the
+    // wrapping post returns error #10 ("object does not exist") until Facebook
+    // finishes processing the video, which took ~30s - so an inline check would
+    // either block publishing for half a minute or always report "unconfirmed".
+    // The client polls /posts/cta-status after the success screen appears.
 
     // Record the published post in product_posts so it shows in Manage Posts
     // and feeds the AI knowledge centre for this product
@@ -138,6 +179,8 @@ export async function POST(request: Request) {
       postUrl,
       pageName: page.name,
       pageId: page.id,
+      // Whether we ASKED for the button, not whether it is confirmed present
+      messengerCtaRequested: messengerCta,
       boostPostId: `${page.id}_${upJson.id}`,
     })
   } catch (error) {

@@ -6,6 +6,7 @@ import { RECOMMENDATION_STYLES, VERDICT_STYLES, type Recommendation } from '@/li
 import { groupLocalitiesByZone } from '@/lib/ads-region-zones'
 import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
 import { TvRulesCat } from '@/components/ads/tv-rules-cat'
+import { ProductThumb } from '@/components/ui/product-thumb'
 
 // Minimal structural shape of a campaign needed for the TV view.
 export interface TvCampaign {
@@ -544,20 +545,21 @@ export function TvDashboard({
         {/* Product photo + name + OFF badge when all its campaigns are
             switched off. Click the row to expand campaigns + edit history. */}
         <span className={`flex min-w-0 items-center gap-1.5 ${density.name} font-semibold`} title={`${g.productName} \u00b7 ${g.campaigns.length} campaign${g.campaigns.length !== 1 ? 's' : ''} \u00b7 click for details`}>
-          {g.productImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={g.productImage || '/placeholder.svg'}
-              alt=""
-              loading="lazy"
-              className="h-5 w-5 shrink-0 rounded-md border border-border/60 bg-muted object-cover"
+          {/* ProductThumb, not a bare <img>: 519 of the 839 product photos are
+              hosted on 1688's CDN, which answers 403 to a browser loading them
+              from our page, so hotlinking them showed a blank box for most of
+              this list. It routes those through the authenticated proxy and
+              keeps the first-letter chip as the fallback. */}
+          {!g.isUnlinked && (
+            <ProductThumb
+              src={g.productImage}
+              className="h-5 w-5 shrink-0 rounded-md border border-border/60 bg-muted"
+              fallback={
+                <span aria-hidden className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[9px] font-bold text-muted-foreground">
+                  {g.productName.charAt(0)}
+                </span>
+              }
             />
-          ) : (
-            !g.isUnlinked && (
-              <span aria-hidden className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[9px] font-bold text-muted-foreground">
-                {g.productName.charAt(0)}
-              </span>
-            )
           )}
           <span className="truncate">{g.productName}</span>
           {g.campaigns.length > 1 && (

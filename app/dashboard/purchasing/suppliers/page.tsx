@@ -1,8 +1,14 @@
 import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { SuppliersContent, type SupplierSummary } from '@/components/purchase-orders/po-suppliers-content'
 
-export default async function SuppliersPage() {
+import { loadSupplierQuality } from '@/lib/purchase-orders/supplier-quality'
+
+export const metadata = { title: 'China Import Suppliers | Business Hub', description: 'China import suppliers, separate 1688 and internal ratings, dated quality notes, original purchasing history and saved conversations.' }
+
+export default async function SuppliersPage({ searchParams }: { searchParams: Promise<{ supplier?: string }> }) {
+  const { supplier: initialOpenName } = await searchParams
   const supabase = await createClient()
   const adminDb = createAdminClient()
 
@@ -19,12 +25,33 @@ export default async function SuppliersPage() {
     redirect('/dashboard')
   }
 
-  const { data: rows } = await adminDb
-    .from('purchase_orders')
-    .select(
-      'supplier_name, product_name, qty, total_payment_supplier, total_payment_supplier_yuan, total_cp_import, status, created_at, link',
-    )
-    .not('supplier_name', 'is', null)
+  // Every order - a supplier's total spend is wrong by however many rows the
+  // 1000-row default cap would drop, with no error to say so.
+  const rows = await fetchAll<{
+    id: string
+    index_no: string | null
+    product_id: string | null
+    supplier_name: string | null
+    product_name: string | null
+    qty: number | null
+    total_payment_supplier: number | null
+    total_payment_supplier_yuan: number | null
+    total_cp_import: number | null
+    status: string | null
+    created_at: string
+    order_date: string | null
+    link: string | null
+  }>((from, to) =>
+    adminDb
+      .from('purchase_orders')
+      .select(
+        'id,index_no,product_id,supplier_name, product_name, qty, total_payment_supplier, total_payment_supplier_yuan, total_cp_import, status, created_at, order_date, link',
+      )
+      .not('supplier_name', 'is', null)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 
   // Aggregate in one pass. Suppliers are identified by name because that is the
   // only supplier key the imported Excel carries - there is no suppliers table.
@@ -49,10 +76,12 @@ export default async function SuppliersPage() {
         sampleLink: null,
         threads: [],
         manualProducts: [],
+        imports: [],
       }
       bySupplier.set(name, s)
     }
 
+    s.imports!.push({ id: r.id, caption: `${r.index_no || r.id.slice(0, 8)} · ${r.product_name || 'Product'}${r.order_date ? ` · ${r.order_date}` : ''}`, productId: r.product_id })
     s.orders += 1
     s.qty += r.qty || 0
     s.spend += Number(r.total_payment_supplier) || 0
@@ -65,6 +94,7 @@ export default async function SuppliersPage() {
     if (r.product_name && !s.products.includes(r.product_name)) {
       s.products.push(r.product_name)
     }
+    if (r.order_date && (!s.lastActualOrder || r.order_date > s.lastActualOrder)) s.lastActualOrder = r.order_date
     if (r.created_at && (!s.lastOrder || r.created_at > s.lastOrder)) {
       s.lastOrder = r.created_at
     }
@@ -72,10 +102,10 @@ export default async function SuppliersPage() {
   }
 
   // Conversations captured from the 1688 messenger by the browser extension.
-  const { data: threads } = await adminDb
+  const threads = await fetchAll<{ id: string; supplier_name: string; chat_handle: string; platform: string; message_count: number; history_complete: boolean; last_captured_at: string | null }>((from, to) => adminDb
     .from('supplier_threads')
     .select('id, supplier_name, chat_handle, platform, message_count, history_complete, last_captured_at')
-    .order('last_captured_at', { ascending: false })
+    .order('last_captured_at', { ascending: false }).order('id').range(from, to))
 
   for (const t of threads || []) {
     const s = bySupplier.get((t.supplier_name || '').trim())
@@ -92,10 +122,10 @@ export default async function SuppliersPage() {
 
   // Products attached by hand - things discussed but never ordered, which by
   // definition cannot come from purchase_orders.
-  const { data: manual } = await adminDb
+  const manual = await fetchAll<{ supplier_name: string; source: string; products: unknown }>((from, to) => adminDb
     .from('supplier_products')
     .select('supplier_name, source, products(id, name)')
-    .eq('source', 'manual')
+    .eq('source', 'manual').order('id').range(from, to))
 
   for (const m of manual || []) {
     const s = bySupplier.get((m.supplier_name || '').trim())
@@ -104,17 +134,19 @@ export default async function SuppliersPage() {
     s.manualProducts.push({ id: p.id, name: p.name })
   }
 
-  const suppliers = [...bySupplier.values()].sort((a, b) => b.spend - a.spend)
-
-  // Only products that are still active are worth offering as new links.
-  const { data: allProducts } = await adminDb
-    .from('products')
-    .select('id, name')
-    .order('name')
+  const [quality, allProducts] = await Promise.all([
+    loadSupplierQuality(adminDb),
+    // Only products that are still active are worth offering as new links.
+    fetchAll<{ id: string; name: string }>((from, to) => adminDb.from('products').select('id,name').order('name').order('id').range(from, to)),
+  ])
+  const byAlias = new Map(quality.flatMap(profile => profile.aliases.map(name => [name, profile] as const)))
+  for (const supplier of bySupplier.values()) supplier.quality = byAlias.get(supplier.name) ?? null
+  const suppliers = [...bySupplier.values()].sort((a, b) => b.spend - a.spend || a.name.localeCompare(b.name))
 
   return (
     <SuppliersContent
       suppliers={suppliers}
+      initialOpenName={initialOpenName && bySupplier.has(initialOpenName) ? initialOpenName : null}
       allProducts={(allProducts || []).map(p => ({ id: p.id, name: p.name }))}
     />
   )

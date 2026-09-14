@@ -14,6 +14,9 @@ import { generateText, Output } from 'ai'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { loadWhatsAppDraftContext, assertWhatsAppDraftContextCurrent, type WhatsAppDraftContext } from '@/lib/whatsapp-green/draft-context'
+import { WhatsAppDraftBlocked } from '@/lib/whatsapp-green/draft-policy'
+import { WhatsAppScopeError } from '@/lib/whatsapp/number-scope'
 import {
   computeDefaultDeliveryDate,
   extractPhone,
@@ -92,12 +95,19 @@ export async function POST(request: Request) {
       customerName?: string
       pageName?: string
       channel?: string
+      waId?: string
+      phoneNumberId?: string
+      expectedContextVersion?: number
       productHint?: string | null
       adName?: string | null
     }
 
+    let whatsappContext: WhatsAppDraftContext | null = null
+    if (body.channel === 'whatsapp') {
+      whatsappContext = await loadWhatsAppDraftContext(body.waId, body.phoneNumberId, body.expectedContextVersion)
+    }
     const turns = Array.isArray(body.messages) ? body.messages : []
-    const transcript = turns
+    const transcript = whatsappContext?.transcript ?? turns
       .filter((t) => t && typeof t.text === 'string' && t.text.trim())
       .slice(-25)
       .map(
@@ -141,6 +151,8 @@ export async function POST(request: Request) {
       'REPLY RULES:',
       '- Reply in the SAME language the customer used (English, French, or Mauritian Kreol). Match their register; be warm and human, never robotic.',
       '- Answer the latest message directly and move the sale or the delivery forward. If you still need the name, phone, or locality to place the order, ask for exactly what is missing - politely and in one short message.',
+      '- The current customer request takes precedence over an earlier enquiry, an earlier order, or historical ad attribution. Do not assume the customer still wants the product from the ad that first brought them here.',
+      '- Photos and attachments are not included in this text-only conversation. Never claim to have identified an item in an unseen photo. If the current item is unclear, ask the customer to name or confirm it instead of choosing an earlier product.',
       '- Never invent prices, stock levels, or delivery dates. If you were not given a fact, ask for it instead of guessing.',
       '- Return only the message text: no markdown, no bullet points, no surrounding quotes, no signature.',
       '',
@@ -148,11 +160,11 @@ export async function POST(request: Request) {
       '- Only extract what the customer actually stated. Never guess. Use null for anything not clearly given.',
       '- A Mauritian mobile number is 8 digits starting with 5. Ignore order numbers, prices, and dates.',
       '- For productName, copy the closest name from the product list EXACTLY as written there, or null if the customer named nothing recognisable.',
+      '- productName must describe the current request, not a superseded product or a historical ad. If the current product cannot be established from the conversation, return null and ask for clarification.',
       '- For locality, return the place name the customer gave, spelled as they wrote it. Do not normalise or invent one.',
       '- readyToOrder is true only when a product, a name, a phone number, and a locality are all present.',
       body.pageName ? `\nThe business page is "${body.pageName}".` : '',
       body.customerName ? `The customer's social profile name is "${body.customerName}".` : '',
-      body.productHint ? `This lead came from an ad for "${body.productHint}" - likely, not certain.` : '',
       catalogue.length ? `\nPRODUCT LIST:\n${catalogue.map((p) => p.name).join('\n')}` : '',
       businessContext ? `\nBUSINESS CONTEXT AND TONE:\n${businessContext}` : '',
     ]
@@ -185,6 +197,9 @@ export async function POST(request: Request) {
       ],
       experimental_output: Output.object({ schema }),
     })
+
+    // A draft from an older conversation must not replace current agent work.
+    if (whatsappContext) await assertWhatsAppDraftContextCurrent(whatsappContext)
 
     // Re-ground the model's guesses against the real catalogue.
     const product = matchName(out.productName, catalogue, (p) => p.name)
@@ -231,7 +246,10 @@ export async function POST(request: Request) {
       },
     })
   } catch (error) {
-    console.error('[v0] ai-assist error:', error)
+    if (error instanceof WhatsAppDraftBlocked || error instanceof WhatsAppScopeError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status })
+    }
+    console.error('[v0] ai-assist failed')
     return NextResponse.json({ success: false, error: 'Failed to analyse conversation' }, { status: 500 })
   }
 }

@@ -1,39 +1,49 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Library, Loader2, RefreshCw, Search, Store, Video } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { VideoSearchPanel } from '@/components/product-master/video-search-panel'
-import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
+import type { QueueClipInput } from '@/lib/product-master/clip-jobs'
 
 /**
  * Feature 8: one place to find a product video.
  *
- * "Find product video" (the TikTok-style feed) and "Marketplace listing" used
- * to be two separate stacked sections, so the same search had to be typed
- * twice and the page grew very tall before the actual reel editor appeared.
- * They answer the same question from two angles, so they belong behind one
- * header as two tabs.
+ * This was two tabs - "Video search" (social, by name) and "Marketplace
+ * listings" (1688, by photo) - which split ONE question across two searches the
+ * user had to run separately and mentally merge.
  *
- * Both child panels take an identical prop shape and are mounted unchanged -
- * this is purely a container, so their download/dedupe behaviour is untouched.
+ * Now there is a single search: the product photo goes in, and every source is
+ * fanned out behind it (supplier listing video, TikTok, Shorts, Reels), with the
+ * results ranked into one grid. The 1688 half is not gone, it moved into that
+ * fan-out - see app/api/product-master/image-search, where its listing videos
+ * are ranked ABOVE social hits because reverse-image search matched the actual
+ * object rather than the same category filmed by a stranger.
  *
- * Both stay MOUNTED when inactive (forceMount + hidden) so that switching tabs
- * does not throw away search results or in-flight downloads.
+ * The PHOTO harvest came with it, and grew: the same paid detail calls that
+ * reveal the videos also carry each listing's gallery, so the search now returns
+ * ~60 product photos where the old tab could show 12. Those are not a bonus -
+ * the reel editor overlays a product photo onto the clip, so the pictures are
+ * what let one piece of footage become several different ads.
+ *
+ * Supplier SOURCING (prices, who to buy from) deliberately did not move here.
+ * It lives in Purchase Orders (po-supplier-finder) and Poster Studio, which is
+ * where that question is actually asked - this panel only wants videos.
  */
 export function SourceFinderPanel({
-  onClipSettled,
+  onQueueClips,
   ...props
 }: {
   defaultQuery?: string
   productImage?: string | null
-  onUseClip?: (file: File, origin?: { sourceId?: string | null; sourceUrl?: string | null }) => void
-  onClipPending?: (job: { id: string; title: string; thumb?: string }) => void
-  onClipSettled?: (id: string, ok: boolean) => void
+  /**
+   * Needed so photos harvested during the search can be saved to the product.
+   * Nullable because the Studio can be open before a product row exists, in
+   * which case there is nowhere to save and the button explains that.
+   */
+  productId?: string | null
+  onQueueClips?: (jobs: QueueClipInput[]) => Promise<boolean>
+  /** Lets the Studio reload its overlay gallery once photos are saved */
+  onPhotosSaved?: () => void
 }) {
-  const [tab, setTab] = useState('videos')
-
   /**
    * Feature 9: how many clips are already saved. The server refuses to insert
    * a clip whose source_id it has seen before, but the count here gives that
@@ -61,63 +71,39 @@ export function SourceFinderPanel({
     void refreshKnown()
   }, [refreshKnown])
 
-  // A clip that just landed should immediately count towards the library
-  const handleSettled = useCallback(
-    (id: string, ok: boolean) => {
-      onClipSettled?.(id, ok)
-      if (ok) void refreshKnown()
+  /**
+   * Queue clips, then re-count the library.
+   *
+   * The count is refreshed on a delay as well as immediately: queueing no
+   * longer means the clip has arrived, so the number only becomes correct once
+   * the server download has actually finished.
+   */
+  const handleQueue = useCallback(
+    async (jobs: QueueClipInput[]) => {
+      const ok = (await onQueueClips?.(jobs)) ?? false
+      if (ok) setTimeout(() => void refreshKnown(), 8000)
+      return ok
     },
-    [onClipSettled, refreshKnown],
+    [onQueueClips, refreshKnown],
   )
 
+  /*
+   * No card, no header of its own.
+   *
+   * This used to wrap the panel in a bordered card titled "Find a product
+   * video", while the panel immediately printed its own "Find product videos"
+   * heading and an explanatory paragraph - two headers and a border saying the
+   * same thing, stacked, before a single result was visible. The library counter
+   * was the only real content here, so it moves into the panel's toolbar and the
+   * rest of the chrome is gone.
+   */
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold">Find a product video</h3>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-            <Library className="h-3.5 w-3.5" />
-            {savedCount === null ? '\u2014' : savedCount} already saved
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => void refreshKnown()}
-            disabled={refreshing}
-            aria-label="Refresh library index"
-          >
-            {refreshing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        </div>
-      </header>
-
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="videos" className="gap-1.5">
-            <Video className="h-3.5 w-3.5" />
-            Video search
-          </TabsTrigger>
-          <TabsTrigger value="marketplace" className="gap-1.5">
-            <Store className="h-3.5 w-3.5" />
-            Marketplace listings
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="videos" forceMount hidden={tab !== 'videos'} className="mt-3">
-          <VideoSearchPanel {...props} onClipSettled={handleSettled} />
-        </TabsContent>
-
-        <TabsContent value="marketplace" forceMount hidden={tab !== 'marketplace'} className="mt-3">
-          <MarketplaceSearchPanel {...props} onClipSettled={handleSettled} />
-        </TabsContent>
-      </Tabs>
-    </section>
+    <VideoSearchPanel
+      {...props}
+      onQueueClips={handleQueue}
+      savedCount={savedCount}
+      refreshingLibrary={refreshing}
+      onRefreshLibrary={() => void refreshKnown()}
+    />
   )
 }

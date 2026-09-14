@@ -8,6 +8,8 @@
  */
 
 import { deriveStage, STAGE_PRIORITY, type LeadStage } from './stage'
+import { whatsappConversationKey } from './whatsapp-identity'
+import type { GreenContactDisplay } from '@/lib/whatsapp-green/contact-overlay'
 
 export type UnifiedChannel = 'messenger' | 'whatsapp' | 'comment'
 
@@ -27,10 +29,16 @@ export type UnifiedThread = {
   /** Which business this came to - Page name, or WhatsApp display number. */
   source: string
   /**
-   * Owning Page, needed to reply as the right business. Null on WhatsApp,
-   * which is addressed by phone number instead.
+   * Owning Page for Messenger, or the server-confirmed business mapping for WhatsApp.
+   * WhatsApp sends still use phoneNumberId, never this Page mapping.
    */
   pageId: string | null
+  phoneNumberId?: string | null
+  canSend?: boolean
+  unreadStateKnown?: boolean
+  /** Additional provider copies never establish complete canonical history. */
+  additionalCopyCount?: number
+  additionalCopiesOnly?: boolean
   /**
    * Who to address a reply to: the PSID on Messenger, the wa_id on WhatsApp,
    * the comment id on a comment. Null when the channel gave us no addressable
@@ -113,6 +121,11 @@ export type MessengerRow = AttributedRow & {
 
 export type WhatsAppRow = AttributedRow & {
   waId: string
+  phoneNumberId?: string | null
+  pageId?: string | null
+  businessName?: string | null
+  canSend?: boolean
+  unreadStateKnown?: boolean
   profileName?: string | null
   lastSnippet?: string | null
   lastMessageAt?: string | null
@@ -122,6 +135,7 @@ export type WhatsAppRow = AttributedRow & {
   firstAdId?: string | null
   firstAdName?: string | null
   firstAdHeadline?: string | null
+  green?: GreenContactDisplay
 }
 
 export function fromMessenger(c: MessengerRow): UnifiedThread {
@@ -147,25 +161,35 @@ export function fromMessenger(c: MessengerRow): UnifiedThread {
 }
 
 export function fromWhatsApp(c: WhatsAppRow): UnifiedThread {
-  const updatedAt = c.lastMessageAt ?? null
+  const canonicalAt = c.lastMessageAt ?? null
+  const liveCopyAt = c.green?.activityAt ?? null
+  const newerCopy = liveCopyAt && Number.isFinite(Date.parse(liveCopyAt)) &&
+    (!canonicalAt || Date.parse(liveCopyAt) > Date.parse(canonicalAt))
+  const updatedAt = newerCopy ? liveCopyAt : canonicalAt
+  const providerOnly = c.green?.only === true
+  const copySnippet = c.green?.snippet ? `${newerCopy ? 'GREEN-API copy' : 'History copy'} · ${c.green.snippet}` : ''
   return {
-    key: `whatsapp:${c.waId}`,
+    key: whatsappConversationKey(c),
     channel: 'whatsapp',
     nativeId: c.waId,
     name: c.profileName?.trim() || c.waId,
-    snippet: c.lastSnippet ?? '',
+    snippet: (newerCopy || providerOnly) && copySnippet ? copySnippet : c.lastSnippet ?? '',
     updatedAt,
-    unreadCount: c.unreadCount ?? 0,
-    outsideWindow: c.outsideWindow ?? false,
-    source: c.displayPhone ?? 'WhatsApp',
-    // WhatsApp is addressed by number, not by Page.
-    pageId: null,
+    unreadCount: providerOnly ? 0 : c.unreadCount ?? 0,
+    outsideWindow: providerOnly ? true : c.outsideWindow ?? false,
+    source: ([c.businessName, c.displayPhone].filter(Boolean).join(' · ') || (c.phoneNumberId ? 'WhatsApp business number ' + c.phoneNumberId : 'WhatsApp · business number unconfirmed')) + (providerOnly ? ' · additional copies only' : ''),
+    pageId: c.pageId ?? null,
+    phoneNumberId: c.phoneNumberId ?? null,
+    canSend: providerOnly ? false : c.canSend,
+    unreadStateKnown: providerOnly ? false : c.unreadStateKnown,
+    additionalCopyCount: c.green?.messageCount,
+    additionalCopiesOnly: providerOnly,
     recipientId: c.waId,
     adId: c.firstAdId ?? null,
     // The headline Meta sends is the PAGE name on every ad, so it is only a
     // last resort - never preferred over the resolved ad name.
     adName: c.firstAdName ?? c.firstAdHeadline ?? null,
-    ...attribution(c, updatedAt, c.product ? 'ad' : null),
+    ...attribution(c, canonicalAt, c.product ? 'ad' : null),
   }
 }
 

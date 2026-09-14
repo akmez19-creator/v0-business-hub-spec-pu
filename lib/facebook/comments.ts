@@ -1,4 +1,4 @@
-import { fbGet, fbWrite } from './graph'
+import { fbGet, fbWrite, FbGraphError } from './graph'
 import type { FbPage } from './pages'
 import { getProductMatcher } from '@/lib/products/catalogue'
 import { getPostAds } from './post-ads'
@@ -66,6 +66,7 @@ export type CommentPageStat = {
   needsReply: number | null
   total: number
   error?: string
+  rateLimited?: boolean
 }
 
 type RawReply = {
@@ -210,7 +211,8 @@ export async function listAllComments(
       failures++
       const message = r.reason instanceof Error ? r.reason.message : String(r.reason)
       console.log('[v0] comments: page failed', page.name, message)
-      pageStats.push({ id: page.id, name: page.name, needsReply: null, total: 0, error: message })
+      pageStats.push({ id: page.id, name: page.name, needsReply: null, total: 0, error: message,
+        rateLimited: r.reason instanceof FbGraphError && r.reason.isRateLimit })
     }
   })
 

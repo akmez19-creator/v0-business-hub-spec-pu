@@ -32,25 +32,37 @@ export async function GET(request: Request) {
     if (!thread) return NextResponse.json({ success: false, error: 'Unknown conversation' }, { status: 404 })
 
     let messages = await listCachedMessages(thread.pageId, thread.psid)
+    let syncError: string | undefined
+    let rateLimited = false
 
-    if (messages.length === 0 && !conversationId.startsWith('psid:')) {
+    // A normal foreground poll only reads our database. A deliberate refresh
+    // can repair a partially cached transcript without crawling every thread.
+    const wantsRefresh = searchParams.get('refresh') === '1'
+    if (messages.length === 0 || wantsRefresh) {
       try {
-        // Miss: a pre-webhook thread being read for the first time.
-        await hydrateThread(thread.pageId, thread.psid, conversationId)
+        await hydrateThread(thread.pageId, thread.psid, thread.conversationId, { explicitRefresh: wantsRefresh })
         messages = await listCachedMessages(thread.pageId, thread.psid)
       } catch (e) {
-        if (isRateLimit(e)) return rateLimitResponse(e)
-        if (e instanceof MessagingPermissionError) {
-          return NextResponse.json({ success: false, needsPermission: true, error: e.message })
+        rateLimited = isRateLimit(e)
+        if (messages.length > 0) {
+          syncError = rateLimited
+            ? 'Facebook is limiting refreshes. Showing saved messages.'
+            : 'Could not refresh from Facebook. Showing saved messages.'
+        } else {
+          if (rateLimited) return rateLimitResponse(e)
+          if (e instanceof MessagingPermissionError) {
+            return NextResponse.json({ success: false, needsPermission: true, error: e.message })
+          }
+          throw e
         }
-        throw e
       }
     }
 
-    // Opening a thread clears its badge.
-    await markMessengerRead(thread.pageId, thread.psid)
+    // Do not mark a message that arrived after this transcript was read.
+    const seenThrough = messages.at(-1)?.createdTime
+    if (seenThrough) await markMessengerRead(thread.pageId, thread.psid, seenThrough)
 
-    return NextResponse.json({ success: true, source: 'cache', messages })
+    return NextResponse.json({ success: true, source: 'cache', messages, rateLimited, syncError })
   } catch (e) {
     if (isRateLimit(e)) return rateLimitResponse(e)
     const message = e instanceof Error ? e.message : 'Failed to load messages'

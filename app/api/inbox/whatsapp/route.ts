@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireWhatsAppInboxUser, validateWhatsAppScope, WhatsAppScopeError } from '@/lib/whatsapp/number-scope'
 import { getCapabilities } from '@/lib/facebook/capabilities'
-import { listContacts, listMessages, markRead, sendText, whatsappToken } from '@/lib/whatsapp/store'
+import { listContacts, listContactsForScopes, listMessages, markRead, sendText, whatsappToken } from '@/lib/whatsapp/store'
 import { listWhatsAppNumbers } from '@/lib/whatsapp/accounts'
+import { getGreenContacts } from '@/lib/whatsapp-green/store'
+import { hasGreenConversation, isGreenBusiness, overlayGreenContacts } from '@/lib/whatsapp-green/contact-overlay'
+import { pauseForHumanReply } from '@/lib/inbox-autopilot/runtime'
 
 /**
  * WhatsApp conversations, served from Postgres rather than Graph.
@@ -13,33 +16,36 @@ import { listWhatsAppNumbers } from '@/lib/whatsapp/accounts'
  * implying the customer has never written.
  */
 
-async function requireUser() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  return user
-}
-
 export async function GET(request: Request) {
   try {
-    if (!(await requireUser())) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    await requireWhatsAppInboxUser()
 
     const params = new URL(request.url).searchParams
     const waId = params.get('waId')
+    const phoneNumberId=params.get('phoneNumberId')
 
     // A single thread was asked for. `before` pages backwards through long
     // histories: a busy customer can run to thousands of messages, and the
     // thread loads the newest page first.
     if (waId) {
       const before = params.get('before')
-      const messages = await listMessages(waId, 100, before ?? undefined)
+      validateWhatsAppScope(waId,phoneNumberId)
+      let transcript: Awaited<ReturnType<typeof listMessages>>
+      try { transcript = await listMessages(waId, phoneNumberId!, 100, before ?? undefined) }
+      catch (error) {
+        if (!(error instanceof WhatsAppScopeError) || error.status !== 404) throw error
+        // Only a proven exact provider scope can supply an empty canonical pane.
+        // This does not mark anything read or imply complete canonical history.
+        const additional = await getGreenContacts({ phoneNumberId: phoneNumberId!, waId, limit: 1 }).catch(() => [])
+        if (!hasGreenConversation(additional, { phoneNumberId: phoneNumberId!, waId })) throw error
+        return NextResponse.json({ success: true, messages: [], hasMore: false, nextCursor: null,
+          canonicalHistory: 'unavailable', additionalCopiesOnly: true })
+      }
+      const {messages,readVersion} = transcript
       // Paging backwards must not clear the badge - only opening the thread
       // (the first, uncursored request) counts as reading it.
-      if (!before) await markRead(waId)
-      return NextResponse.json({ success: true, messages, hasMore: messages.length === 100 })
+      if (!before) await markRead(waId,phoneNumberId!,readVersion)
+      return NextResponse.json({ success: true, messages, hasMore: messages.length === 100, nextCursor:messages.length===100?messages[0].cursor:null })
     }
 
     // Env-only flags, free to compute on every poll.
@@ -51,7 +57,23 @@ export async function GET(request: Request) {
 
     // Contacts live in Postgres, so the 30s poll costs no Graph quota.
     // Search runs in the database so it can reach past the newest page.
-    const contacts = await listContacts(100, params.get('q') ?? undefined)
+    const q = params.get('q') ?? undefined
+    const [canonicalContacts, additional] = await Promise.all([
+      listContacts(100, q, phoneNumberId ?? undefined),
+      phoneNumberId && !isGreenBusiness(phoneNumberId) ? Promise.resolve([])
+        : getGreenContacts({ q, phoneNumberId: phoneNumberId ?? undefined, limit: 200 }).catch(() => null),
+    ])
+    let contacts = canonicalContacts
+    let additionalCopiesUnavailable = additional === null
+    if (additional?.length) {
+      try {
+        const existing = new Set(canonicalContacts.map(contact => JSON.stringify([contact.phoneNumberId, contact.waId])))
+        const missing = additional.filter(contact => !existing.has(JSON.stringify([contact.phoneNumberId, contact.waId])))
+          .map(contact => ({ phoneNumberId: contact.phoneNumberId, waId: contact.waId }))
+        const hydrated = await listContactsForScopes(missing)
+        contacts = overlayGreenContacts([...canonicalContacts, ...hydrated], additional, { q, phoneNumberId: phoneNumberId ?? undefined, limit: 100 })
+      } catch { additionalCopiesUnavailable = true }
+    }
 
     // Number/scope discovery costs ~6 Graph calls (businesses, owned + client
     // WABAs, phone_numbers and subscribed_apps per WABA, debug_token) and the
@@ -60,7 +82,7 @@ export async function GET(request: Request) {
     // over a thousand calls a day against the app's rate limit. It is now
     // opt-in: the client asks once per page load, not on every refresh.
     if (!params.has('meta')) {
-      return NextResponse.json({ success: true, contacts, ...envFlags })
+      return NextResponse.json({ success: true, contacts, additionalCopiesUnavailable, ...envFlags })
     }
 
     const token = whatsappToken()
@@ -86,9 +108,11 @@ export async function GET(request: Request) {
       // different reasons, so the UI reports them separately.
       canSend: Boolean(token) && (channel?.available ?? false) && usable.length > 0,
       contacts,
+      additionalCopiesUnavailable,
       ...envFlags,
     })
   } catch (e) {
+    if(e instanceof WhatsAppScopeError) return NextResponse.json({success:false,error:e.message},{status:e.status})
     const message = e instanceof Error ? e.message : 'Failed to load WhatsApp'
     console.log('[v0] whatsapp list failed:', message)
     return NextResponse.json({ success: false, error: message }, { status: 500 })
@@ -97,12 +121,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    if (!(await requireUser())) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    const user=await requireWhatsAppInboxUser()
 
-    const { waId, message } = (await request.json()) as { waId?: string; message?: string }
-    const text = (message ?? '').trim()
+    const { waId, phoneNumberId, message } = (await request.json()) as { waId?: string; phoneNumberId?: string; message?: string }
+    validateWhatsAppScope(waId,phoneNumberId)
+    const text = typeof message==='string'?message.trim():''
     if (!waId || !text) {
       return NextResponse.json({ success: false, error: 'waId and message are required' }, { status: 400 })
     }
@@ -113,9 +136,11 @@ export async function POST(request: Request) {
       )
     }
 
-    const res = await sendText(waId, text)
-    return NextResponse.json({ success: true, id: res.id })
+    await pauseForHumanReply(user.id,'whatsapp',phoneNumberId!,waId)
+    const res = await sendText(waId, phoneNumberId!, text)
+    return NextResponse.json({ success: true, ...res })
   } catch (e) {
+    if(e instanceof WhatsAppScopeError) return NextResponse.json({success:false,error:e.message},{status:e.status})
     const message = e instanceof Error ? e.message : 'WhatsApp send failed'
     console.log('[v0] whatsapp send failed:', message)
     return NextResponse.json({ success: false, error: message }, { status: 500 })

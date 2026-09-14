@@ -28,6 +28,7 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -73,12 +74,26 @@ import {
   Lamp,
   Flower2,
   WashingMachine,
+  Copy,
+  Merge,
 } from 'lucide-react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { Product, ProductStock } from '@/lib/types'
 import { InventoryImportDialog } from './inventory-import-dialog'
+import { DuplicatesDialog } from './duplicates-dialog'
+import { CombineProductsDialog } from './combine-products-dialog'
 import { setProductShelf } from '@/lib/stock-count-actions'
 import { mediaSrc } from '@/lib/media-url'
+import { ProductPricingFields } from '@/components/products/product-pricing-fields'
+import { NewProductVariantsFields } from '@/components/products/new-product-variants-fields'
+import { createPricingDraft, createVariantsDraft, validateProductPricing, validateNewProductPricing } from '@/lib/products/pricing'
+import { createInventoryProductAction } from '@/app/dashboard/deliveries/inventory/actions'
+import { PRODUCT_CATEGORIES, UNCATEGORISED } from '@/lib/products/categories'
+import useSWR from 'swr'
+import { fetchAll } from '@/lib/supabase/fetch-all'
+import type { SkuLink, SourcingVariant } from '@/lib/purchase-orders/1688-sourcing-types'
+import { InventoryVariantFields, type InventoryVariantDraft } from '@/components/products/inventory-variant-fields'
 
 type ViewMode = 'table' | 'grid'
 type SortKey = 'name' | 'category' | 'quantity' | 'price' | 'initial' | 'actual' | 'shelf'
@@ -117,6 +132,7 @@ export function InventoryContent({
   unresolvedDeliveries?: number
 }) {
   const [products, setProducts] = useState(initialProducts)
+  useEffect(() => { setProducts(initialProducts) }, [initialProducts])
   const [search, setSearch] = useState('')
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -129,6 +145,8 @@ export function InventoryContent({
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false)
+  const [combineOpen, setCombineOpen] = useState(false)
 
   // Export to Excel
   const handleExport = async () => {
@@ -155,6 +173,17 @@ export function InventoryContent({
       }
       
       // Build export data - products with variants get multiple rows
+
+      // Pack sizes actually present, so a 5-Pack or 10-Pack gets its own column.
+      // These columns used to be hardcoded to 2/3/4/6, which silently dropped
+      // every other size from the sheet - an export/re-import round trip would
+      // erase a real price. Sorted numerically and shared by BOTH row builders
+      // below so every row has the same columns and the sheet stays aligned.
+      const tierKeys = [...new Set(products.flatMap(p => Object.keys(p.bundle_prices || {})))]
+        .sort((a, b) => Number(a) - Number(b))
+      const bundleCols = (p: Product): Record<string, string | number> =>
+        Object.fromEntries(tierKeys.map(k => [`${k}-Pack`, p.bundle_prices?.[k] || '']))
+
       const exportData: Array<Record<string, string | number>> = []
       
       for (const p of products) {
@@ -176,10 +205,7 @@ export function InventoryContent({
               'Undelivered': '',
               'Actual Stock': '',
               'PRICE UNIT': v.price_override || p.price || 0,
-              '2-Pack': p.bundle_prices?.['2'] || '',
-              '3-Pack': p.bundle_prices?.['3'] || '',
-              '4-Pack': p.bundle_prices?.['4'] || '',
-              '6-Pack': p.bundle_prices?.['6'] || '',
+              ...bundleCols(p),
               'B1G1': p.is_b1g1 ? 'Yes' : '',
               'Image': p.image_url || '',
               'Status': p.is_active ? 'Active' : 'Inactive',
@@ -204,10 +230,7 @@ export function InventoryContent({
             'Actual Stock': isUncounted(p) ? '' : actualStock(p, st),
             'Stock Counted': isUncounted(p) ? 'No' : 'Yes',
             'PRICE UNIT': p.price || 0,
-            '2-Pack': p.bundle_prices?.['2'] || '',
-            '3-Pack': p.bundle_prices?.['3'] || '',
-            '4-Pack': p.bundle_prices?.['4'] || '',
-            '6-Pack': p.bundle_prices?.['6'] || '',
+            ...bundleCols(p),
             'B1G1': p.is_b1g1 ? 'Yes' : '',
             'Image': p.image_url || '',
             'Status': p.is_active ? 'Active' : 'Inactive',
@@ -492,7 +515,22 @@ export function InventoryContent({
             Manage your product catalog, pricing tiers, and stock
           </p>
         </div>
-<div className="flex items-center gap-2">
+<div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Three ways in to the same merge, restored after a rollback lost
+              the wiring while the dialogs and routes survived on disk:
+              scan (name + paperwork), pick two by hand, or the one-by-one
+              review queue. The merge itself always re-points every FK. */}
+          <Button variant="outline" onClick={() => setDuplicatesOpen(true)} disabled={products.length === 0}>
+            <Copy className="w-4 h-4 mr-2" />
+            Find Duplicates
+          </Button>
+          <Button variant="outline" onClick={() => setCombineOpen(true)} disabled={products.length < 2}>
+            <Merge className="w-4 h-4 mr-2" />
+            Combine Two
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/deliveries/inventory/review">Review One by One</Link>
+          </Button>
           <Button variant="outline" onClick={handleExport} disabled={exporting || products.length === 0}>
             {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
             Export Excel
@@ -524,6 +562,13 @@ export function InventoryContent({
             </DialogContent>
           </Dialog>
           <InventoryImportDialog onSuccess={() => router.refresh()} />
+          <DuplicatesDialog open={duplicatesOpen} onOpenChange={setDuplicatesOpen} onMerged={() => router.refresh()} />
+          <CombineProductsDialog
+            open={combineOpen}
+            onOpenChange={setCombineOpen}
+            products={products.map(p => ({ id: p.id, name: p.name, zone: p.zone, is_active: p.is_active }))}
+            onDone={() => router.refresh()}
+          />
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -534,7 +579,7 @@ export function InventoryContent({
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
               <ProductForm
                 onSave={async (p) => {
-                  setProducts(prev => [...prev, p])
+                  setProducts(prev => [...prev.filter((item) => item.id !== p.id), p])
                   setAddOpen(false)
                   router.refresh()
                 }}
@@ -1409,63 +1454,40 @@ function ProductForm({
 }) {
   const [name, setName] = useState(product?.name || '')
   const [sku, setSku] = useState(product?.sku || '')
-  const [price, setPrice] = useState(product?.price?.toString() || '')
+  const [pricing, setPricing] = useState(() => createPricingDraft(product))
+  const [pricingAttempted, setPricingAttempted] = useState(false)
+  const pricingValidation = validateProductPricing(pricing, { requirePricing: false })
+  const pricingError = pricingAttempted && !pricingValidation.ok ? pricingValidation.issues[0].message : null
   const [category, setCategory] = useState(product?.category || '')
   const [description, setDescription] = useState(product?.description || '')
   const [isActive, setIsActive] = useState(product?.is_active ?? true)
   const [imageUrl, setImageUrl] = useState(product?.image_url || '')
   const [quantity, setQuantity] = useState(product?.quantity?.toString() || '0')
-  // Bundle prices - flexible tiers
-  const [bundlePrices, setBundlePrices] = useState<Record<string, string>>(
-    Object.fromEntries(
-      Object.entries(product?.bundle_prices || {}).map(([k, v]) => [k, String(v)])
-    )
-  )
-  const [isB1g1, setIsB1g1] = useState(product?.is_b1g1 ?? false)
   const [remarks, setRemarks] = useState(product?.remarks || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const submitting = useRef(false)
+  const [requestId] = useState(() => crypto.randomUUID())
+  const [newVariants, setNewVariants] = useState(createVariantsDraft)
   
   // Variants management
-  const [hasVariants, setHasVariants] = useState(product?.has_variants ?? false)
-  const [variants, setVariants] = useState<Array<{
-    id?: string
-    attribute_name: string
-    attribute_value: string
-    quantity: number
-    price_override: number | null
-    sku: string | null
-    isNew?: boolean
-    toDelete?: boolean
-  }>>([])
-  const [loadingVariants, setLoadingVariants] = useState(false)
-  
+  const [existingHasVariants, setHasVariants] = useState(product?.has_variants ?? false)
+  const hasVariants = product ? existingHasVariants : newVariants.enabled
+  const [variantDraft, setVariants] = useState<InventoryVariantDraft[] | null>(null)
   // Fetch existing variants when editing
-  useEffect(() => {
-    async function fetchVariants() {
-      if (!product?.id || !product?.has_variants) return
-      setLoadingVariants(true)
-      try {
-        const supabase = createClient()
-        const { data, error } = await supabase
-          .from('product_variants')
-          .select('*')
-          .eq('product_id', product.id)
-          .order('attribute_name', { ascending: true })
-          .order('attribute_value', { ascending: true })
-        if (error) throw error
-        setVariants(data || [])
-      } catch (err) {
-        console.error('Failed to load variants:', err)
-      } finally {
-        setLoadingVariants(false)
-      }
-    }
-    fetchVariants()
-  }, [product?.id, product?.has_variants])
+  const { data: variantData, isLoading: loadingVariants, error: variantsError } = useSWR(product?.id ? ['inventory-variant-evidence', product.id] : null, async () => {
+    const supabase = createClient()
+    const [variants, links] = await Promise.all([
+      fetchAll<SourcingVariant>((from, to) => supabase.from('product_variants').select('id,product_id,attribute_name,attribute_value,quantity,price_override,sku,image_url,is_active,updated_at').eq('product_id', product!.id).order('attribute_name').order('attribute_value').order('id').range(from, to)),
+      fetchAll<SkuLink>((from, to) => supabase.from('product_1688_sku_links').select('product_id,offer_id,sku_key,target_kind,variant_id,source_spec,confirmed_by,confirmed_at').eq('product_id', product!.id).order('offer_id').order('sku_key').range(from, to)),
+    ])
+    return { variants, links }
+  }, { revalidateOnFocus: false, shouldRetryOnError: false })
+  const variants: InventoryVariantDraft[] = variantDraft ?? variantData?.variants ?? []
+  const sourcingLinks = variantData?.links ?? []
 
   async function uploadImageFile(file: File) {
     setUploading(true)
@@ -1519,59 +1541,66 @@ function ProductForm({
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (submitting.current || uploading) return
     if (!name.trim()) { setError('Name is required'); return }
+    if (product && (loadingVariants || variantsError)) { setError('Variant and supplier-link evidence must load before saving. Reopen this product to retry.'); return }
+    if (product && sourcingLinks.some(link => link.target_kind === 'variant' && (!hasVariants || variants.some(variant => variant.id === link.variant_id && variant.toDelete)))) { setError('Confirmed supplier SKU links protect these variants. Keep variant management and the linked Inventory variants.'); return }
 
+    setPricingAttempted(true)
+    // Inventory can still edit unpriced legacy records; purchasing requires a price.
+    const checkedPricing = validateProductPricing(pricing, { requirePricing: false })
+    if (!checkedPricing.ok) {
+      setError(null)
+      return
+    }
+    if (!product) {
+      const checkedVariants = validateNewProductPricing(pricing, newVariants, { requirePricing: false })
+      if (!checkedVariants.ok) { setError(checkedVariants.issues[0].message); return }
+    }
+
+    submitting.current = true
     setSaving(true)
     setError(null)
 
     try {
+      if (!product) {
+        const saved = await createInventoryProductAction({
+          requestId, name, sku, pricing, variants: newVariants, category, description,
+          isActive, imageUrl, quantity: Number(quantity || 0), remarks,
+        })
+        onSave(saved)
+        return
+      }
       const supabase = createClient()
       const payload = {
         name: name.trim(),
         sku: sku.trim() || null,
-        price: parseFloat(price) || 0,
+        ...checkedPricing.value,
         category: category.trim() || null,
         description: description.trim() || null,
         is_active: isActive,
         image_url: imageUrl || null,
         quantity: hasVariants ? 0 : (parseInt(quantity) || 0), // If has variants, main quantity is 0
-        bundle_prices: Object.fromEntries(
-          Object.entries(bundlePrices)
-            .filter(([, v]) => v && parseFloat(v) > 0)
-            .map(([k, v]) => [k, parseFloat(v)])
-        ),
-        is_b1g1: isB1g1,
         remarks: remarks.trim() || null,
         has_variants: hasVariants,
         updated_at: new Date().toISOString(),
       }
 
-      let savedProduct: Product
-      if (product) {
-        const { data, error: err } = await supabase
-          .from('products')
-          .update(payload)
-          .eq('id', product.id)
-          .select()
-          .single()
-        if (err) throw err
-        savedProduct = data
-      } else {
-        const { data, error: err } = await supabase
-          .from('products')
-          .insert(payload)
-          .select()
-          .single()
-        if (err) throw err
-        savedProduct = data
-      }
+      const { data: savedProduct, error: saveError } = await supabase
+        .from('products')
+        .update(payload)
+        .eq('id', product.id)
+        .select()
+        .single()
+      if (saveError) throw saveError
       
       // Save variants if has_variants is enabled
       if (hasVariants && savedProduct) {
         // Delete variants marked for deletion
         const toDelete = variants.filter(v => v.toDelete && v.id)
         for (const v of toDelete) {
-          await supabase.from('product_variants').delete().eq('id', v.id)
+          const { error } = await supabase.from('product_variants').delete().eq('id', v.id)
+          if (error) throw new Error('This variant is linked to purchasing history and could not be removed.')
         }
         
         // Upsert remaining variants
@@ -1587,21 +1616,24 @@ function ProductForm({
             updated_at: new Date().toISOString(),
           }
           
-          if (v.id && !v.isNew) {
-            await supabase.from('product_variants').update(variantPayload).eq('id', v.id)
-          } else {
-            await supabase.from('product_variants').insert(variantPayload)
-          }
+          // Photos may have been adopted by a sourcing confirmation since this form opened.
+          // Existing variant updates deliberately omit image_url and is_active.
+          const { error } = v.id && !v.isNew
+            ? await supabase.from('product_variants').update(variantPayload).eq('id', v.id).eq('product_id', savedProduct.id)
+            : await supabase.from('product_variants').insert({ ...variantPayload, image_url: v.image_url ?? null })
+          if (error) throw error
         }
       } else if (!hasVariants && product?.has_variants) {
         // If variants were disabled, delete all variants
-        await supabase.from('product_variants').delete().eq('product_id', product.id)
+        const { error } = await supabase.from('product_variants').delete().eq('product_id', product.id)
+        if (error) throw new Error('Linked variants could not be removed. Keep variant management enabled.')
       }
       
       onSave(savedProduct)
     } catch (err) {
       setError((err as Error).message)
     } finally {
+      submitting.current = false
       setSaving(false)
     }
   }
@@ -1646,10 +1678,16 @@ function ProductForm({
             >
               {imageUrl ? (
                 <>
+                  {/* 1688 photos 403 a browser that loads them directly, so
+                      they go through the authenticated proxy. That proxy needs
+                      the caller's cookies, and Next's image optimiser fetches
+                      server-side WITHOUT them, so this must stay unoptimized or
+                      the preview would 401 instead of rendering. */}
                   <Image
-                    src={imageUrl}
+                    src={mediaSrc(imageUrl) || '/placeholder.svg'}
                     alt="Product"
                     fill
+                    unoptimized
                     className="object-cover"
                     sizes="80px"
                   />
@@ -1730,266 +1768,80 @@ function ProductForm({
             />
           </div>
           {/* Category */}
-          <div className="space-y-2">
+          <div className="flex min-w-0 flex-col gap-2">
             <Label htmlFor="product-category">Category</Label>
-            <Select value={category} onValueChange={setCategory} disabled={saving}>
-              <SelectTrigger id="product-category">
-                <SelectValue placeholder="Select category" />
+            <Select value={category || '__uncategorised'} onValueChange={(value) => setCategory(value === '__uncategorised' ? '' : value)} disabled={saving}>
+              <SelectTrigger id="product-category" className="w-full">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Automotive">Automotive</SelectItem>
-                <SelectItem value="Bags & Travel">Bags & Travel</SelectItem>
-                <SelectItem value="Bathroom / Personal Care">Bathroom / Personal Care</SelectItem>
-                <SelectItem value="Car Accessories">Car Accessories</SelectItem>
-                <SelectItem value="Cleaning & Household">Cleaning & Household</SelectItem>
-                <SelectItem value="Electronics">Electronics</SelectItem>
-                <SelectItem value="Health & Wellness">Health & Wellness</SelectItem>
-                <SelectItem value="Home / Bedding">Home / Bedding</SelectItem>
-                <SelectItem value="Home / Furniture">Home / Furniture</SelectItem>
-                <SelectItem value="Home / Laundry">Home / Laundry</SelectItem>
-                <SelectItem value="Home & Pest Control">Home & Pest Control</SelectItem>
-                <SelectItem value="Home Appliances">Home Appliances</SelectItem>
-                <SelectItem value="Kitchen & Food Tools">Kitchen & Food Tools</SelectItem>
-                <SelectItem value="Pet / Outdoor">Pet / Outdoor</SelectItem>
-                <SelectItem value="Pet Supplies">Pet Supplies</SelectItem>
-                <SelectItem value="Phone Accessories">Phone Accessories</SelectItem>
-                <SelectItem value="Sewing & Crafts">Sewing & Crafts</SelectItem>
-                <SelectItem value="Sports & Fitness">Sports & Fitness</SelectItem>
-                <SelectItem value="Storage & Organization">Storage & Organization</SelectItem>
-                <SelectItem value="Tiles & Flooring">Tiles & Flooring</SelectItem>
-                <SelectItem value="Tools / Hardware">Tools / Hardware</SelectItem>
-                <SelectItem value="Toys & Games">Toys & Games</SelectItem>
+                <SelectGroup>
+                  <SelectItem value="__uncategorised">{UNCATEGORISED}</SelectItem>
+                  {product?.category && !PRODUCT_CATEGORIES.some((value) => value === product.category) && (
+                    <SelectItem value={product.category}>{product.category} (current)</SelectItem>
+                  )}
+                  {PRODUCT_CATEGORIES.map((value) => (
+                    <SelectItem key={value} value={value}>{value}</SelectItem>
+                  ))}
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
         </div>
 
         {/* Has Variants Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer py-2 border-y border-border">
+        {product && <label className="flex items-center gap-2 cursor-pointer py-2 border-y border-border">
           <input
             type="checkbox"
             checked={hasVariants}
             onChange={(e) => setHasVariants(e.target.checked)}
             className="rounded border-border"
+            disabled={saving || loadingVariants || !!variantsError || sourcingLinks.some(link => link.target_kind === 'variant')}
           />
           <span className="text-sm font-medium">Has Variants (Size, Color, etc.)</span>
-        </label>
+        </label>}
 
-        {/* Quantity & Unit Price - only show quantity if no variants */}
-        <div className="grid grid-cols-2 gap-3">
-          {!hasVariants && (
-            <div className="space-y-2">
-              <Label htmlFor="product-quantity">Quantity</Label>
-              <Input
-                id="product-quantity"
-                type="number"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                placeholder="0"
-                disabled={saving}
-              />
-            </div>
-          )}
-          <div className={`space-y-2 ${hasVariants ? 'col-span-2' : ''}`}>
-            <Label htmlFor="product-price">Unit Price (Rs)</Label>
+        {!product && <NewProductVariantsFields
+          value={newVariants}
+          onChange={setNewVariants}
+          pricing={pricing}
+          disabled={saving}
+          showErrors={pricingAttempted}
+          showStock
+        />}
+
+        {/* Quantity is held on the variants when the product has them. */}
+        {!hasVariants && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="product-quantity">Quantity</Label>
             <Input
-              id="product-price"
+              id="product-quantity"
               type="number"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
               placeholder="0"
               disabled={saving}
             />
           </div>
-        </div>
-        
-        {/* Variants Management */}
-        {hasVariants && (
-          <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">Product Variants</Label>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setVariants([...variants, { 
-                  attribute_name: '', 
-                  attribute_value: '', 
-                  quantity: 0, 
-                  price_override: null, 
-                  sku: null,
-                  isNew: true 
-                }])}
-                disabled={saving}
-              >
-                <Plus className="w-3 h-3 mr-1" />
-                Add Variant
-              </Button>
-            </div>
-            
-            {loadingVariants ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-              </div>
-            ) : variants.filter(v => !v.toDelete).length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No variants yet. Click &quot;Add Variant&quot; to create one.
-              </p>
-            ) : (
-              <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {variants.map((variant, idx) => 
-                  variant.toDelete ? null : (
-                    <div key={variant.id || `new-${idx}`} className="grid grid-cols-12 gap-2 items-center bg-background p-2 rounded border">
-                      <select
-                        value={variant.attribute_name}
-                        onChange={(e) => {
-                          const updated = [...variants]
-                          updated[idx].attribute_name = e.target.value
-                          setVariants(updated)
-                        }}
-                        disabled={saving}
-                        className="col-span-3 h-8 text-xs bg-background border border-input rounded-md px-2"
-                      >
-                        <option value="">Select...</option>
-                        <option value="Size">Size</option>
-                        <option value="Color">Color</option>
-                        <option value="Capacity">Capacity</option>
-                        <option value="Material">Material</option>
-                        <option value="Style">Style</option>
-                        <option value="Weight">Weight</option>
-                        <option value="Length">Length</option>
-                        <option value="Pack">Pack</option>
-                      </select>
-                      <Input
-                        placeholder="Value (e.g., Large)"
-                        value={variant.attribute_value}
-                        onChange={(e) => {
-                          const updated = [...variants]
-                          updated[idx].attribute_value = e.target.value
-                          setVariants(updated)
-                        }}
-                        disabled={saving}
-                        className="col-span-3 h-8 text-xs"
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Qty"
-                        value={variant.quantity || ''}
-                        onChange={(e) => {
-                          const updated = [...variants]
-                          updated[idx].quantity = parseInt(e.target.value) || 0
-                          setVariants(updated)
-                        }}
-                        disabled={saving}
-                        className="col-span-2 h-8 text-xs"
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Price"
-                        value={variant.price_override ?? ''}
-                        onChange={(e) => {
-                          const updated = [...variants]
-                          updated[idx].price_override = e.target.value ? parseFloat(e.target.value) : null
-                          setVariants(updated)
-                        }}
-                        disabled={saving}
-                        className="col-span-3 h-8 text-xs"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="col-span-1 h-8 w-8 p-0 text-destructive hover:text-destructive"
-                        onClick={() => {
-                          const updated = [...variants]
-                          if (variant.id && !variant.isNew) {
-                            updated[idx].toDelete = true
-                          } else {
-                            updated.splice(idx, 1)
-                          }
-                          setVariants(updated)
-                        }}
-                        disabled={saving}
-                      >
-                        <X className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Leave price empty to use the main unit price. Total stock: {variants.filter(v => !v.toDelete).reduce((sum, v) => sum + (v.quantity || 0), 0)}
-            </p>
-          </div>
         )}
 
-        {/* Bundle Pricing */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-sm font-medium">Bundle Prices (Rs)</Label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => {
-                const nextTier = ['2', '3', '4', '6', '8', '10', '12'].find(t => !bundlePrices[t])
-                if (nextTier) setBundlePrices({ ...bundlePrices, [nextTier]: '' })
-              }}
-              disabled={saving}
-            >
-              <Plus className="w-3 h-3 mr-1" />
-              Add Tier
-            </Button>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {Object.entries(bundlePrices).sort(([a], [b]) => Number(a) - Number(b)).map(([tier, tierPrice]) => (
-              <div key={tier} className="space-y-1 relative">
-                <Label className="text-xs text-muted-foreground">{tier}-Pack</Label>
-                <div className="flex gap-1">
-                  <Input
-                    type="number"
-                    value={tierPrice}
-                    onChange={(e) => setBundlePrices({ ...bundlePrices, [tier]: e.target.value })}
-                    placeholder="0"
-                    disabled={saving}
-                    className="h-9"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => {
-                      const updated = { ...bundlePrices }
-                      delete updated[tier]
-                      setBundlePrices(updated)
-                    }}
-                    disabled={saving}
-                  >
-                    <X className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {Object.keys(bundlePrices).length === 0 && (
-              <p className="col-span-4 text-xs text-muted-foreground py-2">No bundle prices set. Click &quot;Add Tier&quot; to add one.</p>
-            )}
-          </div>
-        </div>
+        <ProductPricingFields
+          value={pricing}
+          onChange={setPricing}
+          disabled={saving}
+          showErrors={pricingAttempted}
+          variantDefaults={hasVariants}
+        />
         
-        {/* B1G1 Offer Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isB1g1}
-            onChange={(e) => setIsB1g1(e.target.checked)}
-            className="rounded border-border"
-            disabled={saving}
-          />
-          <span className="text-sm">B1G1 Offer (Buy 1 Get 1)</span>
-        </label>
+        {/* Variants Management */}
+        {product && hasVariants && <InventoryVariantFields
+          variants={variants}
+          links={sourcingLinks}
+          onChange={setVariants}
+          disabled={saving}
+          loading={loadingVariants}
+          error={variantsError ? 'Variant evidence could not be loaded. Reopen the product before saving.' : null}
+        />}
 
         {/* Remarks */}
         <div className="space-y-2">
@@ -2014,7 +1866,7 @@ function ProductForm({
           <span className="text-sm">Active (visible in system)</span>
         </label>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {(error || pricingError) && <p role="alert" className="text-sm text-destructive">{error || pricingError}</p>}
       </div>
 
       <DialogFooter className="gap-2">
@@ -2033,7 +1885,7 @@ function ProductForm({
         <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
           Cancel
         </Button>
-        <Button type="submit" disabled={saving}>
+        <Button type="submit" disabled={saving || uploading}>
           {saving && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
           {product ? 'Update' : 'Create'}
         </Button>

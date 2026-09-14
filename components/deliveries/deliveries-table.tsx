@@ -1,8 +1,9 @@
 'use client'
 
-import { Fragment, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, bulkUpdateDeliveryDate, markRiderPaid, updateDeliveryPrice, updateDeliveryFields } from '@/lib/delivery-actions'
+import { assignDelivery, deleteDelivery, updateDeliveryStatus, bulkAssignDeliveries, bulkUpdateDeliveryDate, markRiderPaid, updateDeliveryPrice, updateDeliveryFields, getDeliveryForEdit } from '@/lib/delivery-actions'
+import { canCorrectDeliveryDate, deliveryDirtyPatch, deliveryEditForm, type DeliveryEditSnapshot } from '@/lib/delivery-edit'
 import type { Delivery, Profile, Rider, DeliveryStatus, SalesType } from '@/lib/types'
 import { STATUS_LABELS, SALES_TYPE_LABELS, SALES_TYPE_COLORS } from '@/lib/types'
 import { isPendingReattempt, staysOnVan } from '@/lib/reschedule-stock'
@@ -82,6 +83,11 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
     notes: '',
   })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [loadingEdit, setLoadingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [editSnapshot, setEditSnapshot] = useState<DeliveryEditSnapshot | null>(null)
+  const editRequest = useRef(0)
+  const editSubmitting = useRef(false)
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -196,43 +202,62 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
     setEditPriceValue(String(delivery.amount || 0))
   }
 
-  function openEdit(delivery: Delivery) {
+  function closeEdit() {
+    if (editSubmitting.current) return
+    editRequest.current += 1
+    setEditDelivery(null)
+    setEditSnapshot(null)
+    setEditError('')
+    setLoadingEdit(false)
+  }
+
+  async function openEdit(delivery: Delivery) {
+    if (editSubmitting.current) return
+    const request = ++editRequest.current
     setEditDelivery(delivery)
-    setEditForm({
-      // date input wants yyyy-mm-dd
-      delivery_date: delivery.delivery_date ? String(delivery.delivery_date).slice(0, 10) : '',
-      contact_1: delivery.contact_1 || '',
-      contact_2: delivery.contact_2 || '',
-      locality: delivery.locality || '',
-      products: delivery.products || '',
-      qty: String(delivery.qty || 1),
-      notes: delivery.notes || '',
-    })
+    setEditSnapshot(null)
+    setEditError('')
+    setLoadingEdit(true)
+    setEditForm({ delivery_date: '', contact_1: '', contact_2: '', locality: '', products: '', qty: '', notes: '' })
+    try {
+      const result = await getDeliveryForEdit(delivery.id)
+      if (request !== editRequest.current) return
+      if (!result.snapshot || result.snapshot.id !== delivery.id) {
+        setEditError(result.error || 'Could not load current delivery details. Close and reopen this form.')
+        return
+      }
+      setEditSnapshot(result.snapshot)
+      setEditForm(deliveryEditForm(result.snapshot))
+    } catch {
+      if (request === editRequest.current) setEditError('Could not load current delivery details. Close and reopen this form.')
+    } finally {
+      if (request === editRequest.current) setLoadingEdit(false)
+    }
   }
 
   async function handleEditSave() {
-    if (!editDelivery) return
+    if (!editDelivery || !editSnapshot || loadingEdit || savingEdit || editSubmitting.current) return
+    editSubmitting.current = true
     setSavingEdit(true)
+    setEditError('')
     try {
-      const result = await updateDeliveryFields(editDelivery.id, {
-        delivery_date: editForm.delivery_date || null,
-        contact_1: editForm.contact_1.trim() || null,
-        contact_2: editForm.contact_2.trim() || null,
-        locality: editForm.locality.trim() || null,
-        products: editForm.products.trim() || null,
-        qty: parseInt(editForm.qty, 10) || 1,
-        notes: editForm.notes.trim() || null,
-      })
+      const changes = deliveryDirtyPatch(editSnapshot, editForm)
+      const result = await updateDeliveryFields(editDelivery.id, changes, editSnapshot)
       if (result?.error) {
-        alert(result.error)
+        setEditError(result.error)
+        // An uncertain save or concurrent edit requires a fresh baseline, never a blind retry.
+        setEditSnapshot(null)
       } else {
+        editRequest.current += 1
         setEditDelivery(null)
+        setEditSnapshot(null)
         router.refresh()
       }
     } catch (error) {
-      console.error('[v0] Edit delivery error:', error)
-      alert('Failed to update delivery. Please try again.')
+      setEditError(error instanceof Error ? error.message : 'Could not confirm the save. Close and reopen this form before retrying.')
+      setEditSnapshot(null)
     } finally {
+      editSubmitting.current = false
       setSavingEdit(false)
     }
   }
@@ -829,7 +854,7 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
       </Dialog>
 
       {/* Edit Delivery Dialog */}
-      <Dialog open={!!editDelivery} onOpenChange={(open) => !open && setEditDelivery(null)}>
+      <Dialog open={!!editDelivery} onOpenChange={(open) => !open && closeEdit()}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Delivery</DialogTitle>
@@ -837,32 +862,27 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
               Update the delivery date, contact, products and notes for {editDelivery?.customer_name}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          {loadingEdit && <p role="status" className="text-sm text-muted-foreground">Loading current delivery details…</p>}
+          {editError && <p role="alert" className="text-sm text-destructive">{editError}</p>}
+          <fieldset disabled={loadingEdit || savingEdit || !editSnapshot} className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-date">Delivery Date</Label>
                 <Input
                   id="edit-date"
                   type="date"
+                  disabled={!editSnapshot || !canCorrectDeliveryDate(editSnapshot)}
                   value={editForm.delivery_date}
                   onChange={(e) => setEditForm({ ...editForm, delivery_date: e.target.value })}
-                  aria-describedby={editDelivery?.rescheduled_to ? 'edit-date-resched' : undefined}
+                  aria-describedby={editSnapshot && !canCorrectDeliveryDate(editSnapshot) ? 'edit-date-resched' : undefined}
                 />
                 {/* Editing this field was completely blind to a reschedule:
                     this box holds the day the goods WENT OUT, but the order may
                     already be due on another day, and overwriting it silently
                     re-dates the van stock and returns that hang off it. */}
-                {editDelivery?.rescheduled_to &&
-                  editDelivery.rescheduled_to !== editDelivery.delivery_date && (
+                {editSnapshot && !canCorrectDeliveryDate(editSnapshot) && (
                     <p id="edit-date-resched" className="text-xs text-amber-600">
-                      Already rescheduled to{' '}
-                      <span className="font-medium">
-                        {new Date(editDelivery.rescheduled_to).toLocaleDateString('en-GB', {
-                          weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-                        })}
-                      </span>
-                      . This box is the day it went out - change it only to correct a mistake,
-                      not to move the delivery.
+                      This order has dispatch or reschedule activity. Use the existing reschedule workflow to move its delivery.
                     </p>
                   )}
               </div>
@@ -926,12 +946,12 @@ export function DeliveriesTable({ deliveries, riders, contractors, currentPage, 
                 placeholder="Delivery notes"
               />
             </div>
-          </div>
+          </fieldset>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDelivery(null)}>
+            <Button variant="outline" onClick={closeEdit} disabled={savingEdit}>
               Cancel
             </Button>
-            <Button onClick={handleEditSave} disabled={savingEdit}>
+            <Button onClick={handleEditSave} disabled={savingEdit || loadingEdit || !editSnapshot}>
               {savingEdit ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>

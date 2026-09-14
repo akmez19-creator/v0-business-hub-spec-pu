@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireWhatsAppInboxUser, requireWhatsAppNumber, WhatsAppScopeError } from '@/lib/whatsapp/number-scope'
 import { importRows, mapRows, parseCsv } from '@/lib/whatsapp/import'
 
 /**
@@ -15,18 +15,12 @@ export const maxDuration = 60
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
-    }
+    await requireWhatsAppInboxUser()
 
     const form = await request.formData()
     const file = form.get('file')
     const phoneNumberId = String(form.get('phoneNumberId') ?? '').trim()
-    const displayPhone = String(form.get('displayPhone') ?? '').trim() || null
+    // Display/owner information comes from server configuration, never the uploaded form.
     const commit = String(form.get('commit') ?? '') === 'true'
 
     if (!(file instanceof File)) {
@@ -38,6 +32,8 @@ export async function POST(request: Request) {
         { status: 400 },
       )
     }
+    const binding=await requireWhatsAppNumber(phoneNumberId)
+    const displayPhone=binding.display_phone??null
     if (file.size > 25 * 1024 * 1024) {
       return NextResponse.json({ success: false, error: 'File is larger than 25MB.' }, { status: 400 })
     }
@@ -71,6 +67,7 @@ export async function POST(request: Request) {
     const result = await importRows(parsed, phoneNumberId, displayPhone)
     return NextResponse.json({ success: true, dryRun: false, ...result, mapping, problems })
   } catch (e) {
+    if(e instanceof WhatsAppScopeError) return NextResponse.json({success:false,error:e.message},{status:e.status})
     const message = e instanceof Error ? e.message : 'Import failed'
     console.log('[v0] whatsapp import failed:', message)
     return NextResponse.json({ success: false, error: message }, { status: 500 })

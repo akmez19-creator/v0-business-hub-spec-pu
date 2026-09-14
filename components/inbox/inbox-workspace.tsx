@@ -14,12 +14,13 @@
  * itself when a channel is actually unavailable.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { ArrowLeft, Settings2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LeadsChannel } from './leads-channel'
 import { WhatsAppChannel } from './whatsapp-channel'
+import { readInbox } from './inbox-session'
 
 type ChannelId = 'leads' | 'all' | 'messenger' | 'comments' | 'whatsapp'
 
@@ -38,10 +39,29 @@ type CapabilitiesResponse = {
   error?: string
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const fetcher = readInbox
 
 export function InboxWorkspace({ origin }: { origin: string }) {
   const [setupOpen, setSetupOpen] = useState(false)
+  const [healthOpen, setHealthOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number | null>(null)
+  useEffect(() => {
+    const measure = () => {
+      if (panelRef.current) setHeight(Math.max(360, window.innerHeight - panelRef.current.getBoundingClientRect().top - 16))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    const observer = new ResizeObserver(measure)
+    if (panelRef.current?.parentElement) observer.observe(panelRef.current.parentElement)
+    return () => { window.removeEventListener('resize', measure); observer.disconnect() }
+  }, [])
+  const { data: health, error: healthError } = useSWR<{
+    success: boolean
+    pages: { id: string; name: string; lastMessageAt: string | null; lastWebhookAt: string | null; conversationCount: number; lastWebhookError?: string | null; lastSyncError?: string | null }[]
+    messenger?: { lastSyncAt: string | null; lastError: string | null }
+    checkedAt: string
+  }>('/api/inbox/health', fetcher, { refreshInterval: 60_000, refreshWhenHidden: false })
 
   const { data: caps } = useSWR<CapabilitiesResponse>('/api/inbox/capabilities', fetcher, {
     refreshInterval: 5 * 60_000,
@@ -54,7 +74,16 @@ export function InboxWorkspace({ origin }: { origin: string }) {
   )
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] flex-col gap-3 p-6 pt-0">
+    <div ref={panelRef} style={{ height: height ?? '70dvh' }} className="flex min-h-0 flex-col gap-2 px-3 pb-2 md:px-6">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{healthError ? 'Page activity check unavailable' : health ? `${health.pages.length} Pages in inbox history` : 'Checking Page activity…'}</span>
+        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setHealthOpen((value) => !value)}>{healthOpen ? 'Hide Page activity' : 'Page activity'}</Button>
+      </div>
+      {healthOpen ? <div className="grid shrink-0 gap-2 rounded-lg border bg-card p-3 text-xs sm:grid-cols-2">
+        {health?.pages.map((page) => <div key={page.id}><p className="font-medium">{page.name}</p><p className="mt-1 text-muted-foreground">{page.conversationCount} conversations in history</p><p className="text-muted-foreground">Last received event: {page.lastWebhookAt ? new Date(page.lastWebhookAt).toLocaleString() : 'Not recorded'}</p>{page.lastWebhookError || page.lastSyncError ? <p className="mt-1 text-amber-600 dark:text-amber-400">{page.lastWebhookError || page.lastSyncError}</p> : null}</div>)}
+        {health?.messenger?.lastError ? <p className="text-amber-600 dark:text-amber-400 sm:col-span-2">Facebook updates delayed: {health.messenger.lastError}</p> : null}
+        <p className="text-muted-foreground sm:col-span-2">This shows received activity, not a live connection test.</p>
+      </div> : null}
       {degraded.length > 0 ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
@@ -66,13 +95,14 @@ export function InboxWorkspace({ origin }: { origin: string }) {
                   : `${c.label}: ${c.reason ?? 'unavailable'}`,
               )
               .join('. ')}
-            . Those leads are missing from the list until it is granted.
+            . Some actions may be unavailable. Previously loaded conversations remain visible.
           </p>
         </div>
       ) : null}
 
-      <div className="flex flex-1 overflow-hidden">
-        {setupOpen ? <WhatsAppChannel origin={origin} initialWaId={null} /> : <LeadsChannel />}
+      <div className={setupOpen ? 'hidden' : 'flex min-h-0 flex-1 overflow-hidden'}><LeadsChannel active={!setupOpen} /></div>
+      <div className={setupOpen ? 'flex min-h-0 flex-1 overflow-hidden' : 'hidden'}>
+        {setupOpen ? <WhatsAppChannel origin={origin} initialWaId={null} /> : null}
       </div>
 
       <div className="flex justify-end">

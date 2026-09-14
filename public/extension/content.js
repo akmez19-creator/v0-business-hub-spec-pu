@@ -3875,14 +3875,71 @@ function akmezPriceFor(p, q) {
   return unit * q;
 }
 
+// Which packs make up q, biggest first - e.g. [10] or [10, 5].
+// MIRRORS setsUsedFor() in lib/orders/quick-order.ts - keep both in step.
+// akmezSetSize() returns the SMALLEST tier, so a product sold as both a 5-pack
+// and a 10-pack labelled itself "Set of 5" even when the 10 was bought. The
+// price was always right (the DP above picks the 10-pack); only the text lied.
+// Same DP and same tie-breaking as akmezPriceFor, so the label can never
+// describe a different combination from the one charged.
+function akmezSetsUsedFor(p, q) {
+  if (akmezSetSize(p) <= 0) return [];
+  const tiers = akmezTiers(p);
+  if (!tiers.length) return [];
+  q = Math.max(0, parseInt(q, 10) || 0);
+  if (q === 0) return [];
+  const biggest = Math.max.apply(null, tiers.map(t => t.n));
+  const cap = q + biggest;
+  const cost = new Array(cap + 1).fill(Infinity);
+  const pick = new Array(cap + 1).fill(0);
+  cost[0] = 0;
+  for (let i = 1; i <= cap; i++) {
+    for (const t of tiers) {
+      if (t.n <= i && cost[i - t.n] + t.price < cost[i]) {
+        cost[i] = cost[i - t.n] + t.price;
+        pick[i] = t.n;
+      }
+    }
+  }
+  let bestAt = -1, best = Infinity;
+  for (let i = q; i <= cap; i++) if (cost[i] < best) { best = cost[i]; bestAt = i; }
+  if (bestAt < 0) return [];
+  const out = [];
+  for (let i = bestAt; i > 0 && pick[i] > 0; i -= pick[i]) out.push(pick[i]);
+  return out.sort((a, b) => b - a);
+}
+
+// "Set of 10", "2 x Set of 10" when a pack repeats, "Set of 10 & 5" when mixed.
+// MIRRORS setsLabel() in lib/orders/quick-order.ts - keep both in step.
+// Separator is "&" NOT "+" (the wire format splits products on "+") and the
+// count is a prefix (a trailing "xN" means quantity). stripSetSuffix() reads it.
+function akmezSetsLabel(sets) {
+  if (!sets.length) return '';
+  const counts = new Map();
+  for (const n of sets) counts.set(n, (counts.get(n) || 0) + 1);
+  return Array.from(counts.entries())
+    .map(([n, c], i) =>
+      i === 0 ? (c > 1 ? c + ' x Set of ' + n : 'Set of ' + n) : (c > 1 ? c + ' x ' + n : String(n)))
+    .join(' & ');
+}
+
+// The " - Set of N" marker at this quantity, or '' when not sold in sets.
+// MIRRORS setTextFor() in lib/orders/quick-order.ts.
+function akmezSetText(p, q) {
+  const set = akmezSetSize(p);
+  if (set <= 0) return '';
+  const sets = q === undefined ? [] : akmezSetsUsedFor(p, q);
+  return sets.length ? akmezSetsLabel(sets) : 'Set of ' + set;
+}
+
 // A short label describing the active offer, shown as a badge
-function akmezOfferLabel(p) {
+function akmezOfferLabel(p, q) {
   if (!p) return '';
   if (p.is_b1g1) return 'B1G1';
   // A set is packaging, not a discount - "4 for Rs1075" reads as an optional
   // deal on something you could also buy singly, which these cannot be.
   const set = akmezSetSize(p);
-  if (set > 0) return 'Set of ' + set;
+  if (set > 0) return akmezSetText(p, q);
   const tiers = akmezTiers(p).sort((a, b) => a.n - b.n);
   if (tiers.length) return tiers[0].n + ' for Rs' + Math.round(tiers[0].price);
   return '';
@@ -3991,7 +4048,10 @@ function akmezLearnAdProduct(adId, productId) {
   } catch (e) {}
 }
 
-function akmezCartResolve(key) {
+// `q` is optional and only affects the SET LABEL: with a quantity the label
+// names the pack actually sold ("Set of 10"), without one it falls back to the
+// smallest tier, which is what every single-tier product produces anyway.
+function akmezCartResolve(key, q) {
   const str = String(key);
   const sep = str.indexOf('::');
   const pid = sep === -1 ? str : str.slice(0, sep);
@@ -4018,10 +4078,11 @@ function akmezCartResolve(key) {
   // agents already write (Cozy Stool 0/20 carry the set, Welding Rod 100/100).
   // Read off the PARENT, not `priced` - a model override blanks bundle_prices,
   // which is where the set size is derived from.
-  var setN = variant ? 0 : akmezSetSize(p);
+  // Names the pack really sold, so a 10-pack no longer reads "Set of 5".
+  var setTxt = variant ? '' : akmezSetText(p, q);
   const label = variant
     ? (p.name + ' - ' + variant.attribute_value)
-    : (setN > 0 ? p.name + ' - Set of ' + setN : p.name);
+    : (setTxt ? p.name + ' - ' + setTxt : p.name);
   return { p, variant, priced, label };
 }
 
@@ -4116,7 +4177,8 @@ function updateCart() {
   let qty = 0, amt = 0;
   // Render each selected product with quantity controls
   list.innerHTML = entries.map(([id, q]) => {
-    const r = akmezCartResolve(id);
+    // q so the cart badge names the same pack the order text will.
+    const r = akmezCartResolve(id, q);
     if (!r) return '';
     const priced = r.priced;
     qty += q;
@@ -4124,7 +4186,7 @@ function updateCart() {
     const line = akmezPriceFor(priced, q);   // price after B1G1 / bundle rules
     const listTotal = unit * q;              // price with no offer
     amt += line;
-    const offer = akmezOfferLabel(priced);
+    const offer = akmezOfferLabel(priced, q);
     const saved = listTotal - line;
     // Show the discounted line total, with the struck-through list price + offer
     const priceHtml = saved > 0.5
@@ -4299,7 +4361,7 @@ function submitOrder() {
   // line amount (after B1G1 / bundle pricing).
   // Not const: a refund clears these, since nothing leaves the warehouse.
   let productLines = entries.map(([key, q]) => {
-    const r = akmezCartResolve(key);
+    const r = akmezCartResolve(key, q);
     if (!r) return null;
     // r.label already includes the chosen variety (e.g. "M8 Smartband - Red").
     // Flag B1G1 so the picking list shows the offer.
@@ -4344,7 +4406,7 @@ function submitOrder() {
       name:
         (fv
           ? r.p.name + ' - ' + fv.attribute_value
-          : (akmezSetSize(r.p) > 0 ? r.p.name + ' - Set of ' + akmezSetSize(r.p) : r.p.name)) +
+          : (akmezSetText(r.p, fq) ? r.p.name + ' - ' + akmezSetText(r.p, fq) : r.p.name)) +
         ' - B1G1 FREE',
       productId: r.p.id,
       qty: fq,

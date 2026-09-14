@@ -107,6 +107,7 @@ interface ProductAlias {
 }
 
 const PO_COLUMN_ALIASES: Record<string, string[]> = {
+  order_date: ['order date', 'purchase date', 'po date'],
   status: ['status'],
   reorder: ['reorder', 're-order', 'reorder link'],
   link: ['link'],
@@ -196,6 +197,19 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
     const cleaned = String(value).replace(/[Rs,$,\s,¥]/g, '').trim()
     const num = parseFloat(cleaned)
     return isNaN(num) ? 0 : num
+  }
+
+  function parseOrderDate(value: unknown): string | null {
+    if (value == null || value === '') return null
+    if (typeof value === 'number') {
+      const parts = XLSX.SSF.parse_date_code(value)
+      return parts ? `${String(parts.y).padStart(4, '0')}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}` : null
+    }
+    if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10)
+    const date = String(value).trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+    const parsed = new Date(`${date}T00:00:00Z`)
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : null
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -616,6 +630,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
           image_url: columnMap['image'] ? String(row[columnMap['image']] || '').trim() || null : null,
           product_name: productName || null,
           product_id: productId,
+          order_date: parseOrderDate(getValue(row, 'order_date')),
           qty: columnMap['qty'] ? parseInt(String(row[columnMap['qty']] || '0')) || 0 : 0,
           unit_price: parseAmount(columnMap['unit_price'] ? row[columnMap['unit_price']] : 0),
           discounted_unit_price: parseAmount(columnMap['discounted_unit_price'] ? row[columnMap['discounted_unit_price']] : 0),
@@ -1046,17 +1061,17 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
         >
         <DialogHeader>
           <DialogTitle>
-            {step === 'upload' && 'Step 1: Upload Purchase Order Excel'}
+            {step === 'upload' && 'Step 1: Upload Imports Excel'}
             {step === 'column_mapping' && 'Step 2: Map Columns'}
             {step === 'product_mapping' && 'Step 3: Map Products to Inventory'}
             {step === 'importing' && 'Importing...'}
             {step === 'result' && 'Import Complete'}
           </DialogTitle>
           <DialogDescription>
-            {step === 'upload' && 'Upload your purchase order Excel file'}
+            {step === 'upload' && 'Upload your China imports Excel file'}
             {step === 'column_mapping' && `Map Excel columns to system fields. ${parsedData.length} rows found.`}
             {step === 'product_mapping' && 'Match PO product names to your inventory. Aliases are saved for future imports.'}
-            {step === 'importing' && 'Please wait while we import your purchase orders...'}
+            {step === 'importing' && 'Please wait while we import your China imports...'}
             {step === 'result' && 'Import has finished.'}
           </DialogDescription>
         </DialogHeader>
@@ -1784,7 +1799,7 @@ export function POImportDialog({ children }: { children: React.ReactNode }) {
               </Button>
               <Button onClick={handleImport} disabled={importing}>
                 {importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                Import {parsedData.length} Purchase Orders
+                Upload {parsedData.length} Imports
               </Button>
             </>
           )}

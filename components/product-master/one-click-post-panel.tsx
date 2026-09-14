@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react'
 import { AlertCircle, Check, Copy, Download, Loader2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { mediaSrc } from '@/lib/media-url'
 
 /**
  * Feature 6: one button -> poster + description, ready to publish.
@@ -139,7 +140,7 @@ export function OneClickPostPanel({
                 {opt.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={opt.image}
+                    src={mediaSrc(opt.image)}
                     alt={`${opt.label} generated poster`}
                     className="w-full rounded-md border border-border"
                   />

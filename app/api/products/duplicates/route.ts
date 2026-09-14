@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { findDuplicatePairs, type DuplicateProduct } from '@/lib/products/duplicates'
+import { findAllDuplicatePairs, type DuplicateProduct, type ProductLabel } from '@/lib/products/duplicates'
 import { reviewDuplicatePairs } from '@/lib/products/duplicate-ai'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 
 // The AI pass reads a dozen short names, but it is still a paid/rate-limited
 // call on this account, so it never runs as part of the scan.
@@ -19,7 +20,25 @@ async function loadCandidates() {
   if (error) throw new Error(error.message)
 
   const products = (data || []) as (DuplicateProduct & { is_active: boolean | null })[]
-  const pairs = findDuplicatePairs(products)
+
+  // The labels the paperwork knows these products by. Both tables are whole-
+  // table reads that feed a list a person acts on, so they go through fetchAll
+  // - the PO table is already past 690 rows and a silent 1000-row cap here
+  // would hide exactly the oldest, most-established links.
+  const [poRows, aliasRows] = await Promise.all([
+    fetchAll<{ product_id: string | null; product_name: string | null }>((from, to) =>
+      admin.from('purchase_orders').select('product_id, product_name').not('product_id', 'is', null).order('id').range(from, to),
+    ),
+    fetchAll<{ product_id: string | null; alias_name: string | null }>((from, to) =>
+      admin.from('product_aliases').select('product_id, alias_name').order('id').range(from, to),
+    ),
+  ])
+  const labels: ProductLabel[] = [
+    ...poRows.flatMap(r => (r.product_id && r.product_name ? [{ productId: r.product_id, label: r.product_name, via: 'purchase order' as const }] : [])),
+    ...aliasRows.flatMap(r => (r.product_id && r.alias_name ? [{ productId: r.product_id, label: r.alias_name, via: 'alias' as const }] : [])),
+  ]
+
+  const pairs = findAllDuplicatePairs(products, labels)
 
   // Only the products actually in a pair need their counts fetched.
   const ids = [...new Set(pairs.flatMap(p => [p.a.id, p.b.id]))]

@@ -83,19 +83,26 @@
     "three": "^0.183.2",
     "uuid": "13.0.0",
     "vaul": "^1.1.2",
+    "workflow": "4.8.8",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "@tailwindcss/postcss": "^4.1.9",
     "@types/node": "^22",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@workflow/vitest": "4.0.24",
+    "esbuild": "0.25.12",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
+    "tsx": "4.21.0",
     "tw-animate-css": "1.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
   },
   "trustedDependencies": [
     "pg-native"

@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react'
 import { AlertCircle, Crown, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { mediaSrc } from '@/lib/media-url'
 
 /**
  * Feature 7: score every candidate product photo and surface the best one.
@@ -130,9 +131,12 @@ export function BestImagePicker({
                   }`}
                 >
                   <div className="relative">
+                    {/* Proxied: the candidates come off 1688/Taobao, whose CDN
+                        403s a direct browser load. Without this you would be
+                        asked to pick the best photo from a row of blank boxes. */}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={r.imageUrl}
+                      src={mediaSrc(r.imageUrl)}
                       alt={`Candidate ${i + 1}`}
                       className="aspect-square w-full rounded-md object-cover"
                     />

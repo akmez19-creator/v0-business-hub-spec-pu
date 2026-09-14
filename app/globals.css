@@ -170,6 +170,15 @@
 @theme inline {
   --font-sans: 'Geist', 'Geist Fallback';
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-serif: 'Source Serif 4', 'Source Serif 4 Fallback', Georgia, serif;
+  /* Storefront display face. Loaded in app/shop/layout.tsx, so it costs the
+     dashboard nothing - only the shop subtree ever renders font-display.
+     MUST resolve through --font-outfit: next/font generates a HASHED family
+     name (__Outfit_abc123), so writing 'Outfit' literally here would silently
+     fall back to Geist - the same trap that made font-serif render as Times
+     when only Geist was loaded. Outside the shop subtree the var is unset and
+     this degrades to Geist on purpose. */
+  --font-display: var(--font-outfit), 'Geist', sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -219,6 +228,63 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+body:has(.local-order-print) {
+  --document-paper: hsl(0 0% 100%);
+  --document-ink: hsl(240 10% 10%);
+  --document-muted: hsl(240 5% 40%);
+  --document-border: hsl(240 5% 80%);
+}
+
+.local-order-print {
+  --background: var(--document-paper);
+  --foreground: var(--document-ink);
+  --card: var(--document-paper);
+  --card-foreground: var(--document-ink);
+  --muted-foreground: var(--document-muted);
+  --border: var(--document-border);
+}
+
+@media print {
+  body:has(.local-order-print) {
+    background: var(--document-paper);
+    color: var(--document-ink);
+    height: auto;
+    overflow: visible;
+  }
+  [data-dashboard-shell]:has(.local-order-print),
+  [data-dashboard-workspace]:has(.local-order-print),
+  [data-dashboard-content]:has(.local-order-print) {
+    display: block;
+    height: auto;
+    max-height: none;
+    min-width: 0;
+    overflow: visible;
+    padding: 0;
+    background: none;
+  }
+  [data-dashboard-shell]:has(.local-order-print) > :not([data-dashboard-workspace]),
+  [data-dashboard-workspace]:has(.local-order-print) > :not([data-dashboard-content]),
+  .local-order-print-controls {
+    display: none !important;
+  }
+  .local-order-print {
+    max-width: none;
+    margin: 0;
+    padding: 8mm;
+    border-radius: 0;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .local-order-print-table { overflow: visible; }
+  .local-order-print table { table-layout: fixed; }
+  .local-order-print table th:first-child { width: 27%; }
+  .local-order-print table th:nth-child(5) { width: 20%; }
+  .local-order-print th, .local-order-print td { overflow-wrap: anywhere; }
+  .local-order-print thead { display: table-header-group; }
+  .local-order-print tr, .local-order-print-totals { break-inside: avoid; }
+  .local-order-print a { color: inherit; text-decoration: none; }
 }
 
 .game-bg {
@@ -905,5 +971,79 @@
   to {
     transform: translateY(0);
     opacity: 1;
+  }
+}
+
+/* ============================================================
+   STOREFRONT THEME
+   Scoped to .shop-theme, never :root. The dashboard is a dark
+   tool and must keep its own palette - redefining these globally
+   would repaint every internal page.
+   Five colours: porcelain, ink, tangerine, aqua, pink.
+   ============================================================ */
+.shop-theme {
+  --background: hsl(38, 100%, 98%);
+  --foreground: hsl(255, 35%, 13%);
+  --card: hsl(0, 0%, 100%);
+  --card-foreground: hsl(255, 35%, 13%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(255, 35%, 13%);
+  --primary: hsl(22, 95%, 54%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(38, 60%, 95%);
+  --secondary-foreground: hsl(255, 35%, 13%);
+  --muted: hsl(38, 45%, 94%);
+  --muted-foreground: hsl(255, 12%, 45%);
+  --accent: hsl(184, 80%, 40%);
+  --accent-foreground: hsl(0, 0%, 100%);
+  --destructive: hsl(356, 80%, 55%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(38, 35%, 89%);
+  --input: hsl(38, 35%, 92%);
+  --ring: hsl(22, 95%, 54%);
+  --radius: 1.5rem;
+
+  /* Extra hues used for category colour-coding and offer badges. */
+  --shop-aqua: hsl(184, 80%, 40%);
+  --shop-pink: hsl(336, 85%, 60%);
+  --shop-ink: hsl(255, 35%, 13%);
+
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* Horizontal category lanes: hide the scrollbar but keep the scrolling, and
+   snap so a flick always lands on a whole card instead of slicing one. */
+.shop-rail {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+}
+.shop-rail::-webkit-scrollbar {
+  display: none;
+}
+.shop-rail > * {
+  scroll-snap-align: start;
+}
+
+/* Staggered entrance for a grid of cards. One orchestrated reveal rather than
+   per-card hover tricks. Respects reduced-motion below. */
+@keyframes shop-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.shop-rise {
+  animation: shop-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shop-rise {
+    animation: none;
   }
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getInboxPage, sendReply, MessagingPermissionError } from '@/lib/facebook/messages'
 import { recordMessengerMessage } from '@/lib/messenger/store'
+import { pauseForHumanReply } from '@/lib/inbox-autopilot/runtime'
 
 /** Send a reply to a customer on Messenger. */
 export async function POST(request: Request) {
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
     // The reply must be sent as the same Page that received the message.
     const page = await getInboxPage(pageId)
     if (!page) return NextResponse.json({ success: false, error: 'No Page available' }, { status: 400 })
+    await pauseForHumanReply(user.id,'messenger',page.id,recipientId)
 
     try {
       const result = await sendReply(page, recipientId, body)

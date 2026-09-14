@@ -1,6 +1,7 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/server'
 import { MESSAGING_WINDOW_MS, type InboxConversation, type InboxMessage } from '@/lib/facebook/messages'
+import { connectInboxDatabase } from './pg'
 
 /**
  * Cache-backed reads for the Messenger inbox.
@@ -82,8 +83,7 @@ export async function listCachedConversations(options: {
 
   const { data, error } = await q
   if (error) {
-    console.log('[v0] messenger cache: list failed', error.message)
-    return []
+    throw new Error('Could not read cached Messenger conversations')
   }
   return (data as unknown as ConversationRow[]).map(toConversation)
 }
@@ -92,41 +92,68 @@ export async function listCachedConversations(options: {
 export async function cachedPageStats(): Promise<
   { id: string; name: string; unread: number; conversations: number }[]
 > {
-  const db = createAdminClient()
-  const { data } = await db.from('messenger_conversations').select('page_id,page_name,unread_count')
-  const byPage = new Map<string, { id: string; name: string; unread: number; conversations: number }>()
-  for (const row of (data ?? []) as { page_id: string; page_name: string | null; unread_count: number }[]) {
-    const entry = byPage.get(row.page_id) ?? {
-      id: row.page_id,
-      name: row.page_name ?? '',
-      unread: 0,
-      conversations: 0,
+  // Aggregate in the database: returning six Page totals is cheaper and more
+  // accurate than downloading a capped set of thousands of conversation rows.
+  try {
+    const client = await connectInboxDatabase()
+    try {
+      const { rows } = await client.query<{
+        page_id: string; name: string; unread: string; conversations: string
+      }>(`SELECT page_id, COALESCE(MAX(NULLIF(page_name, '')), page_id) AS name,
+          COALESCE(SUM(unread_count), 0)::text AS unread, COUNT(*)::text AS conversations
+          FROM messenger_conversations GROUP BY page_id ORDER BY page_id`)
+      return rows.map((row) => ({
+        id: row.page_id, name: row.name, unread: Number(row.unread), conversations: Number(row.conversations),
+      }))
+    } finally {
+      await client.end().catch(() => {})
     }
-    entry.unread += row.unread_count
-    entry.conversations += 1
-    byPage.set(row.page_id, entry)
+  } catch {
+    // Cached browsing can still work through Supabase if its direct Postgres
+    // connection is temporarily unavailable. Page every row in a stable order.
   }
-  return [...byPage.values()]
+  const db = createAdminClient()
+  const byPage = new Map<string, { id: string; name: string; unread: number; conversations: number }>()
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await db.from('messenger_conversations')
+      .select('page_id,page_name,unread_count').order('id').range(offset, offset + 999)
+    if (error) throw new Error('Could not read Messenger page counts')
+    for (const row of (data ?? []) as { page_id: string; page_name: string | null; unread_count: number }[]) {
+      const entry = byPage.get(row.page_id) ?? {
+        id: row.page_id, name: row.page_name || row.page_id, unread: 0, conversations: 0,
+      }
+      // Match the deterministic nonempty-name choice of the grouped query.
+      if (row.page_name && (entry.name === row.page_id || row.page_name > entry.name)) entry.name = row.page_name
+      entry.unread += row.unread_count ?? 0
+      entry.conversations += 1
+      byPage.set(row.page_id, entry)
+    }
+    if ((data?.length ?? 0) < 1000) break
+  }
+  return [...byPage.values()].sort((a,b) => a.id.localeCompare(b.id))
 }
 
 /** Resolve either id form back to the (page_id, psid) the messages table uses. */
 export async function resolveThread(
   id: string,
   pageId?: string,
-): Promise<{ pageId: string; psid: string } | null> {
-  if (id.startsWith('psid:')) {
-    const psid = id.slice('psid:'.length)
-    if (pageId) return { pageId, psid }
-  }
+): Promise<{ pageId: string; psid: string; conversationId: string | null } | null> {
+  if (!id || id.length > 512 || /[,()]/.test(id)) return null
   const db = createAdminClient()
-  const { data } = await db
+  let query = db
     .from('messenger_conversations')
-    .select('page_id,psid')
-    .or(`conversation_id.eq.${id},psid.eq.${id.replace(/^psid:/, '')}`)
-    .limit(1)
-    .maybeSingle()
-  if (!data) return null
-  return { pageId: data.page_id as string, psid: data.psid as string }
+    .select('page_id,psid,conversation_id')
+  query = id.startsWith('psid:')
+    ? query.eq('psid', id.slice('psid:'.length))
+    : query.eq('conversation_id', id)
+  if (pageId) query = query.eq('page_id', pageId)
+  const { data, error } = await query.limit(2)
+  if (error) throw new Error('Could not resolve Messenger conversation')
+  // Ambiguous customer ids must never select the first business arbitrarily.
+  if (!data || data.length !== 1) return null
+  const row = data[0]
+  return { pageId: row.page_id as string, psid: row.psid as string,
+    conversationId: (row.conversation_id as string | null) ?? null }
 }
 
 /** Transcript for one thread, oldest first, straight from Postgres. */
@@ -137,15 +164,15 @@ export async function listCachedMessages(pageId: string, psid: string): Promise<
     .select('mid,direction,body,attachments,created_at')
     .eq('page_id', pageId)
     .eq('psid', psid)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
+    .order('mid', { ascending: false })
     .limit(500)
 
   if (error) {
-    console.log('[v0] messenger cache: transcript failed', error.message)
-    return []
+    throw new Error('Could not read cached Messenger messages')
   }
 
-  return (data ?? []).map((row) => {
+  return (data ?? []).reverse().map((row) => {
     const r = row as {
       mid: string
       direction: string
@@ -164,18 +191,19 @@ export async function listCachedMessages(pageId: string, psid: string): Promise<
   })
 }
 
-function normaliseAttachments(value: unknown): { type: string; url: string | null }[] {
+export function normaliseAttachments(value: unknown): { type: string; url: string | null }[] {
   // Webhook shape is { data: [...] }; the Graph shape is a bare array.
   const list = Array.isArray(value)
     ? value
     : Array.isArray((value as { data?: unknown[] })?.data)
       ? (value as { data: unknown[] }).data
       : []
-  return list.map((a) => {
-    const att = a as { type?: string; payload?: { url?: string }; image_data?: { url?: string } }
+  return list.filter((a) => a && typeof a === 'object').map((a) => {
+    const att = a as { type?: string; mime_type?: string; url?: string; file_url?: string;
+      payload?: { url?: string }; image_data?: { url?: string } }
     return {
-      type: att.type ?? 'file',
-      url: att.payload?.url ?? att.image_data?.url ?? null,
+      type: att.type ?? att.mime_type ?? 'file',
+      url: att.url ?? att.payload?.url ?? att.image_data?.url ?? att.file_url ?? null,
     }
   })
 }
@@ -183,6 +211,7 @@ function normaliseAttachments(value: unknown): { type: string; url: string | nul
 /** True when the cache has never been populated, so a backfill is still owed. */
 export async function cacheIsEmpty(): Promise<boolean> {
   const db = createAdminClient()
-  const { count } = await db.from('messenger_conversations').select('*', { count: 'exact', head: true })
+  const { count, error } = await db.from('messenger_conversations').select('*', { count: 'exact', head: true })
+  if (error) throw new Error('Could not check Messenger cache')
   return (count ?? 0) === 0
 }

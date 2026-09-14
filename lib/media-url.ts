@@ -30,6 +30,12 @@ const HOTLINK_PROTECTED = [
   'dhresource.com',
   'media-amazon.com',
   'ssl-images-amazon.com',
+  // Bilibili thumbnails. MEASURED, because this is exactly the trap that left
+  // 519 products with blank circles: i1.hdslb.com serves the cover 200 to our
+  // server and 403 to a browser sending our own Referer. So the covers must be
+  // proxied, even though a server-side fetch of the same URL looks perfectly
+  // healthy.
+  'hdslb.com',
 ]
 
 export function isHotlinkProtected(url: string): boolean {

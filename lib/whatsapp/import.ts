@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/server'
+import { persistWhatsAppMessage } from './persistence'
+import { requireWhatsAppNumber, validateWhatsAppScope, WhatsAppScopeError } from './number-scope'
+import { connectInboxDatabase } from '@/lib/messenger/pg'
 
 /**
  * Importer for WhatsApp history exported from another inbox (respond.io).
@@ -178,6 +181,18 @@ type ParsedRow = {
   body: string
   timestamp: string
   id: string
+  legacyId?: string
+}
+
+export function scopedImportId(id:string,phoneNumberId:string):string {
+  return /^wamid\.[A-Za-z0-9+/=_-]+$/.test(id)?id
+    :'imp:scope:'+createHash('sha256').update(JSON.stringify([phoneNumberId,id])).digest('hex')
+}
+
+export function assertImportedIdentity(existing:any,row:ParsedRow,phoneNumberId:string) {
+  if(existing.wa_id!==row.waId || existing.phone_number_id!==phoneNumberId || existing.direction!==row.direction ||
+    existing.body!==row.body || new Date(existing.created_at).getTime()!==Date.parse(row.timestamp))
+    throw new WhatsAppScopeError('An imported message conflicts with its saved owner or content. Nothing was overwritten.',409)
 }
 
 /** Deterministic id so re-importing the same export inserts nothing new. */
@@ -255,7 +270,8 @@ export function mapRows(rows: string[][]): {
     }
 
     const explicitId = idx.id === -1 ? '' : cell(idx.id)
-    parsed.push({ ...partial, id: explicitId ? `imp:${explicitId}` : syntheticId(partial) })
+    const legacyId=explicitId?`imp:${explicitId}`:syntheticId(partial)
+    parsed.push({ ...partial, id: /^wamid\.[A-Za-z0-9+/=_-]+$/.test(explicitId)?explicitId:legacyId,legacyId })
   }
 
   if (bad > 0) problems.push(`${bad} row${bad === 1 ? '' : 's'} skipped for a missing phone number or empty text.`)
@@ -269,91 +285,49 @@ export function mapRows(rows: string[][]): {
  * only advances contact metadata when an imported message is genuinely newer
  * than what the webhook already recorded.
  */
-export async function importRows(
-  parsed: ParsedRow[],
-  phoneNumberId: string,
-  displayPhone: string | null,
-): Promise<{ imported: number; skipped: number; contacts: number }> {
-  const db = createAdminClient()
-  if (parsed.length === 0) return { imported: 0, skipped: 0, contacts: 0 }
-
-  // Collapse duplicate ids inside the file itself, or the insert rejects the
-  // whole batch on a primary-key conflict.
-  const unique = new Map<string, ParsedRow>()
-  for (const p of parsed) if (!unique.has(p.id)) unique.set(p.id, p)
-  const rows = [...unique.values()]
-
-  let imported = 0
-  const CHUNK = 500
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK)
-    const { data, error } = await db
-      .from('whatsapp_messages')
-      .upsert(
-        chunk.map((p) => ({
-          id: p.id,
-          wa_id: p.waId,
-          phone_number_id: phoneNumberId,
-          direction: p.direction,
-          type: 'text',
-          body: p.body,
-          created_at: p.timestamp,
-          raw: { imported: true } as never,
-        })),
-        { onConflict: 'id', ignoreDuplicates: true },
-      )
-      .select('id')
-    if (error) throw new Error(error.message)
-    imported += data?.length ?? 0
+export async function importRows(parsed:ParsedRow[],phoneNumberId:string,displayPhone:string|null):Promise<{imported:number;skipped:number;contacts:number}> {
+  const binding=await requireWhatsAppNumber(phoneNumberId)
+  const db=createAdminClient()
+  const unique=new Map<string,ParsedRow>()
+  for(const row of parsed) {
+    validateWhatsAppScope(row.waId,phoneNumberId)
+    const duplicate=unique.get(row.id)
+    if(duplicate && (duplicate.waId!==row.waId || duplicate.direction!==row.direction || duplicate.body!==row.body || duplicate.timestamp!==row.timestamp))
+      throw new WhatsAppScopeError('The import contains conflicting rows with the same message ID.',409)
+    unique.set(row.id,row)
   }
-
-  // One contact row per conversation, carrying the newest imported message.
-  const byContact = new Map<string, { name: string | null; last: string; snippet: string }>()
-  for (const p of rows) {
-    const cur = byContact.get(p.waId)
-    if (!cur || p.timestamp > cur.last) {
-      byContact.set(p.waId, { name: p.name ?? cur?.name ?? null, last: p.timestamp, snippet: p.body.slice(0, 200) })
-    } else if (!cur.name && p.name) {
-      cur.name = p.name
+  const rows=[...unique.values()]
+  const existing=new Map<string,any>()
+  // A prior import may have used the legacy unscoped ID. Respect it only when the original account and content match.
+  const candidateIds=[...new Set(rows.flatMap(row=>[row.id,row.legacyId??row.id,scopedImportId(row.id,phoneNumberId)]))]
+  for(let offset=0;offset<candidateIds.length;offset+=200) {
+    const {data,error}=await db.from('whatsapp_messages').select('id,wa_id,phone_number_id,body,direction,created_at')
+      .in('id',candidateIds.slice(offset,offset+200))
+    if(error) throw new WhatsAppScopeError('Could not verify existing imported messages.',503)
+    for(const item of data??[]) existing.set(item.id,item)
+  }
+  // Validate every exact scoped/provider match before starting this import's writes.
+  for(const row of rows) {
+    const exact=existing.get(scopedImportId(row.id,phoneNumberId))
+    if(exact) assertImportedIdentity(exact,row,phoneNumberId)
+    const legacy=existing.get(row.legacyId??row.id)
+    if(legacy?.phone_number_id===phoneNumberId) assertImportedIdentity(legacy,row,phoneNumberId)
+  }
+  let imported=0,skipped=0
+  // Reuse the transport connection; each row still commits its exact-owner content and summary atomically.
+  const connection=await connectInboxDatabase()
+  try { for(const row of rows) {
+    validateWhatsAppScope(row.waId,phoneNumberId)
+    const legacy=existing.get(row.legacyId??row.id)
+    if(legacy?.phone_number_id===phoneNumberId) {
+      skipped++;continue
     }
-  }
-
-  const waIds = [...byContact.keys()]
-  const existing = new Map<string, { last_message_at: string | null; profile_name: string | null }>()
-  for (let i = 0; i < waIds.length; i += 200) {
-    const { data } = await db
-      .from('whatsapp_contacts')
-      .select('wa_id,last_message_at,profile_name')
-      .in('wa_id', waIds.slice(i, i + 200))
-    for (const r of data ?? []) {
-      existing.set(r.wa_id as string, {
-        last_message_at: r.last_message_at as string | null,
-        profile_name: r.profile_name as string | null,
-      })
-    }
-  }
-
-  const upserts = [...byContact.entries()].map(([waId, v]) => {
-    const prev = existing.get(waId)
-    const prevLast = prev?.last_message_at ?? null
-    // Never let historical data overwrite a newer live conversation.
-    const isNewer = !prevLast || v.last > prevLast
-    return {
-      wa_id: waId,
-      profile_name: prev?.profile_name ?? v.name,
-      phone_number_id: phoneNumberId,
-      display_phone: displayPhone,
-      last_message_at: isNewer ? v.last : prevLast,
-      last_snippet: isNewer ? v.snippet : undefined,
-      // unread_count and last_inbound_at are deliberately untouched: importing
-      // history must not light up the badge or reopen the 24h reply window.
-    }
-  })
-
-  for (let i = 0; i < upserts.length; i += 200) {
-    const { error } = await db.from('whatsapp_contacts').upsert(upserts.slice(i, i + 200), { onConflict: 'wa_id' })
-    if (error) throw new Error(error.message)
-  }
-
-  return { imported, skipped: rows.length - imported, contacts: byContact.size }
+    const scopedId=scopedImportId(row.id,phoneNumberId)
+    const result=await persistWhatsAppMessage({messageId:scopedId,waId:row.waId,phoneNumberId,
+      profileName:row.name,displayPhone:binding.display_phone??displayPhone,
+      direction:row.direction,type:'text',body:row.body,timestamp:row.timestamp,
+      historical:true,source:'import',raw:{imported:true,originalImportId:row.id}},connection)
+    if(result.inserted) imported++;else skipped++
+  } } finally {await connection.end().catch(()=>{})}
+  return {imported,skipped,contacts:new Set(rows.map(row=>row.waId)).size}
 }

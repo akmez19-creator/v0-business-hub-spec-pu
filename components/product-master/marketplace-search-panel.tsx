@@ -17,7 +17,9 @@ import {
   Video,
   X,
 } from 'lucide-react'
+import { mediaSrc } from '@/lib/media-url'
 import { ClipPreview } from './clip-preview'
+import type { QueueClipInput } from '@/lib/product-master/clip-jobs'
 
 export type MarketplaceHit = {
   id: string
@@ -43,6 +45,15 @@ type PlatformInfo = {
 }
 type PlatformResult = { id: string; label: string; count: number; error: string | null }
 
+/**
+ * Proxy a URL unconditionally. Kept for VIDEO only.
+ *
+ * Images should use mediaSrc(), which rewrites just the supplier CDNs that 403
+ * a browser and leaves our own Supabase/Blob URLs alone. Video cannot use it:
+ * TikTok/Facebook serve from signed hosts that are not on the hotlink list, so
+ * mediaSrc would hand back the raw URL and playback would break. The proxy also
+ * forwards Range, which video needs and a plain <img> does not.
+ */
 const inlineUrl = (src: string) => `/api/product-master/video-fetch?inline=1&src=${encodeURIComponent(src)}`
 
 const compact = (n: number) => {
@@ -81,18 +92,21 @@ const PREVIEW_HOLD_MS = 4500
 export function MarketplaceSearchPanel({
   defaultQuery = '',
   productImage = null,
-  onUseClip,
-  onClipPending,
-  onClipSettled,
+  onQueueClips,
   onMakePoster,
 }: {
   defaultQuery?: string
   /** The product's own photo, used as the default reverse-image search source */
   productImage?: string | null
-  /** origin carries the listing's own id so the library can spot a re-save */
-  onUseClip?: (file: File, origin?: { sourceId?: string | null; sourceUrl?: string | null }) => void
-  onClipPending?: (job: { id: string; title: string; thumb?: string }) => void
-  onClipSettled?: (id: string, ok: boolean) => void
+  /**
+   * Hand listing videos to the server-side download queue.
+   *
+   * The panel used to download the file itself and pass a File up. That work
+   * died the moment the Studio dialog closed, because the dialog is mounted
+   * conditionally and unmounting cancelled the fetch. Now the click only
+   * records a job, so it survives the tab.
+   */
+  onQueueClips?: (jobs: QueueClipInput[]) => Promise<boolean>
   /** Send a listing photo to Poster Studio */
   onMakePoster?: (args: { image: string; title: string }) => void
 }) {
@@ -130,7 +144,6 @@ export function MarketplaceSearchPanel({
   const [previewIds, setPreviewIds] = useState<string[]>([])
   const rotateCursor = useRef(0)
   const [jobs, setJobs] = useState<Record<string, 'queued' | 'working' | 'done' | 'failed'>>({})
-  const queue = useRef<Promise<void>>(Promise.resolve())
   /** Listing ids whose video is already saved in the clip library (feature 9) */
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
 
@@ -251,40 +264,33 @@ export function MarketplaceSearchPanel({
   )
 
   /**
-   * Pull a listing video into the feed. Runs through a promise chain so ten
-   * clicks download one after another instead of all at once - the same
-   * queueing the TikTok panel uses, for the same reason.
+   * Hand a listing video to the download queue.
+   *
+   * There is no local promise chain any more: this writes a job row and
+   * returns, so ten clicks are ten cheap POSTs and the pacing happens on the
+   * server. The feed tile tracks the real download from there.
    */
   const useClip = useCallback(
     (hit: MarketplaceHit) => {
-      if (!onUseClip || !hit.video || jobs[hit.id]) return
+      if (!onQueueClips || !hit.video || jobs[hit.id]) return
       setJobs((j) => ({ ...j, [hit.id]: 'queued' }))
-      onClipPending?.({ id: hit.id, title: hit.title, thumb: hit.image ?? undefined })
-
-      queue.current = queue.current.then(async () => {
-        setJobs((j) => ({ ...j, [hit.id]: 'working' }))
-        try {
-          const res = await fetch(inlineUrl(hit.video as string))
-          if (!res.ok) throw new Error('Could not fetch clip')
-          const blob = await res.blob()
-          const name = `${hit.title.replace(/[^\w\- ]+/g, '').trim().slice(0, 40) || 'listing'}.mp4`
+      void onQueueClips([
+        {
+          id: hit.id,
+          title: hit.title,
+          thumbUrl: hit.image ?? null,
+          source: '1688',
           // Namespaced so a listing id can never collide with a video id
-          onUseClip(new File([blob], name, { type: blob.type || 'video/mp4' }), {
-            sourceId: hit.id ? `listing:${hit.id}` : null,
-            // pageUrl, not hit.video: the video url is a CDN link that can be
-            // re-signed between searches, so it would never match on a
-            // re-find. The listing page url is stable.
-            sourceUrl: hit.pageUrl || null,
-          })
-          setJobs((j) => ({ ...j, [hit.id]: 'done' }))
-          onClipSettled?.(hit.id, true)
-        } catch {
-          setJobs((j) => ({ ...j, [hit.id]: 'failed' }))
-          onClipSettled?.(hit.id, false)
-        }
-      })
+          sourceId: hit.id ? `listing:${hit.id}` : null,
+          // pageUrl, not hit.video: the video url is a CDN link that can be
+          // re-signed between searches, so it would never match on a
+          // re-find. The listing page url is stable.
+          sourceUrl: hit.pageUrl || null,
+          streamUrl: hit.video,
+        },
+      ]).then((ok) => setJobs((j) => ({ ...j, [hit.id]: ok ? 'done' : 'failed' })))
     },
-    [jobs, onClipPending, onClipSettled, onUseClip],
+    [jobs, onQueueClips],
   )
 
   /**
@@ -470,7 +476,14 @@ export function MarketplaceSearchPanel({
               {refImages.length ? (
                 refImages.map((src) => (
                   <div key={src} className="relative h-20 w-20 overflow-hidden rounded-lg border border-amber-500 bg-black">
-                    <img src={src || '/placeholder.svg'} alt="Reference photo" className="h-full w-full object-cover" />
+                    {/* mediaSrc for DISPLAY only - refImages must keep the raw
+                        public URL, because it is posted as `imageUrls` and TMAPI
+                        fetches it server-side; our proxy path is authenticated
+                        and app-relative, so sending that would break the search.
+                        mediaSrc (not inlineUrl) because a reference photo can be
+                        an uploaded Blob URL, which the proxy does not allowlist -
+                        this rewrites only the supplier CDNs that 403 a browser. */}
+                    <img src={mediaSrc(src) || '/placeholder.svg'} alt="Reference photo" className="h-full w-full object-cover" />
                     {refImages.length > 1 && (
                       <button
                         type="button"
@@ -556,7 +569,7 @@ export function MarketplaceSearchPanel({
                       }`}
                     >
                       <img
-                        src={inlineUrl(src) || '/placeholder.svg'}
+                        src={mediaSrc(src) || '/placeholder.svg'}
                         alt="Suggested reference photo"
                         className="h-full w-full object-cover"
                         loading="lazy"
@@ -722,7 +735,7 @@ export function MarketplaceSearchPanel({
                     <ClipPreview
                       id={hit.id}
                       src={inlineUrl(hit.video)}
-                      poster={hit.image ? inlineUrl(hit.image) : undefined}
+                      poster={hit.image ? mediaSrc(hit.image) : undefined}
                       title={hit.title}
                       active={previewIds.includes(hit.id)}
                       onVisibility={reportVisibility}
@@ -730,7 +743,7 @@ export function MarketplaceSearchPanel({
                     />
                   ) : hit.image ? (
                     <img
-                      src={inlineUrl(hit.image) || '/placeholder.svg'}
+                      src={mediaSrc(hit.image) || '/placeholder.svg'}
                       alt={hit.title}
                       className="h-full w-full object-cover"
                       loading="lazy"
@@ -759,7 +772,7 @@ export function MarketplaceSearchPanel({
                   </div>
 
                   <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-                    {onUseClip && hit.video && (
+                    {onQueueClips && hit.video && (
                       <button
                         type="button"
                         onClick={() => useClip(hit)}

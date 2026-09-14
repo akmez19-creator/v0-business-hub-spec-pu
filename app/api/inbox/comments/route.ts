@@ -37,7 +37,8 @@ export async function GET(request: Request) {
     }
 
     const token = process.env.FACEBOOK_ACCESS_TOKEN
-    if (!token) {
+    const hasCache = !(await commentCacheIsEmpty())
+    if (!token && !hasCache) {
       return NextResponse.json({
         success: false,
         needsPermission: true,
@@ -54,12 +55,13 @@ export async function GET(request: Request) {
     // While throttled it reports no scopes, which is indistinguishable from a
     // genuinely missing permission - blocking on it would hide 1000+ comments
     // we already hold locally and wrongly advise regenerating the token.
-    const hasCache = !(await commentCacheIsEmpty())
     let channel: Awaited<ReturnType<typeof getCapabilities>>['channels']['comments'] | undefined
-    try {
-      channel = (await getCapabilities(token)).channels.comments
-    } catch {
-      channel = undefined // throttled or unreachable; cache still serves
+    if (token && (wantsRefresh || !hasCache)) {
+      try {
+        channel = (await getCapabilities(token)).channels.comments
+      } catch {
+        channel = undefined // throttled or unreachable; cache still serves
+      }
     }
 
     // Only refuse when the permission is genuinely missing AND we have nothing
@@ -107,12 +109,12 @@ export async function GET(request: Request) {
       scope: requested,
       source: 'cache',
       rateLimited,
-      syncError: rateLimited ? syncError : undefined,
+      syncError,
       pages: pageRefs,
       pageStats: requested === 'all' ? stats : stats.filter((p) => p.id === requested),
       capability: channel,
       comments,
-    })
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (e) {
     // Throttling is transient and must never be reported as a token problem.
     if (isRateLimit(e)) return rateLimitResponse(e)

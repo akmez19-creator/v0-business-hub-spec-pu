@@ -60,8 +60,7 @@ export async function listCachedComments(pageId?: string): Promise<CommentItem[]
 
   const { data, error } = await q
   if (error) {
-    console.log('[v0] comment cache: list failed', error.message)
-    return []
+    throw new Error('Could not read cached Facebook comments')
   }
 
   const rows = (data ?? []) as unknown as Row[]
@@ -126,18 +125,22 @@ export async function cachedCommentStats(): Promise<CommentPageStat[]> {
 
 export async function commentCacheIsEmpty(): Promise<boolean> {
   const db = createAdminClient()
-  const { count } = await db.from('page_comments').select('*', { count: 'exact', head: true })
+  const { count, error } = await db.from('page_comments').select('*', { count: 'exact', head: true })
+  if (error) throw new Error('Could not check the Facebook comment cache')
   return (count ?? 0) === 0
 }
 
 /** Pull every Page's comments from Graph and store them. Explicit refresh only. */
-export async function syncComments(): Promise<{ ok: boolean; stored: number; rateLimited: boolean; error?: string }> {
+export async function syncComments(): Promise<{
+  ok: boolean; stored: number; rateLimited: boolean; error?: string;
+  pageStats?: CommentPageStat[]; partial?: boolean
+}> {
   const db = createAdminClient()
   try {
     const pages = await getInboxPages()
     if (pages.length === 0) return { ok: false, stored: 0, rateLimited: false, error: 'No Page reachable' }
 
-    const { comments } = await listAllComments(pages)
+    const { comments, pageStats } = await listAllComments(pages)
     const rows: Record<string, unknown>[] = []
 
     for (const c of comments) {
@@ -164,20 +167,40 @@ export async function syncComments(): Promise<{ ok: boolean; stored: number; rat
       }
     }
 
+    let stored = 0
     for (let i = 0; i < rows.length; i += 200) {
+      const batch = rows.slice(i, i + 200)
       const { error } = await db
         .from('page_comments')
-        .upsert(rows.slice(i, i + 200), { onConflict: 'comment_id' })
-      if (error) console.log('[v0] comment sync: upsert failed', error.message)
+        .upsert(batch, { onConflict: 'comment_id' })
+      if (!error) stored += batch.length
+      else for (const row of batch) {
+        const stat = pageStats.find((p) => p.id === row.page_id)
+        if (stat) stat.error = 'Some comments could not be saved. Please retry.'
+      }
     }
 
+    const failures = pageStats.filter((p) => p.error)
+    const error = failures.length
+      ? `${failures.length} of ${pages.length} Facebook Pages could not refresh comments. Saved comments remain available.`
+      : undefined
+    const now = new Date().toISOString()
+    for (const stat of pageStats) {
+      await db.from('inbox_sync_state').upsert({
+        key: `comments:sync:${stat.id}`, last_run_at: now, updated_at: now,
+        ...(stat.error ? { last_error: 'Page comment refresh did not complete' } : { last_ok_at: now, last_error: null }),
+      }, { onConflict: 'key' })
+    }
     await db.from('inbox_sync_state').upsert(
-      { key: 'comments', last_run_at: new Date().toISOString(), last_ok_at: new Date().toISOString(), last_error: null },
+      { key: 'comments', last_run_at: now, updated_at: now,
+        ...(error ? { last_error: error } : { last_ok_at: now, last_error: null }) },
       { onConflict: 'key' },
     )
-    return { ok: true, stored: rows.length, rateLimited: false }
+    return { ok: !error, stored, rateLimited: failures.some((p) => p.rateLimited), error, pageStats,
+      partial: failures.length > 0 && failures.length < pages.length }
   } catch (e) {
-    const error = e instanceof Error ? e.message : 'comment sync failed'
+    const error = isRateLimit(e) ? 'Facebook is limiting comment refreshes. Saved comments remain available.'
+      : 'Could not refresh Facebook comments. Saved comments remain available.'
     await db.from('inbox_sync_state').upsert(
       { key: 'comments', last_run_at: new Date().toISOString(), last_error: error },
       { onConflict: 'key' },

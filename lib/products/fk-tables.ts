@@ -26,6 +26,15 @@ export type FkTable = {
 export const PRODUCTS_FK_TABLES: FkTable[] = [
   // History and orders - the reason the duplicate matters at all.
   { table: 'purchase_orders', column: 'product_id' },
+  { table: 'import_reorder_lines', column: 'product_id' },
+  { table: 'import_reorder_items', column: 'product_id' },
+  { table: 'product_1688_preferences', column: 'product_id' },
+  { table: 'product_1688_sku_links', column: 'product_id', uniqueWith: ['offer_id', 'sku_key'] },
+  { table: 'import_reorder_1688_selections', column: 'product_id' },
+  // Move only the association; note text and product/import captions remain historical.
+  { table: 'foreign_supplier_quality_notes', column: 'product_id' },
+  // Keep the surviving product's assumptions if both products have overrides.
+  { table: 'import_reorder_settings', column: 'product_id', uniqueWith: ['supplier_name'] },
   { table: 'deliveries', column: 'product_id' },
   { table: 'stock_movements', column: 'product_id' },
   // Guarded by an explicit pre-check in mergeProducts; listed here so the

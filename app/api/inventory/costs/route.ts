@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { costsFromPurchaseOrders, resolveUnitCost, valueStock, type CostRow } from '@/lib/inventory/cost'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 
 /**
  * Inventory value, and the products blocking it from being complete.
@@ -9,22 +10,6 @@ import { costsFromPurchaseOrders, resolveUnitCost, valueStock, type CostRow } fr
  * every priced purchase order, and a browser client reading a partial set would
  * silently under-report the cost of stock rather than fail.
  */
-
-/** Pull every row; Supabase caps a single select at 1000. */
-async function fetchAll<T>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<T[]> {
-  const page = 1000
-  const out: T[] = []
-  for (let from = 0; from < 50_000; from += page) {
-    const { data, error } = await build(from, from + page - 1)
-    if (error) throw new Error(error.message)
-    if (!data?.length) break
-    out.push(...data)
-    if (data.length < page) break
-  }
-  return out
-}
 
 export async function GET() {
   try {
@@ -54,6 +39,8 @@ export async function GET() {
           .from('products')
           .select('id,name,quantity,cost_price,cost_price_at,sold_out,has_variants,image_url,sku,category,zone')
           .not('is_active', 'is', false)
+          // Total order: without it, page 2 can repeat or skip rows of page 1.
+          .order('id')
           .range(from, to),
       ),
       fetchAll<CostRow & { product_name: string | null; supplier_name: string | null }>((from, to) =>
@@ -63,6 +50,7 @@ export async function GET() {
           .not('product_id', 'is', null)
           .gt('total_cp_import', 0)
           .gt('qty', 0)
+          .order('id')
           .range(from, to),
       ),
     ])

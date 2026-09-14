@@ -152,6 +152,105 @@ export function priceFor(product: QuickOrderProduct | null | undefined, qty: num
 }
 
 /**
+ * Which packs actually make up `qty`, biggest first - e.g. [10] or [10, 5].
+ *
+ * WHY THIS EXISTS: `setSize()` returns the SMALLEST tier, so a product sold as
+ * both a 5-pack and a 10-pack always labelled itself "Set of 5" even when the
+ * customer bought the 10 - the price was already right (the knapsack picks the
+ * 10-pack), only the text lied. Owner's rule is that a product can be sold by
+ * sets regardless of the number, so the label has to name the pack that was
+ * really used.
+ *
+ * Deliberately the SAME dynamic program as priceFor(), including how ties are
+ * broken, so the text can never describe a different combination from the one
+ * that was charged. If priceFor changes, this must change with it.
+ *
+ * Every product live today has exactly one tier, and with one tier this can
+ * only ever return that tier - so the label is unchanged for all of them.
+ */
+export function setsUsedFor(
+  product: QuickOrderProduct | null | undefined,
+  qty: number,
+): number[] {
+  if (setSize(product) <= 0) return []
+  const tiers = tiersOf(product)
+  if (!tiers.length) return []
+  const q = Math.max(0, Number.parseInt(String(qty), 10) || 0)
+  if (q === 0) return []
+
+  const biggest = Math.max(...tiers.map(t => t.n))
+  const cap = q + biggest
+  const cost = new Array<number>(cap + 1).fill(Number.POSITIVE_INFINITY)
+  const pick = new Array<number>(cap + 1).fill(0)
+  cost[0] = 0
+  for (let i = 1; i <= cap; i++) {
+    for (const t of tiers) {
+      if (t.n <= i && cost[i - t.n] + t.price < cost[i]) {
+        cost[i] = cost[i - t.n] + t.price
+        pick[i] = t.n
+      }
+    }
+  }
+  let bestAt = -1
+  let best = Number.POSITIVE_INFINITY
+  for (let i = q; i <= cap; i++) {
+    if (cost[i] < best) {
+      best = cost[i]
+      bestAt = i
+    }
+  }
+  if (bestAt < 0) return []
+
+  const out: number[] = []
+  for (let i = bestAt; i > 0 && pick[i] > 0; i -= pick[i]) out.push(pick[i])
+  return out.sort((a, b) => b - a)
+}
+
+/**
+ * The " - Set of N" marker for a set-only product at this quantity, or '' when
+ * the product is not sold in sets.
+ *
+ * Set-only ONLY. offerLabel() must not be used for order text: it also returns
+ * multi-buy wording like "2 for Rs850" for products that have a unit price, and
+ * appending that to an order line would rewrite the text of every tiered
+ * product and break the name matching against deliveries.
+ */
+export function setTextFor(
+  product: QuickOrderProduct | null | undefined,
+  qty?: number,
+): string {
+  const set = setSize(product)
+  if (set <= 0) return ''
+  const sets = qty === undefined ? [] : setsUsedFor(product, qty)
+  return sets.length ? setsLabel(sets) : `Set of ${set}`
+}
+
+/**
+ * "Set of 10", "2 x Set of 10" when a pack repeats, "Set of 10 & 5" when packs
+ * are mixed.
+ *
+ * The repeat count matters on a picking slip: two 10-packs and one 10-pack are
+ * different things to load, and collapsing both to "Set of 10" is the quiet
+ * ambiguity that causes a short delivery.
+ *
+ * FORMAT IS CONSTRAINED BY THE WIRE FORMAT, not by taste - stripSetSuffix() has
+ * the matching reader:
+ *  - separator is "&", never "+", because splitParts() splits products on "+"
+ *  - the count is a PREFIX ("2 x Set of 10"), because a trailing "xN" is how
+ *    quantity is encoded.
+ */
+function setsLabel(sets: number[]): string {
+  if (!sets.length) return ''
+  const counts = new Map<number, number>()
+  for (const n of sets) counts.set(n, (counts.get(n) ?? 0) + 1)
+  const parts = [...counts.entries()].map(([n, c], i) =>
+    // "Set of" is written once, so a mixed label reads "Set of 10 & 5".
+    i === 0 ? (c > 1 ? `${c} x Set of ${n}` : `Set of ${n}`) : c > 1 ? `${c} x ${n}` : `${n}`,
+  )
+  return parts.join(' & ')
+}
+
+/**
  * Short badge describing the active offer, e.g. "B1G1", "Set of 4" or
  * "2 for Rs850".
  *
@@ -159,11 +258,19 @@ export function priceFor(product: QuickOrderProduct | null | undefined, qty: num
  * on a product you could also buy singly, which is exactly what these cannot
  * be sold as.
  */
-export function offerLabel(product: QuickOrderProduct | null | undefined): string {
+export function offerLabel(
+  product: QuickOrderProduct | null | undefined,
+  qty?: number,
+): string {
   if (!product) return ''
   if (product.is_b1g1) return 'B1G1'
   const set = setSize(product)
-  if (set > 0) return `Set of ${set}`
+  // With a quantity in hand, name the pack actually used; without one there is
+  // nothing to infer from, so fall back to the smallest.
+  if (set > 0) {
+    const sets = qty === undefined ? [] : setsUsedFor(product, qty)
+    return sets.length ? setsLabel(sets) : `Set of ${set}`
+  }
   const tiers = tiersOf(product).sort((a, b) => a.n - b.n)
   if (tiers.length) return `${tiers[0].n} for Rs${Math.round(tiers[0].price)}`
   return ''
@@ -195,11 +302,16 @@ export function offerLabel(product: QuickOrderProduct | null | undefined): strin
 export function orderTextFor(
   product: QuickOrderProduct | null | undefined,
   variantValue?: string | null,
+  qty?: number,
 ): string {
   if (!product) return ''
   if (variantValue) return `${product.name} - ${variantValue}`
   const set = setSize(product)
-  return set > 0 ? `${product.name} - Set of ${set}` : product.name
+  if (set <= 0) return product.name
+  // Name the pack that was really sold. Omitting qty keeps the old smallest-tier
+  // text, which is what every single-tier product produces anyway.
+  const sets = qty === undefined ? [] : setsUsedFor(product, qty)
+  return `${product.name} - ${sets.length ? setsLabel(sets) : `Set of ${set}`}`
 }
 
 const ymd = (d: Date) =>

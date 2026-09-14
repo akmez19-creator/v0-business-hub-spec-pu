@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SourceFinderPanel } from '@/components/product-master/source-finder-panel'
+import { REGULAR_PAGE_POSTS } from '@/lib/facebook/page-usage-shared'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Slider } from '@/components/ui/slider'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import {
   ArrowDown,
   ArrowUp,
@@ -38,7 +40,9 @@ import { ReelPublishPanel } from './reel-publish-panel'
 import { ReelAdPanel } from './reel-ad-panel'
 import { ReelAudioPanel, audioIsCleared, type ReelAudio } from './reel-audio-panel'
 import { saveClipToLibrary, fileFromSavedClip, type SavedClipRow } from '@/lib/product-master/clip-library'
+import type { ClipJob, QueueClipInput } from '@/lib/product-master/clip-jobs'
 import { buildOffers, type ProductOffer } from '@/lib/product-master/offers'
+import { mediaSrc } from '@/lib/media-url'
 
 interface Clip {
   id: string
@@ -62,15 +66,17 @@ interface Clip {
   review?: 'ready' | 'edit'
 }
 
-/** A clip that is still being downloaded, shown in the feed as a placeholder
- *  so the work is visible from the moment it is requested rather than only
- *  once the file has fully arrived. */
-interface PendingClip {
-  id: string
-  title: string
-  thumb?: string
-  failed?: boolean
-}
+/**
+ * A clip download that lives in the database, shown in the feed as a
+ * placeholder tile.
+ *
+ * This used to be browser-only state, which is exactly why a download vanished
+ * when the dialog closed: the Studio is mounted conditionally, so unmounting
+ * threw the list away and cancelled the fetch. The row is now the source of
+ * truth, so the tile is a view of real work rather than a promise the tab has
+ * to keep.
+ */
+type JobRow = ClipJob & { clip?: SavedClipRow | null }
 
 // Banner style presets for the product-name title
 // Style library for burned-in banners. The first 5 are the proven combos;
@@ -205,6 +211,26 @@ let clipSeq = 0
 
 // The Reels frame. Anything not already this shape is letterboxed into it
 // before branding, so a landscape source cannot be published as a wide video.
+/**
+ * Roll a fresh punch-in + speed nudge for one post.
+ *
+ * Ranges are chosen to be INVISIBLE to a viewer but different to a file
+ * comparison, which is the whole job: 4-10% zoom is well inside the frame so a
+ * product touching the edges does not get clipped, and 0.92-1.08x is under the
+ * ~1.1x threshold where a human starts to notice the pacing is off.
+ *
+ * Zoom deliberately never returns 0 and speed never returns exactly 1 - a roll
+ * that lands on "off" would silently produce the untouched-frames copy this
+ * exists to prevent.
+ */
+function randomPicture(): { zoom: number; speed: number } {
+  const zoom = 4 + Math.floor(Math.random() * 7) // 4-10%
+  // Two-sided, skipping 1.00: -0.08..-0.02 or +0.02..+0.08
+  const mag = 2 + Math.floor(Math.random() * 7) // 2-8 (hundredths)
+  const speed = 1 + (Math.random() < 0.5 ? -mag : mag) / 100
+  return { zoom, speed: Number(speed.toFixed(2)) }
+}
+
 const REEL_W = 1080
 const REEL_H = 1920
 /** 9:16 within rounding tolerance - i.e. safe to publish without letterboxing */
@@ -345,9 +371,11 @@ export function ReelsStudioTab({
   onBoostPost?: (boost: { pageId: string; postId: string }) => void
 }) {
   const [clips, setClips] = useState<Clip[]>([])
-  // Clips being downloaded right now. Kept separate from `clips` because they
+  // Downloads running on the server. Kept separate from `clips` because they
   // have no file yet and must not be selectable, movable or mergeable.
-  const [pending, setPending] = useState<PendingClip[]>([])
+  const [jobs, setJobs] = useState<JobRow[]>([])
+  // Bumped to wake the poller after a new batch is queued
+  const [poll, setPoll] = useState(0)
   const [selected, setSelected] = useState<string | null>(null)
   const [range, setRange] = useState<[number, number]>([0, 0])
   const [busy, setBusy] = useState<'cut' | 'merge' | 'brand' | 'load' | null>(null)
@@ -429,28 +457,35 @@ export function ReelsStudioTab({
   const [gallery, setGallery] = useState<string[]>([])
   const [chosenPhoto, setChosenPhoto] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
+  /**
+   * Load this product's saved photos.
+   *
+   * Extracted from the mount effect so it can be re-run on demand: the video
+   * search now harvests photos off the supplier listings, and once those are
+   * saved they have to appear in the overlay picker immediately rather than only
+   * after the dialog is closed and reopened.
+   */
+  const loadGallery = useCallback(async () => {
     const params = new URLSearchParams()
     if (productId) params.set('productId', productId)
     else if (productName) params.set('productName', productName)
     else return
 
-    fetch(`/api/product-master/images?${params}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (cancelled || !json.success) return
-        const urls = (json.images as { image_url: string }[])
-          .map((i) => i.image_url)
-          .filter(Boolean)
-        setGallery(Array.from(new Set(urls)))
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
+    try {
+      const res = await fetch(`/api/product-master/images?${params}`)
+      const json = await res.json()
+      if (!json.success) return
+      const urls = (json.images as { image_url: string }[]).map((i) => i.image_url).filter(Boolean)
+      setGallery(Array.from(new Set(urls)))
+    } catch {
+      // A gallery that fails to load just means the cover photo is the only
+      // overlay option - it must never break the editor
     }
   }, [productId, productName])
+
+  useEffect(() => {
+    void loadGallery()
+  }, [loadGallery])
 
   // The cover stays the default; the gallery is the fallback for products whose
   // inventory row never got a cover written to it.
@@ -472,7 +507,9 @@ export function ReelsStudioTab({
   // swaps the watermark instead of making the user re-upload every time.
   // Pages with nothing saved fall back to the shared logo, then the bundled one.
   const [brandPageId, setBrandPageId] = useState('')
-  const [brandPages, setBrandPages] = useState<{ id: string; name: string }[]>([])
+  // `posts` is how many Page posts we have on record, used to order the list
+  // and mark the Pages actually in regular use
+  const [brandPages, setBrandPages] = useState<{ id: string; name: string; posts?: number }[]>([])
   const [pageLogos, setPageLogos] = useState<Record<string, string>>({})
   const [logoFallback, setLogoFallback] = useState('')
   // True once the saved logo lookup has settled. The AI cutout waits for this
@@ -494,7 +531,9 @@ export function ReelsStudioTab({
         const logos = (logoJson?.logos ?? {}) as Record<string, string>
         const fallback = String(logoJson?.fallback || '')
         const layouts = (logoJson?.layouts ?? {}) as Record<string, any>
-        const pages = (pageJson?.pages ?? []) as { id: string; name: string }[]
+        // Already ordered most-used-first by the API, so pages[0] is now the
+        // Page we really post to rather than whichever name sorts first
+        const pages = (pageJson?.pages ?? []) as { id: string; name: string; posts?: number }[]
         setPageLogos(logos)
         setLogoFallback(fallback)
         setPageLayouts(layouts)
@@ -969,6 +1008,21 @@ export function ReelsStudioTab({
   }, [productRemoveBg, activeProductImage, hasProductImage])
 
   const effectiveProductSrc = productRemoveBg && productProcessed ? productProcessed : activeProductImage
+  /**
+   * The same photo, but as something the BROWSER can actually load.
+   *
+   * The gallery is mostly 1688 pictures saved during PO import, and that CDN
+   * answers 403 to a browser loading them from our page. That broke more than
+   * the thumbnails: this src is also fed to `new Image()` for the canvas burn,
+   * so the product-photo overlay silently failed to appear on the rendered
+   * video. Routing it through our same-origin proxy fixes both, and keeps
+   * crossOrigin='anonymous' happy since same-origin never taints the canvas.
+   *
+   * Deliberately NOT used for `activeProductImage` where it is passed to the
+   * search panel or posted to remove-bg: those go to the server, which must
+   * receive the original public URL.
+   */
+  const loadableProductSrc = mediaSrc(effectiveProductSrc)
   const effectiveLogoSrc = logoRemoveBg && processedLogo ? processedLogo : logoSrc
   const activeStyle = TITLE_STYLES.find((s) => s.id === titleStyle) ?? TITLE_STYLES[0]
   const activePriceStyle = TITLE_STYLES.find((s) => s.id === priceStyle) ?? TITLE_STYLES[3]
@@ -979,7 +1033,11 @@ export function ReelsStudioTab({
   const priceText =
     promoLayout === 'offer'
       ? activeOffer
-        ? [activeOffer.headline, activeOffer.sub].filter(Boolean).join(' - ')
+        ? // The ladder's headline only names the first pack, so spell out every
+          // tier here or the caption sells the 5-pack and never mentions the 10.
+          activeOffer.ladder?.length
+          ? activeOffer.ladder.map((t) => `${t.qty} pcs ${fmtRs(t.total)}`).join(', ')
+          : [activeOffer.headline, activeOffer.sub].filter(Boolean).join(' - ')
         : ''
       : priceNew.trim()
         ? priceOld.trim()
@@ -1006,6 +1064,17 @@ export function ReelsStudioTab({
     // unit price and any saving underneath, so the value is unmistakable.
     if (layout === 'offer') {
       if (!offer) return [[{ text: n, scale: 1 }]]
+      // Price ladder: one row per pack, so "5 pcs Rs 375" and "10 pcs Rs 575"
+      // are both readable and the viewer can see the trade-up. Scaled below 1
+      // because two full-size rows make a tag taller than the safe zone.
+      if (offer.ladder?.length) {
+        return offer.ladder.map((t) => [
+          { text: `${t.qty} PCS`, scale: 0.58, dim: !t.best },
+          // The better-per-unit row stays full brightness and slightly larger,
+          // so the deal we want taken is the one that reads loudest.
+          { text: fmtRs(t.total), scale: t.best ? 0.92 : 0.78, accent: t.best },
+        ])
+      }
       const second: PromoSeg[] = []
       if (offer.subKind === 'pay' && offer.sub) {
         // The price actually paid - full brightness and nearly headline size,
@@ -1304,8 +1373,15 @@ export function ReelsStudioTab({
   // Make-it-yours: real edits to the footage itself, applied in the same pass
   // as the branding. Overlays alone leave the underlying frames and audio
   // identical to the source, which is what platforms actually compare.
-  const [speed, setSpeed] = useState(1)
-  const [zoom, setZoom] = useState(0)
+  //
+  // AUTOMATIC, not optional. These used to be two sliders defaulting to
+  // zoom 0 / speed 1 - i.e. OFF - so unless all three were dragged by hand on
+  // every single post, the render burned overlays onto untouched frames and
+  // published the exact "copy" the panel warned about. A differentiation step
+  // that has to be remembered is a differentiation step that does not happen,
+  // so it now rolls itself and there is nothing to forget.
+  const [speed, setSpeed] = useState(() => randomPicture().speed)
+  const [zoom, setZoom] = useState(() => randomPicture().zoom)
   const [muteAudio, setMuteAudio] = useState(false)
   // Replacement sound, only meaningful once the original is muted
   const [audio, setAudio] = useState<ReelAudio | null>(null)
@@ -1324,6 +1400,12 @@ export function ReelsStudioTab({
       setPriceStyle((prevPrice) => pick([prevPrice, nextTitle]))
       return nextTitle
     })
+    // The picture transform rolls with the style, so "new style for every post"
+    // means a genuinely different FILE every post, not just different colours.
+    // Two posts sharing a zoom and speed are the same footage twice over.
+    const p = randomPicture()
+    setZoom(p.zoom)
+    setSpeed(p.speed)
     setRestyled(true)
   }, [])
 
@@ -1377,45 +1459,38 @@ export function ReelsStudioTab({
   const [fetchError, setFetchError] = useState('')
   const [fetchInfo, setFetchInfo] = useState('')
 
+  /**
+   * Queue a pasted link.
+   *
+   * The whole resolve-and-download used to run here, in the tab, so closing the
+   * dialog mid-download threw the work away. Now this only records the job; the
+   * server resolves the page url itself, which also means a retry gets a fresh
+   * stream instead of a signed CDN link that has since expired.
+   */
   const fetchFromLink = async () => {
     const url = link.trim()
     if (!url || fetching) return
     setFetching(true)
     setFetchError('')
-    setFetchInfo('Resolving video\u2026')
-    // Show the work in the feed straight away rather than leaving the drop
-    // zone looking empty for the whole download
-    const pendingId = `pending-${Date.now()}-${clipSeq++}`
-    setPending((p) => [...p, { id: pendingId, title: 'Fetching from link' }])
+    setFetchInfo('Queueing download\u2026')
     try {
-      const res = await fetch('/api/product-master/video-fetch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      })
-      const meta = await res.json()
-      if (!meta.success) throw new Error(meta.error || 'Could not fetch this video')
-
-      setFetchInfo(`Downloading ${meta.quality === 'hd' ? 'HD' : 'SD'} video\u2026`)
-      const safeName = `${meta.source}-${(meta.title || 'video').replace(/[^\w\- ]+/g, '').trim().slice(0, 40) || 'video'}.mp4`
-      const proxied = `/api/product-master/video-fetch?src=${encodeURIComponent(meta.videoUrl)}&filename=${encodeURIComponent(safeName)}`
-      const fileRes = await fetch(proxied)
-      if (!fileRes.ok) throw new Error('Download failed - the video link may have expired, try again')
-      const blob = await fileRes.blob()
-      if (blob.size < 10_000) throw new Error('Downloaded file looks empty - try again')
-
-      const file = new File([blob], safeName, { type: 'video/mp4' })
-      setPending((p) => p.filter((x) => x.id !== pendingId))
-      addFiles([file], { source: 'link' })
+      const ok = await queueClips([
+        {
+          id: url,
+          title: 'Pasted link',
+          source: 'link',
+          // No sourceId: a pasted link has no platform id to dedupe on, and
+          // inventing one from the url would block a legitimate re-download.
+          sourceUrl: url,
+        },
+      ])
+      if (!ok) throw new Error('Could not queue this video - check the link and try again')
       setLink('')
-      setFetchInfo(`Added: ${safeName}`)
-      setTimeout(() => setFetchInfo(''), 4000)
+      setFetchInfo('Downloading in the background - you can close this window')
+      setTimeout(() => setFetchInfo(''), 6000)
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : 'Could not fetch this video')
       setFetchInfo('')
-      // Leave a failed marker briefly so the feed explains what happened
-      setPending((p) => p.map((x) => (x.id === pendingId ? { ...x, failed: true } : x)))
-      setTimeout(() => setPending((p) => p.filter((x) => x.id !== pendingId)), 5000)
     } finally {
       setFetching(false)
     }
@@ -1518,6 +1593,46 @@ export function ReelsStudioTab({
     }
   }, [])
 
+  /**
+   * Pull a saved clip row into the feed.
+   *
+   * Shared by the restore-on-open fetch and the job poller, so a download that
+   * finishes while you are watching lands in the feed exactly the way it would
+   * have if you had closed the dialog and come back.
+   */
+  const addSavedRow = useCallback(async (row: SavedClipRow) => {
+    // Cheap pre-check so a row already in the feed does not cause a pointless
+    // blob download; the setClips guard below is what actually prevents dupes.
+    let already = false
+    setClips((prev) => {
+      already = prev.some((c) => c.dbId === row.id)
+      return prev
+    })
+    if (already) return
+
+    const file = await fileFromSavedClip(row)
+    setClips((prev) =>
+      // Guard against a double-mount in dev, and against the poller and the
+      // restore fetch racing for the same row
+      prev.some((c) => c.dbId === row.id)
+        ? prev
+        : [
+            ...prev,
+            {
+              id: `db-${row.id}`,
+              name: row.name,
+              url: URL.createObjectURL(file),
+              file,
+              duration: Number(row.duration) || 0,
+              width: row.width || 1080,
+              height: row.height || 1920,
+              dbId: row.id,
+              save: 'saved' as const,
+            },
+          ],
+    )
+  }, [])
+
   // Restore this product's saved clips when the studio opens, so work carries
   // across sessions instead of resetting every time the dialog is closed
   const [restoring, setRestoring] = useState(true)
@@ -1532,28 +1647,9 @@ export function ReelsStudioTab({
       .then(async (json) => {
         if (cancelled || !json.success || !json.clips?.length) return
         for (const row of json.clips as SavedClipRow[]) {
+          if (cancelled) return
           try {
-            const file = await fileFromSavedClip(row)
-            if (cancelled) return
-            setClips((prev) =>
-              // Guard against a double-mount in dev replaying the same rows
-              prev.some((c) => c.dbId === row.id)
-                ? prev
-                : [
-                    ...prev,
-                    {
-                      id: `db-${row.id}`,
-                      name: row.name,
-                      url: URL.createObjectURL(file),
-                      file,
-                      duration: Number(row.duration) || 0,
-                      width: row.width || 1080,
-                      height: row.height || 1920,
-                      dbId: row.id,
-                      save: 'saved' as const,
-                    },
-                  ],
-            )
+            await addSavedRow(row)
           } catch {
             // A blob that no longer resolves should not block the rest
           }
@@ -1565,12 +1661,142 @@ export function ReelsStudioTab({
     return () => {
       cancelled = true
     }
-  }, [productId, productName])
+  }, [productId, productName, addSavedRow])
+
+  /**
+   * Hand clips to the server-side download queue.
+   *
+   * Returns whether the queue accepted them, which is all the search panels
+   * need to know - the download itself is reported by the tiles below, from
+   * the job rows, so nothing depends on this component staying mounted.
+   */
+  const queueClips = useCallback(
+    async (incoming: QueueClipInput[]) => {
+      if (incoming.length === 0) return false
+      try {
+        const res = await fetch('/api/product-master/clip-jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId: productRef.current.id || null,
+            productName: productRef.current.name || '',
+            jobs: incoming,
+          }),
+        })
+        const json = await res.json()
+        if (!json.success) return false
+        // Show the tiles immediately rather than waiting for the next poll
+        setJobs((prev) => {
+          const seen = new Set(prev.map((j) => j.id))
+          return [...prev, ...(json.jobs as JobRow[]).filter((j) => !seen.has(j.id))]
+        })
+        // Polling stops when the queue goes idle, so a new batch has to wake it
+        setPoll((n) => n + 1)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [],
+  )
+
+  /**
+   * Watch the job rows.
+   *
+   * Polls while anything is live and stops when the queue is idle, so an open
+   * dialog is not making requests forever. Each pass also nudges the worker
+   * server-side, which is what revives a job stranded by a closed tab without
+   * needing a cron.
+   */
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const params = new URLSearchParams()
+    if (productId) params.set('productId', productId)
+    else if (productName) params.set('productName', productName)
+
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/product-master/clip-jobs?${params}`)
+        const json = await res.json()
+        if (cancelled || !json.success) return
+
+        const rows = json.jobs as JobRow[]
+        setJobs(rows)
+
+        // A finished job carries its clip row, so drop it straight into the
+        // feed - this is what makes reopening feel like you never left.
+        for (const job of rows) {
+          if (job.status === 'done' && job.clip) {
+            try {
+              await addSavedRow(job.clip)
+            } catch {
+              // The tile stays; a blob that will not load is not fatal
+            }
+          }
+        }
+
+        if (cancelled) return
+        // Keep watching only while there is something to watch
+        const live = rows.some((j) => j.status === 'queued' || j.status === 'running')
+        if (live) timer = setTimeout(tick, 3000)
+      } catch {
+        // A dropped poll is not an error worth showing - try again shortly
+        if (!cancelled) timer = setTimeout(tick, 6000)
+      }
+    }
+
+    void tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [productId, productName, addSavedRow, poll])
+
+  /**
+   * Jobs worth drawing a tile for.
+   *
+   * A completed job is dropped as soon as its clip is in the feed, so the feed
+   * never shows a spinner next to the very clip it just produced. Completions
+   * whose clip has not landed yet stay visible - the work is not finished from
+   * the user's point of view until they can see the clip.
+   */
+  const visibleJobs = useMemo(
+    () => jobs.filter((j) => j.status !== 'done' || !clips.some((c) => c.dbId === j.clip_id)),
+    [jobs, clips],
+  )
+
+  /** Stop showing a job the user has acknowledged. */
+  const dismissJob = useCallback(async (id: string) => {
+    setJobs((prev) => prev.filter((j) => j.id !== id))
+    try {
+      await fetch(`/api/product-master/clip-jobs?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+    } catch {
+      // Hidden locally either way; the next poll will correct it if it failed
+    }
+  }, [])
 
   const selectedClip = clips.find((c) => c.id === selected) || null
   // Step 2 already owns the only preview player, so "Edit" and tile taps scroll
   // to it rather than opening a second video somewhere else
   const editorRef = useRef<HTMLElement>(null)
+  const resultRef = useRef<HTMLElement>(null)
+
+  // Bring the finished reel into view when a render lands. It appears at the
+  // bottom of the page, so without this the render you just waited for is
+  // off-screen and looks like nothing happened.
+  const shownResult = useRef<string | null>(null)
+  useEffect(() => {
+    const url = output?.url ?? null
+    // Guard on the url, not on `output` being truthy: re-running on every
+    // render would yank the page back down while you edit the caption.
+    if (!url || shownResult.current === url) {
+      if (!url) shownResult.current = null
+      return
+    }
+    shownResult.current = url
+    requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+  }, [output?.url])
 
   const selectClip = (c: Clip) => {
     setSelected(c.id)
@@ -1689,12 +1915,14 @@ export function ReelsStudioTab({
         // the preview the user just approved
         if (i === 0 || !autoRestyle || !hasBranding) {
           spent = [activeStyle.id]
-          return { title: activeStyle, price: activePriceStyle }
+          return { title: activeStyle, price: activePriceStyle, picture: { zoom, speed } }
         }
         if (spent.length >= TITLE_STYLES.length) spent = []
         const title = pickDistinct(spent)
         spent.push(title.id)
-        return { title, price: pickDistinct([title.id]) }
+        // Fresh punch-in and pacing per clip too, or a batch of twenty differs
+        // only by its captions while the footage stays byte-identical
+        return { title, price: pickDistinct([title.id]), picture: randomPicture() }
       })
 
       // One at a time: ffmpeg.wasm is a single instance here, so renders cannot
@@ -1704,7 +1932,9 @@ export function ReelsStudioTab({
         const c = list[i]
         setBatch({ done: i, total: list.length })
         try {
-          const blob = mustRender(c) ? await renderBrandedBlob(c.file, stylePlan[i]) : c.file
+          const blob = mustRender(c)
+            ? await renderBrandedBlob(c.file, stylePlan[i], stylePlan[i].picture)
+            : c.file
           // Numbered by feed position, not batch position, so a clip keeps the
           // same name whether it is downloaded on its own or as part of a batch
           dir.file(clipFileName(productName, clips.indexOf(c), clips.length), blob)
@@ -1984,7 +2214,7 @@ export function ReelsStudioTab({
         }, 'image/png')
       }
       img.onerror = () => reject(new Error('product image load failed'))
-      img.src = effectiveProductSrc
+      img.src = loadableProductSrc
     })
 
   // BRAND: burn the title + price + logo onto the clean (un-branded) source.
@@ -2018,9 +2248,18 @@ export function ReelsStudioTab({
   const renderBrandedBlob = async (
     data: Blob | File,
     styles?: { title: (typeof TITLE_STYLES)[number]; price: (typeof TITLE_STYLES)[number] },
+    /**
+     * Per-render picture transform, for exactly the same reason as `styles`:
+     * a batch renders every clip inside ONE call, so reading zoom/speed off
+     * state would give all of them the identical punch-in and pacing - twenty
+     * files that differ only by their captions. Passed in explicitly instead.
+     */
+    picture?: { zoom: number; speed: number },
   ): Promise<Blob> => {
     const styleForTitle = styles?.title ?? activeStyle
     const styleForPrice = styles?.price ?? activePriceStyle
+    const useZoom = picture?.zoom ?? zoom
+    const useSpeed = picture?.speed ?? speed
     const ffmpeg = ffmpegRef.current
     // A track of unknown origin is never burned in. This is the copyright gate:
     // the button is already disabled, so reaching here means something slipped
@@ -2065,8 +2304,8 @@ export function ReelsStudioTab({
       // the preview. Cropping after would scale the logo and text up with it.
       // Chains from `last`, so it crops the reel-shaped frame when one was made
       // rather than reaching back past it to the raw source.
-      if (zoom > 0) {
-        const f = 1 + zoom / 100
+      if (useZoom > 0) {
+        const f = 1 + useZoom / 100
         chains.push(`[${last}]crop=iw/${f}:ih/${f},scale=${out.w}:${out.h},setsar=1[zm]`)
         last = 'zm'
       }
@@ -2118,8 +2357,8 @@ export function ReelsStudioTab({
 
       // Speed goes last, on the finished picture, so the overlays ride along
       // with it rather than drifting out of sync with the footage
-      if (speed !== 1) {
-        chains.push(`[${last}]setpts=PTS/${speed}[sp]`)
+      if (useSpeed !== 1) {
+        chains.push(`[${last}]setpts=PTS/${useSpeed}[sp]`)
         last = 'sp'
       }
 
@@ -2144,8 +2383,8 @@ export function ReelsStudioTab({
         idx++
       } else if (muteAudio) {
         audioArgs = ['-an']
-      } else if (speed !== 1) {
-        audioArgs = ['-map', '0:a?', '-af', `atempo=${speed}`, '-c:a', 'aac']
+      } else if (useSpeed !== 1) {
+        audioArgs = ['-map', '0:a?', '-af', `atempo=${useSpeed}`, '-c:a', 'aac']
       } else {
         audioArgs = ['-map', '0:a?', '-c:a', 'copy']
       }
@@ -2206,6 +2445,42 @@ export function ReelsStudioTab({
     }
   }
 
+  /**
+   * Brand a newly selected clip on its own, with no click.
+   *
+   * Held in a ref because `brandVideo` is re-created every render: depending on
+   * the function directly would re-run this effect constantly and kick off an
+   * ffmpeg render on top of the one already going.
+   */
+  const brandVideoRef = useRef(brandVideo)
+  brandVideoRef.current = brandVideo
+
+  /**
+   * Auto-apply fires ONCE per source, keyed on identity rather than on the
+   * settings.
+   *
+   * `!preBrand` is what makes that true: the first render snapshots the clean
+   * source, so after it lands this condition is false and the effect cannot
+   * fire again until the source actually changes (`selectClip` clears both) or
+   * branding is removed. Without that guard, branding sets `output`, which
+   * re-triggers the effect, which brands again - forever.
+   *
+   * Deliberately NOT re-rendering on every settings change: an ffmpeg pass is
+   * seconds of CPU, and re-encoding on each keystroke of the title would make
+   * the editor unusable. Tweaks are picked up by "Update branding".
+   */
+  useEffect(() => {
+    if (!ffmpegReady || busy !== null) return
+    // Only a fresh, un-branded clip. `output` is the result of a cut or merge,
+    // which is also a valid target, but preBrand tells us whether it is done.
+    if (preBrand || !selectedClip) return
+    if (!hasBranding) return
+    // Never auto-render a track whose origin is still unanswered - the same
+    // copyright gate the Apply button enforces
+    if (!audioIsCleared(audio)) return
+    void brandVideoRef.current()
+  }, [selectedClip, preBrand, ffmpegReady, busy, hasBranding, audio])
+
   // Strip all branding: restore the clean pre-brand video
   const removeBranding = () => {
     if (!preBrand) return
@@ -2215,40 +2490,60 @@ export function ReelsStudioTab({
 
   const brandSource = output ? 'the current result' : selectedClip ? 'the selected clip' : null
 
-  return (
-    <div className="flex flex-col gap-5">
-      {/* ---- Find a product video: video search + marketplace listings ---- */}
-          <SourceFinderPanel
-            defaultQuery={productName}
-            productImage={activeProductImage}
-        onUseClip={(file, origin) =>
-          addFiles([file], {
-            source: 'search',
-            sourceId: origin?.sourceId ?? null,
-            sourceUrl: origin?.sourceUrl ?? null,
-          })
-        }
-        onClipPending={(job) => setPending((p) => (p.some((x) => x.id === job.id) ? p : [...p, job]))}
-        onClipSettled={(id, ok) => {
-          if (ok) return setPending((p) => p.filter((x) => x.id !== id))
-          setPending((p) => p.map((x) => (x.id === id ? { ...x, failed: true } : x)))
-          setTimeout(() => setPending((p) => p.filter((x) => x.id !== id)), 5000)
-        }}
-      />
+  // Is there a video stage to show beside the controls? When there is not, the
+  // side-by-side split has to collapse back to one column, otherwise the grid
+  // holds an empty 21rem track open next to half-width controls.
+  const stageOn = Boolean(brandSource && (titleOn || priceOn || logoOn))
 
-      {/* ---- Fetch from link ---- */}
-      <section className="flex flex-col gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 p-3">
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <Link2 className="h-4 w-4 text-sky-500" />
-          Fetch a product video from a link
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Paste a TikTok or Facebook video link - the full HD, watermark-free video is downloaded and added to
-          the feed automatically. No external website needed.
-        </p>
-        <div className="flex gap-2">
+  return (
+    /*
+      A TWO-PAGE SPREAD.
+      
+      Left page gathers footage, right page builds the reel. The two pages scroll
+      INDEPENDENTLY, which is the whole point: this was one ~3250-line column, so
+      reaching the branding controls scrolled the search results off the screen
+      and back again. Now the sources stay open on the left while you work on the
+      right, and neither page is ever more than its own short scroll deep.
+    */
+    /*
+      GRID, not flex - and the `minmax(0,...)` is the entire reason.
+
+      This was `lg:flex-row` + `lg:basis-[58%]` and it rendered as ONE full-width
+      page. A flex child still sizes to its content floor, and the left page
+      holds a multi-column video grid, so the left page grew past its 58% basis,
+      shoved the right page beyond the dialog edge, and `overflow-hidden` meant
+      there was no scrollbar to reveal it - the spread was there, just pushed out
+      of sight. Grid tracks declared `minmax(0, Nfr)` cannot exceed their share,
+      so both pages always fit.
+    */
+    <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1.35fr)_1px_minmax(0,1fr)]">
+      {/* ================= LEFT PAGE: find the footage ================= */}
+      <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4">
+        <header className="flex items-baseline gap-3">
+          <span className="font-serif text-xl leading-none text-muted-foreground/60">I</span>
+          <h3 className="font-serif text-lg leading-none tracking-tight">Find the footage</h3>
+          <span className="h-px flex-1 bg-border" />
+        </header>
+
+        {/* ---- Find a product video: video search + marketplace listings ---- */}
+        <SourceFinderPanel
+          defaultQuery={productName}
+          productImage={activeProductImage}
+          productId={productId}
+          onQueueClips={queueClips}
+          onPhotosSaved={loadGallery}
+        />
+
+        {/* ---- Fetch from link ----
+            Demoted to a single row at the foot of the page: it is one input and
+            one button, and the paragraph explaining it is now the placeholder
+            plus a tooltip. It used to be a bordered card with two lines of
+            prose, sitting between the search and the feed. */}
+        <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
+          <Link2 className="h-3.5 w-3.5 shrink-0 text-sky-500" />
           <Input
-            placeholder="https://www.tiktok.com/... or https://www.facebook.com/..."
+            placeholder="Paste a TikTok or Facebook link to pull the full HD, watermark-free video"
+            title="The video is downloaded and added to the feed automatically - no external website needed."
             value={link}
             onChange={(e) => setLink(e.target.value)}
             onKeyDown={(e) => {
@@ -2258,16 +2553,35 @@ export function ReelsStudioTab({
               }
             }}
             disabled={fetching}
-            className="flex-1"
+            className="h-8 flex-1 text-xs"
           />
-          <Button onClick={fetchFromLink} disabled={fetching || !link.trim()}>
+          <Button size="sm" className="h-8" onClick={fetchFromLink} disabled={fetching || !link.trim()}>
             {fetching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
-            {fetching ? 'Fetching\u2026' : 'Fetch video'}
+            {fetching ? 'Fetching\u2026' : 'Fetch'}
           </Button>
         </div>
         {fetchInfo && <p className="text-xs text-sky-400">{fetchInfo}</p>}
         {fetchError && <p className="text-xs text-destructive">{fetchError}</p>}
-      </section>
+      </div>
+
+      {/* The spine. A double hairline reads as a gutter rather than as a panel
+          border, which is what keeps the two halves feeling like one spread. */}
+      <div className="hidden bg-border lg:block" aria-hidden="true" />
+
+      {/* ================= RIGHT PAGE: build the reel ================= */}
+      {/*
+        `@container` and NOT a viewport breakpoint. This page is the `1fr` of a
+        1.35fr/1px/1fr spread, so it is only ~42% of the dialog - a `lg:` rule
+        fires off the WINDOW being 1024px wide and would split a 470px column
+        into two useless 235px ones. Container queries measure this page, so the
+        stage moves beside the controls on a wide monitor and stacks on a laptop.
+      */}
+      <div className="@container flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto px-6 py-4">
+        <header className="flex items-baseline gap-3">
+          <span className="font-serif text-xl leading-none text-muted-foreground/60">II</span>
+          <h3 className="font-serif text-lg leading-none tracking-tight">Make the reel</h3>
+          <span className="h-px flex-1 bg-border" />
+        </header>
 
       {/* ---- Step 1: feed ---- */}
       <section className="flex flex-col gap-2">
@@ -2295,47 +2609,104 @@ export function ReelsStudioTab({
             />
           </div>
         </div>
-        {/* Which Page these posts are for. Picking one loads that Page's whole
-            saved look - logo, banner spot and watermark - so it belongs here at
-            the top rather than buried in the branding step. */}
-        {brandPages.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background/60 px-2.5 py-1.5">
-            <span className="mr-0.5 text-xs font-medium text-muted-foreground">Page</span>
-            {brandPages.map((p) => {
-              const active = p.id === brandPageId
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => selectBrandPage(p.id)}
-                  aria-pressed={active}
-                  title={
-                    pageLayouts[p.id]
-                      ? `${p.name} has its own saved look`
-                      : `${p.name} uses the shared default look`
-                  }
-                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
-                    active
-                      ? 'border-amber-500 bg-amber-500/15 text-amber-500'
-                      : 'border-border text-muted-foreground hover:text-foreground'
+        {/* ONE toolbar, not three stacked bands. Page, quick post and banner
+            spot were a full-width row each - three borders and three lots of
+            padding for what is really one set of "how this batch behaves"
+            settings, pushing the clips themselves off the screen. Grouped with
+            hairline dividers instead, and the Page list is a dropdown so six
+            accounts (or twenty) cost the same single line. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border bg-background/60 px-2.5 py-1.5">
+          {/* Picking a Page loads that Page's whole saved look - logo, banner
+              spot, watermark - so it stays first, ahead of the branding step. */}
+          {brandPages.length > 0 && (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Page</span>
+              {/* `brandPageId` starts as '' meaning "shared default look", so
+                  the trigger must not look chosen until a Page actually is -
+                  the old pill row showed no active pill in that state and this
+                  has to read the same way. */}
+              <Select value={brandPageId} onValueChange={selectBrandPage}>
+                <SelectTrigger
+                  className={`h-7 w-auto max-w-[190px] gap-1.5 px-2 text-[11px] font-medium ${
+                    brandPageId
+                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-500'
+                      : 'text-muted-foreground'
                   }`}
+                  aria-label="Which Page these posts are for"
                 >
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                      pageLogos[p.id] || pageLayouts[p.id] ? 'bg-emerald-500' : 'bg-muted-foreground/40'
-                    }`}
-                  />
-                  {p.name}
-                </button>
-              )
-            })}
-          </div>
-        )}
+                  {/* The dot is rendered here rather than through SelectValue,
+                      which would clone the item's own dot in as well */}
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {brandPageId && (
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          pageLogos[brandPageId] || pageLayouts[brandPageId]
+                            ? 'bg-emerald-500'
+                            : 'bg-muted-foreground/40'
+                        }`}
+                      />
+                    )}
+                    <span className="truncate">
+                      {brandPages.find((p) => p.id === brandPageId)?.name ?? 'Choose a Page'}
+                    </span>
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {/* Ordered most-posted-to first by the API. The heading and
+                      the rule below it explain WHY it is not alphabetical -
+                      without them a reordered list just looks unsorted. */}
+                  {brandPages.some((p) => (p.posts ?? 0) >= REGULAR_PAGE_POSTS) && (
+                    <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Pages you post to
+                    </p>
+                  )}
+                  {brandPages.map((p, i) => {
+                    const regular = (p.posts ?? 0) >= REGULAR_PAGE_POSTS
+                    // The rule falls where regular use ends, so the rarely-used
+                    // Pages stay reachable without competing for the eye
+                    const firstRare = regular
+                      ? false
+                      : i > 0 && (brandPages[i - 1].posts ?? 0) >= REGULAR_PAGE_POSTS
+                    return (
+                      <Fragment key={p.id}>
+                        {firstRare && (
+                          <p className="mt-1 border-t px-2 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Rarely used
+                          </p>
+                        )}
+                        <SelectItem value={p.id} className="text-xs">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                pageLogos[p.id] || pageLayouts[p.id] ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                              }`}
+                              title={
+                                pageLogos[p.id] || pageLayouts[p.id]
+                                  ? 'Has its own saved look'
+                                  : 'Uses the shared default look'
+                              }
+                            />
+                            {p.name}
+                          </span>
+                        </SelectItem>
+                      </Fragment>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-        {/* Quick post: skip Steps 2-4 entirely. Watch each clip, decide for
-            yourself, download it branded - one at a time or the whole feed. */}
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background/60 px-2.5 py-1.5">
-          <label className="flex items-center gap-2 text-xs font-medium">
+          <span aria-hidden className="h-4 w-px bg-border" />
+
+          {/* Quick post: skip Steps 2-4 entirely. Watch each clip, decide for
+              yourself, download it branded - one at a time or the whole feed.
+              The long explanation moved to the tooltip; the step's own heading
+              already says what the feed is for. */}
+          <label
+            className="flex items-center gap-1.5 text-[11px] font-medium"
+            title="Review each clip and download it branded, with no editing"
+          >
             <input
               type="checkbox"
               checked={quickPost}
@@ -2343,23 +2714,33 @@ export function ReelsStudioTab({
               className="h-3.5 w-3.5 accent-sky-500"
             />
             Quick post
-            <span className="font-normal text-muted-foreground">
-              {'\u2014'} review each clip and download, no editing
-            </span>
           </label>
+
+          <span aria-hidden className="h-4 w-px bg-border" />
+
+          {/* Same placement state as the copy under the preview - either one
+              moves both - surfaced here so the spot can be fixed up front */}
+          <PlacementControls
+            value={layoutPreset}
+            onPick={applyLayoutPreset}
+            locked={lockLayout}
+            onToggleLock={() => setLockLayout((v) => !v)}
+          />
+
           {quickPost && (
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2">
               {batch ? (
-                <span className="text-xs text-muted-foreground" aria-live="polite">
+                <span className="text-[11px] text-muted-foreground" aria-live="polite">
                   Rendering {Math.min(batch.done + 1, batch.total)} of {batch.total}
                 </span>
               ) : (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-[11px] text-muted-foreground">
                   {readyClips.length} of {clips.length} ready
                 </span>
               )}
               <Button
                 size="sm"
+                className="h-7 text-xs"
                 onClick={downloadAllReady}
                 disabled={
                   busy !== null ||
@@ -2379,16 +2760,6 @@ export function ReelsStudioTab({
             </div>
           )}
         </div>
-
-        {/* The same placement state as the one under the preview, surfaced up
-            here so the spot can be fixed before any branding is touched */}
-        <PlacementControls
-          value={layoutPreset}
-          onPick={applyLayoutPreset}
-          locked={lockLayout}
-          onToggleLock={() => setLockLayout((v) => !v)}
-          className="rounded-lg border bg-background/60 px-2.5 py-1.5"
-        />
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -2396,10 +2767,10 @@ export function ReelsStudioTab({
             addFiles(e.dataTransfer.files)
           }}
           className={`flex gap-3 overflow-x-auto rounded-lg border border-dashed p-3 ${
-            clips.length === 0 && pending.length === 0 ? 'min-h-28 items-center justify-center' : ''
+            clips.length === 0 && visibleJobs.length === 0 ? 'min-h-28 items-center justify-center' : ''
           }`}
         >
-          {clips.length === 0 && pending.length === 0 && (
+          {clips.length === 0 && visibleJobs.length === 0 && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               {restoring ? (
                 <>
@@ -2550,45 +2921,100 @@ export function ReelsStudioTab({
             </div>
           ))}
 
-          {/* Clips still downloading. Shown as real tiles so a batch of ten
-              looks like ten arriving, not an empty feed that fills at random. */}
-          {pending.map((p) => (
+          {/* Downloads running on the server. Shown as real tiles so a batch of
+              ten looks like ten arriving, not an empty feed that fills at
+              random. A finished job's clip is added to the feed by the poller,
+              so only unfinished work is drawn here. */}
+          {visibleJobs.map((job) => (
             <div
-              key={p.id}
+              key={job.id}
               aria-live="polite"
               className={`relative w-36 shrink-0 overflow-hidden rounded-md border border-dashed ${
-                p.failed ? 'border-destructive/50' : 'border-sky-500/40'
+                job.status === 'failed' ? 'border-destructive/50' : 'border-sky-500/40'
               }`}
             >
               <div className="relative flex h-20 w-36 items-center justify-center bg-black">
-                {p.thumb && (
+                {job.thumb_url && (
                   <img
-                    src={p.thumb || '/placeholder.svg'}
+                    src={job.thumb_url || '/placeholder.svg'}
                     alt=""
                     className="absolute inset-0 h-full w-full object-cover opacity-30"
                   />
                 )}
-                {p.failed ? (
+                {job.status === 'failed' ? (
                   <CircleAlert className="relative h-5 w-5 text-destructive" />
                 ) : (
                   <Loader2 className="relative h-5 w-5 animate-spin text-sky-400" />
                 )}
+                {/* A failure needs clearing by hand: it carries the reason, and
+                    auto-hiding it is how the old version lost the explanation */}
+                {job.status === 'failed' && (
+                  <button
+                    type="button"
+                    onClick={() => void dismissJob(job.id)}
+                    className="absolute right-1 top-1 rounded bg-black/70 p-0.5 text-muted-foreground hover:text-foreground"
+                    aria-label={`Dismiss failed download: ${job.title}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
               </div>
               <div className="px-1.5 py-1">
                 <p className="truncate text-[10px] text-muted-foreground">
-                  {p.failed ? 'Failed' : 'Processing'} {'\u00b7'} {p.title}
+                  {job.status === 'failed' ? 'Failed' : job.status === 'running' ? 'Downloading' : 'Queued'}{' '}
+                  {'\u00b7'} {job.title}
                 </p>
+                {job.status === 'failed' && job.error && (
+                  <p className="truncate text-[10px] text-destructive" title={job.error}>
+                    {job.error}
+                  </p>
+                )}
               </div>
             </div>
           ))}
         </div>
       </section>
 
+      {/*
+        STEPS 2 AND 3 SHARE A ROW WITH THE STAGE.
+
+        Trimming and branding both aim at the same video, but the trimmer, the
+        checkboxes and the drag-to-place preview were three stacked blocks - so
+        ticking "Promo price tag" scrolled the video you were placing it on off
+        the screen, and you scrolled back to check it.
+
+        Three tracks on a wide page: the work (cut/merge, shuffle, sound) on the
+        left, then WHAT goes on the video, then the video itself. The layer
+        checkboxes sit directly against the stage they act on, so ticking one
+        and seeing it land are the same glance. On a laptop the third track
+        folds away and the cards drop under the controls, stage still on the
+        right; narrower still and it is one plain column.
+      */}
+      <div
+        className={`flex flex-col gap-4 ${
+          stageOn
+            ? '@4xl:grid @4xl:items-start @4xl:gap-5 @4xl:grid-cols-[minmax(0,1fr)_minmax(0,21rem)] @6xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)_minmax(0,21rem)]'
+            : ''
+        }`}
+      >
+        {/* TRACK 1: cut, merge, and how the batch behaves.
+            Placement classes are inert while this is a flex column, so they do
+            not need gating on `stageOn` the way the grid itself does. */}
+        <div className="flex min-w-0 flex-col gap-4 @4xl:col-start-1 @4xl:row-start-1">
       {/* ---- Step 2: cut or merge ---- */}
       <section ref={editorRef} className="flex flex-col gap-2">
-        <p className="flex items-center gap-2 text-sm font-semibold">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-bold text-sky-500">2</span>
           Cut a scene or merge the feed
+          {/* The "click a clip to trim" prompt used to be its own bordered
+              band that said nothing until a clip was picked. It belongs on the
+              heading it is explaining. */}
+          {!selectedClip && clips.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+              <Scissors className="h-3 w-3" />
+              click a clip above to trim it
+            </span>
+          )}
         </p>
 
         {selectedClip ? (
@@ -2626,38 +3052,46 @@ export function ReelsStudioTab({
               </div>
             </div>
           </div>
-        ) : (
-          clips.length > 0 && (
-            <p className="rounded-lg border border-dashed px-3 py-2.5 text-sm text-muted-foreground">
-              <Scissors className="mr-1.5 inline h-3.5 w-3.5" />
-              Click a clip above to trim it.
-            </p>
-          )
-        )}
+        ) : null}
 
-        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-sm font-medium">
-              <Merge className="h-3.5 w-3.5 text-emerald-500" /> Merge into one reel
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {clips.length < 2
-                ? 'Add at least 2 clips - they merge in feed order into a 1080x1920 reel (30fps).'
-                : `${clips.length} clips will merge in feed order into a 1080x1920 reel (30fps).`}
-            </p>
-          </div>
-          <Button size="sm" onClick={mergeClips} disabled={!ffmpegReady || busy !== null || clips.length < 2}>
+        {/* Merge on one line: the title and the detail sat stacked, which made
+            a two-line box out of a single sentence */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-2.5 py-2">
+          <Merge className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+          <span className="text-xs font-medium">Merge into one reel</span>
+          <span className="text-[11px] text-muted-foreground">
+            {clips.length < 2
+              ? '\u2014 add at least 2 clips, they join in feed order (1080x1920, 30fps)'
+              : `\u2014 ${clips.length} clips in feed order (1080x1920, 30fps)`}
+          </span>
+          <Button
+            size="sm"
+            className="ml-auto h-7 text-xs"
+            onClick={mergeClips}
+            disabled={!ffmpegReady || busy !== null || clips.length < 2}
+          >
             {busy === 'merge' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Merge className="mr-1.5 h-3.5 w-3.5" />}
             {busy === 'merge' ? 'Merging\u2026' : 'Merge'}
           </Button>
         </div>
       </section>
+      {/* end of track 1: cut + merge only. Step 3 is a sibling track. */}
+      </div>
 
+      {/*
+        TRACK 2: Step 3 entire. Its heading, Apply-branding button, shuffle and
+        sound rows travel WITH the layer cards they own - splitting them left an
+        amber panel in one column quietly governing checkboxes in another.
+        Sits immediately left of the stage it acts on.
+      */}
       {/* ---- Step 3: brand (title + logo) ---- */}
-      <section className="flex flex-col gap-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
-        <div className="flex items-center justify-between gap-2">
+      <section className="flex min-w-0 flex-col gap-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 @4xl:col-start-1 @4xl:row-start-2 @6xl:col-start-2 @6xl:row-start-1">
+        {/* `flex-wrap` because this heading and its Apply-branding button no
+            longer have a full page width to share - in the middle track the
+            button drops onto its own line instead of crushing the heading. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="flex items-center gap-2 text-sm font-semibold">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-bold text-amber-500">3</span>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-bold text-amber-500">3</span>
             Brand it: title + price + logo
           </p>
           <div className="flex items-center gap-2">
@@ -2700,27 +3134,47 @@ export function ReelsStudioTab({
             ? 'Branding is editable: change anything below and hit Update branding to replace it, or remove it entirely.'
             : brandSource
               ? `Burns the title, price tag, and/or logo onto ${brandSource}.`
-              : 'Select a clip (or cut/merge first) - then apply branding to the result.'}
+              : 'Select a clip and branding applies itself - cut or merge first if you want to.'}
         </p>
 
-        {/* Style shuffle: rotate to a fresh look now, or once per post */}
-        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-background/60 p-2.5">
+        {/* Differentiation on one line. The style shuffle and the automatic
+            picture transform are the same idea - make this post unlike the
+            last one - so they read better together than as two bordered bands.
+            The transform has no controls on purpose: it was two sliders
+            defaulting to off, so it only happened if you remembered to drag
+            them every time. What is left is a read-out, proof it was applied
+            without the option to leave it off. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border bg-background/60 px-2.5 py-1.5">
           <Button type="button" variant="outline" size="sm" onClick={shuffleStyles} className="h-7 gap-1.5 bg-transparent text-xs">
             <RefreshCw className="h-3 w-3" />
             Shuffle style
           </Button>
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
             <input
               type="checkbox"
               checked={autoRestyle}
               onChange={(e) => setAutoRestyle(e.target.checked)}
               className="h-3.5 w-3.5 accent-amber-500"
             />
-            New style for every post &amp; download
+            New style every post
           </label>
+
+          {/* No divider here: in the narrow middle track this row wraps, and a
+              decorative rule dangles at the break. The gap separates them. */}
+          <span
+            className="flex items-center gap-1.5 text-[11px]"
+            title="Every render gets its own small punch-in and pacing change, so no two posts are the same file"
+          >
+            <Film className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+            <span className="text-muted-foreground">Made yours</span>
+            <span className="font-mono text-amber-500">
+              zoom {zoom}% {'\u00b7'} {speed.toFixed(2)}x
+            </span>
+          </span>
+
           {pendingRestyle && (
             <span className="text-[11px] text-muted-foreground" aria-live="polite">
-              Fresh style queued for your next post
+              Fresh style queued
             </span>
           )}
           {restyled && !pendingRestyle && (
@@ -2730,55 +3184,16 @@ export function ReelsStudioTab({
           )}
         </div>
 
-        {/* Make it yours: edits to the footage itself, split into picture and
-            sound. Overlays sit on top of untouched frames and audio - these
-            change the video itself, which is what makes it your own work. */}
-        <div className="flex flex-col gap-3 rounded-md border border-amber-500/25 bg-amber-500/[0.04] p-3">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-semibold text-foreground">Make it yours</span>
-            <span className="text-[11px] leading-relaxed text-muted-foreground">
-              Your logo and price sit on top of the video. These change the video itself, which is what
-              makes the post count as your own work instead of a copy.
-            </span>
-          </div>
-
-          {/* Picture */}
-          <div className="flex flex-col gap-2.5 rounded-md border border-border bg-background/40 p-2.5">
-            <div className="flex items-center gap-2">
-              <Film className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-xs font-semibold text-foreground">Picture</span>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
-                  Zoom in {zoom > 0 ? `${zoom}%` : 'off'}
-                </span>
-                <Slider min={0} max={20} step={1} value={[zoom]} onValueChange={(v) => setZoom(v[0])} aria-label="Zoom in" className="flex-1" />
-              </div>
-              <span className="text-[11px] leading-relaxed text-muted-foreground">
-                Crops a little closer to the product, like standing one step nearer. Trims the outer edge,
-                so keep it low if the product touches the sides.
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-3">
-                <span className="w-32 shrink-0 text-[11px] text-muted-foreground">
-                  {speed === 1 ? 'Speed: normal' : speed < 1 ? `Slower (${speed.toFixed(2)}x)` : `Faster (${speed.toFixed(2)}x)`}
-                </span>
-                <Slider min={0.8} max={1.25} step={0.05} value={[speed]} onValueChange={(v) => setSpeed(v[0])} aria-label="Playback speed" className="flex-1" />
-              </div>
-              <span className="text-[11px] leading-relaxed text-muted-foreground">
-                Plays the clip a touch slower or faster. Anything up to about 1.1x is hard to notice.
-              </span>
-            </div>
-          </div>
-
-          {/* Sound. Muting is the strongest single change, and it opens the
-              choice of what goes in place of the original. */}
-          <div className="flex flex-col gap-2">
-            <label className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+        {/* Sound + safe zones share a row: three checkboxes that were three
+            separate bands. Sound stays a CHOICE rather than automatic, because
+            muting opens the question of what replaces the original and that
+            answer cannot be guessed. */}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border bg-background/60 px-2.5 py-1.5">
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
+              title="The strongest change of all - it also clears the way for your own sound"
+            >
               <input
                 type="checkbox"
                 checked={muteAudio}
@@ -2786,47 +3201,55 @@ export function ReelsStudioTab({
                   setMuteAudio(e.target.checked)
                   if (!e.target.checked) setAudio(null)
                 }}
-                className="mt-0.5 h-3.5 w-3.5 accent-amber-500"
+                className="h-3.5 w-3.5 accent-amber-500"
               />
-              <span>
-                <span className="font-semibold text-foreground">Mute the original audio</span>
-                <span className="block text-[11px] leading-relaxed">
-                  The strongest change of the three, and it clears the way for your own sound.
-                </span>
-              </span>
+              Mute original audio
             </label>
 
-            {muteAudio && <ReelAudioPanel audio={audio} onChange={setAudio} />}
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
+              title="Dim the bands where Reels puts its own buttons over your video"
+            >
+              <input
+                type="checkbox"
+                checked={showSafe}
+                onChange={(e) => setShowSafe(e.target.checked)}
+                className="h-3.5 w-3.5 accent-emerald-500"
+              />
+              Show safe zones
+            </label>
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
+              title="Stop the title, price and logo from being dragged under the platform's own UI"
+            >
+              <input
+                type="checkbox"
+                checked={snapSafe}
+                onChange={(e) => setSnapSafe(e.target.checked)}
+                className="h-3.5 w-3.5 accent-emerald-500"
+              />
+              Keep branding inside
+            </label>
           </div>
+
+          {muteAudio && <ReelAudioPanel audio={audio} onChange={setAudio} />}
         </div>
 
-        {/* Safe zones: where the platform's UI will cover the video */}
-        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-background/60 p-2.5">
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={showSafe}
-              onChange={(e) => setShowSafe(e.target.checked)}
-              className="h-3.5 w-3.5 accent-emerald-500"
-            />
-            Show Reels safe zones
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={snapSafe}
-              onChange={(e) => setSnapSafe(e.target.checked)}
-              className="h-3.5 w-3.5 accent-emerald-500"
-            />
-            Keep branding inside them
-          </label>
-        </div>
+      {/*
+        The four layer cards, now INSIDE Step 3 rather than after it.
 
+        Column count is a CONTAINER query, not `sm:`. `sm:grid-cols-2` measured
+        the window, so it stayed 2-up even when this landed in a 304px track and
+        squeezed each card to ~150px. `@sm` (page over 384px) gives the pair;
+        once the page earns its own third track at `@6xl` the cards go back to a
+        single stack, because 304px cannot hold two of them.
+      */}
+      <div className="grid min-w-0 grid-cols-1 gap-2 @sm:grid-cols-2 @6xl:grid-cols-1">
         {/* Title banner controls */}
-        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
-          <label className="flex items-center gap-2 text-sm font-medium">
+        <div className="flex flex-col gap-1.5 rounded-md border bg-background/60 px-2.5 py-2">
+          <label className="flex items-center gap-2 text-xs font-medium">
             <input type="checkbox" checked={titleOn} onChange={(e) => setTitleOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
-            <Type className="h-3.5 w-3.5 text-amber-500" />
+            <Type className="h-3.5 w-3.5 shrink-0 text-amber-500" />
             Product name title
           </label>
           {/* Editing happens on the video - this row only summarises it */}
@@ -2834,18 +3257,25 @@ export function ReelsStudioTab({
             <button
               type="button"
               onClick={() => setActiveLayer('title')}
-              className="ml-6 w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+              className="ml-6 flex min-w-0 max-w-full text-left text-[11px] text-muted-foreground hover:text-foreground"
             >
               <span className="truncate">{titleText.trim() || 'No title text'}</span>
-              <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+              <span className="shrink-0 text-amber-500">&nbsp;{'\u00b7'} edit on video</span>
             </button>
           )}
         </div>
 
         {/* Product photo controls - only offered when the product has a photo */}
         {hasProductImage && (
-          <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
-            <label className="flex items-center gap-2 text-sm font-medium">
+          <div
+            className={`flex flex-col gap-1.5 rounded-md border bg-background/60 px-2.5 py-2 ${
+              // Only takes the full row once the thumbnails are actually there
+              // `col-span-full`, not `col-span-2`: this grid drops to a single
+              // column in its own track, where spanning 2 would overflow it
+              productOn && photoChoices.length > 1 ? 'col-span-full' : ''
+            }`}
+          >
+            <label className="flex items-center gap-2 text-xs font-medium">
               <input
                 type="checkbox"
                 checked={productOn}
@@ -2855,7 +3285,7 @@ export function ReelsStudioTab({
                 }}
                 className="h-3.5 w-3.5 accent-amber-500"
               />
-              <Stamp className="h-3.5 w-3.5 text-amber-500" />
+              <Stamp className="h-3.5 w-3.5 shrink-0 text-amber-500" />
               Product photo
             </label>
             {productOn && (
@@ -2871,9 +3301,9 @@ export function ReelsStudioTab({
             {/* Saved listing photos. Only worth showing when there is a real
                 choice to make, so a product with one picture stays uncluttered. */}
             {productOn && photoChoices.length > 1 && (
-              <div className="ml-6 flex flex-col gap-1.5">
+              <div className="ml-6 flex flex-wrap items-center gap-x-2 gap-y-1.5">
                 <span className="text-[11px] text-muted-foreground">
-                  {photoChoices.length} saved photos {'\u00b7'} tap to swap
+                  {photoChoices.length} saved {'\u00b7'} tap to swap
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {photoChoices.map((url) => {
@@ -2885,11 +3315,13 @@ export function ReelsStudioTab({
                         onClick={() => setChosenPhoto(url)}
                         aria-label="Use this photo on the video"
                         aria-pressed={isActive}
-                        className={`h-11 w-11 overflow-hidden rounded border-2 transition ${
+                        className={`h-9 w-9 overflow-hidden rounded border-2 transition ${
                           isActive ? 'border-amber-500' : 'border-transparent opacity-70 hover:opacity-100'
                         }`}
                       >
-                        <img src={url || '/placeholder.svg'} alt="" className="h-full w-full object-cover" />
+                        {/* Display only - the click still stores the raw `url`,
+                            which is what gets sent to the server. */}
+                        <img src={mediaSrc(url) || '/placeholder.svg'} alt="" className="h-full w-full object-cover" />
                       </button>
                     )
                   })}
@@ -2900,51 +3332,57 @@ export function ReelsStudioTab({
         )}
 
         {/* Price tag controls */}
-        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
-          <label className="flex items-center gap-2 text-sm font-medium">
+        <div className="flex flex-col gap-1.5 rounded-md border bg-background/60 px-2.5 py-2">
+          <label className="flex items-center gap-2 text-xs font-medium">
             <input type="checkbox" checked={priceOn} onChange={(e) => setPriceOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
-            <Tag className="h-3.5 w-3.5 text-amber-500" />
+            <Tag className="h-3.5 w-3.5 shrink-0 text-amber-500" />
             Promo price tag
           </label>
           {priceOn && (
             <button
               type="button"
               onClick={() => setActiveLayer('price')}
-              className="ml-6 w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+              className="ml-6 flex min-w-0 max-w-full text-left text-[11px] text-muted-foreground hover:text-foreground"
             >
-              <span>{priceText.trim() || 'No price set'}</span>
-              <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+              <span className="truncate">{priceText.trim() || 'No price set'}</span>
+              <span className="shrink-0 text-amber-500">&nbsp;{'\u00b7'} edit on video</span>
             </button>
           )}
         </div>
 
-        {/* Logo controls */}
-        <div className="flex flex-col gap-2 rounded-md border bg-background/60 p-2.5">
-          <label className="flex items-center gap-2 text-sm font-medium">
+        {/* Logo controls. Full row only when open - the preview, the Change
+            button and the cutout toggle need to sit side by side, but the
+            switched-off checkbox does not. */}
+        <div
+          className={`flex flex-col gap-1.5 rounded-md border bg-background/60 px-2.5 py-2 ${
+            logoOn ? 'col-span-full' : ''
+          }`}
+        >
+          <label className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium">
             <input type="checkbox" checked={logoOn} onChange={(e) => setLogoOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
-            <ImageIcon className="h-3.5 w-3.5 text-amber-500" />
+            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-amber-500" />
             Logo watermark
+            {/* Which Page this logo saves against, inline on the heading
+                instead of a line of its own. The Page picker itself lives in
+                Step 1, where it drives the whole look, not just this image. */}
+            {logoOn && brandPages.length > 0 && (
+              <span className="text-[11px] font-normal text-muted-foreground">
+                {'\u2014'} saving for{' '}
+                <span className="font-medium text-foreground">
+                  {brandPages.find((p) => p.id === brandPageId)?.name ?? 'all pages'}
+                </span>
+                {!pageLogos[brandPageId] && <span className="ml-1 opacity-70">(shared logo)</span>}
+              </span>
+            )}
           </label>
 
-          {/* The Page picker now lives in Step 1, where it drives the whole
-              look rather than just this one image */}
-          {logoOn && brandPages.length > 0 && (
-            <p className="pl-6 text-xs text-muted-foreground">
-              Saving for{' '}
-              <span className="font-medium text-foreground">
-                {brandPages.find((p) => p.id === brandPageId)?.name ?? 'all pages'}
-              </span>
-              {!pageLogos[brandPageId] && <span className="ml-1 opacity-70">(using shared logo)</span>}
-            </p>
-          )}
-
           {logoOn && (
-            <div className="flex flex-col gap-3 pl-6 sm:flex-row sm:items-start">
-              <div className="flex flex-col items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pl-6">
+              <div className="flex items-center gap-1.5">
                 <img
                   src={effectiveLogoSrc || '/placeholder.svg'}
                   alt="Logo preview"
-                  className="h-16 w-16 rounded border object-contain"
+                  className="h-11 w-11 shrink-0 rounded border object-contain"
                   style={{
                     opacity: logoOpacity / 100,
                     backgroundImage:
@@ -2975,38 +3413,44 @@ export function ReelsStudioTab({
                   </p>
                 )}
               </div>
-              {/* Size and transparency now live on the video itself, so all
-                  that stays here is the cutout escape hatch */}
-              <div className="flex flex-1 flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setLogoRemoveBg(!logoRemoveBg)}
-                  aria-pressed={logoRemoveBg}
-                  className={`flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
-                    logoRemoveBg
-                      ? 'border-amber-500 bg-amber-500/15 text-amber-500'
-                      : 'border-border text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Eraser className="h-3 w-3" />
-                  {removingBg ? 'Cutting out background\u2026' : logoRemoveBg ? 'Background removed' : 'Keep original background'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveLayer('logo')}
-                  className="w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
-                >
-                  {logoSize}% wide, {logoOpacity}% opacity
-                  <span className="text-amber-500"> {'\u00b7'} edit on video</span>
-                </button>
-              </div>
+              {/* Size and transparency live on the video itself, so all that
+                  stays here is the cutout escape hatch and the read-out - side
+                  by side now rather than stacked in their own column */}
+              <button
+                type="button"
+                onClick={() => setLogoRemoveBg(!logoRemoveBg)}
+                aria-pressed={logoRemoveBg}
+                className={`flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
+                  logoRemoveBg
+                    ? 'border-amber-500 bg-amber-500/15 text-amber-500'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Eraser className="h-3 w-3" />
+                {removingBg ? 'Cutting out background\u2026' : logoRemoveBg ? 'Background removed' : 'Keep original background'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveLayer('logo')}
+                className="w-fit text-left text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                {logoSize}% wide, {logoOpacity}% opacity
+                <span className="text-amber-500"> {'\u00b7'} edit on video</span>
+              </button>
             </div>
           )}
         </div>
+        {/* end of the layer cards */}
+        </div>
+      </section>
+      {/* end of track 2: the stage is a sibling track, not a child of Step 3 */}
 
-        {/* Drag-to-place preview: position the title, price, and logo anywhere */}
-        {brandSource && (titleOn || priceOn || logoOn) && (
-          <div className="flex flex-col gap-1.5 rounded-md border bg-background/60 p-2.5">
+        {/* TRACK 3: THE STAGE. Place the title, price, photo and logo on the
+            video. Spans both rows in the 2-track layout so it sits beside the
+            controls AND the cards; back to a single row once it has its own
+            track. Sticky either way, so it holds still while you scroll. */}
+        {stageOn && (
+          <div className="flex min-w-0 flex-col gap-1.5 rounded-md border bg-background/60 p-2.5 @4xl:sticky @4xl:top-0 @4xl:col-start-2 @4xl:row-start-1 @4xl:row-span-2 @6xl:col-start-3 @6xl:row-span-1">
               <p className="flex items-center gap-2 text-sm font-medium">
                 {lockLayout ? (
                   <Lock className="h-3.5 w-3.5 text-emerald-500" />
@@ -3038,7 +3482,9 @@ export function ReelsStudioTab({
                     before the branding is drawn on. */}
                 <video
                   src={preBrand?.url ?? output?.url ?? selectedClip?.url}
-                  className="pointer-events-none max-h-80 w-auto transition-transform"
+                  // Taller in the side-by-side layout: a 9:16 clip capped at
+                  // 320px is only 180px wide, which wastes most of the column
+                  className="pointer-events-none max-h-80 w-auto transition-transform @4xl:max-h-[26rem]"
                   style={zoom > 0 ? { transform: `scale(${1 + zoom / 100})` } : undefined}
                   muted
                   playsInline
@@ -3091,7 +3537,7 @@ export function ReelsStudioTab({
                     style={{ left: `${productXY.x}%`, top: `${productXY.y}%`, width: `${productSize}%` }}
                   >
                     <img
-                      src={effectiveProductSrc || '/placeholder.svg'}
+                      src={loadableProductSrc || '/placeholder.svg'}
                       alt="Drag to position the product photo"
                       role="button"
                       onPointerDown={(e) => {
@@ -3392,7 +3838,8 @@ export function ReelsStudioTab({
             </p>
           </div>
         )}
-      </section>
+      {/* end of the Steps 2+3 / stage row */}
+      </div>
 
       {(busy === 'cut' || busy === 'merge' || busy === 'brand') && (
         <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
@@ -3404,9 +3851,25 @@ export function ReelsStudioTab({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {/* ---- Result ---- */}
+      {/* ---- Result ----
+        A BOUNDED box with its own scrollbar, not another band added to the
+        page. A finished reel is ~700px (an 8-row caption plus a 288px preview)
+        arriving BELOW all three steps, so it used to push itself off the bottom
+        - the only way to see the video and the caption together was to zoom the
+        browser out.
+
+        The header sits OUTSIDE the scrolling body, so Download / Post it /
+        Publish stay on screen however far you scroll the caption. No sticky
+        needed - a flex column with a `min-h-0 flex-1` scroll body pins it.
+      */}
       {output && (
-        <section className="overflow-hidden rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+        <section
+          ref={resultRef}
+          // `shrink-0` is load-bearing: page II is a flex column, so without it
+          // this section is a shrinkable item and the steps above (which are
+          // shrink-0) crush it. Measured 2px tall before this.
+          className="flex max-h-[70vh] shrink-0 flex-col overflow-hidden rounded-lg border border-emerald-500/30 bg-emerald-500/5"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/20 px-4 py-2.5">
             <span className="text-sm font-semibold">Result ready</span>
             <div className="flex items-center gap-2">
@@ -3433,7 +3896,12 @@ export function ReelsStudioTab({
               )}
             </div>
           </div>
-          <div className="flex flex-col gap-3 p-3">
+          {/* `[&>*]:shrink-0` is the other half of the fix. A flex column with
+              overflow SHRINKS its children instead of scrolling, so the publish
+              panel and the video preview were squashed rather than scrollable -
+              proved it: 881px of content compressed into 509px, scrollbar
+              never appeared. With children pinned it scrolls properly. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 [&>*]:shrink-0">
             {showPublish && (
               <ReelPublishPanel
                 videoBlob={output.blob}
@@ -3460,6 +3928,7 @@ export function ReelsStudioTab({
           </div>
         </section>
       )}
+      </div>
     </div>
   )
 }

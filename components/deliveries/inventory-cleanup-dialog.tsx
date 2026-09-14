@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AlertTriangle, Merge, Loader2, Sparkles, Check, Search, Brain, Copy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { mediaSrc } from '@/lib/media-url'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -309,9 +310,13 @@ export function InventoryCleanupDialog({ onSuccess }: InventoryCleanupDialogProp
                             {masterId === product.id && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
                           </div>
 
+                          {/* Proxied: 1688 photos 403 when a browser loads them
+                              from our page. This one matters more than most -
+                              the merge auto-picks the copy that HAS a photo, so
+                              a blank thumb here hides the reason for that pick. */}
                           {product.image_url && (
                             <img 
-                              src={product.image_url} 
+                              src={mediaSrc(product.image_url)} 
                               alt=""
                               className="w-8 h-8 rounded object-cover shrink-0"
                             />

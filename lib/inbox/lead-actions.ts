@@ -8,6 +8,7 @@
  */
 
 import type { UnifiedThread } from './unified'
+import { whatsappIdentity, whatsappReplyUnavailable, whatsappTranscriptKey } from './whatsapp-identity'
 
 /** A transcript line, after the per-channel shapes have been flattened. */
 export type LeadMessage = {
@@ -34,7 +35,7 @@ export function transcriptUrl(thread: UnifiedThread): string | null {
         (thread.pageId ? `&pageId=${encodeURIComponent(thread.pageId)}` : '')
       )
     case 'whatsapp':
-      return `/api/inbox/whatsapp?waId=${encodeURIComponent(thread.nativeId)}`
+      return whatsappTranscriptKey({ waId: thread.nativeId, phoneNumberId: thread.phoneNumberId })
     default:
       return null
   }
@@ -118,8 +119,7 @@ export type SendResult = {
  * Send a reply on whichever channel the lead came in on.
  *
  * Each channel is addressed differently: Messenger by PSID as a specific Page,
- * WhatsApp by wa_id (the number replies from the contact's own phone_number_id
- * server-side), and a comment by its own comment id.
+ * WhatsApp by business phone number plus customer wa_id, and a comment by its own comment id.
  */
 export async function sendLeadReply(thread: UnifiedThread, text: string): Promise<SendResult> {
   const body = text.trim()
@@ -144,8 +144,13 @@ export async function sendLeadReply(thread: UnifiedThread, text: string): Promis
         text: body,
         pageId: thread.pageId ?? undefined,
       })
-    case 'whatsapp':
-      return post('/api/inbox/whatsapp', { waId: thread.recipientId, message: body })
+    case 'whatsapp': {
+      const sender = { waId: thread.recipientId, phoneNumberId: thread.phoneNumberId, canSend: thread.canSend }
+      const unavailable = whatsappReplyUnavailable(sender)
+      if (unavailable) return { success: false, error: unavailable }
+      const identity = whatsappIdentity(sender)!
+      return post('/api/inbox/whatsapp', { ...identity, message: body })
+    }
     default:
       if (!thread.pageId) return { success: false, error: 'This comment has no Page attached.' }
       return post('/api/inbox/comments', {

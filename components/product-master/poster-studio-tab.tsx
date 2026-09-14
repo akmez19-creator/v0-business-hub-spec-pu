@@ -8,6 +8,7 @@ import { Download, ImageIcon, Loader2, Plus, Sparkles, Upload, X } from 'lucide-
 import { MarketplaceSearchPanel } from '@/components/product-master/marketplace-search-panel'
 import { OneClickPostPanel } from '@/components/product-master/one-click-post-panel'
 import { BestImagePicker } from '@/components/product-master/best-image-picker'
+import { mediaSrc } from '@/lib/media-url'
 
 type ModelInfo = { id: string; label: string; note: string; provider?: 'gateway' | 'google' | 'openai' }
 
@@ -234,12 +235,18 @@ export function PosterStudioTab({
   const setAt = (list: string[], i: number, v: string) => list.map((x, n) => (n === i ? v : x))
 
   return (
-    <div className="flex flex-col gap-5">
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        Send a product photo to an AI model and get a finished promo poster back, text and all. Pick a photo
-        from your product, upload one, or pull one from a marketplace listing below.
-      </p>
-
+    /*
+      Two columns on a wide screen.
+      
+      This was one long vertical column: photo, then model, then layout, then a
+      ~165-line text form, then the result - so the poster you were writing text
+      for was several screens away from the text fields. Setup and copy now sit
+      side by side, and the intro paragraph is gone (the section headings and the
+      Generate button already say what this does).
+    */
+    <>
+    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:gap-6">
+      <div className="flex min-w-0 flex-col gap-5 xl:flex-1">
       {/* ---- Source photo ---- */}
       <section className="flex flex-col gap-2">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Product photo</h4>
@@ -247,13 +254,12 @@ export function PosterStudioTab({
           <div className="h-28 w-28 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
             {sourceImage ? (
               <img
-                src={
-                  sourceImage.startsWith('data:')
-                    ? sourceImage
-                    : proxyPreview
-                      ? inlineUrl(sourceImage)
-                      : sourceImage
-                }
+                // mediaSrc resolves the known hotlink-blocked CDNs up front, so
+                // the common 1688 case no longer has to fail a request first and
+                // flash a broken image. data: URLs pass through untouched.
+                // The onError retry is kept for hosts not on that list, which is
+                // the case it can still genuinely rescue.
+                src={proxyPreview ? inlineUrl(sourceImage) : mediaSrc(sourceImage)}
                 alt="Poster source"
                 className="h-full w-full object-cover"
                 onError={() => {
@@ -314,7 +320,7 @@ export function PosterStudioTab({
                     }`}
                   >
                     <img
-                      src={url || '/placeholder.svg'}
+                      src={mediaSrc(url) || '/placeholder.svg'}
                       alt=""
                       className="h-full w-full object-cover"
                       onError={(e) => {
@@ -428,7 +434,12 @@ export function PosterStudioTab({
           </label>
         )}
       </section>
+      </div>
 
+      {/* Second column: the copy, the Generate button and the finished poster -
+          so the result is beside the fields that produced it, not screens below
+          them. Sticky so it stays put while the long form is scrolled. */}
+      <div className="flex min-w-0 flex-col gap-5 xl:flex-1 xl:sticky xl:top-2">
       {/* ---- Poster text ---- */}
       <section className="flex flex-col gap-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Poster text</h4>
@@ -675,9 +686,12 @@ export function PosterStudioTab({
           <img src={poster || '/placeholder.svg'} alt={`Generated poster for ${name}`} className="w-full rounded-lg border border-border" />
         </section>
       )}
+      </div>
+    </div>
 
-      {/* Marketplace listings double as a photo source for the poster */}
-      <section className="flex flex-col gap-2">
+    {/* Full width: this is a grid of listing photos, so it wants the whole
+        window rather than half of it. */}
+    <section className="mt-5 flex flex-col gap-2">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Find a photo from marketplace listings
         </h4>
@@ -694,6 +708,6 @@ export function PosterStudioTab({
           }}
         />
       </section>
-    </div>
+    </>
   )
 }

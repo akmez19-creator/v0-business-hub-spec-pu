@@ -1,15 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import { after } from 'next/server'
+import { connectInboxDatabase } from '@/lib/messenger/pg'
+import { validateWhatsAppScope, requireWhatsAppNumber, decodeWhatsAppCursor, encodeWhatsAppCursor, WhatsAppScopeError } from './number-scope'
+import { persistWhatsAppMessage, persistWhatsAppStatus } from './persistence'
 
-/**
- * WhatsApp inbox storage.
- *
- * The Cloud API has NO endpoint for listing past conversations - unlike
- * Messenger, which let us pull 67 unread messages retroactively. WhatsApp
- * messages exist only as webhook deliveries, so anything not written to
- * Postgres the moment it arrives is gone permanently. That is why this channel
- * is database-backed rather than a live Graph read, and why it necessarily
- * starts empty and fills going forward.
- */
+/** WhatsApp content is persisted from webhooks, supported history imports and local sends.
+ * Status webhooks contain delivery state, not the message body. */
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
 
@@ -20,6 +16,10 @@ export type WaContact = {
   waId: string
   profileName: string | null
   phoneNumberId: string
+  businessName: string
+  pageId: string | null
+  canSend: boolean
+  unreadStateKnown: boolean
   displayPhone: string | null
   lastMessageAt: string | null
   lastInboundAt: string | null
@@ -67,6 +67,8 @@ export type WaContact = {
 export type WaMessage = {
   id: string
   waId: string
+  phoneNumberId: string
+  cursor: string
   direction: 'in' | 'out'
   type: string
   body: string | null
@@ -96,6 +98,11 @@ type ContactRow = {
   wa_id: string
   profile_name: string | null
   phone_number_id: string
+  business_name: string
+  page_id: string | null
+  can_send: boolean
+  unread_state_known: boolean
+  message_count?: number
   display_phone: string | null
   last_message_at: string | null
   last_inbound_at: string | null
@@ -119,6 +126,10 @@ function toContact(
     waId: r.wa_id,
     profileName: r.profile_name,
     phoneNumberId: r.phone_number_id,
+    businessName: r.business_name || 'Unmapped WhatsApp number',
+    pageId: r.page_id ?? null,
+    canSend: r.can_send === true,
+    unreadStateKnown: r.unread_state_known === true,
     displayPhone: r.display_phone,
     lastMessageAt: r.last_message_at,
     lastInboundAt: r.last_inbound_at,
@@ -187,102 +198,85 @@ async function adProducts(
  * tiny. If this thread history ever grows large enough to matter, replace it
  * with a Postgres view rather than paging it here.
  */
-async function messageCounts(
-  db: ReturnType<typeof createAdminClient>,
-  waIds: string[],
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>()
-  if (!waIds.length) return counts
-
-  const { data, error } = await db.from('whatsapp_messages').select('wa_id').in('wa_id', waIds)
-  // A failed count must not blank the inbox: fall back to zero, which at worst
-  // labels a thread "new enquiry" instead of "awaiting reply".
-  if (error) {
-    console.log('[v0] whatsapp message counts failed:', error.message)
-    return counts
-  }
-
-  for (const row of data ?? []) {
-    const id = row.wa_id as string
-    counts.set(id, (counts.get(id) ?? 0) + 1)
-  }
-  return counts
+/** Recent conversations retain the explicit business number as part of their identity. */
+export async function listContacts(limit = 100, search?: string, phoneNumberId?: string): Promise<WaContact[]> {
+  if(phoneNumberId) await requireWhatsAppNumber(phoneNumberId)
+  const db=await connectInboxDatabase()
+  let rows:ContactRow[]
+  try {
+    rows=(await db.query(`SELECT c.*,n.business_name,n.page_id,n.can_send,
+      COALESCE(n.display_phone,c.display_phone) AS display_phone,
+      (SELECT count(*)::integer FROM whatsapp_messages m WHERE m.wa_id=c.wa_id AND m.phone_number_id=c.phone_number_id) AS message_count
+      FROM whatsapp_conversations c JOIN whatsapp_inbox_numbers n USING(phone_number_id)
+      WHERE n.can_read AND ($1::text IS NULL OR c.phone_number_id=$1)
+        AND ($2::text IS NULL OR c.profile_name ILIKE $2 OR c.wa_id ILIKE $2)
+      ORDER BY c.last_message_at DESC NULLS LAST,c.phone_number_id,c.wa_id LIMIT $3`,
+      [phoneNumberId??null,search?.trim()?`%${search.trim()}%`:null,Math.min(200,Math.max(1,limit))])).rows
+  } finally { await db.end().catch(()=>{}) }
+  const products=await adProducts(createAdminClient(),[...new Set(rows.map(r=>r.first_ad_id).filter((id):id is string=>Boolean(id)))])
+  return rows.map(r=>toContact(r,r.message_count??0,r.first_ad_id?products.get(r.first_ad_id)??null:null))
 }
 
-/**
- * Most recently active contacts.
- *
- * `search` is applied in Postgres rather than in the browser: once the list
- * runs past the limit, filtering only what was already downloaded would
- * silently fail to find any older customer, which is exactly when search
- * matters most.
- */
-export async function listContacts(limit = 100, search?: string): Promise<WaContact[]> {
-  const db = createAdminClient()
-  let q = db.from('whatsapp_contacts').select('*')
-
-  const term = search?.trim()
-  if (term) {
-    // Escape PostgREST's or() delimiters so a stray comma or paren in a name
-    // cannot break out of the filter expression.
-    const safe = term.replace(/[,()\\]/g, ' ').trim()
-    if (safe) q = q.or(`profile_name.ilike.%${safe}%,wa_id.ilike.%${safe}%`)
-  }
-
-  const { data, error } = await q
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(limit)
-  if (error) throw new Error(error.message)
-
-  const rows = (data ?? []) as ContactRow[]
-  // Both lookups are scoped to this page and independent, so run them together
-  // rather than paying two sequential round trips on every 30s poll.
-  const [counts, products] = await Promise.all([
-    messageCounts(db, rows.map((r) => r.wa_id)),
-    adProducts(db, [...new Set(rows.map((r) => r.first_ad_id).filter((id): id is string => Boolean(id)))]),
-  ])
-  return rows.map((r) =>
-    toContact(r, counts.get(r.wa_id) ?? 0, r.first_ad_id ? (products.get(r.first_ad_id) ?? null) : null),
-  )
+/** Hydrate exact canonical pairs discovered through additional providers without losing stored read/send/ad state. */
+export async function listContactsForScopes(scopes: { phoneNumberId: string; waId: string }[]): Promise<WaContact[]> {
+  if (scopes.length > 200) throw new WhatsAppScopeError('Too many WhatsApp conversation scopes.')
+  for (const scope of scopes) validateWhatsAppScope(scope.waId, scope.phoneNumberId)
+  const pairs = [...new Map(scopes.map(scope => [JSON.stringify([scope.phoneNumberId, scope.waId]), scope])).values()]
+  if (!pairs.length) return []
+  const db = await connectInboxDatabase()
+  let rows: ContactRow[]
+  try {
+    rows = (await db.query(`SELECT c.*,n.business_name,n.page_id,n.can_send,
+      COALESCE(n.display_phone,c.display_phone) AS display_phone,
+      (SELECT count(*)::integer FROM whatsapp_messages m WHERE m.wa_id=c.wa_id AND m.phone_number_id=c.phone_number_id) AS message_count
+      FROM whatsapp_conversations c JOIN whatsapp_inbox_numbers n USING(phone_number_id)
+      JOIN jsonb_to_recordset($1::jsonb) AS requested(phone_number_id text,wa_id text)
+        ON requested.phone_number_id=c.phone_number_id AND requested.wa_id=c.wa_id
+      WHERE n.can_read`, [JSON.stringify(pairs.map(scope => ({ phone_number_id: scope.phoneNumberId, wa_id: scope.waId })))])).rows
+  } finally { await db.end().catch(() => {}) }
+  const products = await adProducts(createAdminClient(), [...new Set(rows.map(row => row.first_ad_id).filter((id): id is string => Boolean(id)))])
+  return rows.map(row => toContact(row, row.message_count ?? 0, row.first_ad_id ? products.get(row.first_ad_id) ?? null : null))
 }
 
-/**
- * One page of a thread, newest first, then flipped for display.
- *
- * `before` is the created_at of the oldest message already on screen, so a
- * long-running customer thread can be walked backwards a page at a time
- * rather than loading thousands of rows into the browser at once.
- */
-export async function listMessages(waId: string, limit = 100, before?: string): Promise<WaMessage[]> {
-  const db = createAdminClient()
-  let q = db
-    .from('whatsapp_messages')
-    .select('id,wa_id,direction,type,body,media_id,media_mime,status,error,created_at')
-    .eq('wa_id', waId)
-  if (before) q = q.lt('created_at', before)
-  const { data, error } = await q.order('created_at', { ascending: false }).limit(limit)
-  if (error) throw new Error(error.message)
-
-  // Query newest-first so the LIMIT keeps recent messages, then flip for display.
-  return (data ?? [])
-    .map((r) => ({
-      id: r.id as string,
-      waId: r.wa_id as string,
-      direction: r.direction as 'in' | 'out',
-      type: r.type as string,
-      body: r.body as string | null,
-      mediaId: r.media_id as string | null,
-      mediaMime: r.media_mime as string | null,
-      status: r.status as string | null,
-      error: r.error as string | null,
-      createdAt: r.created_at as string,
-    }))
-    .reverse()
+/** The revision and transcript share a read-only snapshot; read acknowledgement cannot erase a later arrival. */
+export async function listMessages(waId:string,phoneNumberId:string,limit=100,before?:string):Promise<{messages:WaMessage[];readVersion:string}> {
+  validateWhatsAppScope(waId,phoneNumberId)
+  await requireWhatsAppNumber(phoneNumberId)
+  const cursor=decodeWhatsAppCursor(before)
+  const db=await connectInboxDatabase()
+  try {
+    await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+    const contact=(await db.query('SELECT activity_version FROM whatsapp_conversations WHERE wa_id=$1 AND phone_number_id=$2',[waId,phoneNumberId])).rows[0]
+    if(!contact) throw new WhatsAppScopeError('This customer has no conversation on the selected business number.',404)
+    const rows=(await db.query(`SELECT id,wa_id,phone_number_id,direction,type,body,media_id,media_mime,status,error,created_at,
+      to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
+      FROM whatsapp_messages WHERE wa_id=$1 AND phone_number_id=$2
+        AND ($3::timestamptz IS NULL OR (created_at,id)<($3::timestamptz,$4::text))
+      ORDER BY created_at DESC,id DESC LIMIT $5`,[waId,phoneNumberId,cursor?.[0]??null,cursor?.[1]??null,Math.min(100,Math.max(1,limit))])).rows
+    await db.query('COMMIT')
+    return {readVersion:String(contact.activity_version),messages:rows.map(r=>({
+      id:r.id,waId:r.wa_id,phoneNumberId:r.phone_number_id,direction:r.direction,type:r.type,body:r.body,
+      mediaId:r.media_id,mediaMime:r.media_mime,status:r.status,error:r.error,createdAt:new Date(r.created_at).toISOString(),
+      cursor:encodeWhatsAppCursor({createdAt:r.cursor_time,id:r.id}),
+    })).reverse()}
+  } catch(error) { await db.query('ROLLBACK').catch(()=>{});throw error }
+  finally { await db.end().catch(()=>{}) }
 }
 
-export async function markRead(waId: string) {
-  const db = createAdminClient()
-  await db.from('whatsapp_contacts').update({ unread_count: 0 }).eq('wa_id', waId)
+export async function markRead(waId:string,phoneNumberId:string,readVersion:string) {
+  validateWhatsAppScope(waId,phoneNumberId)
+  if(!/^\d+$/.test(readVersion)) throw new WhatsAppScopeError('The conversation read revision is invalid.')
+  const db=await connectInboxDatabase()
+  try {
+    await db.query('BEGIN')
+    await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`whatsapp:customer:${waId}`])
+    await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify(['whatsapp:conversation',phoneNumberId,waId])])
+    await db.query(`UPDATE whatsapp_conversations SET unread_count=0,unread_state_known=true,
+      last_read_at=GREATEST(COALESCE(last_read_at,'-infinity'::timestamptz),clock_timestamp()),updated_at=clock_timestamp()
+      WHERE wa_id=$1 AND phone_number_id=$2 AND activity_version=$3::bigint`,[waId,phoneNumberId,readVersion])
+    await db.query('COMMIT')
+  } catch(error) { await db.query('ROLLBACK').catch(()=>{});throw error }
+  finally { await db.end().catch(()=>{}) }
 }
 
 type IncomingArgs = {
@@ -298,8 +292,8 @@ type IncomingArgs = {
   timestamp: string
   raw: unknown
   /**
-   * 'out' marks an ECHO - a reply an agent sent from Business Suite,
-   * respond.io or the phone app, which Meta mirrors back to us. Defaults
+   * 'out' marks an outgoing content event when the connected integration
+   * actually delivers one. A status receipt alone has no body. Defaults
    * to 'in' so existing inbound callers are unaffected.
    */
   direction?: 'in' | 'out'
@@ -330,7 +324,7 @@ async function resolveAdName(adId: string): Promise<string | null> {
   const token = whatsappToken()
   if (!token) return null
   try {
-    const res = await fetch(`${GRAPH}/${adId}?fields=name,campaign{name},adset{name}&access_token=${token}`)
+    const res = await fetch(`${GRAPH}/${adId}?fields=name,campaign{name},adset{name}&access_token=${token}`, { signal: AbortSignal.timeout(6000) })
     const j = (await res.json()) as {
       name?: string
       campaign?: { name?: string }
@@ -354,11 +348,6 @@ async function resolveAdName(adId: string): Promise<string | null> {
   }
 }
 
-/** Later of two timestamps, so a backfill can never move a marker backwards. */
-function maxTime(current: string | null | undefined, incoming: string): string {
-  if (!current) return incoming
-  return new Date(incoming) > new Date(current) ? incoming : current
-}
 
 /** The `referral` object Meta attaches to a Click-to-WhatsApp message. */
 type WaReferral = {
@@ -401,166 +390,61 @@ export function readReferral(raw: unknown) {
  * Handles both directions: inbound customer messages, and echoes of replies
  * sent from other tools.
  */
-export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean }> {
-  const db = createAdminClient()
-  const outbound = a.direction === 'out'
-  const historical = a.historical === true
-
-  const { data: existing } = await db.from('whatsapp_messages').select('id').eq('id', a.messageId).maybeSingle()
-  if (existing) return { inserted: false }
-
-  const { data: contact } = await db
-    .from('whatsapp_contacts')
-    .select('unread_count, profile_name, first_ad_id, last_message_at, last_inbound_at')
-    .eq('wa_id', a.waId)
-    .maybeSingle()
-
-  // Only an inbound message can carry an ad click - an echo of our own reply
-  // never does.
-  const ad = outbound ? null : readReferral(a.raw)
-
-  // First-touch only: once a contact has an acquiring ad, a later click must
-  // not rewrite it, or the record of who originally won the customer is lost.
-  const firstTouch =
-    ad && !contact?.first_ad_id
-      ? {
-          first_ad_id: ad.ad_id,
-          first_ad_headline: ad.ad_headline,
-          first_ad_source_url: ad.ad_source_url,
-          first_ad_at: a.timestamp,
-          // The product name, not the page name - this is what agents read.
-          first_ad_name: await resolveAdName(ad.ad_id),
-        }
-      : {}
-
-  await db.from('whatsapp_contacts').upsert(
-    {
-      wa_id: a.waId,
-      // An echo carries OUR profile name, not the customer's, so writing it
-      // would rename the thread after the business. Keep the known name.
-      profile_name: outbound
-        ? ((contact?.profile_name as string | null | undefined) ?? null)
-        : (a.profileName ?? null),
-      phone_number_id: a.phoneNumberId,
-      display_phone: a.displayPhone ?? null,
-      // A backfilled message is older than whatever is already recorded, so
-      // it must never claim to be the latest activity or reset the snippet -
-      // that would drag 180-day-old threads to the top of the inbox.
-      ...(historical
-        ? {
-            last_message_at: maxTime(contact?.last_message_at as string | null, a.timestamp),
-            ...(outbound ? {} : { last_inbound_at: maxTime(contact?.last_inbound_at as string | null, a.timestamp) }),
-            ...(contact ? {} : { last_snippet: a.body?.slice(0, 200) ?? `[${a.type}]` }),
-          }
-        : {
-            last_message_at: a.timestamp,
-            // last_inbound_at drives the 24h free-form reply window, so only
-            // a real customer message may move it - never one of our replies.
-            ...(outbound ? {} : { last_inbound_at: a.timestamp }),
-            last_snippet: a.body?.slice(0, 200) ?? `[${a.type}]`,
-          }),
-      // An agent already handled this thread elsewhere, so an echo clears the
-      // unread badge instead of raising it. Imported history was read long
-      // ago and must leave the badge exactly as it found it.
-      unread_count: historical
-        ? ((contact?.unread_count as number | undefined) ?? 0)
-        : outbound
-          ? 0
-          : ((contact?.unread_count as number | undefined) ?? 0) + 1,
-      ...firstTouch,
-    },
-    { onConflict: 'wa_id' },
-  )
-
-  const { error } = await db.from('whatsapp_messages').insert({
-    id: a.messageId,
-    wa_id: a.waId,
-    phone_number_id: a.phoneNumberId,
-    direction: outbound ? 'out' : 'in',
-    type: a.type,
-    body: a.body,
-    media_id: a.mediaId ?? null,
-    media_mime: a.mediaMime ?? null,
-    created_at: a.timestamp,
-    raw: a.raw as never,
-    // Null on organic messages, which is exactly how ad-sourced leads are
-    // told apart from people who messaged on their own.
-    ...(ad ?? {}),
-  })
-  if (error) throw new Error(error.message)
-  return { inserted: true }
+export async function saveIncoming(a: IncomingArgs): Promise<{ inserted: boolean; enriched: boolean }> {
+  const ad = a.direction === 'out' ? null : readReferral(a.raw)
+  const result = await persistWhatsAppMessage({ ...a, ad, source: 'webhook' })
+  if (ad && (result.inserted || result.enriched)) {
+    // Commit the message before a decorative Marketing API lookup. This
+    // existing first-touch enrichment never blocks webhook acknowledgement.
+    after(async () => {
+      try {
+        const db = createAdminClient()
+        const { data: contact, error } = await db.from('whatsapp_conversations')
+          .select('first_ad_id,first_ad_name').eq('wa_id', a.waId).eq('phone_number_id',a.phoneNumberId).maybeSingle()
+        if (error || !contact || contact.first_ad_id !== ad.ad_id || contact.first_ad_name) return
+        const name = await resolveAdName(ad.ad_id)
+        if (name) await db.from('whatsapp_conversations')
+          .update({ first_ad_name: name }).eq('wa_id', a.waId).eq('phone_number_id',a.phoneNumberId)
+          .eq('first_ad_id', ad.ad_id).is('first_ad_name', null)
+      } catch { console.log('[inbox] WhatsApp ad label enrichment failed') }
+    })
+  }
+  return result
 }
 
-/**
- * Record a delivery/read receipt for an outbound message.
- *
- * A status for a wamid we have never stored means the message was sent from
- * SOMEWHERE ELSE - Business Suite, the phone, or respond.io. Meta fans status
- * webhooks out to every subscribed app, so those receipts reach us even though
- * the message content does not (`message_echoes` is Tech-Provider only).
- * Previously this was a bare UPDATE that matched no row and vanished, which is
- * why the inbox showed 773 inbound against 2 outbound and every thread looked
- * unanswered. We now insert a placeholder so the reply is at least VISIBLE.
- */
+/** Save receipts without treating their timestamps as message activity. */
 export async function updateStatus(
   messageId: string,
   status: string,
   error?: string,
   external?: { waId: string; phoneNumberId: string | null; at: string | null },
 ) {
-  const db = createAdminClient()
-  const { data } = await db
-    .from('whatsapp_messages')
-    .update({ status, ...(error ? { error } : {}) })
-    .eq('id', messageId)
-    .select('id')
-
-  if (data?.length || !external?.waId) return
-
-  // Content is genuinely unavailable from a status webhook - store null rather
-  // than inventing a body, and let the UI say where the reply came from.
-  const at = external.at ?? new Date().toISOString()
-  const { error: insErr } = await db.from('whatsapp_messages').insert({
-    id: messageId,
-    wa_id: external.waId,
-    phone_number_id: external.phoneNumberId,
-    direction: 'out',
-    type: 'external',
-    body: null,
-    status,
-    created_at: at,
+  // Every webhook receipt is scoped by both recipient and owning number.
+  // Missing scope must not update an arbitrary row using wamid alone.
+  if (!external?.waId || !external.phoneNumberId) throw new Error('WhatsApp status is missing its recipient or owning number')
+  await persistWhatsAppStatus({ messageId, status, error,
+    waId: external.waId, phoneNumberId: external.phoneNumberId,
+    timestamp: external.at ?? new Date().toISOString(),
   })
-  // Racing status webhooks (sent/delivered/read) for one new message: the first
-  // inserts, the rest collide on the wamid primary key. That is expected.
-  if (insErr && !/duplicate|unique/i.test(insErr.message)) {
-    console.log('[v0] whatsapp external send record failed:', insErr.message)
-    return
-  }
-
-  // Only advance the thread clock, never last_inbound_at: a reply sent
-  // elsewhere does not reopen the customer's 24h window.
-  await db
-    .from('whatsapp_contacts')
-    .update({ last_message_at: at })
-    .eq('wa_id', external.waId)
-    .lt('last_message_at', at)
 }
 
 /** Send a free-form text message and record it locally. */
-export async function sendText(waId: string, body: string): Promise<{ id: string }> {
+export async function sendText(waId: string, phoneNumberId:string, body: string): Promise<{ id: string; savedLocally: boolean; warning?: string }> {
   const token = whatsappToken()
   if (!token) throw new Error('WhatsApp is not configured on this deployment.')
 
-  // Reply from the number the customer messaged. Falling back to a global
-  // default would answer a Buildeco customer from the Made By Moris number.
-  const db0 = createAdminClient()
-  const { data: contact } = await db0
-    .from('whatsapp_contacts')
-    .select('phone_number_id')
-    .eq('wa_id', waId)
-    .maybeSingle()
-  const phoneNumberId = (contact?.phone_number_id as string | undefined) ?? whatsappPhoneNumberId()
-  if (!phoneNumberId) throw new Error('No WhatsApp number is associated with this conversation.')
+  validateWhatsAppScope(waId,phoneNumberId)
+  await requireWhatsAppNumber(phoneNumberId,true)
+  const db=await connectInboxDatabase()
+  try {
+    const conversation=(await db.query(`SELECT (SELECT max(created_at) FROM whatsapp_messages m
+      WHERE m.wa_id=c.wa_id AND m.phone_number_id=c.phone_number_id AND m.direction='in' AND m.type<>'external'
+        AND COALESCE(m.raw->>'imported','false')<>'true') AS last_inbound_at
+      FROM whatsapp_conversations c WHERE c.wa_id=$1 AND c.phone_number_id=$2`,[waId,phoneNumberId])).rows[0]
+    if(!conversation) throw new WhatsAppScopeError('The customer has no conversation on this business number.',404)
+    const inbound=conversation.last_inbound_at?new Date(conversation.last_inbound_at).getTime():0
+    if(!inbound || Date.now()-inbound>WA_WINDOW_MS) throw new WhatsAppScopeError('The free-form reply window for this business number has closed.',409)
+  } finally { await db.end().catch(()=>{}) }
 
   const res = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -579,25 +463,17 @@ export async function sendText(waId: string, body: string): Promise<{ id: string
   }
   if (!res.ok || json.error) throw new Error(json.error?.message || 'WhatsApp send failed')
 
-  const id = json.messages?.[0]?.id ?? `local-${Date.now()}`
-  const db = createAdminClient()
+  const id = json.messages?.[0]?.id ?? `local-${crypto.randomUUID()}`
   const now = new Date().toISOString()
-  await db.from('whatsapp_messages').insert({
-    id,
-    wa_id: waId,
-    phone_number_id: phoneNumberId,
-    direction: 'out',
-    type: 'text',
-    body,
-    status: 'sent',
-    created_at: now,
-  })
-  // Outbound activity reorders the thread but never reopens the 24h window -
-  // only a customer message does that, so last_inbound_at is left untouched.
-  await db
-    .from('whatsapp_contacts')
-    .update({ last_message_at: now, last_snippet: body.slice(0, 200), unread_count: 0 })
-    .eq('wa_id', waId)
-
-  return { id }
+  // Only retry the idempotent local write, never the accepted Meta send.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await persistWhatsAppMessage({ messageId:id, waId, phoneNumberId,
+        direction:'out', type:'text', body, status:'sent', timestamp:now,
+        source:'send', raw:{ localSend:true } })
+      return { id, savedLocally:true }
+    } catch { console.log('[inbox] Accepted WhatsApp send could not yet be stored locally') }
+  }
+  return { id, savedLocally:false,
+    warning:'WhatsApp accepted this message, but its local copy could not be saved yet. Do not resend; refresh the conversation shortly.' }
 }

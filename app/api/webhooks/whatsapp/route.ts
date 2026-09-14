@@ -1,20 +1,15 @@
 import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { saveIncoming, updateStatus } from '@/lib/whatsapp/store'
+import { createWhatsAppWebhookTrace } from '@/lib/whatsapp/webhook-trace'
+import { createAutopilotWake } from '@/lib/inbox-autopilot/wake'
 
-/**
- * WhatsApp Cloud API webhook.
- *
- * This route is the ONLY way WhatsApp messages ever reach the app - the Cloud
- * API has no history endpoint - so it must accept and persist every delivery.
- *
- * Meta retries until it receives a 200, so this always returns 200 once the
- * payload is understood, even if a single message fails to store. Returning
- * 500 for a permanently-bad message would make Meta retry it forever and
- * queue up everything behind it.
- */
+/** WhatsApp webhook. Acknowledge only after durable message/receipt writes.
+ * Each item is idempotent so a transient failure can safely retry the batch. */
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+export const maxDuration = 180
 
 /** GET is Meta's subscription handshake. */
 export async function GET(request: Request) {
@@ -42,7 +37,7 @@ export async function GET(request: Request) {
  */
 function signatureValid(raw: string, header: string | null): boolean {
   const secret = process.env.FACEBOOK_APP_SECRET
-  if (!secret) return true // cannot verify without the secret; see log below
+  if (!secret) return false
   if (!header?.startsWith('sha256=')) return false
 
   const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex')
@@ -74,9 +69,8 @@ type WaValue = {
   contacts?: { wa_id?: string; profile?: { name?: string } }[]
   messages?: WaMessagePayload[]
   /**
-   * Echoes of replies sent from Business Suite, respond.io or the phone app.
-   * Meta uses two different field names depending on how the number was
-   * onboarded, and both carry the same shape.
+   * Optional outgoing content events. Availability depends on the number's
+   * supported integration; ordinary status receipts never contain a body.
    */
   message_echoes?: WaMessagePayload[]
   smb_message_echoes?: WaMessagePayload[]
@@ -91,9 +85,8 @@ type WaValue = {
     threads?: { id?: string; messages?: WaMessagePayload[] }[]
   }[]
   /**
-   * `recipient_id` and `timestamp` matter for replies sent from Business Suite
-   * or respond.io: the status webhook is the ONLY trace of them we receive, so
-   * it has to carry enough to attach the reply to the right thread.
+   * Receipts carry recipient identity and delivery timestamps, but no body.
+   * They cannot identify which application or person sent the message.
    */
   statuses?: {
     id: string
@@ -124,38 +117,43 @@ function readMedia(m: WaMessagePayload) {
 }
 
 export async function POST(request: Request) {
+  if (!process.env.FACEBOOK_APP_SECRET) return new NextResponse('Webhook signature verification is not configured', { status: 503 })
   const raw = await request.text()
 
   if (!signatureValid(raw, request.headers.get('x-hub-signature-256'))) {
     console.log('[v0] whatsapp webhook: bad signature, rejected')
     return new NextResponse('Forbidden', { status: 403 })
   }
-  if (!process.env.FACEBOOK_APP_SECRET) {
-    console.log('[v0] whatsapp webhook: FACEBOOK_APP_SECRET unset - payload accepted UNVERIFIED')
-  }
 
-  let payload: { entry?: { changes?: { value?: WaValue }[] }[] }
+  let payload: { object?: string; entry?: { changes?: { field?: string; value?: WaValue }[] }[] }
   try {
     payload = JSON.parse(raw)
   } catch {
     return new NextResponse('Bad request', { status: 400 })
   }
 
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.entry)) return new NextResponse('Bad request', { status: 400 })
+  const trace = createWhatsAppWebhookTrace(payload)
+  const autopilotWake = createAutopilotWake()
+  let outcome: 'accepted' | 'retryable' | 'exception' | 'ignored-object' = 'exception'
   let saved = 0
+  let failed = 0
+  try {
+  if (payload.object && payload.object !== 'whatsapp_business_account') {
+    outcome = 'ignored-object'
+    return NextResponse.json({ received:true })
+  }
   for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
+    for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
       const value = change.value
       if (!value) continue
 
       const phoneNumberId = value.metadata?.phone_number_id
       const displayPhone = value.metadata?.display_phone_number ?? null
-      const profileName = value.contacts?.[0]?.profile?.name ?? null
 
-      // Inbound customer messages, plus echoes of replies agents sent from
-      // Business Suite / respond.io / the phone app. Meta names the echo
-      // field differently depending on how the number was onboarded.
+      // Preserve existing incoming, optional outgoing and supported history paths.
       const batches: { items: WaMessagePayload[]; direction: 'in' | 'out'; historical?: boolean }[] = [
-        { items: value.messages ?? [], direction: 'in' },
+        { items: value.messages ?? [], direction: change.field === 'message_echoes' || change.field === 'smb_message_echoes' ? 'out' : 'in' },
         { items: value.message_echoes ?? [], direction: 'out' },
         { items: value.smb_message_echoes ?? [], direction: 'out' },
       ]
@@ -181,27 +179,23 @@ export async function POST(request: Request) {
             })
           }
         }
-        if (chunk.metadata?.progress != null) {
-          console.log(
-            `[v0] whatsapp history: phase ${chunk.metadata.phase ?? '?'} chunk ${chunk.metadata.chunk_order ?? '?'} ${chunk.metadata.progress}%`,
-          )
-        }
+
       }
 
       for (const { items, direction, historical } of batches) {
         for (const m of items) {
-          if (!phoneNumberId) continue
+          if (!phoneNumberId) { failed++; continue }
           // On an echo `from` is our own business number, so the thread is
           // keyed by `to` - the customer. Using `from` would file every
           // agent reply under a single thread named after the business.
           const waId = direction === 'out' ? m.to : m.from
-          if (!waId) continue
+          if (!waId || !m.id || !m.timestamp || !m.type) { failed++; continue }
 
           const { mediaId, mediaMime } = readMedia(m)
           try {
             const { inserted } = await saveIncoming({
               waId,
-              profileName,
+              profileName: value.contacts?.find(contact => contact.wa_id === waId)?.profile?.name ?? null,
               phoneNumberId,
               displayPhone,
               messageId: m.id,
@@ -216,10 +210,10 @@ export async function POST(request: Request) {
               historical,
             })
             if (inserted) saved++
+            if (direction === 'in' && !historical) autopilotWake.add('whatsapp', phoneNumberId)
           } catch (e) {
-            // Swallow per-message so one bad row cannot block the whole batch
-            // and trigger endless Meta retries.
-            console.log('[v0] whatsapp webhook: save failed', m.id, e instanceof Error ? e.message : e)
+            failed++
+            console.log('[inbox] WhatsApp message persistence failed; batch will retry')
           }
         }
       }
@@ -233,12 +227,22 @@ export async function POST(request: Request) {
             at: s.timestamp ? new Date(Number(s.timestamp) * 1000).toISOString() : null,
           })
         } catch (e) {
-          console.log('[v0] whatsapp webhook: status failed', s.id, e instanceof Error ? e.message : e)
+          failed++
+          console.log('[inbox] WhatsApp status persistence failed; batch will retry')
         }
       }
     }
   }
 
   if (saved > 0) console.log('[v0] whatsapp webhook: stored', saved, 'message(s)')
+  if (failed) {
+    outcome = 'retryable'
+    return NextResponse.json({ received:false, retryable:true }, { status:503 })
+  }
+  outcome = 'accepted'
+  autopilotWake.schedule()
   return NextResponse.json({ received: true })
+  } finally {
+    trace.finish({ outcome, saved, failed })
+  }
 }

@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { fmtMur, fmtMurUnit } from '@/lib/inventory/cost'
+import { mediaSrc } from '@/lib/media-url'
 
 interface MissingRow {
   id: string
@@ -377,7 +378,8 @@ function CostPriceDialog({
                           {r.image_url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
-                              src={r.image_url || '/placeholder.svg'}
+                              // Proxied - supplier CDN photos 403 a direct load
+                              src={mediaSrc(r.image_url) || '/placeholder.svg'}
                               alt=""
                               className="h-8 w-8 flex-shrink-0 rounded object-cover"
                             />

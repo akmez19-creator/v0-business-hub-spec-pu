@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { searchVideoIndex } from '@/lib/product-master/video-resolve'
 
 export const maxDuration = 60
-
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
 
 type SearchHit = {
   id: string
@@ -86,19 +84,13 @@ function relevance(title: string, terms: string[]) {
 
 /** One keyword search against the short-video index. */
 async function searchOnce(keywords: string, cursor = 0, count = 24) {
-  const res = await fetch('https://www.tikwm.com/api/feed/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-    body: `keywords=${encodeURIComponent(keywords)}&count=${count}&cursor=${cursor}&HD=1`,
-  })
-  if (!res.ok) throw new Error('Search service unreachable')
-  const json = (await res.json()) as {
-    code: number
-    msg?: string
-    data?: { cursor?: number; hasMore?: boolean; videos?: RawVideo[] }
+  // The provider access itself lives in video-resolve, which works around a
+  // Cloudflare rule on the search path - see searchVideoIndex for why.
+  return (await searchVideoIndex({ keywords, cursor, count })) as {
+    cursor?: number
+    hasMore?: boolean
+    videos?: RawVideo[]
   }
-  if (json.code !== 0 || !json.data) throw new Error(json.msg || 'No results')
-  return json.data
 }
 
 // POST { query, cursor } -> TikTok keyword search.

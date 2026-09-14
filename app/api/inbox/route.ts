@@ -36,11 +36,13 @@ export async function GET(request: Request) {
     const empty = await cacheIsEmpty()
     let rateLimited = false
     let syncError: string | undefined
+    let partial = false
 
     if (wantsRefresh || empty) {
       const result = await syncConversations()
       rateLimited = result.rateLimited
       syncError = result.error
+      partial = Boolean(result.partial)
       // A throttle with nothing cached is the only case with nothing to show.
       if (!result.ok && result.rateLimited && (await cacheIsEmpty())) {
         return rateLimitResponse(new Error(result.error ?? 'rate limited'))
@@ -72,11 +74,12 @@ export async function GET(request: Request) {
       scope: requested,
       source: 'cache',
       rateLimited,
-      syncError: rateLimited ? syncError : undefined,
+      syncError,
+      partial,
       pages: pageRefs,
       pageStats,
       conversations,
-    })
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (e) {
     // Throttling is transient and must never be reported as a token problem.
     if (isRateLimit(e)) return rateLimitResponse(e)

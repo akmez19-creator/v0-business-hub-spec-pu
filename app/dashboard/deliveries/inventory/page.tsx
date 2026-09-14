@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { InventoryContent } from '@/components/deliveries/inventory-content'
+import { fetchAll } from '@/lib/supabase/fetch-all'
+import type { Product } from '@/lib/types'
 
 export default async function InventoryPage() {
   const supabase = await createClient()
@@ -23,8 +25,8 @@ export default async function InventoryPage() {
   // thousands of rows and PostgREST silently caps selects at 1000, which would
   // under-report every total. The RPC also does the product_id -> name ->
   // product_aliases resolution that recovers ~96% of unlinked delivery rows.
-  const [{ data: products }, { data: stock, error: stockError }] = await Promise.all([
-    adminDb.from('products').select('*').order('name'),
+  const [products, { data: stock, error: stockError }] = await Promise.all([
+    fetchAll<Product>((from, to) => adminDb.from('products').select('*').order('name').order('id').range(from, to)),
     adminDb.rpc('get_product_stock_summary'),
   ])
 

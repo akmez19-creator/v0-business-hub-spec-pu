@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -148,6 +149,19 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ]
 
 export default function AdsManagerPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[400px]" role="status" aria-label="Loading Ads Manager">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" aria-hidden="true" />
+      </div>
+    }>
+      <AdsManagerContent />
+    </Suspense>
+  )
+}
+
+function AdsManagerContent() {
+  const searchParams = useSearchParams()
   const [accounts, setAccounts] = useState<AdAccount[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string>('all')
   // Multi-select account filter (empty = all accounts). Persisted so the
@@ -194,8 +208,17 @@ export default function AdsManagerPage() {
   // Latest client-stats refresher, callable from the []-deps interval
   const refreshClientStatsRef = useRef<(() => void) | null>(null)
   
-  // Full-screen TV dashboard mode (separate glanceable wall-display view)
-  const [tvMode, setTvMode] = useState(false)
+  // Keep the TV shortcut, reloads and browser history in sync with this view.
+  const tvMode = searchParams.get('view') === 'tv'
+  const setTvMode = useCallback((enabled: boolean) => {
+    const url = new URL(window.location.href)
+    if (enabled) url.searchParams.set('view', 'tv')
+    else url.searchParams.delete('view')
+    // Next.js syncs native history with useSearchParams without remounting this
+    // page, preserving the account/date filters and already loaded ad data.
+    // Replace keeps Exit from adding a TV entry to the Back-button history.
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+  }, [])
   // Riders + their allocated regions + today's client counts (TV mode display)
   const [tvRiders, setTvRiders] = useState<{ id: string; name: string; regions: string[]; todayClients?: number }[]>([])
   const [tvRidersTodayTotal, setTvRidersTodayTotal] = useState(0)
@@ -472,7 +495,7 @@ export default function AdsManagerPage() {
   }, [campaignLinks])
 
   async function fetchCachedData(forceRefresh = false) {
-    setLoading(true)
+    // Initial loading starts true. Later refreshes keep the dashboard mounted.
     setLoadingCampaigns(true)
     setError(null)
     

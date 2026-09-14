@@ -26,10 +26,16 @@ const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80004, 80003, 80002, 80001, 80
 
 export class FbGraphError extends Error {
   code: number | undefined
+  subcode: number | undefined
+  fbtraceId: string | undefined
   isRateLimit: boolean
-  constructor(message: string, code?: number) {
+  constructor(message: string, code?: number, details: { subcode?: unknown; fbtraceId?: unknown } = {}) {
     super(message)
     this.code = code
+    this.subcode = typeof details.subcode === 'number' && Number.isSafeInteger(details.subcode) && details.subcode >= 0
+      ? details.subcode : undefined
+    this.fbtraceId = typeof details.fbtraceId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(details.fbtraceId)
+      ? details.fbtraceId : undefined
     this.isRateLimit = code !== undefined && RATE_LIMIT_CODES.has(code)
   }
 }
@@ -77,8 +83,9 @@ async function rawFetch(url: string, init?: RequestInit): Promise<{ res: Respons
 }
 
 function errorFrom(json: Record<string, unknown>): FbGraphError {
-  const err = (json?.error ?? {}) as { message?: string; code?: number }
-  return new FbGraphError(err.message || 'Facebook API error', err.code)
+  const err = (json?.error ?? {}) as { message?: string; code?: number; error_subcode?: unknown; fbtrace_id?: unknown }
+  return new FbGraphError(err.message || 'Facebook API error', err.code,
+    { subcode: err.error_subcode, fbtraceId: err.fbtrace_id })
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

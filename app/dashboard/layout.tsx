@@ -1,8 +1,7 @@
 import React from "react"
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { DashboardSidebar } from '@/components/dashboard/sidebar'
-import { DashboardHeader } from '@/components/dashboard/header'
+import { DashboardWorkspace } from '@/components/dashboard/dashboard-workspace'
 import { RoleSwitcherProvider } from '@/components/dashboard/role-switcher-context'
 import type { Profile } from '@/lib/types'
 
@@ -83,15 +82,9 @@ export default async function DashboardLayout({
   // For admin, manager, marketing_agent - use full desktop layout with sidebar
   return (
     <RoleSwitcherProvider actualRole={profile.role}>
-      <div className="flex h-screen overflow-hidden bg-background">
-        <DashboardSidebar profile={profile as Profile} />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <DashboardHeader profile={profile as Profile} />
-          <main className="flex-1 overflow-y-auto p-6">
-            {children}
-          </main>
-        </div>
-      </div>
+      <DashboardWorkspace profile={profile as Profile}>
+        {children}
+      </DashboardWorkspace>
     </RoleSwitcherProvider>
   )
 }

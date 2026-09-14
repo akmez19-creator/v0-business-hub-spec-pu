@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Sparkles, AlertTriangle, Check, MapPin, RefreshCw } from 'lucide-react'
+import { Loader2, Sparkles, AlertTriangle, Check, MapPin, RefreshCw, Link2 } from 'lucide-react'
 
 type Side = {
   id: string
@@ -28,8 +28,9 @@ type Pair = {
   b: Side
   winner: Side | null
   loser: Side | null
-  reason: 'identical' | 'typo'
+  reason: 'identical' | 'typo' | 'linked'
   undecided: 'both-zoned' | 'neither-zoned' | null
+  link?: { label: string; via: 'purchase order' | 'alias'; ownerId: string }
 }
 
 type Verdict = { sameProduct: boolean; confidence: number; reason: string } | null
@@ -64,6 +65,16 @@ export function DuplicatesDialog({
    * actually been transacting under. Ties fall back to the winner.
    */
   function defaultName(pair: Pair): string {
+    // A linked pair carries its own answer: the purchase order filed under one
+    // row is labelled with the OTHER row's exact name, so that is what the
+    // buyer calls the thing. Weighing records here picked "Machine Tablets"
+    // (2 orders + 3 photos) over "Washing Machine Cleaner" (0 + 0) even though
+    // both of those orders say "Washing machine cleaner" - caught only by the
+    // screenshot, the DOM check read the pair as fine.
+    if (pair.link) {
+      const other = pair.link.ownerId === pair.a.id ? pair.b : pair.a
+      return other.name
+    }
     const fallback = (pair.winner ?? pair.a).name
     const weight = (s: Side) => s.po_count + s.image_count
     if (weight(pair.a) === weight(pair.b)) return fallback
@@ -211,8 +222,9 @@ export function DuplicatesDialog({
         <DialogHeader>
           <DialogTitle>Possible duplicate products</DialogTitle>
           <DialogDescription>
-            Products whose names are near-identical, so the same item may have been counted under
-            one name and ordered under another. Nothing merges until you say so.
+            Products whose names are near-identical, or whose purchase orders carry another
+            product&apos;s exact name, so the same item may have been counted under one name and
+            ordered under another. Nothing merges until you say so.
           </DialogDescription>
         </DialogHeader>
 
@@ -280,6 +292,12 @@ export function DuplicatesDialog({
                       AI: {v.sameProduct ? 'same product' : 'different products'}
                     </Badge>
                   )}
+                  {pair.reason === 'linked' && (
+                    <Badge variant="outline" className="gap-1">
+                      <Link2 className="w-3 h-3" />
+                      Linked by paperwork
+                    </Badge>
+                  )}
                   {pair.undecided && (
                     <Badge variant="outline" className="gap-1">
                       <AlertTriangle className="w-3 h-3" />
@@ -287,6 +305,23 @@ export function DuplicatesDialog({
                     </Badge>
                   )}
                 </div>
+
+                {/* The two names look unrelated, so the reviewer needs to see
+                    the thread that ties them: which row's paperwork carries the
+                    other row's name. Without this line a 'linked' pair reads
+                    as a scanner mistake. */}
+                {pair.link && (() => {
+                  const owner = pair.link.ownerId === pair.a.id ? pair.a : pair.b
+                  const other = owner.id === pair.a.id ? pair.b : pair.a
+                  return (
+                    <p className="text-sm text-muted-foreground text-pretty">
+                      {pair.link.via === 'purchase order' ? 'A purchase order' : 'A learned alias'} filed under{' '}
+                      <span className="text-foreground">&ldquo;{owner.name}&rdquo;</span> is labelled{' '}
+                      <span className="text-foreground">&ldquo;{pair.link.label}&rdquo;</span>
+                      {' '}&mdash; the exact name of <span className="text-foreground">&ldquo;{other.name}&rdquo;</span>.
+                    </p>
+                  )
+                })()}
 
                 {v && <p className="text-sm text-muted-foreground">{v.reason}</p>}
 

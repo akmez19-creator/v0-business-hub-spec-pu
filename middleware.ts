@@ -25,11 +25,30 @@ function redirectToLogin(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // ---- Storefront: fully anonymous, checked BEFORE updateSession ----
+  // Customers browsing /shop never sign in, and updateSession() makes a
+  // getUser() network call on every request. Running it for the storefront
+  // would add that latency to every product page and every media request for
+  // no benefit, since nothing under /shop reads `user`. The media proxy and
+  // order endpoint under /api/shop/ are covered by the same skip.
+  // NOTE: this is a pass-through, NOT an auth decision - /shop has no private
+  // data. Anything needing a session must stay out of this branch.
+  if (pathname.startsWith('/shop') || pathname.startsWith('/api/shop/')) {
+    return NextResponse.next()
+  }
+
+  // These scheduled routes check CRON_SECRET in their own handlers. Vercel
+  // has no user session; do not make scheduled work depend on Supabase sign-in.
+  // Keep the match exact so other API routes retain their session gate.
+  if (pathname === '/api/cron/inbox-reconcile' || pathname === '/api/cron/whatsapp-green-reconcile' || pathname === '/api/cron/inbox-autopilot') {
+    return NextResponse.next()
+  }
+
   // ONE client, ONE getUser. This call is what refreshes the auth cookie, and
   // it is the only place allowed to write it.
   const { response, user } = await updateSession(request)
-
-  const { pathname } = request.nextUrl
 
   // Public routes that don't need auth
   const publicRoutes = ['/auth/login', '/auth/sign-up', '/auth/sign-up-success', '/auth/error', '/auth/callback']
@@ -44,6 +63,19 @@ export async function middleware(request: NextRequest) {
   // passage on those prefixes - it is still verified by the route itself.
   // Unauthenticated API calls get a 401 JSON response, never a redirect.
   if (pathname.startsWith('/api') && !user) {
+    // Genuinely public, kept separate from the Bearer-token list below so the
+    // distinction stays visible: the storefront is browsed by customers who
+    // never sign in, so these must answer anonymously.
+    //   /api/shop/media - read-only media proxy, locked to an allowlist of
+    //                     supplier CDNs (see the route).
+    //   /api/shop/order - accepts a new order. Server-side priced: it trusts
+    //                     only product ids + quantities from the browser and
+    //                     recomputes every amount from the database.
+    const publicApiPrefixes = ['/api/shop/']
+    if (publicApiPrefixes.some((p) => pathname.startsWith(p))) {
+      return response
+    }
+
     const tokenAuthPrefixes = [
       '/api/extension',
       '/api/clients/rating',
@@ -77,6 +109,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|\\.well-known/workflow/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

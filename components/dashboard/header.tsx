@@ -93,8 +93,10 @@ const navItems: NavItem[] = [
     icon: ShoppingCart,
     roles: ['admin', 'manager'],
     subItems: [
-      { href: '/dashboard/purchasing', label: 'Orders', icon: ShoppingCart },
-      { href: '/dashboard/purchasing/suppliers', label: 'Suppliers', icon: Building2 },
+      { href: '/dashboard/purchasing', label: 'Imports', icon: ShoppingCart },
+      { href: '/dashboard/purchasing/suppliers', label: 'Foreign Suppliers', icon: Building2 },
+      { href: '/dashboard/purchasing/reorders', label: 'Reorders', icon: ClipboardList },
+      { href: '/dashboard/purchasing/local', label: 'Local Purchases', icon: ClipboardList },
     ],
   },
   {
@@ -188,8 +190,12 @@ export function DashboardHeader({ profile }: { profile: Profile }) {
     // Check for specific pages first
     if (pathname.includes('/ads')) return 'Ads Manager'
     if (pathname.includes('/inventory')) return 'Products'
-    if (pathname.startsWith('/dashboard/purchasing/suppliers')) return 'Suppliers'
-    if (pathname.startsWith('/dashboard/purchasing')) return 'Purchase Orders'
+    if (pathname.startsWith('/dashboard/purchasing/suppliers')) return 'Foreign Suppliers'
+    if (pathname.startsWith('/dashboard/purchasing/local/orders')) return 'Local Supplier Orders'
+    if (pathname.startsWith('/dashboard/purchasing/local/history')) return 'Saved Local Purchases'
+    if (pathname.startsWith('/dashboard/purchasing/local')) return 'Local Purchases'
+    if (pathname.startsWith('/dashboard/purchasing/reorders')) return 'Reorders'
+    if (pathname.startsWith('/dashboard/purchasing')) return 'Imports'
     if (pathname.includes('/stock') && !pathname.includes('/contractors') && !pathname.includes('/riders')) return 'Stock In/Out'
     if (pathname.includes('/collections')) return 'Collections'
     if (pathname.includes('/payments')) return 'Payments'

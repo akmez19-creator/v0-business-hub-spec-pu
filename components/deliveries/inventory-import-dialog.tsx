@@ -77,14 +77,28 @@ interface ParsedProduct {
   category?: string
   quantity?: number
   price?: number
-  bundle_2?: number
-  bundle_3?: number
-  bundle_4?: number
-  bundle_6?: number
+  // Any pack size, as `bundle_5`, `bundle_10`, ... Previously only 2/3/4/6 were
+  // declared and mapped, so a "5-Pack" column in the sheet was silently
+  // ignored - including one produced by our own export.
+  [bundleField: `bundle_${number}`]: number | undefined
   is_b1g1?: boolean | string
   image_url?: string
   remarks?: string
   variant?: string  // Format: "AttributeName: AttributeValue" e.g., "Size: Large"
+}
+
+/**
+ * The `bundle_N` field for a bundle column header, or null when it is not one.
+ *
+ * Accepts the forms that appear in real sheets and in our own export:
+ * "5-Pack", "5 pack", "5pk", "5", "SPX5", "spx5".
+ */
+function bundleFieldFor(header: string): `bundle_${number}` | null {
+  const h = header.toLowerCase().trim()
+  const m = /^(?:spx\s*(\d+)|(\d+)\s*(?:-|\s)?\s*(?:pack|pk|pcs?)?)$/.exec(h)
+  const n = Number.parseInt(m?.[1] || m?.[2] || '', 10)
+  // 1 is the unit price, not a bundle, and would create a nonsense "1-pack".
+  return Number.isFinite(n) && n >= 2 ? (`bundle_${n}` as const) : null
 }
 
 export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps) {
@@ -132,7 +146,11 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
             
             // Map columns from your Excel format
             for (const [excelCol, value] of Object.entries(row)) {
-              const mappedField = COLUMN_MAPPING[excelCol] || COLUMN_MAPPING[excelCol.toLowerCase().trim()]
+              // Falls back to a pattern match so ANY pack size works, not just
+              // the handful spelled out in COLUMN_MAPPING.
+              const mappedField = COLUMN_MAPPING[excelCol]
+                || COLUMN_MAPPING[excelCol.toLowerCase().trim()]
+                || bundleFieldFor(excelCol)
               if (mappedField && value !== '' && value !== null && value !== undefined) {
                 const strValue = String(value).trim()
                 if (strValue) {
@@ -141,14 +159,18 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                     if (!isNaN(numVal)) {
                       product.quantity = numVal
                     }
-                  } else if (['price', 'price_spx2', 'price_spx3', 'price_b1g1'].includes(mappedField)) {
+                    // Bundle prices are money and MUST be parsed as numbers.
+                    // They previously fell through to the string branch below,
+                    // so an imported tier landed in JSONB as "375" rather than
+                    // 375, leaving arithmetic to string coercion.
+                  } else if (mappedField.startsWith('bundle_') || ['price', 'price_spx2', 'price_spx3', 'price_b1g1'].includes(mappedField)) {
                     // Remove currency symbols and parse
                     const numVal = parseFloat(strValue.replace(/[^0-9.-]/g, ''))
                     if (!isNaN(numVal)) {
-                      (product as Record<string, number>)[mappedField] = numVal
+                      (product as unknown as Record<string, number>)[mappedField] = numVal
                     }
                   } else {
-                    (product as Record<string, string>)[mappedField] = strValue
+                    (product as unknown as Record<string, string>)[mappedField] = strValue
                   }
                 }
               }
@@ -257,12 +279,15 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
           ? 0 // Will be tracked in variants
           : (firstProduct.quantity || 0)
 
-        // Build bundle prices object
+        // Build bundle prices object from EVERY bundle_N the sheet supplied,
+        // so a 5-Pack or 10-Pack column survives the import.
         const bundlePrices: Record<string, number> = {}
-        if (firstProduct.bundle_2) bundlePrices['2'] = firstProduct.bundle_2
-        if (firstProduct.bundle_3) bundlePrices['3'] = firstProduct.bundle_3
-        if (firstProduct.bundle_4) bundlePrices['4'] = firstProduct.bundle_4
-        if (firstProduct.bundle_6) bundlePrices['6'] = firstProduct.bundle_6
+        for (const [field, val] of Object.entries(firstProduct)) {
+          if (!field.startsWith('bundle_')) continue
+          const n = Number.parseInt(field.slice('bundle_'.length), 10)
+          const amount = Number(val)
+          if (n >= 2 && Number.isFinite(amount) && amount > 0) bundlePrices[String(n)] = amount
+        }
         
         // Check if B1G1 - can be boolean, "Yes", or truthy value
         const isB1g1 = firstProduct.is_b1g1 === true || 
@@ -453,12 +478,14 @@ export function InventoryImportDialog({ onSuccess }: InventoryImportDialogProps)
                         <td className="px-3 py-2 text-right">{product.quantity || '-'}</td>
                         <td className="px-3 py-2 text-right">{product.price ? `Rs ${product.price}` : '-'}</td>
                         <td className="px-3 py-2 text-right text-xs">
-                          {[
-                            product.bundle_2 && `2pk: Rs${product.bundle_2}`,
-                            product.bundle_3 && `3pk: Rs${product.bundle_3}`,
-                            product.bundle_4 && `4pk: Rs${product.bundle_4}`,
-                            product.bundle_6 && `6pk: Rs${product.bundle_6}`,
-                          ].filter(Boolean).join(', ') || '-'}
+                          {/* Every pack size found, smallest first - the preview
+                              must show what will actually be imported. */}
+                          {Object.entries(product)
+                            .filter(([f, v]) => f.startsWith('bundle_') && Number(v) > 0)
+                            .map(([f, v]) => [Number.parseInt(f.slice(7), 10), Number(v)] as const)
+                            .sort((a, b) => a[0] - b[0])
+                            .map(([n, v]) => `${n}pk: Rs${v}`)
+                            .join(', ') || '-'}
                         </td>
                         <td className="px-3 py-2 text-center">{product.is_b1g1 ? 'Yes' : '-'}</td>
                       </tr>

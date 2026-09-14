@@ -84,9 +84,15 @@ export type InboxMessage = {
  * message text - so the UI can render setup instructions instead of an error.
  */
 export class MessagingPermissionError extends Error {
-  constructor(message: string) {
+  code: number | undefined
+  subcode: number | undefined
+  fbtraceId: string | undefined
+  constructor(message: string, details?: FbGraphError) {
     super(message)
     this.name = 'MessagingPermissionError'
+    this.code = details?.code
+    this.subcode = details?.subcode
+    this.fbtraceId = details?.fbtraceId
   }
 }
 
@@ -119,10 +125,8 @@ export async function getInboxPage(pageId?: string): Promise<FbPage | null> {
   const pages = await getInboxPages()
   if (pages.length === 0) return null
   if (pageId) {
-    // An unknown id is a stale selection, not a reason to serve someone
-    // else's inbox, so fall through to the defaults rather than guessing.
-    const asked = pages.find((p) => p.id === pageId)
-    if (asked) return asked
+    // Never reply from another business when an explicit selection is stale.
+    return pages.find((p) => p.id === pageId) ?? null
   }
   const configured = process.env.FACEBOOK_INBOX_PAGE_ID
   return (
@@ -267,6 +271,7 @@ export type PageStat = {
   conversations: number
   /** Populated only when the Page failed, so the UI can say which and why. */
   error?: string
+  rateLimited?: boolean
 }
 
 /**
@@ -303,7 +308,8 @@ export async function listAllConversations(
       failures++
       const message = r.reason instanceof Error ? r.reason.message : String(r.reason)
       console.log('[v0] inbox: page failed', page.name, message)
-      pageStats.push({ id: page.id, name: page.name, unread: null, conversations: 0, error: message })
+      pageStats.push({ id: page.id, name: page.name, unread: null, conversations: 0, error: message,
+        rateLimited: r.reason instanceof FbGraphError && r.reason.isRateLimit })
     }
   })
 
@@ -323,7 +329,24 @@ type RawMessage = {
   attachments?: { data?: { mime_type?: string; image_data?: { url?: string }; file_url?: string }[] }
 }
 
-export async function listMessages(page: FbPage, conversationId: string, limit = 40): Promise<InboxMessage[]> {
+/** Resolve a webhook-only customer using the owning Page, not the recent-list cutoff. */
+export async function conversationForCustomer(page: FbPage, psid: string): Promise<string | null> {
+  const url = `${GRAPH}/${page.id}/conversations?${new URLSearchParams({
+    user_id: psid, fields: 'id,participants', limit: '10', access_token: page.access_token,
+  })}`
+  try {
+    const json = await fbGet<{ data?: { id: string; participants?: { data?: InboxParticipant[] } }[] }>(url,
+      { cacheTtl: 0, staleWhenLimited: false })
+    return json.data?.find((conversation) =>
+      conversation.participants?.data?.some((participant) => participant.id === psid))?.id ?? null
+  } catch (e) {
+    asPermissionError(e)
+  }
+}
+
+export async function listMessages(
+  page: FbPage, conversationId: string, limit = 40, options: { fresh?: boolean } = {},
+): Promise<InboxMessage[]> {
   const url =
     `${GRAPH}/${conversationId}` +
     `?fields=messages.limit(${limit}){id,message,created_time,from,attachments}` +
@@ -331,7 +354,8 @@ export async function listMessages(page: FbPage, conversationId: string, limit =
 
   let json: { messages?: { data?: RawMessage[] } }
   try {
-    json = await fbGet<{ messages?: { data?: RawMessage[] } }>(url, { cacheTtl: THREAD_TTL_MS })
+    json = await fbGet<{ messages?: { data?: RawMessage[] } }>(url,
+      { cacheTtl: options.fresh ? 0 : THREAD_TTL_MS, staleWhenLimited: !options.fresh })
   } catch (e) {
     asPermissionError(e)
   }
@@ -356,11 +380,9 @@ export async function listMessages(page: FbPage, conversationId: string, limit =
 /**
  * Reply to a customer.
  *
- * Facebook only allows a free-form reply within 24h of the customer's last
- * message. Past that, an untagged send is rejected outright, so we retry once
- * with HUMAN_AGENT (the tag that exists precisely for a person answering
- * later). If that is also rejected the account lacks the tag, and the caller
- * gets the real reason rather than a silent failure.
+ * Send once using the standard RESPONSE path. A generic permission error is
+ * not evidence of HUMAN_AGENT approval or eligibility. Never escalate tags or
+ * retry a send automatically; a lost response can leave delivery uncertain.
  */
 export async function sendReply(
   page: FbPage,
@@ -369,33 +391,55 @@ export async function sendReply(
 ): Promise<{ ok: true; usedHumanAgentTag: boolean; messageId: string | null }> {
   const url = `${GRAPH}/${page.id}/messages?access_token=${encodeURIComponent(page.access_token)}`
 
-  const send = async (tag?: string) => {
-    const body = new URLSearchParams({
-      recipient: JSON.stringify({ id: recipientId }),
-      message: JSON.stringify({ text }),
-      messaging_type: tag ? 'MESSAGE_TAG' : 'RESPONSE',
-      ...(tag ? { tag } : {}),
-    })
-    // Writes are never cached and already retry on throttling.
-    return fbWrite(url, { body })
-  }
+  const body = new URLSearchParams({
+    recipient: JSON.stringify({ id: recipientId }),
+    message: JSON.stringify({ text }),
+    messaging_type: 'RESPONSE',
+  })
 
   // Meta returns the message_id it assigned. Surfacing it lets the caller cache
   // the sent reply under Meta's OWN id, so when the echo of this same message
   // arrives moments later it collides on the primary key and is ignored rather
   // than showing the reply twice.
-  const idOf = (r: unknown) => (r as { message_id?: string } | undefined)?.message_id ?? null
+  const idOf = (r: unknown) => {
+    const id = (r as { message_id?: unknown } | undefined)?.message_id
+    return typeof id === 'string' && id.trim() && id.length <= 1024 ? id : null
+  }
 
   try {
-    const res = await send()
-    return { ok: true, usedHumanAgentTag: false, messageId: idOf(res) }
+    const res = await fbWrite(url, { body, retries: 0 })
+    const messageId = idOf(res)
+    if (!messageId) throw new Error('Unconfirmed Messenger response')
+    return { ok: true, usedHumanAgentTag: false, messageId }
   } catch (e) {
-    const err = e as FbGraphError
-    // 10 = outside allowed window / policy violation for untagged sends
-    if (err?.code === 10 || /outside.*window|24.*hour|message tag/i.test(err?.message ?? '')) {
-      const res = await send('HUMAN_AGENT')
-      return { ok: true, usedHumanAgentTag: true, messageId: idOf(res) }
+    // Do not expose arbitrary error strings: transport errors can contain the
+    // token-bearing URL, and provider descriptions can echo submitted content.
+    if (!(e instanceof FbGraphError)) {
+      throw new Error('The Messenger send response could not be confirmed. Check the conversation before sending again.')
     }
-    asPermissionError(e)
+    const code = typeof e.code === 'number' && Number.isSafeInteger(e.code) && e.code >= 0 ? e.code : undefined
+    const trace = e.fbtraceId && ![page.access_token, encodeURIComponent(page.access_token), text]
+      .filter(Boolean).some((secret) => e.fbtraceId!.includes(secret)) ? e.fbtraceId : undefined
+    const diagnostics = [code === undefined ? null : `code ${code}`,
+      e.subcode === undefined ? null : `subcode ${e.subcode}`, trace ? `trace ${trace}` : null].filter(Boolean)
+    const providerMessage = typeof e.message === 'string' ? e.message : ''
+    const missingPermission = code === 200 || /pages_messaging|appropriate role/i.test(providerMessage)
+    const description = code === undefined
+      ? 'The Messenger send response could not be confirmed. Check the conversation before sending again.'
+      : missingPermission
+      ? 'Meta rejected the Messenger permission or Page role. Check the connection before sending again.'
+      : /outside.*window|24.*hour/i.test(providerMessage)
+        ? 'Meta rejected this reply outside the permitted messaging window. No message tag was added.'
+        : /HUMAN_AGENT.*approv|approv.*HUMAN_AGENT/i.test(providerMessage)
+          ? 'Meta reported that HUMAN_AGENT approval is missing. No alternative tag was attempted.'
+          : code === 190
+            ? 'Meta rejected the Messenger connection credentials. Reconnect the authorised account before sending again.'
+            : e.isRateLimit
+              ? 'Meta temporarily limited Messenger requests. No automatic retry was made.'
+              : 'Meta rejected this Messenger reply. Check the original error details before sending again.'
+    const safeError = new FbGraphError(description + (diagnostics.length ? ` (Meta ${diagnostics.join('; ')}.)` : ''), code,
+      { subcode: e.subcode, fbtraceId: trace })
+    if (missingPermission) throw new MessagingPermissionError(safeError.message, safeError)
+    throw safeError
   }
 }

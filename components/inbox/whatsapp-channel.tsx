@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import useSWR from 'swr'
+import { useEffect, useRef, useState } from 'react'
+import useSWR, { useSWRConfig } from 'swr'
 import { formatDistanceToNow } from 'date-fns'
 import { Clock, ExternalLink, History, Megaphone, Phone, RefreshCw, Search, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -16,10 +16,18 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/components/ui/use-toast'
 import { ChannelUnavailable } from './channel-unavailable'
+import { whatsappAcceptedWarning } from './inbox-behavior'
+import { whatsappConversationKey, whatsappIdentity, whatsappReplyUnavailable, whatsappTranscriptKey } from '@/lib/inbox/whatsapp-identity'
 
 type Contact = {
   waId: string
+  phoneNumberId?: string | null
+  businessName?: string | null
+  pageId?: string | null
+  canSend?: boolean
+  unreadStateKnown?: boolean
   profileName: string | null
   displayPhone: string | null
   lastMessageAt: string | null
@@ -140,7 +148,51 @@ type SyncResponse = {
   error?: string
 }
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+/** Reject failures so SWR retains saved data, with a bound on a stalled read. */
+async function fetcher(url: string) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 45_000)
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+    const body = await response.json().catch(() => null)
+    if (!response.ok || !body || body.success === false) {
+      throw new Error(body?.error || (response.status === 401
+        ? 'Please sign in again to load WhatsApp.'
+        : 'WhatsApp could not load. Please try again.'))
+    }
+    return body
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('WhatsApp took too long to respond. Please try again.')
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function mergeWhatsAppData(meta?: ListResponse, list?: ListResponse): ListResponse | undefined {
+  if (!meta && !list) return undefined
+  return {
+    success: Boolean((list ?? meta)?.success),
+    contacts: list?.contacts ?? meta?.contacts,
+    capability: meta?.capability ?? null,
+    numbers: meta?.numbers,
+    canSend: meta?.canSend,
+    hasVerifyToken: meta?.hasVerifyToken ?? list?.hasVerifyToken,
+    signatureVerified: meta?.signatureVerified ?? list?.signatureVerified,
+    webhookPath: meta?.webhookPath ?? list?.webhookPath,
+    error: list?.error ?? meta?.error,
+  }
+}
+
+function whatsappMessageBody(message: WaMessage): string | null {
+  // A legacy status placeholder is not evidence of the sending app.
+  return message.type === 'external' && message.body === 'Replied from another app' ? null : message.body
+}
+
+type WhatsAppDraft = { text: string; version: number }
+function completeWhatsAppDraft(draft: WhatsAppDraft, submittedVersion: number): WhatsAppDraft {
+  return draft.version === submittedVersion ? { text: '', version: draft.version + 1 } : draft
+}
 
 const relative = (iso: string | null) => {
   if (!iso) return ''
@@ -151,10 +203,12 @@ const relative = (iso: string | null) => {
 export function WhatsAppChannel({
   origin,
   initialWaId = null,
+  initialPhoneNumberId = null,
 }: {
   origin: string
   /** Thread to open on mount, set when arriving from the unified inbox. */
   initialWaId?: string | null
+  initialPhoneNumberId?: string | null
 }) {
   const [selected, setSelected] = useState<Contact | null>(null)
   const [query, setQuery] = useState('')
@@ -164,11 +218,20 @@ export function WhatsAppChannel({
    * can be reviewed on its own.
    */
   const [adFilter, setAdFilter] = useState<'all' | 'ads' | string>('all')
-  const [draft, setDraft] = useState('')
+  const [drafts, setDrafts] = useState<Record<string, WhatsAppDraft>>({})
+  const selectedKey = selected ? whatsappConversationKey(selected) : null
+  const draftState = selectedKey ? drafts[selectedKey] : undefined
+  const draft = draftState?.text ?? ''
+  const selectedId = useRef<string | null>(null)
+  selectedId.current = selectedKey
+  const replyUnavailable = selected ? whatsappReplyUnavailable(selected) : null
+  const sendingRef = useRef(false)
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<SyncResponse | null>(null)
+  const { mutate: mutateCache } = useSWRConfig()
+  const { toast } = useToast()
 
   // Two requests against one route, deliberately.
   //
@@ -178,13 +241,15 @@ export function WhatsAppChannel({
   // API calls a day against the app's rate limit. So capability is fetched
   // once per page load and never refreshed on a timer, while the contact
   // list - which is pure Postgres and free - keeps polling.
-  const { data: meta } = useSWR<ListResponse>('/api/inbox/whatsapp?meta=1', fetcher, {
+  const { data: meta, error: metaError, mutate: mutateMeta, isValidating: checkingMeta } = useSWR<ListResponse>('/api/inbox/whatsapp?meta=1', fetcher, {
     revalidateOnFocus: false,
+    revalidateOnReconnect: false,
     revalidateIfStale: false,
+    shouldRetryOnError: false,
     refreshInterval: 0,
   })
 
-  const { data: list, isLoading, mutate, isValidating } = useSWR<ListResponse>('/api/inbox/whatsapp', fetcher, {
+  const { data: list, error: listError, isLoading, mutate, isValidating } = useSWR<ListResponse>('/api/inbox/whatsapp', fetcher, {
     refreshInterval: 30_000,
     revalidateOnFocus: true,
     keepPreviousData: true,
@@ -193,34 +258,47 @@ export function WhatsAppChannel({
   // Capability fields come from the meta request only, contacts from the
   // polling one. Spreading `list` over `meta` wholesale would overwrite
   // capability with the undefined keys the contacts response omits.
-  const data: ListResponse | undefined =
-    meta || list
-      ? {
-          success: true,
-          ...(list ?? {}),
-          capability: meta?.capability ?? null,
-          numbers: meta?.numbers,
-          canSend: meta?.canSend,
-        }
-      : undefined
+  const data = mergeWhatsAppData(meta, list)
 
-  // Open the thread the unified inbox asked for, once contacts have loaded.
-  // Guarded on `selected` so it never fights a manual click afterwards.
+  // Refresh metadata only for the same sender/customer pair. A legacy customer-only
+  // deep link cannot choose a business number on the agent's behalf.
   useEffect(() => {
-    if (!initialWaId || selected) return
-    const match = (list?.contacts ?? []).find((c) => c.waId === initialWaId)
+    if (selected) {
+      const match = list?.contacts?.find((contact) => whatsappConversationKey(contact) === whatsappConversationKey(selected))
+      if (match && match !== selected) setSelected(match)
+      return
+    }
+    if (!initialWaId || !initialPhoneNumberId) return
+    const match = (list?.contacts ?? []).find((c) => c.waId === initialWaId && c.phoneNumberId === initialPhoneNumberId)
     if (match) setSelected(match)
-  }, [initialWaId, list, selected])
+  }, [initialWaId, initialPhoneNumberId, list, selected])
 
-  const { data: thread, mutate: mutateThread } = useSWR<{ success: boolean; messages?: WaMessage[] }>(
-    selected ? `/api/inbox/whatsapp?waId=${encodeURIComponent(selected.waId)}` : null,
+  const { data: thread, error: threadError, isLoading: threadLoading, mutate: mutateThread } = useSWR<{ success: boolean; messages?: WaMessage[] }>(
+    selected ? whatsappTranscriptKey(selected) : null,
     fetcher,
-    { refreshInterval: 20_000 },
+    { refreshInterval: 20_000, keepPreviousData: false },
   )
+
+  const retryLoad = () => Promise.allSettled([mutateMeta(), mutate()])
+  const loadError = metaError || listError
+  // Show a failed first load before the loading guard; cached data stays usable.
+  if ((!meta || !data?.contacts) && loadError) {
+    return (
+      <div className="flex flex-1 items-start p-6">
+        <div role="alert" className="w-full rounded-lg border border-destructive/40 bg-destructive/5 p-6">
+          <p className="font-medium">Could not load WhatsApp setup</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{loadError instanceof Error ? loadError.message : 'Please try again.'}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={retryLoad} disabled={checkingMeta || isValidating}>
+            {checkingMeta || isValidating ? 'Retrying...' : 'Try again'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   // Wait for capability as well as contacts: judging "scope missing" before
   // the meta request lands would flash the unavailable screen on every load.
-  if (isLoading || !meta) {
+  if ((!data?.contacts && isLoading) || !meta) {
     return (
       <div className="flex flex-1 flex-col gap-3 p-6">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -244,16 +322,20 @@ export function WhatsAppChannel({
         description={
           scopeMissing
             ? data?.capability?.reason
-            : `The token can reach ${usableNumbers.length} Cloud API number${usableNumbers.length === 1 ? '' : 's'}, but no webhook is receiving messages yet, so nothing can arrive.`
+            : 'The webhook verify token is not configured in this project. Review the existing Meta connection before changing its setup.'
         }
         missing={data?.capability?.missing ?? []}
         steps={[
           'Set WHATSAPP_VERIFY_TOKEN in the project settings to any random string you choose.',
-          `In the Meta app dashboard open WhatsApp > Configuration, set the callback URL to ${origin}/api/webhooks/whatsapp and paste the same verify token.`,
+          `In the Meta app dashboard open WhatsApp > Configuration, set the callback URL to ${origin}${data?.webhookPath ?? '/api/webhooks/whatsapp'} and paste the same verify token.`,
           'Subscribe to the "messages" webhook field, then click Verify and save.',
           'Repeat the subscription for each WhatsApp Business Account you want in this inbox — they are configured per account, not per app.',
         ]}
       >
+        {loadError ? <p role="alert" className="text-sm text-amber-500">Setup could not refresh. Showing the last saved connection details.</p> : null}
+        <Button variant="outline" size="sm" onClick={retryLoad} disabled={checkingMeta || isValidating}>
+          {checkingMeta || isValidating ? 'Checking...' : 'Check connection again'}
+        </Button>
         {usableNumbers.length > 0 ? (
           <div className="rounded-lg border border-border bg-muted/40 p-4">
             <p className="text-sm font-medium">
@@ -314,7 +396,7 @@ export function WhatsAppChannel({
         <div className="w-full rounded-lg border border-destructive/40 bg-destructive/5 p-6">
           <p className="font-medium">Could not load WhatsApp</p>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{data?.error ?? 'Unknown error'}</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => mutate()}>
+          <Button variant="outline" size="sm" className="mt-4" onClick={retryLoad}>
             Try again
           </Button>
         </div>
@@ -349,6 +431,8 @@ export function WhatsAppChannel({
     return (
       (c.profileName ?? '').toLowerCase().includes(q) ||
       c.waId.includes(q) ||
+      (c.displayPhone ?? '').includes(q) ||
+      (c.businessName ?? '').toLowerCase().includes(q) ||
       (c.lastSnippet ?? '').toLowerCase().includes(q) ||
       (c.firstAdName ?? '').toLowerCase().includes(q) ||
       (c.firstAdId ?? '').includes(q)
@@ -375,22 +459,39 @@ export function WhatsAppChannel({
   }
 
   const send = async () => {
-    if (!selected || !draft.trim()) return
+    if (!selected || !draft.trim() || sendingRef.current) return
+    const unavailable = whatsappReplyUnavailable(selected)
+    if (unavailable) { setSendError(unavailable); return }
+    const identity = whatsappIdentity(selected)!
+    const recipient = whatsappConversationKey(identity)
+    const replyUrl = whatsappTranscriptKey(identity)!
+    const submittedDraft = draft
+    const submittedVersion = draftState?.version ?? 0
+    sendingRef.current = true
     setSending(true)
     setSendError(null)
     try {
       const res = await fetch('/api/inbox/whatsapp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waId: selected.waId, message: draft.trim() }),
+        body: JSON.stringify({ ...identity, message: submittedDraft.trim() }),
       })
-      const json = (await res.json()) as { success: boolean; error?: string }
+      const json = (await res.json()) as { success: boolean; error?: string; savedLocally?: boolean; warning?: string }
       if (!json.success) throw new Error(json.error ?? 'Send failed')
-      setDraft('')
-      await Promise.all([mutateThread(), mutate()])
+      setDrafts((current) => current[recipient]
+        ? { ...current, [recipient]: completeWhatsAppDraft(current[recipient], submittedVersion) }
+        : current)
+      const warning = whatsappAcceptedWarning(json)
+      if (warning) toast({ title: 'Sent to WhatsApp', description: warning })
+      // A cache refresh failure cannot turn an accepted send into a resend prompt.
+      await Promise.allSettled([
+        ...(selectedId.current === recipient ? [mutateCache(replyUrl)] : []),
+        mutate(),
+      ])
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : 'Send failed')
+      if (selectedId.current === recipient) setSendError(e instanceof Error ? e.message : 'Send failed')
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
   }
@@ -419,6 +520,12 @@ export function WhatsAppChannel({
               </Button>
             </div>
           </div>
+          {loadError ? (
+            <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+              <p>WhatsApp could not refresh. Showing saved conversations and connection details.</p>
+              <Button variant="ghost" size="sm" className="mt-2 h-7 px-2" onClick={metaError ? retryLoad : () => mutate()} disabled={checkingMeta || isValidating}>Try again</Button>
+            </div>
+          ) : null}
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -503,9 +610,10 @@ export function WhatsAppChannel({
           ) : (
             <ul className="flex flex-col">
               {contacts.map((c) => {
-                const active = selected?.waId === c.waId
+                const key = whatsappConversationKey(c)
+                const active = selectedKey === key
                 return (
-                  <li key={c.waId}>
+                  <li key={key}>
                     <button
                       type="button"
                       onClick={() => {
@@ -522,8 +630,9 @@ export function WhatsAppChannel({
                         <span className="shrink-0 text-xs text-muted-foreground">{relative(c.lastMessageAt)}</span>
                       </div>
                       <span className="truncate text-sm text-muted-foreground">{c.lastSnippet ?? 'No preview'}</span>
+                      <span className="truncate text-xs text-muted-foreground">{[c.businessName, c.displayPhone].filter(Boolean).join(' · ') || (c.phoneNumberId ? 'Business number ' + c.phoneNumberId : 'Business number unconfirmed')}</span>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {c.unreadCount > 0 ? (
+                        {c.unreadStateKnown !== true ? <span className="text-xs text-muted-foreground">Unread status unconfirmed</span> : c.unreadCount > 0 ? (
                           <Badge variant="default" className="h-5 tabular-nums">
                             {c.unreadCount}
                           </Badge>
@@ -559,6 +668,7 @@ export function WhatsAppChannel({
               <div className="flex min-w-0 flex-col gap-1">
                 <h3 className="truncate font-semibold">{selected.profileName ?? `+${selected.waId}`}</h3>
                 <p className="text-xs tabular-nums text-muted-foreground">+{selected.waId}</p>
+                <p className="text-xs text-muted-foreground">{[selected.businessName, selected.displayPhone].filter(Boolean).join(' · ') || (selected.phoneNumberId ? 'Business number ' + selected.phoneNumberId : 'Business number unconfirmed')}</p>
                 {/* The agent's most useful context: what this person clicked
                     before writing. Without it every lead reads identically. */}
                 {selected.firstAdId ? (
@@ -614,17 +724,18 @@ export function WhatsAppChannel({
                     </div>
                   </div>
                 ) : null}
-                {/* Meta only delivers INBOUND messages to us: replies an agent
-                    sent from Business Suite, respond.io or the phone app are
-                    never mirrored back. A thread of purely inbound messages
-                    therefore looks unanswered even when it was handled, so say
-                    so - otherwise someone replies to the same customer twice. */}
+                {/* Saved history does not establish what happened in another tool. */}
                 {messages.length > 0 && messages.every((m) => m.direction === 'in') ? (
                   <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-pretty text-muted-foreground">
-                    Only messages from the customer are shown. Replies sent from Business Suite, respond.io or the
-                    WhatsApp Business app aren&apos;t visible here, so this conversation may already have been answered.
-                    Reply below to keep the full thread in this inbox.
+                    The saved history currently contains customer messages only. Replies or older content may be missing;
+                    check the conversation before replying again.
                   </p>
+                ) : null}
+                {threadError ? (
+                  <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+                    <p>This conversation could not refresh. Any saved messages remain visible.</p>
+                    <Button variant="ghost" size="sm" className="mt-2 h-7 px-2" onClick={() => mutateThread()}>Try again</Button>
+                  </div>
                 ) : null}
                 {messages.map((m) => (
                   <div key={m.id} className={`flex ${m.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
@@ -638,14 +749,10 @@ export function WhatsAppChannel({
                       {m.mediaId ? <WaMedia message={m} /> : null}
                       {/* Media often arrives with no caption, so an empty
                           paragraph would add a blank line under the player. */}
-                      {m.body ? (
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-pretty">{m.body}</p>
-                      ) : m.mediaId ? null : m.type === 'external' ? (
-                        /* Reply sent from Business Suite / respond.io / the
-                           phone. Meta's status webhook proves it happened but
-                           carries no content, so say that rather than render
-                           an empty bubble that reads as a bug. */
-                        <p className="text-sm italic opacity-70">Replied from another app</p>
+                      {whatsappMessageBody(m) ? (
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-pretty">{whatsappMessageBody(m)}</p>
+                      ) : m.mediaId ? null : m.type === 'external' || m.type === 'text' ? (
+                        <p className="text-sm italic opacity-70">Message content unavailable</p>
                       ) : (
                         <p className="text-sm italic opacity-70">{m.type} message</p>
                       )}
@@ -656,13 +763,14 @@ export function WhatsAppChannel({
                     </div>
                   </div>
                 ))}
-                {messages.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">No messages in this conversation</p>
+                {messages.length === 0 && !threadError ? (
+                  <p role="status" className="p-6 text-center text-sm text-muted-foreground">{threadLoading ? 'Loading conversation...' : 'No messages saved for this conversation'}</p>
                 ) : null}
               </div>
             </div>
 
             <div className="flex flex-col gap-2 border-t border-border p-4">
+              {replyUnavailable ? <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">{replyUnavailable}</p> : null}
               {sendError ? <p className="text-sm text-destructive">{sendError}</p> : null}
               {selected.outsideWindow ? (
                 <p className="text-xs leading-relaxed text-amber-500">
@@ -673,18 +781,22 @@ export function WhatsAppChannel({
               <div className="flex items-end gap-2">
                 <Textarea
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    const text = e.target.value
+                    const recipient = whatsappConversationKey(selected)
+                    setDrafts((current) => ({ ...current, [recipient]: { text, version: (current[recipient]?.version ?? 0) + 1 } }))
+                  }}
                   onKeyDown={(e) => {
                     if (e.key !== 'Enter' || e.shiftKey) return
                     if (e.nativeEvent.isComposing || e.keyCode === 229) return
                     e.preventDefault()
-                    send()
+                    if (!replyUnavailable) send()
                   }}
                   placeholder="Type a WhatsApp message..."
                   className="min-h-[44px] resize-none"
                   aria-label="WhatsApp reply"
                 />
-                <Button onClick={send} disabled={!draft.trim() || sending} aria-label="Send WhatsApp message">
+                <Button onClick={send} disabled={!draft.trim() || sending || Boolean(replyUnavailable)} aria-label="Send WhatsApp message">
                   <Send className="h-4 w-4" aria-hidden="true" />
                 </Button>
               </div>

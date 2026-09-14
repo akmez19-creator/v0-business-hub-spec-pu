@@ -7,7 +7,7 @@
  * that text back into cart lines - and be honest when we cannot.
  */
 
-import { setSize, type QuickOrderProduct, type QuickOrderVariant } from '@/lib/orders/quick-order'
+import { setTextFor, type QuickOrderProduct, type QuickOrderVariant } from '@/lib/orders/quick-order'
 
 export type OrderLine = {
   /** Catalogue product. Null when the text could not be matched. */
@@ -46,8 +46,10 @@ export function formatOrderLines(lines: OrderLine[]): string {
       if (l.variant) {
         name += ` - ${l.variant.attribute_value}`
       } else if (l.product) {
-        const set = setSize(l.product)
-        if (set > 0) name += ` - Set of ${set}`
+        // qty is passed so a 10-pack reads "Set of 10" instead of the smallest
+        // tier - see setsUsedFor. Single-tier products are unaffected.
+        const label = setTextFor(l.product, l.qty)
+        if (label) name += ` - ${label}`
       }
       // A variant with its own price override drops the parent's offers, so the
       // flag has to follow the priced product, not the parent.
@@ -91,7 +93,19 @@ export function stripOfferSuffix(name: string): string {
  */
 export function stripSetSuffix(name: string): string {
   const out = String(name || '')
-    .replace(/\s*[-–]\s*Set\s+of\s+\d+\s*/i, ' ')
+    // Every form setsLabel() can emit, in ONE pass:
+    //   " - Set of 4"           single pack
+    //   " - 2 x Set of 10"      same pack more than once
+    //   " - Set of 10 & 5"      mixed packs
+    // The separator is "&" and NEVER "+", because splitParts() treats "+" as a
+    // PRODUCT separator - "... - Set of 10 + Set of 5" would be torn into two
+    // lines, the second a phantom "Set of 5" matching no product. The leading
+    // count is written "2 x Set of 10" rather than trailing, since a trailing
+    // "xN" is how the wire format encodes QUANTITY.
+    .replace(
+      /\s*[-–]\s*(?:\d+\s*[x×]\s*)?Set\s+of\s+\d+(?:\s*&\s*(?:\d+\s*[x×]\s*)?\d+)*\s*/i,
+      ' ',
+    )
     .replace(/\s{2,}/g, ' ')
     .trim()
   return out || String(name || '').trim()

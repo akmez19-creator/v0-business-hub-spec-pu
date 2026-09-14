@@ -20,11 +20,18 @@ export function ProductThumb({
   alt = '',
   className,
   iconClassName,
+  fallback,
 }: {
   src: string | null | undefined
   alt?: string
   className?: string
   iconClassName?: string
+  /**
+   * What to show when there is no photo, or it fails to load. Dense lists pass
+   * a first-letter chip here because at 20px an icon reads as an error state,
+   * while a letter still identifies the row. Defaults to the muted icon.
+   */
+  fallback?: React.ReactNode
 }) {
   // Remember WHICH url failed, not merely that one did: rows get recycled as
   // the table re-sorts or paginates, and a plain boolean would leave a later
@@ -33,6 +40,7 @@ export function ProductThumb({
   const resolved = mediaSrc(src)
 
   if (!resolved || failedSrc === resolved) {
+    if (fallback !== undefined) return <>{fallback}</>
     return (
       <div
         className={cn(

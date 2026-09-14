@@ -47,6 +47,13 @@ interface SubNavItem {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
+  /**
+   * Optional per-sub-item gate. Sub-items otherwise inherit the parent's roles,
+   * which is too coarse for Overview: its parent is open to riders and
+   * contractors, but they never type orders so Entry Activity would be an empty
+   * screen for them.
+   */
+  roles?: UserRole[]
 }
 
 interface NavItem {
@@ -65,6 +72,21 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
     roles: ['admin', 'manager', 'marketing_agent', 'contractor', 'rider'],
     color: '#f97316',
+    /*
+     * A parent WITH sub-items renders as an expand button instead of a link, so
+     * it stops navigating. "Dashboard" is therefore listed as the first
+     * sub-item - the same pattern Deliveries already uses - or clicking
+     * Overview would no longer reach /dashboard at all.
+     */
+    subItems: [
+      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      {
+        href: '/dashboard/activity',
+        label: 'Entry Activity',
+        icon: CalendarClock,
+        roles: ['admin', 'manager', 'marketing_agent'],
+      },
+    ],
   },
   {
     href: '/dashboard/inbox',
@@ -125,8 +147,13 @@ const navItems: NavItem[] = [
     roles: ['admin', 'manager'],
     color: '#14b8a6',
     subItems: [
-      { href: '/dashboard/purchasing', label: 'Orders', icon: ShoppingCart },
-      { href: '/dashboard/purchasing/suppliers', label: 'Suppliers', icon: Building2 },
+      { href: '/dashboard/purchasing', label: 'Imports', icon: ShoppingCart },
+      // China suppliers belong with Imports: they are who the imports come from.
+      { href: '/dashboard/purchasing/suppliers', label: 'Foreign Suppliers', icon: Building2 },
+      { href: '/dashboard/purchasing/reorders', label: 'Reorders', icon: ClipboardList },
+      // Local (Mauritius) buying sits under Purchasing rather than in its own
+      // section: it is the same decision as importing, seen from the other side.
+      { href: '/dashboard/purchasing/local', label: 'Local Purchases', icon: FileText },
     ],
   },
   {
@@ -295,6 +322,8 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
   
   // Auto-expand menu based on current path
   const getDefaultExpanded = () => {
+    // Overview's own sub-page, matched before the broader prefixes below.
+    if (pathname === '/dashboard/activity') return '/dashboard'
     if (pathname.startsWith('/dashboard/marketing-back-office')) return '/dashboard/marketing-back-office'
     if (pathname.startsWith('/dashboard/marketing-front-office')) return '/dashboard/marketing-front-office'
     // Purchasing owns its own route tree, so it matches before the
@@ -371,10 +400,20 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
                 isActive = true
               } else if (item.href !== '/dashboard' && item.label !== 'Deliveries' && item.label !== 'Finance' && item.label !== 'Inventory') {
                 isActive = pathname === item.href || pathname.startsWith(item.href)
-              } else if (item.href === '/dashboard' && pathname === '/dashboard') {
+              } else if (item.href === '/dashboard' && (pathname === '/dashboard' || pathname === '/dashboard/activity')) {
+                // Overview owns /dashboard/activity too. Without this the
+                // sidebar highlights nothing while sitting on that page.
                 isActive = true
               }
-              const hasSubItems = item.subItems && item.subItems.length > 0
+              /*
+               * Role-filter FIRST, then decide whether this is a menu. A rider
+               * sees only "Dashboard" under Overview, and turning the parent
+               * into an expand button to reveal a single link that goes where
+               * the parent already went is pure friction - so with one visible
+               * child it stays a plain link.
+               */
+              const visibleSubItems = item.subItems?.filter((s) => !s.roles || s.roles.includes(effectiveRole)) ?? []
+              const hasSubItems = visibleSubItems.length > 1
               const isExpanded = expandedItem === item.href
               const isHovered = hoveredIndex === index
               
@@ -495,7 +534,7 @@ export function DashboardSidebar({ profile }: { profile: Profile }) {
                   {/* Sub-items dropdown */}
                   {hasSubItems && isExpanded && (
                     <div className="mt-1 ml-4 pl-4 border-l border-white/10 space-y-1 opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-300">
-                      {item.subItems?.map((subItem) => {
+                      {visibleSubItems.map((subItem) => {
                         const isSubActive = pathname === subItem.href
                         return (
                           <Link

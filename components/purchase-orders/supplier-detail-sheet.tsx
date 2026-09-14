@@ -9,6 +9,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, Plus, X, MessageSquare } from 'lucide-react'
 import type { SupplierSummary, SupplierThread } from './po-suppliers-content'
+import { SupplierQualityPanel } from './supplier-quality-panel'
+import { loadSupplierQualityAction, saveSupplierQualityAction } from '@/app/dashboard/purchasing/suppliers/actions'
 
 type Message = { id: string; from: 'me' | 'them'; body: string }
 
@@ -20,10 +22,12 @@ export function SupplierDetailSheet({
   supplier,
   allProducts,
   onClose,
+  initialTab = 'quality',
 }: {
   supplier: SupplierSummary | null
   allProducts: { id: string; name: string }[]
   onClose: () => void
+  initialTab?: 'quality' | 'chat'
 }) {
   const router = useRouter()
   const [thread, setThread] = useState<SupplierThread | null>(null)
@@ -138,11 +142,17 @@ export function SupplierDetailSheet({
               </SheetDescription>
             </SheetHeader>
 
-            <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Tabs key={`${supplier.name}-${initialTab}`} defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <TabsList className="mx-6 w-fit shrink-0">
+                <TabsTrigger value="quality">Quality & notes</TabsTrigger>
                 <TabsTrigger value="chat">Conversation</TabsTrigger>
                 <TabsTrigger value="products">Products</TabsTrigger>
               </TabsList>
+
+              <TabsContent value="quality" className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 mt-4">
+                <SupplierQualityPanel key={supplier.name} name={supplier.name} initialQuality={supplier.quality ?? null}
+                  products={allProducts} imports={supplier.imports ?? []} loadPage={loadSupplierQualityAction} saveNote={saveSupplierQualityAction} />
+              </TabsContent>
 
               <TabsContent value="chat" className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 mt-4">
                 {supplier.threads.length > 1 && (

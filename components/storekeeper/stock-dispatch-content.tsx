@@ -12,6 +12,7 @@ import { Package, CheckCircle2, CalendarIcon, Loader2, X, Check, Users, ArrowRig
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { guardedUpdate, sessionIsAlive, type WriteOutcome } from '@/lib/guarded-write'
+import { mediaSrc } from '@/lib/media-url'
 
 interface Delivery {
   id: string
@@ -731,7 +732,10 @@ export function StockDispatchContent({
                   >
                     {p.image ? (
                       <>
-                        <img src={p.image} alt={p.product} className="w-full h-full object-cover" />
+                        {/* Proxied - supplier CDN photos 403 a direct browser
+                            load, and the storekeeper uses this picture to match
+                            what is in his hand against the row. */}
+                        <img src={mediaSrc(p.image)} alt={p.product} className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                           <ZoomIn className="w-4 h-4 text-white" />
                         </div>
@@ -964,7 +968,7 @@ export function StockDispatchContent({
                             >
                               {pInfo?.image ? (
                                 <>
-                                  <img src={pInfo.image} alt={productName} className="w-full h-full object-cover" />
+                                  <img src={mediaSrc(pInfo.image)} alt={productName} className="w-full h-full object-cover" />
                                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                     <ZoomIn className="w-4 h-4 text-white" />
                                   </div>
@@ -1059,8 +1063,12 @@ export function StockDispatchContent({
             className="p-4"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* The lightbox is fed from product photos AND contractor photos.
+                mediaSrc only rewrites the hotlink-protected supplier CDNs and
+                returns our own Supabase/Blob URLs untouched, so one call here
+                covers every caller without breaking the self-hosted ones. */}
             <img 
-              src={lightboxImage} 
+              src={mediaSrc(lightboxImage)} 
               alt="Product" 
               className="max-w-[85vw] max-h-[70vh] rounded-xl object-contain"
               loading="eager"

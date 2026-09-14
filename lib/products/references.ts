@@ -58,7 +58,12 @@ export const PRODUCT_BLOCKING_TABLES: Array<{
   filter?: { column: string; value: string }
 }> = [
   // Keeps product_name, so the order stays readable with no product behind it.
-  { table: 'purchase_orders', column: 'product_id', label: 'purchase order', plural: 'purchase orders', kind: 'history', removal: 'unlink' },
+  { table: 'purchase_orders', column: 'product_id', label: 'China import', plural: 'China imports', kind: 'history', removal: 'unlink' },
+  { table: 'import_reorder_lines', column: 'product_id', label: 'import reorder line', plural: 'import reorder lines', kind: 'history', removal: 'unlink' },
+  { table: 'import_reorder_items', column: 'product_id', label: 'saved reorder product', plural: 'saved reorder products', kind: 'history', removal: 'unlink' },
+  { table: 'product_1688_preferences', column: 'product_id', label: 'approved sourcing preference', plural: 'approved sourcing preferences', kind: 'history', removal: 'block' },
+  { table: 'product_1688_sku_links', column: 'product_id', label: 'confirmed supplier SKU link', plural: 'confirmed supplier SKU links', kind: 'history', removal: 'block' },
+  { table: 'import_reorder_1688_selections', column: 'product_id', label: 'saved sourcing review', plural: 'saved sourcing reviews', kind: 'history', removal: 'block' },
   { table: 'deliveries', column: 'product_id', label: 'delivery', plural: 'deliveries', kind: 'history', removal: 'block' },
   { table: 'stock_movements', column: 'product_id', label: 'stock movement', plural: 'stock movements', kind: 'history', removal: 'block' },
   // No name column - unlinking would leave "Unknown product" lines inside

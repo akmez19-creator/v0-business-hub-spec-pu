@@ -1,5 +1,4 @@
-import { generateText, type ModelMessage } from 'ai'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { houseName } from '@/lib/products/house-name'
 
 export const maxDuration = 300
 
@@ -16,122 +15,16 @@ interface NameSuggestion {
   source: 'vision' | 'text'
 }
 
-/**
- * Title Case that leaves genuinely uppercase tokens alone (LED, USB, 3M) and
- * keeps short joiners lowercase unless they lead. Fixes "meat slicer" ->
- * "Meat Slicer" and "Solar Led Bulb" -> "Solar LED Bulb".
- */
-const ACRONYMS = new Set([
-  'LED', 'USB', 'TV', 'PVC', 'ABS', 'DC', 'AC', 'HD', 'SD', 'RGB',
-  'BBQ', 'LCD', 'GPS', 'UV', 'XL', 'XXL', 'MM', 'CM', '3D', 'AA', 'AAA',
-])
-const MINOR = new Set(['and', 'or', 'for', 'to', 'of', 'with', 'in', 'on'])
+// The naming rules (two words, Title Case, reuse the shop vocabulary) live in
+// lib/products/house-name.ts and are shared with the purchasing page's "Create
+// in inventory" dialog. They used to be defined here, which meant the other
+// place that mints products could not use them - and named things differently.
 
-export function titleCase(input: string): string {
-  const words = input.trim().split(/\s+/)
-  return words
-    .map((w, i) => {
-      const bare = w.replace(/[^A-Za-z0-9]/g, '')
-      if (ACRONYMS.has(bare.toUpperCase())) return bare.toUpperCase()
-      const lower = w.toLowerCase()
-      if (i > 0 && MINOR.has(lower)) return lower
-      return lower.charAt(0).toUpperCase() + lower.slice(1)
-    })
-    .join(' ')
-}
-
-/** Enforce the 2-word rule (3 only when the model insisted and it reads well). */
-function clampWords(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean)
-  if (words.length <= 3) return words.join(' ')
-  // Keep the last two words: the head noun almost always sits at the end
-  // ("Stainless Steel Meat Slicer" -> "Meat Slicer").
-  return words.slice(-2).join(' ')
-}
-
-function cleanName(raw: string): string {
-  const stripped = raw
-    .replace(/["'`\u201c\u201d]/g, '')
-    .replace(/[^A-Za-z0-9 \-/]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return titleCase(clampWords(stripped))
-}
-
-const SYSTEM =
-  'You name consumer products for the inventory of a Mauritius delivery shop. ' +
-  'You are given a photo and/or the current messy name, plus the vocabulary the shop already uses. ' +
-  'Return the single best retail product name.\n' +
-  'HARD RULES:\n' +
-  '- Exactly TWO words. Use three ONLY when two words genuinely cannot identify the product.\n' +
-  '- Title Case (e.g. "Meat Slicer"). Keep real acronyms uppercase (LED, USB, PVC).\n' +
-  '- Reuse the shop vocabulary when a matching term already exists, so names stay consistent.\n' +
-  '- Describe WHAT THE PRODUCT IS, not its colour, quantity, packaging or brand.\n' +
-  '- No model numbers, no sizes, no marketing words ("premium", "high quality", "hot sale").\n' +
-  '- If the current name is already good and only has bad casing or a typo, just fix that.\n' +
-  'Reply with STRICT JSON only, no markdown fence: {"name":"Two Words","reason":"under 8 words"}'
-
-function parseName(raw: string): { name: string; reason: string } | null {
-  const cleaned = raw.replace(/```json|```/g, '').trim()
-  const start = cleaned.indexOf('{')
-  const end = cleaned.lastIndexOf('}')
-  if (start === -1 || end === -1) return null
+async function nameOne(item: IncomingItem, vocabulary: string[]): Promise<NameSuggestion | null> {
   try {
-    const o = JSON.parse(cleaned.slice(start, end + 1)) as { name?: string; reason?: string }
-    if (!o.name || typeof o.name !== 'string') return null
-    return { name: o.name, reason: typeof o.reason === 'string' ? o.reason : '' }
-  } catch {
-    return null
-  }
-}
-
-/** One generateText call with the gateway, falling back to a direct Gemini key. */
-async function runModel(system: string, messages: ModelMessage[]) {
-  try {
-    const { text } = await generateText({ model: 'google/gemini-3-flash', system, messages })
-    return text
-  } catch (gatewayError) {
-    const googleKey = process.env.GOOGLE_AI_API_KEY
-    if (!googleKey) throw gatewayError
-    console.error(
-      '[v0] suggest-names: gateway failed, falling back to Gemini:',
-      gatewayError instanceof Error ? gatewayError.name : gatewayError,
-    )
-    const google = createGoogleGenerativeAI({ apiKey: googleKey })
-    const { text } = await generateText({ model: google('gemini-2.5-flash'), system, messages })
-    return text
-  }
-}
-
-async function nameOne(item: IncomingItem, vocabulary: string): Promise<NameSuggestion | null> {
-  const hasImage = !!item.imageUrl && /^https?:\/\//i.test(item.imageUrl)
-  const prompt = hasImage
-    ? `Name the product in this photo. The shop currently calls it "${item.currentName}" - trust the photo over that label if they disagree.\n\nShop vocabulary already in use:\n${vocabulary}`
-    : `Give the best two-word retail name for a product currently called "${item.currentName}". There is no photo, so keep the meaning of the current name and only fix wording, casing or spelling.\n\nShop vocabulary already in use:\n${vocabulary}`
-
-  const content: ({ type: 'text'; text: string } | { type: 'image'; image: URL })[] = [
-    { type: 'text', text: prompt },
-  ]
-  if (hasImage) {
-    try {
-      content.push({ type: 'image', image: new URL(item.imageUrl as string) })
-    } catch {
-      // Malformed URL - fall through as a text-only request.
-    }
-  }
-
-  try {
-    const raw = await runModel(SYSTEM, [{ role: 'user', content }])
-    const parsed = parseName(raw)
-    if (!parsed) return null
-    const suggested = cleanName(parsed.name)
-    if (!suggested) return null
-    return {
-      key: item.key,
-      suggested,
-      reason: parsed.reason,
-      source: content.length > 1 ? 'vision' : 'text',
-    }
+    const result = await houseName({ imageUrl: item.imageUrl, currentName: item.currentName, vocabulary })
+    if (!result) return null
+    return { key: item.key, suggested: result.name, reason: result.reason, source: result.source }
   } catch (err) {
     console.error('[v0] suggest-names failed for', item.key, err instanceof Error ? err.message : err)
     return null
@@ -171,12 +64,9 @@ export async function POST(request: Request) {
       )
     }
 
-    // A sample of real inventory names teaches the model the house style.
-    const vocabulary = (body.inventoryNames || [])
-      .filter(Boolean)
-      .slice(0, 300)
-      .join(', ')
-      .slice(0, 6000)
+    // The real inventory names teach the model the house style. The shared
+    // module caps the joined text itself, so the whole list goes in.
+    const vocabulary = (body.inventoryNames || []).filter(Boolean)
 
     const settled = await mapLimited(items, 4, item => nameOne(item, vocabulary))
     const suggestions = settled.filter((s): s is NameSuggestion => !!s)

@@ -16,6 +16,9 @@ import {
 import { Search, TruckIcon, DollarSign, Package, ExternalLink, Boxes, MessageSquare } from 'lucide-react'
 import { formatCurrency, formatDate, statusColor } from './po-columns'
 import { SupplierDetailSheet } from './supplier-detail-sheet'
+import { Button } from '@/components/ui/button'
+import { QualityRating } from './supplier-quality-panel'
+import type { QualityImportOption, SupplierQualitySummary } from '@/lib/purchase-orders/1688-types'
 
 /** Messages stored across every captured conversation with this supplier. */
 function totalMessages(s: SupplierSummary) {
@@ -40,24 +43,30 @@ export interface SupplierSummary {
   landed: number
   products: string[]
   lastOrder: string | null
+  lastActualOrder?: string | null
   statuses: Record<string, number>
   sampleLink: string | null
   threads: SupplierThread[]
   manualProducts: { id: string; name: string }[]
+  quality?: SupplierQualitySummary | null
+  imports?: QualityImportOption[]
 }
 
 export function SuppliersContent({
   suppliers,
   allProducts,
+  initialOpenName = null,
 }: {
   suppliers: SupplierSummary[]
   allProducts: { id: string; name: string }[]
+  initialOpenName?: string | null
 }) {
   const [search, setSearch] = useState('')
   // Only the NAME is held. Keeping the whole row would freeze a snapshot taken
   // at click time, so after router.refresh() the sheet would keep rendering the
   // pre-save data and a successful save would look like it did nothing.
-  const [openName, setOpenName] = useState<string | null>(null)
+  const [openName, setOpenName] = useState<string | null>(initialOpenName)
+  const [initialTab, setInitialTab] = useState<'quality' | 'chat'>('quality')
   const openSupplier = openName ? (suppliers.find(s => s.name === openName) ?? null) : null
 
   const filtered = useMemo(() => {
@@ -81,11 +90,11 @@ export function SuppliersContent({
   }, [filtered])
 
   return (
-    <div className="space-y-6">
+    <div className="flex min-w-0 flex-col gap-6 font-sans">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Suppliers</h2>
         <p className="text-muted-foreground">
-          Every supplier you have ordered from, ranked by spend
+          China import suppliers, platform ratings and your dated quality history
         </p>
       </div>
 
@@ -150,7 +159,10 @@ export function SuppliersContent({
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-[220px]">Supplier</TableHead>
-              <TableHead className="min-w-[80px] text-right">Orders</TableHead>
+              <TableHead className="min-w-36">1688 rating</TableHead>
+              <TableHead className="min-w-32">Internal rating</TableHead>
+              <TableHead className="min-w-64">Remarks / quality notes</TableHead>
+              <TableHead className="min-w-[80px] text-right">Imports</TableHead>
               <TableHead className="min-w-[80px] text-right">Qty</TableHead>
               <TableHead className="min-w-[130px] text-right">Spend</TableHead>
               <TableHead className="min-w-[120px] text-right">Spend (Yuan)</TableHead>
@@ -158,18 +170,18 @@ export function SuppliersContent({
               <TableHead className="min-w-[200px]">Products</TableHead>
               <TableHead className="min-w-[150px]">Conversations</TableHead>
               <TableHead className="min-w-[160px]">Status</TableHead>
-              <TableHead className="min-w-[120px]">Last Order</TableHead>
+              <TableHead className="min-w-[120px]">Last Import</TableHead>
               <TableHead className="min-w-[60px]">Link</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={14} className="text-center py-12 text-muted-foreground">
                   <TruckIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
                   <p>
                     {suppliers.length === 0
-                      ? 'No suppliers yet. Import a purchase order to populate this list.'
+                      ? 'No suppliers yet. Upload your China imports to populate this list.'
                       : 'No suppliers match your search.'}
                   </p>
                 </TableCell>
@@ -186,6 +198,16 @@ export function SuppliersContent({
                     >
                       {s.name}
                     </Link>
+                  </TableCell>
+                  <TableCell><QualityRating quality={s.quality} platform /></TableCell>
+                  <TableCell><QualityRating quality={s.quality} /></TableCell>
+                  <TableCell className="whitespace-normal">
+                    <div className="flex max-w-72 flex-col gap-2 text-sm leading-relaxed">
+                      {!!s.quality?.defectCount && <Badge variant="destructive" className="w-fit">{s.quality.defectCount} defect report{s.quality.defectCount === 1 ? '' : 's'}</Badge>}
+                      <p className="line-clamp-2 break-words text-muted-foreground">{s.quality?.latestNote || 'No quality notes yet'}</p>
+                      {s.quality?.latestNoteAt && <span className="text-muted-foreground">{new Date(s.quality.latestNoteAt).toLocaleDateString('en-GB')} · {s.quality.latestNoteAuthor}</span>}
+                      <Button type="button" variant="outline" size="sm" className="w-fit" aria-label={`Quality and notes for ${s.name}`} onClick={() => { setInitialTab('quality'); setOpenName(s.name) }}>Quality & notes</Button>
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">{s.orders}</TableCell>
                   <TableCell className="text-right">{s.qty.toLocaleString()}</TableCell>
@@ -210,7 +232,7 @@ export function SuppliersContent({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setOpenName(s.name)}
+                        onClick={() => { setInitialTab('chat'); setOpenName(s.name) }}
                         className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
                       >
                         <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
@@ -237,7 +259,8 @@ export function SuppliersContent({
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                    {formatDate(s.lastOrder)}
+                    {formatDate(s.lastActualOrder || s.lastOrder)}
+                    {!s.lastActualOrder && s.lastOrder && <p>Recorded date</p>}
                   </TableCell>
                   <TableCell>
                     {s.sampleLink ? (
@@ -264,6 +287,7 @@ export function SuppliersContent({
       <SupplierDetailSheet
         supplier={openSupplier}
         allProducts={allProducts}
+        initialTab={initialTab}
         onClose={() => setOpenName(null)}
       />
     </div>

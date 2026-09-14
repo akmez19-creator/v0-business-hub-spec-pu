@@ -58,34 +58,36 @@ export async function upsertComment(c: FeedComment): Promise<void> {
     { onConflict: 'comment_id' },
   )
   if (error) {
-    console.log('[v0] comment store: upsert failed', error.message)
-    return
+    throw new Error('Could not persist Facebook comment')
   }
 
   if (fromPage && c.parentId) {
-    await db
+    const { error: replyError } = await db
       .from('page_comments')
       .update({ replied_at: c.createdTime ?? new Date().toISOString() })
       .eq('comment_id', c.parentId)
+    if (replyError) throw new Error('Could not update Facebook comment reply state')
   }
 }
 
 /** Soft delete. Hard-deleting would let the next backfill resurrect the row. */
 export async function markCommentDeleted(commentId: string): Promise<void> {
   const db = createAdminClient()
-  await db
+  const { error } = await db
     .from('page_comments')
     .update({ is_deleted: true, updated_at: new Date().toISOString() })
     .eq('comment_id', commentId)
+  if (error) throw new Error('Could not update deleted Facebook comment')
 }
 
 /** Named to stay distinct from `comments.setCommentHidden`, which calls Graph. */
 export async function markCommentHidden(commentId: string, hidden: boolean): Promise<void> {
   const db = createAdminClient()
-  await db
+  const { error } = await db
     .from('page_comments')
     .update({ is_hidden: hidden, updated_at: new Date().toISOString() })
     .eq('comment_id', commentId)
+  if (error) throw new Error('Could not update hidden Facebook comment')
 }
 
 /** Reuse the post->ad cache so a comment inherits its post's product. */

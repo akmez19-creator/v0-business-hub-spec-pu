@@ -94,6 +94,17 @@ export async function mergeProducts(
       )
     }
 
+    const sourcing = await client.query<{ protected: boolean }>(
+      `select exists(select 1 from import_reorder_items where product_id=any($1::uuid[]))
+        or exists(select 1 from import_reorder_lines where product_id=any($1::uuid[]))
+        or exists(select 1 from import_reorder_settings where product_id=any($1::uuid[]))
+        or exists(select 1 from product_1688_preferences where product_id=any($1::uuid[]))
+        or exists(select 1 from product_1688_sku_links where product_id=any($1::uuid[]))
+        or exists(select 1 from import_reorder_1688_selections where product_id=any($1::uuid[])) as protected`,
+      [[winnerId, loserId]],
+    )
+    if (sourcing.rows[0].protected) throw new MergeBlockedError('These products have saved purchasing or sourcing history. Merging would rewrite reviewed product and variant identities; no changes were applied.')
+
     const moved: Record<string, number> = {}
     const skipped: Record<string, number> = {}
 

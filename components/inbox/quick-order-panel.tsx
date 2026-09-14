@@ -10,7 +10,8 @@
  * Nothing about those rules is reimplemented on the client.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { beginAnotherOrder, readInbox, type OrderOperation } from './inbox-session'
 import useSWR from 'swr'
 import { Check, Copy, Loader2, PackagePlus, Sparkles, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -28,7 +29,7 @@ import { useToast } from '@/hooks/use-toast'
 import { offerLabel, priceFor, unitPrice, type QuickOrderProduct } from '@/lib/orders/quick-order'
 import type { UnifiedThread } from '@/lib/inbox/unified'
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const fetcher = readInbox
 
 export type OrderDraft = {
   customerName: string
@@ -59,18 +60,25 @@ export function QuickOrderPanel({
   aiPending,
   unmatched,
   onOrderCreated,
+  operation,
+  onOperationChange,
 }: {
   thread: UnifiedThread
+  operation: OrderOperation
+  onOperationChange: (update: (value: OrderOperation) => OrderOperation) => void
   draft: OrderDraft
-  onChange: (next: OrderDraft) => void
+  onChange: (next: OrderDraft, field: keyof OrderDraft) => void
   /** The AI is still reading the thread, so fields may yet fill in. */
   aiPending: boolean
   /** Values the AI read but could not match to the catalogue. */
   unmatched?: { product: string | null; locality: string | null } | null
   onOrderCreated: (result: { proformaLink: string | null }) => void
 }) {
-  const [saving, setSaving] = useState(false)
-  const [created, setCreated] = useState<{ proformaLink: string | null } | null>(null)
+  const { saving, created, previousCreated, business } = operation
+  const submitting = useRef(false)
+  const setSaving = (value: boolean) => onOperationChange((state) => ({ ...state, saving: value }))
+  const setCreated = (value: OrderOperation['created']) => onOperationChange((state) => ({ ...state, created: value }))
+  const setBusiness = (value: string) => onOperationChange((state) => ({ ...state, business: value }))
   const { toast } = useToast()
 
   // Same endpoint and payload the extension loads, so the catalogue, the
@@ -85,12 +93,6 @@ export function QuickOrderPanel({
 
   const products = data?.products ?? []
   const regions = data?.regions ?? []
-
-  // A new lead is a new order: never let the previous customer's success
-  // banner sit above a different person's form.
-  useEffect(() => {
-    setCreated(null)
-  }, [thread.key])
 
   const product = useMemo(
     () => products.find((p) => p.id === draft.productId) ?? null,
@@ -134,13 +136,12 @@ export function QuickOrderPanel({
 
   // Seeded from the mapping but kept editable, because auto-detection cannot
   // work for WhatsApp and an unmapped Page would otherwise be filed silently.
-  const [business, setBusiness] = useState('')
   useEffect(() => {
-    setBusiness(pageCode ?? '')
-  }, [pageCode, thread.key])
+    if (pageCode) onOperationChange((state) => state.business ? state : { ...state, business: pageCode })
+  }, [pageCode, thread.key, onOperationChange])
 
   const set = <K extends keyof OrderDraft>(key: K, value: OrderDraft[K]) =>
-    onChange({ ...draft, [key]: value })
+    onChange({ ...draft, [key]: value }, key)
 
   const missing: string[] = []
   if (!draft.customerName.trim()) missing.push('name')
@@ -150,7 +151,8 @@ export function QuickOrderPanel({
   if (!business) missing.push('business')
 
   const submit = async () => {
-    if (missing.length || saving || !product) return
+    if (missing.length || saving || created || submitting.current || !product) return
+    submitting.current = true
     setSaving(true)
     try {
       const res = await fetch('/api/extension', {
@@ -197,12 +199,13 @@ export function QuickOrderPanel({
         variant: 'destructive',
       })
     } finally {
+      submitting.current = false
       setSaving(false)
     }
   }
 
   return (
-    <aside className="flex h-full w-[380px] shrink-0 flex-col overflow-hidden border-l border-border">
+    <aside className="flex h-full min-h-0 w-full shrink-0 flex-col overflow-hidden border-l border-border">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <PackagePlus className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <h3 className="flex-1 text-sm font-semibold">Quick order</h3>
@@ -407,9 +410,11 @@ export function QuickOrderPanel({
                 Copy proforma link
               </Button>
             ) : null}
+            <Button variant="outline" size="sm" onClick={() => onOperationChange(beginAnotherOrder)}>New order for this customer</Button>
           </div>
         ) : (
           <>
+            {previousCreated?.proformaLink ? <a href={previousCreated.proformaLink} target="_blank" rel="noopener noreferrer" className="text-center text-xs underline">View previous order confirmation</a> : null}
             <Button onClick={submit} disabled={missing.length > 0 || saving}>
               {saving ? (
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />

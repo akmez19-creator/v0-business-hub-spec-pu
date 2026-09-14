@@ -2,6 +2,16 @@
 
 import { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import useSWR from 'swr'
+import { Checkbox } from '@/components/ui/checkbox'
+import { getReorderCatalogueAction } from '@/app/dashboard/purchasing/reorders/actions'
+import { newReorderLine, type ImportReference, type SavedReorderItem } from '@/lib/purchase-orders/workflow'
+import { copyImportReference } from '@/lib/purchase-orders/reorder-reference'
+import { POEntryDialog } from './po-entry-dialog'
+import { ReorderLaterDialog } from './reorder-later-dialog'
+import { PurchaseError } from './reorder-fields'
+import { safeSpreadsheetText } from '@/lib/purchase-orders/reorder-export'
 import { createClient } from '@/lib/supabase/client'
 import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +35,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -46,7 +57,6 @@ import {
   Search,
   Upload,
   TruckIcon,
-  DollarSign,
   BoxesIcon,
   Filter,
   Download,
@@ -54,6 +64,9 @@ import {
   Loader2,
   FileSpreadsheet,
   ChevronDown,
+  MoreHorizontal,
+  Plus,
+  Repeat2,
 } from 'lucide-react'
 import { POImportDialog } from './po-import-dialog'
 import {
@@ -68,7 +81,6 @@ import {
 interface Stats {
   totalOrders: number
   totalQty: number
-  totalValue: number
   byStatus: Record<string, number>
 }
 
@@ -79,6 +91,7 @@ interface Stats {
 function orderToExportRow(o: PurchaseOrder): Record<string, string | number> {
   return {
     'Date': o.created_at ? new Date(o.created_at).toISOString().slice(0, 10) : '',
+    'Order Date': o.order_date || '',
     'Status': o.status || 'pending',
     'Reorder': o.reorder || '',
     'Link': o.link || '',
@@ -163,6 +176,22 @@ export function PurchaseOrdersContent({
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [, startTransition] = useTransition()
+  const [selectedImports, setSelectedImports] = useState<string[]>([])
+  const [reorderSources, setReorderSources] = useState<ImportReference[]>([])
+  const [reorderOpen, setReorderOpen] = useState(false)
+  const [laterSource, setLaterSource] = useState<ImportReference | null>(null)
+  const { data: catalogue, error: catalogueError } = useSWR(laterSource ? 'import-reorder-catalogue' : null, getReorderCatalogueAction, { revalidateOnFocus: false })
+  const laterInitial = useMemo<SavedReorderItem | null>(() => {
+    if (!laterSource || !catalogue) return null
+    const product = catalogue.products.find((product) => product.id === laterSource.product_id)
+    if (!product) return null
+    const reference = catalogue.references.find((reference) => reference.id === laterSource.id) || laterSource
+    return { id: crypto.randomUUID(), item: copyImportReference({ ...newReorderLine(product), variantId: reference.variant_id || null }, reference), supplierName: reference.supplier_name?.trim() || '', status: 'active', priority: 2, reviewDate: null, revision: 0, updatedAt: '' }
+  }, [laterSource, catalogue])
+  function openReorder(sources: ImportReference[] = []) {
+    setReorderSources(sources)
+    setReorderOpen(true)
+  }
 
   const columns = useMemo(() => columnsForView(view), [view])
 
@@ -209,10 +238,12 @@ export function PurchaseOrdersContent({
     // When there is nothing to export, fall back to the example row so the user
     // can still download a correctly-formatted template to fill in and re-import.
     const isTemplate = filtered.length === 0
-    const rows = (isTemplate ? [EXAMPLE_ORDER] : filtered).map(orderToExportRow)
+    const rows = (isTemplate ? [EXAMPLE_ORDER] : filtered).map(orderToExportRow).map((row) =>
+      Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === 'string' ? safeSpreadsheetText(value) : value])),
+    )
     const worksheet = XLSX.utils.json_to_sheet(rows)
     const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Purchase Orders')
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Imports')
     const stamp = new Date().toISOString().slice(0, 10)
     const name = isTemplate ? `purchase-orders-template-${stamp}` : `purchase-orders-${stamp}`
     XLSX.writeFile(workbook, `${name}.${format}`, { bookType: format })
@@ -242,17 +273,19 @@ export function PurchaseOrdersContent({
     }
   }
 
-  const colCount = columns.length
+  const colCount = columns.length + 2
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Purchase Orders</h2>
-          <p className="text-muted-foreground">Manage and track supplier purchase orders</p>
+          <h2 className="text-2xl font-bold text-foreground">Imports</h2>
+          <p className="text-muted-foreground">China purchasing history, supplier costs and shipment tracking</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" asChild><Link href="/dashboard/purchasing/reorders"><Repeat2 />Reorders</Link></Button>
+          <Button variant="outline" onClick={() => openReorder()}><Plus />New reorder</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline">
@@ -289,7 +322,7 @@ export function PurchaseOrdersContent({
           <POImportDialog>
             <Button>
               <Upload className="w-4 h-4 mr-2" />
-              Import PO Excel
+              Upload Imports Excel
             </Button>
           </POImportDialog>
         </div>
@@ -299,10 +332,10 @@ export function PurchaseOrdersContent({
       <AlertDialog open={deleteOpen} onOpenChange={(o) => { if (!deleting) setDeleteOpen(o) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete all purchase orders?</AlertDialogTitle>
+            <AlertDialogTitle>Delete all imports?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes all <strong>{initialOrders.length}</strong> purchase
-              orders. This action cannot be undone. Export a backup first if you may need
+              This permanently removes all <strong>{initialOrders.length}</strong> China
+              imports. This action cannot be undone. Export a backup first if you may need
               this data later.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -332,10 +365,10 @@ export function PurchaseOrdersContent({
       </AlertDialog>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Imports</CardTitle>
             <BoxesIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -349,15 +382,6 @@ export function PurchaseOrdersContent({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalQty.toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(stats.totalValue)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -418,9 +442,12 @@ export function PurchaseOrdersContent({
           </SelectContent>
         </Select>
         <Badge variant="secondary" className="ml-auto">
-          {filtered.length} / {initialOrders.length} orders
+          {filtered.length} / {initialOrders.length} imports
         </Badge>
       </div>
+
+      {selectedImports.length > 0 && <div className="flex flex-wrap items-center gap-3"><Badge variant="secondary">{selectedImports.length} import references selected</Badge><Button onClick={() => openReorder(initialOrders.filter((order) => selectedImports.includes(order.id)))}><Repeat2 />Reorder selected</Button><Button variant="ghost" onClick={() => setSelectedImports([])}>Clear selection</Button><p className="text-sm text-muted-foreground">Different suppliers are split into separate drafts. Existing imports are not changed.</p></div>}
+      <PurchaseError error={catalogueError ? 'Could not load the catalogue for Reorder later. Try opening the product again.' : laterSource && catalogue && !laterInitial ? 'Link this historical import to an active catalogue product using Review & correct first.' : null} />
 
       {/* Table */}
       <Card>
@@ -480,6 +507,8 @@ export function PurchaseOrdersContent({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10"><Checkbox aria-label="Select all filtered import references" checked={filtered.length > 0 && filtered.every((order) => selectedImports.includes(order.id))} onCheckedChange={(checked) => setSelectedImports(checked === true ? filtered.map((order) => order.id) : [])} /></TableHead>
+                <TableHead>Actions</TableHead>
                 {columns.map(c => (
                   <TableHead key={c.key} className={c.className}>
                     {c.label}
@@ -494,7 +523,7 @@ export function PurchaseOrdersContent({
                     <TableCell colSpan={colCount} className="py-4 text-center">
                       <div className="flex flex-col items-center gap-1">
                         <Package className="w-8 h-8 opacity-50" />
-                        <p className="font-medium text-foreground">No purchase orders yet</p>
+                        <p className="font-medium text-foreground">No imports yet</p>
                         <p className="text-sm text-muted-foreground">
                           Import an Excel file to get started. The row below is an{' '}
                           <span className="font-medium text-foreground">example</span> showing
@@ -511,6 +540,7 @@ export function PurchaseOrdersContent({
                     </TableCell>
                   </TableRow>
                   <TableRow className="opacity-60 italic pointer-events-none">
+                    <TableCell /><TableCell />
                     {columns.map(c => (
                       <TableCell key={c.key} className={c.className}>
                         {c.render(EXAMPLE_ORDER)}
@@ -529,6 +559,8 @@ export function PurchaseOrdersContent({
               ) : (
                 filtered.map(order => (
                   <TableRow key={order.id}>
+                    <TableCell><Checkbox aria-label={`Select import ${order.index_no || order.product_name}`} checked={selectedImports.includes(order.id)} onCheckedChange={(checked) => setSelectedImports((ids) => checked === true ? [...new Set([...ids, order.id])] : ids.filter((id) => id !== order.id))} /></TableCell>
+                    <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Actions for import ${order.index_no || order.product_name}`}><MoreHorizontal /></Button></DropdownMenuTrigger><DropdownMenuContent align="start"><DropdownMenuGroup><DropdownMenuItem onSelect={() => openReorder([order])}>Reorder this product</DropdownMenuItem><DropdownMenuItem onSelect={() => setLaterSource(order)}>Add to reorder later</DropdownMenuItem><DropdownMenuItem asChild><Link href={`/dashboard/purchasing/imports/${order.id}`}>Review & correct original import</Link></DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
                     {columns.map(c => (
                       <TableCell key={c.key} className={c.className}>
                         {c.render(order)}
@@ -542,6 +574,8 @@ export function PurchaseOrdersContent({
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
       </Card>
+      <POEntryDialog open={reorderOpen} onOpenChange={setReorderOpen} sources={reorderSources} />
+      {catalogue && laterInitial && <ReorderLaterDialog open={Boolean(laterSource)} onOpenChange={(open) => { if (!open) setLaterSource(null) }} catalogue={catalogue} initial={laterInitial} onSaved={() => setLaterSource(null)} />}
     </div>
   )
 }

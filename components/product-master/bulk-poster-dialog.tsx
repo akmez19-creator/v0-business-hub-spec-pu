@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { mediaSrc } from '@/lib/media-url'
 
 /**
  * Bulk one-click posts: run the SAME poster+caption generator that Poster
@@ -231,7 +232,7 @@ export function BulkPosterDialog({
                   {row.product.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={row.product.image || '/placeholder.svg'}
+                      src={mediaSrc(row.product.image) || '/placeholder.svg'}
                       alt=""
                       className="h-8 w-8 shrink-0 rounded object-cover"
                     />
@@ -293,7 +294,7 @@ export function BulkPosterDialog({
                           {opt.image ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
-                              src={opt.image || '/placeholder.svg'}
+                              src={mediaSrc(opt.image) || '/placeholder.svg'}
                               alt={`${opt.label} poster for ${row.product.name}`}
                               className="w-full rounded-md border border-border"
                             />

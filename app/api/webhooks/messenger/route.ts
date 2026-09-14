@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { recordAdRef } from '@/lib/messenger/ad-refs'
 import { recordMessengerMessage } from '@/lib/messenger/store'
 import { markCommentDeleted, markCommentHidden, upsertComment } from '@/lib/facebook/comment-store'
+import { createAdminClient } from '@/lib/supabase/server'
+import { createAutopilotWake } from '@/lib/inbox-autopilot/wake'
 
 /**
  * Messenger + Page feed webhook.
@@ -20,10 +22,13 @@ import { markCommentDeleted, markCommentHidden, upsertComment } from '@/lib/face
  * (verified across 1722 messages), so the click moment is the only chance to
  * capture it.
  *
- * Always returns 200 once the payload parses, so Meta does not retry forever.
+ * Acknowledges only persisted events. A transient failure remains retryable;
+ * the message ids make successfully stored events safe to receive again.
  */
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+export const maxDuration = 180
 
 /** GET is Meta's subscription handshake. Shares the WhatsApp verify token. */
 export async function GET(request: Request) {
@@ -46,7 +51,7 @@ export async function GET(request: Request) {
 
 function signatureValid(raw: string, header: string | null): boolean {
   const secret = process.env.FACEBOOK_APP_SECRET
-  if (!secret) return true // cannot verify without the secret; see log below
+  if (!secret) return false
   if (!header?.startsWith('sha256=')) return false
 
   const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex')
@@ -130,19 +135,20 @@ type FeedChange = {
 }
 
 export async function POST(request: Request) {
+  if (!process.env.FACEBOOK_APP_SECRET) {
+    console.log('[v0] messenger webhook: signature verification is not configured')
+    return NextResponse.json({ received: false, error: 'Webhook verification is not configured' }, { status: 503 })
+  }
   const raw = await request.text()
 
   if (!signatureValid(raw, request.headers.get('x-hub-signature-256'))) {
     console.log('[v0] messenger webhook: bad signature, rejected')
     return new NextResponse('Forbidden', { status: 403 })
   }
-  if (!process.env.FACEBOOK_APP_SECRET) {
-    console.log('[v0] messenger webhook: FACEBOOK_APP_SECRET unset - payload accepted UNVERIFIED')
-  }
 
   let body: {
     object?: string
-    entry?: { id?: string; messaging?: MessagingEvent[]; changes?: FeedChange[] }[]
+    entry?: { id?: string; messaging?: MessagingEvent[]; standby?: MessagingEvent[]; changes?: FeedChange[] }[]
   }
   try {
     body = JSON.parse(raw)
@@ -152,19 +158,26 @@ export async function POST(request: Request) {
 
   if (body.object !== 'page') return NextResponse.json({ received: true })
 
+  const autopilotWake = createAutopilotWake()
+  let failed = false
   for (const entry of body.entry ?? []) {
     // entry.id is the PAGE id: the same person messaging two of the six pages
     // is two separate attributions, so it is part of the key.
     const pageId = entry.id
     if (!pageId) continue
+    let entryFailed = false
+    let handled = false
 
-    for (const event of entry.messaging ?? []) {
+    // Meta can deliver standby events when another connected tool controls
+    // the conversation. Reading them does not take control or send a reply.
+    for (const event of [...(entry.messaging ?? []), ...(entry.standby ?? [])]) {
       const referral = event.referral ?? event.postback?.referral ?? event.message?.referral
       const senderId = event.sender?.id
 
       // Attribution first: it must still be captured even for an event that
       // carries no message body (a bare Get Started postback).
       if (referral && senderId) {
+        handled = true
         try {
           await recordAdRef({
             pageId,
@@ -174,10 +187,9 @@ export async function POST(request: Request) {
             source: referral.source ?? null,
             adType: referral.type ?? null,
           })
-          console.log(`[v0] messenger webhook: stored ad ref ${referral.ad_id ?? referral.ref} for ${senderId}`)
         } catch (error) {
-          // Swallow: a failed attribution must not cause Meta to retry.
-          console.log('[v0] messenger webhook: failed to store ad ref', error)
+          entryFailed = true
+          console.log('[v0] messenger webhook: referral persistence failed')
         }
       }
 
@@ -195,6 +207,7 @@ export async function POST(request: Request) {
       const isEcho = message.is_echo === true
       const psid = isEcho ? event.recipient?.id : event.sender?.id
       if (!psid || psid === pageId) continue
+      handled = true
 
       try {
         await recordMessengerMessage({
@@ -209,8 +222,10 @@ export async function POST(request: Request) {
           createdAt: new Date(event.timestamp ?? Date.now()).toISOString(),
           raw: event,
         })
+        if (!isEcho) autopilotWake.add('messenger', pageId)
       } catch (error) {
-        console.log('[v0] messenger webhook: failed to store message', error)
+        entryFailed = true
+        console.log('[v0] messenger webhook: message persistence failed')
       }
     }
 
@@ -218,6 +233,7 @@ export async function POST(request: Request) {
       if (change.field !== 'feed') continue
       const v = change.value
       if (v?.item !== 'comment' || !v.comment_id) continue
+      handled = true
 
       try {
         if (v.verb === 'remove') {
@@ -238,10 +254,27 @@ export async function POST(request: Request) {
           })
         }
       } catch (error) {
-        console.log('[v0] messenger webhook: failed to store comment', error)
+        entryFailed = true
+        console.log('[v0] messenger webhook: comment persistence failed')
+      }
+    }
+    failed ||= entryFailed
+    if (handled) {
+      const now = new Date().toISOString()
+      try {
+        const { error } = await createAdminClient().from('inbox_sync_state').upsert({
+          key: `messenger:webhook:${pageId}`, last_run_at: now, updated_at: now,
+          ...(entryFailed ? { last_error: 'Some webhook events could not be saved; retry requested' }
+            : { last_ok_at: now, last_error: null }),
+        }, { onConflict: 'key' })
+        if (error) console.log('[v0] messenger webhook: receipt status could not be saved')
+      } catch {
+        console.log('[v0] messenger webhook: receipt status could not be saved')
       }
     }
   }
 
+  if (failed) return NextResponse.json({ received: false, retryable: true }, { status: 503 })
+  autopilotWake.schedule()
   return NextResponse.json({ received: true })
 }

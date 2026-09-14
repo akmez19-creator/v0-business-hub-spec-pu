@@ -21,7 +21,15 @@ export type DuplicateProduct = {
   image_count: number
 }
 
-export type DuplicateReason = 'identical' | 'typo'
+/**
+ * 'linked' is the case the name scanner is blind to: the products are called
+ * different things ("Machine Tablets" / "Washing Machine Cleaner") but the
+ * purchase orders filed under one of them carry the OTHER one's exact name.
+ * The buyer typed the invoice label, the storekeeper typed what is on the
+ * shelf, and the PO import linked the label to a row it minted rather than to
+ * the shelved row. Seven such pairs on the live catalogue, none found by name.
+ */
+export type DuplicateReason = 'identical' | 'typo' | 'linked'
 
 export type DuplicatePair = {
   /** The product that keeps its identity. Null when zone cannot decide. */
@@ -34,6 +42,19 @@ export type DuplicatePair = {
   /** Why this pair needs a human, or null when zone settled it. */
   undecided: 'both-zoned' | 'neither-zoned' | null
   editDistance: number
+  /**
+   * For 'linked' only: the label that ties the two together and where it came
+   * from, so the reviewer sees "PO says 'Washing machine cleaner'" instead of
+   * having to trust an unexplained pairing.
+   */
+  link?: { label: string; via: 'purchase order' | 'alias'; ownerId: string }
+}
+
+/** A label recorded against a product that is not the product's own name. */
+export type ProductLabel = {
+  productId: string
+  label: string
+  via: 'purchase order' | 'alias'
 }
 
 /** Case, spacing and punctuation carry no meaning here: "U-Shaped" == "U Shape". */
@@ -150,8 +171,74 @@ export function findDuplicatePairs(products: DuplicateProduct[]): DuplicatePair[
   }
 
   // Decided pairs first, then closest names, so the clearest work is on top.
+  return sortPairs(pairs)
+}
+
+function sortPairs(pairs: DuplicatePair[]): DuplicatePair[] {
   return pairs.sort((l, r) => {
     if (!l.undecided !== !r.undecided) return l.undecided ? 1 : -1
     return l.editDistance - r.editDistance
   })
+}
+
+/**
+ * Pairs joined by the paperwork rather than by spelling.
+ *
+ * A purchase order (or a learned alias) filed under product X whose label is
+ * the exact name of product Y is the strongest evidence in the catalogue that
+ * X and Y are one item: a person typed Y's name while buying X. This is how
+ * "Machine Tablets" (0 on hand, 2 POs labelled "Washing machine cleaner") and
+ * "Washing Machine Cleaner" (Zone D, 6 on hand, 0 POs) were sitting side by
+ * side with nothing joining them.
+ *
+ * Exact squashed match only. Containment ("Eye Mask" inside "Eye Mask Marine
+ * Collagen") is excluded for the same reason it is excluded above: on this
+ * catalogue a shorter name is usually a different, cheaper product.
+ *
+ * Zone still picks the winner. A PO under the unzoned row is precisely the
+ * pattern - stock counted on the shelf, orders under the invoice name - so the
+ * winner is the shelved row and the orders are what gets moved to it.
+ */
+export function findLinkedPairs(products: DuplicateProduct[], labels: ProductLabel[]): DuplicatePair[] {
+  const byName = new Map<string, DuplicateProduct>()
+  for (const p of products) {
+    const k = squashName(p.name)
+    if (k) byName.set(k, p)
+  }
+  const byId = new Map(products.map(p => [p.id, p]))
+
+  const pairs: DuplicatePair[] = []
+  const seen = new Set<string>()
+  for (const l of labels) {
+    const owner = byId.get(l.productId)
+    const other = byName.get(squashName(l.label))
+    if (!owner || !other || owner.id === other.id) continue
+    // One pair per product couple regardless of how many POs carry the label.
+    const key = [owner.id, other.id].sort().join(':')
+    if (seen.has(key)) continue
+    seen.add(key)
+    // A differing model code is still a different SKU even when a PO says
+    // otherwise - "Bucket 9L" bought under a "Bucket 15L" label is a typo on
+    // the PO, not a duplicate product.
+    if (!sameModelMarks(owner.name, other.name)) continue
+
+    const [a, b] = owner.id < other.id ? [owner, other] : [other, owner]
+    pairs.push({
+      ...decidePair(a, b),
+      a,
+      b,
+      reason: 'linked',
+      editDistance: 0,
+      link: { label: l.label, via: l.via, ownerId: owner.id },
+    })
+  }
+  return sortPairs(pairs)
+}
+
+/** Name-based and paperwork-based pairs together, without listing a couple twice. */
+export function findAllDuplicatePairs(products: DuplicateProduct[], labels: ProductLabel[]): DuplicatePair[] {
+  const byName = findDuplicatePairs(products)
+  const have = new Set(byName.map(p => [p.a.id, p.b.id].sort().join(':')))
+  const linked = findLinkedPairs(products, labels).filter(p => !have.has([p.a.id, p.b.id].sort().join(':')))
+  return sortPairs([...byName, ...linked])
 }

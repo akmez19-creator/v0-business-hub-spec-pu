@@ -2,7 +2,21 @@ export type UserRole = 'admin' | 'manager' | 'marketing_agent' | 'marketing_back
 
 export type DeliveryStatus = 'pending' | 'assigned' | 'picked_up' | 'delivered' | 'nwd' | 'cms'
 
-export type SalesType = 'sale' | 'exchange' | 'trade_in' | 'refund' | 'drop_off'
+/**
+ * `free_item` is the Rs 0 gift row written beside a B1G1 sale. It is a real
+ * stored value (deliveries.sales_type has no CHECK constraint, and
+ * lib/agent-actions.ts writes it), so leaving it out of this union meant
+ * normalizeSalesType() quietly answered 'sale' for it and isPayoutEligible()
+ * PAID THE RIDER for the gift.
+ *
+ * Restored twice after sandbox rollbacks (25 Aug, 4 Sep 2026) dropped it
+ * while the writer kept writing it. A type union that lags its writer is a
+ * money bug, not a type bug.
+ *
+ * PRE-EXISTING HOLE, left alone: `pick_up` is also stored (1 row) and also
+ * missing here, so it still normalises to 'sale'.
+ */
+export type SalesType = 'sale' | 'exchange' | 'trade_in' | 'refund' | 'drop_off' | 'free_item'
 
 export interface Profile {
   id: string
@@ -234,6 +248,10 @@ export interface Product {
   // Null means `quantity` has never been physically verified - it may still hold
   // a real book figure carried over from before stock counting existed.
   last_counted_at?: string | null
+  // Explicit "on-hand is zero" statement, set by a person. `quantity` alone
+  // cannot express this: 0/null there means "never counted". The DB column
+  // exists and 16 files read it; only this declaration kept getting lost.
+  sold_out?: boolean
   // Warehouse shelf label, e.g. "E1" - letter prefix is the zone, number is the
   // shelf within it. Null means the location has not been recorded yet.
   shelf_code?: string | null
@@ -421,7 +439,8 @@ export const SALES_TYPE_LABELS: Record<SalesType, string> = {
   exchange: 'Exchange',
   trade_in: 'Trade In',
   refund: 'Refund',
-  drop_off: 'Drop Off'
+  drop_off: 'Drop Off',
+  free_item: 'Free Item'
 }
 
 export const SALES_TYPE_COLORS: Record<SalesType, string> = {
@@ -429,21 +448,27 @@ export const SALES_TYPE_COLORS: Record<SalesType, string> = {
   exchange: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
   trade_in: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   refund: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  drop_off: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
+  drop_off: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
+  free_item: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
 }
 
 /** Sales types where the rider must return a product */
 export const RETURN_SALES_TYPES: SalesType[] = ['exchange', 'trade_in', 'refund']
 
 /** Sales types that do NOT count toward rider/contractor payout (done free of charge) */
-export const NON_PAYOUT_SALES_TYPES: SalesType[] = ['exchange', 'trade_in', 'drop_off', 'refund']
+// `free_item` belongs here: the B1G1 gift rides in the SAME parcel as the paid
+// row, so paying the rider for both rows would bill two drops for one journey.
+export const NON_PAYOUT_SALES_TYPES: SalesType[] = ['exchange', 'trade_in', 'drop_off', 'refund', 'free_item']
 
 /** Supabase .not() filter value for excluding non-payout types from queries */
-export const NON_PAYOUT_FILTER = '("exchange","trade_in","drop_off","refund")'
+export const NON_PAYOUT_FILTER = '("exchange","trade_in","drop_off","refund","free_item")'
 
 /** Check if a delivery's sales_type is a payout-eligible (regular sale) delivery */
 export function isPayoutEligible(salesType: string | null | undefined): boolean {
-  return !NON_PAYOUT_SALES_TYPES.includes((salesType || 'sale') as SalesType)
+  // Normalise first: casting the raw string let any non-canonical spelling
+  // ("Free Item") miss the list and be paid out. Stored values are already
+  // canonical, so this changes no live row - it only closes the import path.
+  return !NON_PAYOUT_SALES_TYPES.includes(normalizeSalesType(salesType))
 }
 
 /** Normalize raw sales_type strings from Excel into our SalesType */
@@ -454,6 +479,8 @@ export function normalizeSalesType(raw: string | null | undefined): SalesType {
   if (v === 'trade in' || v === 'trade-in' || v === 'tradein' || v === 'trade_in') return 'trade_in'
   if (v === 'refund' || v === 'refnd') return 'refund'
   if (v === 'drop off' || v === 'dropoff' || v === 'drop-off' || v === 'drop_off') return 'drop_off'
+  // Without this the B1G1 gift row came back from Excel as a plain 'sale'.
+  if (v === 'free item' || v === 'free-item' || v === 'free_item' || v === 'freeitem') return 'free_item'
   if (v === 'sale' || v === 'normal' || v === 'delivery') return 'sale'
   return 'sale'
 }

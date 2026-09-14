@@ -7,6 +7,7 @@ import type { DeliveryStatus } from './types'
 import { createRegionResolver } from './region-resolver'
 import { syncContractorStock, getContractorIdFromDelivery } from '@/lib/stock-actions'
 import { canonicalMethod, splitForMethod } from '@/lib/payment-method'
+import { deliveryEditSelect, deliveryEditGuardFields, readDeliveryEditSnapshot, sameDeliveryEditSnapshot, validateDeliveryEditPatch, type DeliveryEditPatch, type DeliveryEditSnapshot } from './delivery-edit'
 
 /** Revalidate all delivery-related pages so data stays in sync */
 function revalidateAllDeliveryPaths() {
@@ -663,20 +664,27 @@ export async function updateDeliveryNote(deliveryId: string, note: string) {
   return { success: true }
 }
 
-// Admin/manager edit of the delivery's editable fields (delivery date, notes,
-// contact numbers, products, quantity, region). Only touches the given columns
-// so it never wipes pricing / payment / assignment data.
+// Read the actual row before opening the form; never seed editable contacts from a partial list row.
+export async function getDeliveryForEdit(deliveryId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  if (!profile || !['admin', 'manager'].includes(profile.role)) return { error: 'Only admins can edit deliveries' }
+  const { data, error } = await supabase.from('deliveries').select(deliveryEditSelect).eq('id', deliveryId).maybeSingle()
+  if (error || !data) return { error: 'Could not load current delivery details. Close and reopen this form.' }
+  try {
+    return { success: true, snapshot: readDeliveryEditSnapshot(data) }
+  } catch {
+    return { error: 'Delivery details are incomplete. Reload before editing.' }
+  }
+}
+
+// A dirty-field patch with the exact loaded baseline; never replace untouched fields.
 export async function updateDeliveryFields(
   deliveryId: string,
-  fields: {
-    delivery_date?: string | null
-    notes?: string | null
-    contact_1?: string | null
-    contact_2?: string | null
-    products?: string | null
-    qty?: number
-    locality?: string | null
-  }
+  fields: DeliveryEditPatch,
+  expected: DeliveryEditSnapshot
 ) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -692,21 +700,33 @@ export async function updateDeliveryFields(
     return { error: 'Only admins can edit deliveries' }
   }
 
-  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if ('delivery_date' in fields) updateData.delivery_date = fields.delivery_date || null
-  if ('notes' in fields) updateData.notes = fields.notes || null
-  if ('contact_1' in fields) updateData.contact_1 = fields.contact_1 || null
-  if ('contact_2' in fields) updateData.contact_2 = fields.contact_2 || null
-  if ('products' in fields) updateData.products = fields.products || null
-  if ('qty' in fields) updateData.qty = fields.qty && fields.qty > 0 ? fields.qty : 1
-  if ('locality' in fields) updateData.locality = await normalizeLocality(fields.locality ?? null)
+  let baseline: DeliveryEditSnapshot
+  let current: DeliveryEditSnapshot
+  let patch: DeliveryEditPatch
+  try {
+    baseline = readDeliveryEditSnapshot(expected)
+    if (baseline.id !== deliveryId) return { error: 'Delivery selection changed. Close and reopen this form.' }
+    const { data, error } = await supabase.from('deliveries').select(deliveryEditSelect).eq('id', deliveryId).maybeSingle()
+    if (error || !data) return { error: 'Could not reload delivery details. No changes were saved.' }
+    current = readDeliveryEditSnapshot(data)
+    if (!sameDeliveryEditSnapshot(baseline, current)) return { error: 'This delivery changed after you opened it. Close and reopen before saving.' }
+    patch = validateDeliveryEditPatch(fields, current)
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Invalid delivery changes.' }
+  }
+  if (Object.keys(patch).length === 0) return { success: true, unchanged: true }
+  const updateData: Record<string, unknown> = { ...patch, updated_at: new Date().toISOString() }
+  if ('locality' in patch) updateData.locality = await normalizeLocality(patch.locality ?? null)
 
-  const { error } = await supabase
-    .from('deliveries')
-    .update(updateData)
-    .eq('id', deliveryId)
-
-  if (error) return { error: error.message }
+  // Match the complete baseline atomically, including dispatch/reschedule state. Even writers
+  // that do not update updated_at cannot race this form and silently lose their changes.
+  let query = supabase.from('deliveries').update(updateData).eq('id', deliveryId)
+  for (const key of deliveryEditGuardFields) {
+    query = current[key] === null ? query.is(key, null) : query.eq(key, current[key])
+  }
+  const { data: saved, error } = await query.select('id').maybeSingle()
+  if (error) return { error: 'Could not confirm the save. Reload the delivery before retrying.' }
+  if (!saved) return { error: 'This delivery changed before the save completed. Close and reopen before saving.' }
   revalidateAllDeliveryPaths()
   return { success: true }
 }

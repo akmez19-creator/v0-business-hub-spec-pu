@@ -33,6 +33,13 @@ export interface PurchaseOrder {
   tracking_number: string | null
   batch_id: string | null
   created_at: string
+  order_date?: string | null
+  updated_at?: string | null
+  imported_at?: string | null
+  variant_id?: string | null
+  variant_snapshot?: { id: string; attributeName: string; attributeValue: string } | null
+  reorder_line_id?: string | null
+  expected_arrival_date?: string | null
 }
 
 export function statusColor(status: string | null): string {
@@ -54,7 +61,7 @@ export function formatCurrency(value: number, currency = 'Rs') {
   return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-// Order date is the created_at timestamp - there is no separate PO date field.
+// Older spreadsheets have only a recorded timestamp; never label it an order date.
 export function formatDate(value: string | null): string {
   if (!value) return '-'
   const d = new Date(value)
@@ -133,8 +140,9 @@ export const COLUMNS: ColumnDef[] = [
     className: 'min-w-[110px]',
     overview: true,
     render: (o) => (
-      <span className="whitespace-nowrap text-sm text-muted-foreground">
-        {formatDate(o.created_at)}
+      <span className="flex flex-col whitespace-nowrap text-sm text-muted-foreground">
+        <span>{formatDate(o.order_date || o.created_at)}</span>
+        {!o.order_date && <span>Recorded date</span>}
       </span>
     ),
   },
@@ -180,21 +188,21 @@ export const COLUMNS: ColumnDef[] = [
     label: 'Unit Price',
     className: 'min-w-[100px] text-right',
     group: 'pricing',
-    render: (o) => formatCurrency(o.unit_price),
+    render: (o) => formatCurrency(o.unit_price, '¥'),
   },
   {
     key: 'disc_price',
     label: 'Disc. Price',
     className: 'min-w-[100px] text-right',
     group: 'pricing',
-    render: (o) => formatCurrency(o.discounted_unit_price),
+    render: (o) => formatCurrency(o.discounted_unit_price, '¥'),
   },
   {
     key: 'shipment',
     label: 'Shipment',
     className: 'min-w-[100px] text-right',
     group: 'pricing',
-    render: (o) => formatCurrency(o.shipment_to_warehouse),
+    render: (o) => formatCurrency(o.shipment_to_warehouse, '¥'),
   },
   {
     key: 'disc_pct',

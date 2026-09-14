@@ -1,0 +1,10 @@
+{
+  "stepFiles": [
+    "/vercel/share/v0-project/node_modules/.pnpm/workflow@4.8.8_@nestjs+common@12.0.1_reflect-metadata@0.2.2_rxjs@7.8.2__@nestjs+core@12_7d51177ff4407821376c6367114a07b3/node_modules/workflow/dist/stdlib.js",
+    "/vercel/share/v0-project/workflows/reorder-1688.ts"
+  ],
+  "workflowFiles": [
+    "/vercel/share/v0-project/workflows/reorder-1688.ts"
+  ],
+  "serdeOnlyFiles": []
+}
