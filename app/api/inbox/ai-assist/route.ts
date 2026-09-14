@@ -18,9 +18,11 @@ import { loadWhatsAppDraftContext, assertWhatsAppDraftContextCurrent, type Whats
 import { WhatsAppDraftBlocked } from '@/lib/whatsapp-green/draft-policy'
 import { WhatsAppScopeError } from '@/lib/whatsapp/number-scope'
 import {
-  computeDefaultDeliveryDate,
+  deliveryDayLabel,
   extractPhone,
+  offerLabel,
   priceFor,
+  upcomingDeliveryDates,
   type Holiday,
   type QuickOrderProduct,
 } from '@/lib/orders/quick-order'
@@ -144,6 +146,15 @@ export async function POST(request: Request) {
     const businessContext =
       typeof settingsRow?.ai_reply_prompt === 'string' ? settingsRow.ai_reply_prompt.trim() : ''
 
+    // Real delivery days, computed from the admin's cut-off/scheme/closures, handed to the
+    // model as facts. Without them "never invent delivery dates" leaves it unable to answer
+    // the most common question in the inbox.
+    const holidays: Holiday[] = Array.isArray(settingsRow?.holidays) ? settingsRow.holidays : []
+    const scheme = (settingsRow?.delivery_day_scheme as Record<string, string>) || {}
+    const cutoff = settingsRow?.cutoff_time || '20:00'
+    const deliveryOptions = upcomingDeliveryDates(new Date(), cutoff, scheme, holidays)
+    const deliveryFacts = deliveryOptions.map((d) => `${deliveryDayLabel(d)} (${d})`).join(', ')
+
     const system = [
       'You are an experienced sales agent for a Mauritian retail and home-delivery business, working the social-media inbox (Facebook Messenger, WhatsApp, and Facebook post comments).',
       'You do two jobs at once: (1) write the single best reply to send now, and (2) extract the order details the customer has already given.',
@@ -165,7 +176,15 @@ export async function POST(request: Request) {
       '- readyToOrder is true only when a product, a name, a phone number, and a locality are all present.',
       body.pageName ? `\nThe business page is "${body.pageName}".` : '',
       body.customerName ? `The customer's social profile name is "${body.customerName}".` : '',
-      catalogue.length ? `\nPRODUCT LIST:\n${catalogue.map((p) => p.name).join('\n')}` : '',
+      catalogue.length
+        ? `\nPRODUCT LIST (exact names, unit price for one, offers as noted):\n${catalogue
+            .map((p) => {
+              const offer = offerLabel(p)
+              return `${p.name}: Rs ${priceFor(p, 1)}${offer ? ` (${offer})` : ''}`
+            })
+            .join('\n')}`
+        : '',
+      `\nDELIVERY DAYS AVAILABLE (the only dates you may offer; the first is the default): ${deliveryFacts}. If the customer asks for a different day, say the team will confirm.`,
       businessContext ? `\nBUSINESS CONTEXT AND TONE:\n${businessContext}` : '',
     ]
       .filter(Boolean)
@@ -211,13 +230,7 @@ export async function POST(request: Request) {
     const phone2 = extractPhone(out.phone2 ?? '') ?? null
 
     const qty = Math.min(Math.max(1, out.qty || 1), 50)
-    const holidays: Holiday[] = Array.isArray(settingsRow?.holidays) ? settingsRow.holidays : []
-    const delivery = computeDefaultDeliveryDate(
-      new Date(),
-      settingsRow?.cutoff_time || '20:00',
-      (settingsRow?.delivery_day_scheme as Record<string, string>) || {},
-      holidays,
-    )
+    const delivery = { date: deliveryOptions[0] }
 
     return NextResponse.json({
       success: true,
@@ -239,6 +252,7 @@ export async function POST(request: Request) {
         notes: out.notes?.trim() || '',
         deliveryDate: delivery.date,
       },
+      deliveryOptions,
       // Surfaced in the UI so the agent can see WHY a field is blank.
       unmatched: {
         product: !!out.productName && !product ? out.productName : null,

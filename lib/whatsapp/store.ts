@@ -3,6 +3,7 @@ import { after } from 'next/server'
 import { connectInboxDatabase } from '@/lib/messenger/pg'
 import { validateWhatsAppScope, requireWhatsAppNumber, decodeWhatsAppCursor, encodeWhatsAppCursor, WhatsAppScopeError } from './number-scope'
 import { persistWhatsAppMessage, persistWhatsAppStatus } from './persistence'
+import { alignReceiptsWithCopies, copyTime, historyCopyId, type CopyRow } from '@/lib/whatsapp-green/receipt-match'
 
 /** WhatsApp content is persisted from webhooks, supported history imports and local sends.
  * Status webhooks contain delivery state, not the message body. */
@@ -77,6 +78,8 @@ export type WaMessage = {
   status: string | null
   error: string | null
   createdAt: string
+  /** Set when a status-only receipt's text came from its identity-verified GREEN-API copy. */
+  copySource?: 'green-api' | null
 }
 
 export function whatsappToken(): string | undefined {
@@ -239,26 +242,60 @@ export async function listContactsForScopes(scopes: { phoneNumberId: string; waI
 }
 
 /** The revision and transcript share a read-only snapshot; read acknowledgement cannot erase a later arrival. */
-export async function listMessages(waId:string,phoneNumberId:string,limit=100,before?:string):Promise<{messages:WaMessage[];readVersion:string}> {
+export async function listMessages(waId:string,phoneNumberId:string,limit=100,before?:string):Promise<{messages:WaMessage[];readVersion:string;hasMore:boolean;nextCursor:string|null}> {
   validateWhatsAppScope(waId,phoneNumberId)
   await requireWhatsAppNumber(phoneNumberId)
   const cursor=decodeWhatsAppCursor(before)
+  const pageSize=Math.min(100,Math.max(1,limit))
   const db=await connectInboxDatabase()
   try {
     await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const contact=(await db.query('SELECT activity_version FROM whatsapp_conversations WHERE wa_id=$1 AND phone_number_id=$2',[waId,phoneNumberId])).rows[0]
     if(!contact) throw new WhatsAppScopeError('This customer has no conversation on the selected business number.',404)
     const rows=(await db.query(`SELECT id,wa_id,phone_number_id,direction,type,body,media_id,media_mime,status,error,created_at,
+      (type='external' OR COALESCE(raw #>> '{_inbox,receiptOnly}','false')='true') AS receipt_only,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
       FROM whatsapp_messages WHERE wa_id=$1 AND phone_number_id=$2
         AND ($3::timestamptz IS NULL OR (created_at,id)<($3::timestamptz,$4::text))
-      ORDER BY created_at DESC,id DESC LIMIT $5`,[waId,phoneNumberId,cursor?.[0]??null,cursor?.[1]??null,Math.min(100,Math.max(1,limit))])).rows
+      ORDER BY created_at DESC,id DESC LIMIT $5`,[waId,phoneNumberId,cursor?.[0]??null,cursor?.[1]??null,pageSize])).rows
+    // Phone-typed replies reach Meta as status receipts without text; GREEN-API keeps the text.
+    // Only a copy whose id Meta itself embedded in the wamid may fill a receipt. Copies with NO Meta
+    // row at all (history/journal imports) are the only record of that message and are folded in below.
+    const copies:(CopyRow&{first_observed_at:Date|string|null})[]=(await db.query(`SELECT provider_message_id,wa_id,direction,kind,body,provider_accepted_at,first_observed_at,deleted_observed,conflicted
+      FROM whatsapp_green_messages WHERE wa_id=$1 AND phone_number_id=$2`,[waId,phoneNumberId])).rows
+    const {fills,historyOnlyCopies}=alignReceiptsWithCopies(rows.map(r=>({...r,receiptOnly:r.receipt_only===true})),copies)
     await db.query('COMMIT')
-    return {readVersion:String(contact.activity_version),messages:rows.map(r=>({
-      id:r.id,waId:r.wa_id,phoneNumberId:r.phone_number_id,direction:r.direction,type:r.type,body:r.body,
-      mediaId:r.media_id,mediaMime:r.media_mime,status:r.status,error:r.error,createdAt:new Date(r.created_at).toISOString(),
-      cursor:encodeWhatsAppCursor({createdAt:r.cursor_time,id:r.id}),
-    })).reverse()}
+    // Paging is decided by canonical rows alone so folded copies can never hide an older page.
+    const hasMore=rows.length===pageSize
+    const oldest=rows.at(-1)
+    const nextCursor=hasMore&&oldest?encodeWhatsAppCursor({createdAt:oldest.cursor_time,id:oldest.id}):null
+    const oldestTime=oldest?new Date(oldest.created_at).getTime():Number.NEGATIVE_INFINITY
+    const canonical:WaMessage[]=rows.map(r=>{
+      const fill=fills.get(r.id)
+      return {
+        id:r.id,waId:r.wa_id,phoneNumberId:r.phone_number_id,direction:r.direction,type:r.type,body:fill?fill.body:r.body,
+        mediaId:r.media_id,mediaMime:r.media_mime,status:r.status,error:r.error,createdAt:new Date(r.created_at).toISOString(),
+        cursor:encodeWhatsAppCursor({createdAt:r.cursor_time,id:r.id}),
+        copySource:fill?'green-api' as const:null,
+      }
+    }).reverse()
+    // Provider acceptance is the copy's own timestamp; first observation is only a fallback when it is absent.
+    const folded:WaMessage[]=historyOnlyCopies.flatMap(copy=>{
+      const source=copy as typeof copies[number]
+      const at=copyTime(copy.provider_accepted_at)
+      const when=Number.isFinite(at)?at:copyTime(source.first_observed_at)
+      if(!Number.isFinite(when))return []
+      // Older pages are still behind the cursor: only fold copies that belong to this page's window.
+      if(hasMore&&when<oldestTime)return []
+      if(cursor&&when>=Date.parse(cursor[0]))return []
+      return [{
+        id:historyCopyId(copy.provider_message_id),waId:copy.wa_id,phoneNumberId,direction:copy.direction as WaMessage['direction'],type:'text',
+        body:copy.body!.trim(),mediaId:null,mediaMime:null,status:null,error:null,createdAt:new Date(when).toISOString(),
+        cursor:oldest?encodeWhatsAppCursor({createdAt:oldest.cursor_time,id:oldest.id}):'',copySource:'green-api' as const,
+      }]
+    })
+    const messages=[...canonical,...folded].sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)||a.id.localeCompare(b.id))
+    return {readVersion:String(contact.activity_version),messages,hasMore,nextCursor}
   } catch(error) { await db.query('ROLLBACK').catch(()=>{});throw error }
   finally { await db.end().catch(()=>{}) }
 }

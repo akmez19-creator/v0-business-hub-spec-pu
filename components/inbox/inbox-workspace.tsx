@@ -74,11 +74,7 @@ export function InboxWorkspace({ origin }: { origin: string }) {
   )
 
   return (
-    <div ref={panelRef} style={{ height: height ?? '70dvh' }} className="flex min-h-0 flex-col gap-2 px-3 pb-2 md:px-6">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>{healthError ? 'Page activity check unavailable' : health ? `${health.pages.length} Pages in inbox history` : 'Checking Page activity…'}</span>
-        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setHealthOpen((value) => !value)}>{healthOpen ? 'Hide Page activity' : 'Page activity'}</Button>
-      </div>
+    <div ref={panelRef} style={{ height: height ?? '70dvh' }} className="flex min-h-0 flex-col gap-2 px-3 pb-1 md:px-6">
       {healthOpen ? <div className="grid shrink-0 gap-2 rounded-lg border bg-card p-3 text-xs sm:grid-cols-2">
         {health?.pages.map((page) => <div key={page.id}><p className="font-medium">{page.name}</p><p className="mt-1 text-muted-foreground">{page.conversationCount} conversations in history</p><p className="text-muted-foreground">Last received event: {page.lastWebhookAt ? new Date(page.lastWebhookAt).toLocaleString() : 'Not recorded'}</p>{page.lastWebhookError || page.lastSyncError ? <p className="mt-1 text-amber-600 dark:text-amber-400">{page.lastWebhookError || page.lastSyncError}</p> : null}</div>)}
         {health?.messenger?.lastError ? <p className="text-amber-600 dark:text-amber-400 sm:col-span-2">Facebook updates delayed: {health.messenger.lastError}</p> : null}
@@ -105,7 +101,12 @@ export function InboxWorkspace({ origin }: { origin: string }) {
         {setupOpen ? <WhatsAppChannel origin={origin} initialWaId={null} /> : null}
       </div>
 
-      <div className="flex justify-end">
+      {/* Status and setup share one footer line so the columns above get the height. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1">
+          <span>{healthError ? 'Page activity check unavailable' : health ? `${health.pages.length} Pages in inbox history` : 'Checking Page activity…'}</span>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setHealthOpen((value) => !value)} aria-expanded={healthOpen}>{healthOpen ? 'Hide Page activity' : 'Page activity'}</Button>
+        </div>
         <Button
           variant="ghost"
           size="sm"

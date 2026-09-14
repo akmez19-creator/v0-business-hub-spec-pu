@@ -23,5 +23,5 @@ export function customerFromChat(chatId: string): string | null {
   const match = /^(\d{5,20})@c\.us$/.exec(chatId)
   return match?.[1] ?? null
 }
-export type GreenMessageView = { id: string; source: 'green-api'; providerInstanceId: string; providerChatId: string; providerMessageId: string; direction: 'in'|'out'; kind:'text'|'unsupported'|'deleted'; text:string|null; providerAcceptedAt:string|null; sentAt:null; observedAt:string; edited:boolean; conflicted:boolean; canonicalReceiptMatch:'unverified' }
+export type GreenMessageView = { id: string; source: 'green-api'; providerInstanceId: string; providerChatId: string; providerMessageId: string; direction: 'in'|'out'; kind:'text'|'unsupported'|'deleted'; text:string|null; providerAcceptedAt:string|null; sentAt:null; observedAt:string; edited:boolean; conflicted:boolean; canonicalReceiptMatch:'verified'|'unverified' }
 export type GreenReadiness = { allowed:false; canDraft:boolean; reasons:GreenBlockReason[]; draftReasons:GreenBlockReason[]; contextVersion:number; unresolvedOriginalCount:number; unsupportedOriginalCount:number; canonicalHasMore:boolean; providerConflictCount:number; pendingProviderCount:number; providerUnalignedCount:number; coverage:'unknown'; mode:'observation' }

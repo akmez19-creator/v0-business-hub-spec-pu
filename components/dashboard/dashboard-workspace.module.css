@@ -65,8 +65,25 @@
 .viewToggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 7px; min-height: 44px; margin-left: auto; padding: 10px 12px; border: 1px solid #587789; border-radius: 10px; color: #d6e9f1; background: #172c3b; font-size: 14px; line-height: 1.35; white-space: nowrap; }
 .viewToggle[aria-pressed="true"], .viewToggle[data-active="true"] { border-color: #8ab8c4; color: #e6f7fa; background: #2c4a59; }
 .viewToggle svg { width: 15px; height: 15px; }
+.chromeToggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 7px; min-height: 44px; padding: 10px 12px; border: 1px solid #587789; border-radius: 10px; color: #d6e9f1; background: #172c3b; font-size: 14px; line-height: 1.35; white-space: nowrap; }
+.chromeToggle[aria-pressed="true"] { border-color: #8ab8c4; color: #e6f7fa; background: #2c4a59; }
+.chromeToggle svg { width: 16px; height: 16px; }
 .content { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #4b6679 #0b1420; }
 .contentInner { box-sizing: border-box; width: 100%; max-width: 1560px; min-width: 0; margin-inline: auto; padding: 24px; }
+/* Compact chrome: one thin bar, the page gets the rest of the screen. */
+.shell[data-compact="true"] .groupbar, .shell[data-compact="true"] .quickbar { display: none; }
+.shell[data-compact="true"] .canopy { width: calc(100% - 24px); max-width: none; margin-top: 8px; border-radius: 14px; }
+.shell[data-compact="true"] .topbar { gap: 14px; min-height: 54px; padding: 5px 14px; }
+.shell[data-compact="true"] .brand { min-width: 0; min-height: 40px; }
+.shell[data-compact="true"] .brandMark { width: 34px; height: 34px; border-radius: 10px; }
+.shell[data-compact="true"] .brandMark svg { width: 18px; height: 18px; }
+.shell[data-compact="true"] .brandText span { display: none; }
+.shell[data-compact="true"] .context { gap: 0; padding-left: 14px; }
+.shell[data-compact="true"] .context > span { font-size: 11px; }
+.shell[data-compact="true"] .context strong { font-size: 14px; }
+.shell[data-compact="true"] .searchTrigger, .shell[data-compact="true"] .chromeToggle, .shell[data-compact="true"] .accountButton, .shell[data-compact="true"] .iconButton { min-height: 38px; padding-block: 6px; }
+.shell[data-compact="true"] .accountText span { display: none; }
+.shell[data-compact="true"] .contentInner, .shell[data-compact="true"][data-width="wide"] .contentInner { max-width: none; padding: 10px 12px 12px; }
 .shell[data-width="wide"] .contentInner { max-width: 2200px; }
 .dialog { display: flex !important; flex-direction: column; width: calc(100% - 32px) !important; max-width: 1000px !important; max-height: calc(100dvh - 32px); gap: 0 !important; overflow: hidden; padding: 0 !important; border: 1px solid #658491 !important; border-radius: 21px !important; background: #101c2b !important; color: var(--nav-ink) !important; box-shadow: 0 26px 100px #0008; }
 .dialogHeader { display: flex; align-items: flex-start; justify-content: space-between; flex-shrink: 0; gap: 20px !important; padding: 26px 28px 18px; text-align: left !important; }

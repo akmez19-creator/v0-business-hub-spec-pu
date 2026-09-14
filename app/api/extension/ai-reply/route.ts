@@ -2,6 +2,14 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  deliveryDayLabel,
+  offerLabel,
+  priceFor,
+  upcomingDeliveryDates,
+  type Holiday,
+  type QuickOrderProduct,
+} from '@/lib/orders/quick-order'
 
 // Do NOT use the edge runtime with the AI SDK.
 export const runtime = 'nodejs'
@@ -66,24 +74,51 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'No customer message found to reply to.' }, { status: 400, headers: corsHeaders })
     }
 
-    // Admin-configured business context (tone, policies, product info)
-    const { data: settingsRow } = await auth.supabase
-      .from('extension_settings')
-      .select('ai_reply_prompt')
-      .eq('id', 1)
-      .single()
+    // Same grounding as /api/inbox/ai-assist: the owner's instruction, the live
+    // catalogue with real prices, and the delivery days that can honestly be
+    // offered. Without these the extension button could only talk in generalities.
+    const [{ data: settingsRow }, { data: products }] = await Promise.all([
+      auth.supabase
+        .from('extension_settings')
+        .select('ai_reply_prompt, cutoff_time, delivery_day_scheme, holidays')
+        .eq('id', 1)
+        .single(),
+      auth.supabase
+        .from('products')
+        .select('id, name, price, bundle_prices, is_b1g1')
+        .eq('is_active', true)
+        .order('name'),
+    ])
     const businessContext: string = typeof settingsRow?.ai_reply_prompt === 'string' ? settingsRow.ai_reply_prompt.trim() : ''
+    const catalogue = (products ?? []) as QuickOrderProduct[]
+    const priceList = catalogue
+      .map(p => {
+        const one = priceFor(p, 1)
+        const offer = offerLabel(p)
+        return `${p.name}: Rs ${one}${offer ? ` (${offer})` : ''}`
+      })
+      .join('\n')
+    const holidays: Holiday[] = Array.isArray(settingsRow?.holidays) ? settingsRow.holidays : []
+    const deliveryOptions = upcomingDeliveryDates(
+      new Date(),
+      settingsRow?.cutoff_time || '20:00',
+      (settingsRow?.delivery_day_scheme as Record<string, string>) || {},
+      holidays,
+    )
+    const deliveryFacts = deliveryOptions.map(d => `${deliveryDayLabel(d)} (${d})`).join(', ')
 
     const system = [
       'You are a customer-service agent replying to a customer message in a social-media inbox (Facebook/Instagram/WhatsApp) for a Mauritian retail/delivery business.',
       'Write ONE concise, friendly, professional reply that directly answers the latest customer message and moves the sale or delivery forward.',
       'Reply in the SAME language the customer used (English, French, or Mauritian Kreol). Keep it natural and human, not robotic.',
-      'Do not invent prices, stock, or delivery dates you were not given. If information is missing, politely ask for it.',
+      'Talk about the specific product the customer asked about, using its exact name and price from the PRICE LIST. Do not invent prices, stock, or delivery dates you were not given. If information is missing, politely ask for it.',
       'Do not use markdown, bullet points, or quotation marks around the whole message. Return only the message text the agent will send.',
       pageName ? `The business page is "${pageName}".` : '',
       customerName ? `The customer's name is "${customerName}"; you may greet them by first name if natural.` : '',
+      priceList ? `\nPRICE LIST (unit price for one; offers as noted):\n${priceList}` : '',
+      `\nDELIVERY DAYS AVAILABLE (the only dates you may offer; the first is the default): ${deliveryFacts}. If the customer asks for a different day, say the team will confirm.`,
       businessContext ? `\nBusiness context and tone to follow:\n${businessContext}` : '',
-    ].filter(Boolean).join(' ')
+    ].filter(Boolean).join('\n')
 
     const { text } = await generateText({
       model: openai('gpt-4.1'),

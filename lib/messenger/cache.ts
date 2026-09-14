@@ -39,6 +39,7 @@ type ConversationRow = {
   product_id: string | null
   campaign_id: string | null
   campaign_name: string | null
+  done_at?: string | null
 }
 
 function toConversation(row: ConversationRow): InboxConversation {
@@ -62,11 +63,12 @@ function toConversation(row: ConversationRow): InboxConversation {
     campaignId: row.campaign_id,
     campaignName: row.campaign_name,
     lastFromCustomer: row.last_from_customer,
+    doneAt: row.done_at ?? null,
   }
 }
 
 const COLUMNS =
-  'psid,conversation_id,page_id,page_name,customer_name,last_message_at,last_snippet,last_from_customer,message_count,unread_count,ad_id,ad_name,product,product_id,campaign_id,campaign_name'
+  'psid,conversation_id,page_id,page_name,customer_name,last_message_at,last_snippet,last_from_customer,message_count,unread_count,ad_id,ad_name,product,product_id,campaign_id,campaign_name,done_at'
 
 export async function listCachedConversations(options: {
   pageId?: string

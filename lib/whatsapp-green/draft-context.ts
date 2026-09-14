@@ -4,6 +4,7 @@ import { connectInboxDatabase } from '@/lib/messenger/pg'
 import { requireWhatsAppInboxUser, requireWhatsAppNumber, validateWhatsAppScope } from '@/lib/whatsapp/number-scope'
 import { getGreenReadiness } from './store'
 import { buildWhatsAppDraftTranscript, WhatsAppDraftBlocked, type DraftMessage } from './draft-policy'
+import { alignReceiptsWithCopies, copyTime, historyCopyId, type CopyRow, type ReceiptRow } from './receipt-match'
 
 export type WhatsAppDraftContext = {
   waId: string
@@ -37,10 +38,35 @@ export async function loadWhatsAppDraftContext(
       'SELECT activity_version FROM whatsapp_conversations WHERE wa_id=$1 AND phone_number_id=$2', [waId, phone],
     )).rows[0]
     if (!contact) throw new WhatsAppDraftBlocked('NO_CONVERSATION', 'No conversation was found on this business number.', 404)
-    const rows = (await db.query(
-      `SELECT id,direction,type,body,media_id FROM whatsapp_messages
+    const originals = (await db.query(
+      `SELECT id,wa_id,direction,type,body,media_id,created_at,
+              (type='external' OR COALESCE(raw #>> '{_inbox,receiptOnly}','false')='true') AS receipt_only
+       FROM whatsapp_messages
        WHERE wa_id=$1 AND phone_number_id=$2 ORDER BY created_at DESC,id DESC LIMIT 101`, [waId, phone],
-    )).rows as (DraftMessage & { id: string })[]
+    )).rows as (ReceiptRow & { receipt_only: boolean })[]
+    const copies = (await db.query(
+      `SELECT provider_message_id,wa_id,direction,kind,body,provider_accepted_at,deleted_observed,conflicted
+       FROM whatsapp_green_messages WHERE wa_id=$1 AND phone_number_id=$2`, [waId, phone],
+    )).rows as CopyRow[]
+    // A status-only receipt reads as its verified GREEN-API copy; anything unverified stays blank and blocks below.
+    // Copies with no Meta row (history imports) are folded in as their own turns - the same rows the thread shows.
+    const { fills, historyOnlyCopies } = alignReceiptsWithCopies(originals.map(row => ({ ...row, receiptOnly: row.receipt_only === true })), copies)
+    type Turn = DraftMessage & { id: string; filledFrom?: string; at: number }
+    const time = (value: string | Date) => (value instanceof Date ? value.getTime() : Date.parse(value))
+    const rows: Turn[] = originals.map(row => {
+      const fill = fills.get(row.id)
+      return fill
+        ? { id: row.id, direction: row.direction, type: 'text', body: fill.body, media_id: null, filledFrom: fill.providerMessageId, at: time(row.created_at) }
+        : { id: row.id, direction: row.direction, type: row.type, body: row.body, media_id: row.media_id ?? null, at: time(row.created_at) }
+    })
+    const oldestOriginal = originals.length ? Math.min(...rows.map(row => row.at)) : Number.NEGATIVE_INFINITY
+    for (const copy of historyOnlyCopies) {
+      const at = copyTime(copy.provider_accepted_at)
+      // Beyond the 101-row window older originals are not loaded either, so keep the same horizon.
+      if (!Number.isFinite(at) || (originals.length > 100 && at < oldestOriginal)) continue
+      rows.push({ id: historyCopyId(copy.provider_message_id), direction: copy.direction, type: 'text', body: copy.body!.trim(), media_id: null, filledFrom: copy.provider_message_id, at })
+    }
+    rows.sort((a, b) => b.at - a.at || b.id.localeCompare(a.id))
     const transcript = buildWhatsAppDraftTranscript(rows.slice().reverse())
     const fingerprint = createHash('sha256').update(JSON.stringify([contact.activity_version, rows])).digest('hex')
     await db.query('COMMIT')

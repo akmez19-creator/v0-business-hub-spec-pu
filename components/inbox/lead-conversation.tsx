@@ -14,7 +14,9 @@ import type { CommentItem } from './comments-channel'
 import { format } from 'date-fns'
 import {
   AlertTriangle,
+  CheckCheck,
   Loader2,
+  Smartphone,
   Megaphone,
   MessageCircle,
   MessageSquare,
@@ -80,7 +82,7 @@ export function LeadConversation({
   onGreenContextChange,
 }: {
   thread: UnifiedThread
-  messages: (LeadMessage & { status?: string | null; receiptOnly?: boolean })[]
+  messages: (LeadMessage & { status?: string | null; receiptOnly?: boolean; fromCopy?: boolean })[]
   loading: boolean
   rateLimited: boolean
   draft: string
@@ -160,6 +162,17 @@ export function LeadConversation({
               </span>
             </p>
           ) : null}
+          {thread.done ? (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CheckCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Marked Done in Meta Business Suite · {format(new Date(thread.done.at), 'd MMM HH:mm')} · reopens if the customer writes again</span>
+            </p>
+          ) : thread.answeredByPhone ? (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Smartphone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Last reply was sent from the phone (seen by GREEN-API), not through this inbox</span>
+            </p>
+          ) : null}
         </div>
         {replyWindow !== 'open' ? (
           <Badge variant="outline" title={thread.channel === 'messenger' ? 'Based on loaded messages from the customer' : undefined} className="shrink-0 gap-1.5 border-amber-500/40 text-amber-500">
@@ -226,6 +239,7 @@ export function LeadConversation({
                   <span className="text-[11px] opacity-60 tabular-nums">
                     {m.createdAt ? format(new Date(m.createdAt), 'd MMM HH:mm') : ''}
                     {m.fromBusiness && m.status ? ` · ${m.status}` : ''}
+                    {m.fromCopy ? (m.id.startsWith('green:') ? ' · from WhatsApp history' : ' · text from WhatsApp copy') : ''}
                   </span>
                 </div>
               </li>

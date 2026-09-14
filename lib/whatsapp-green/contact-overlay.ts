@@ -12,6 +12,12 @@ export type GreenContactDisplay = {
   source: 'green-api'; only: boolean; messageCount: number; activityAt: string | null
   activityBasis: 'provider-live-acceptance' | 'copy-received' | 'none'
   snippet: string | null; lastObservedAt: string | null; historyUnverified: true
+  /**
+   * Newest message the phone itself has seen (live webhook or journal copy),
+   * by provider time. This is what says whether a reply typed on the handset
+   * already answered the customer - Meta never sees those sends.
+   */
+  lastDirection: 'in' | 'out' | null; lastAt: string | null
 }
 export type ContactWithGreen = WaContact & { green?: GreenContactDisplay }
 const currentBusinesses: Record<string, { pageId: string; phone: string }> = {
@@ -56,10 +62,16 @@ export function overlayGreenContacts(canonical: WaContact[], provider: GreenCont
     const receivedAt = !existing && row.hasLiveObservation ? knownDate(row.liveObservedAt, now) : null
     const liveAt = acceptedAt ?? receivedAt
     const newerLive = liveAt && (!existing || time(liveAt) > time(existing.lastMessageAt)) ? liveAt : null
+    // Journal copies are dated by provider acceptance only; their import time says nothing about the conversation.
+    const liveSeen = row.hasLiveObservation && row.liveDirection ? { at: acceptedAt ?? knownDate(row.liveObservedAt, now), direction: row.liveDirection } : null
+    const journalSeen = row.latestDirection ? { at: knownDate(row.latestProviderAcceptedAt, now), direction: row.latestDirection } : null
+    const newest = [liveSeen, journalSeen].filter((seen): seen is { at: string; direction: 'in' | 'out' } => !!seen?.at)
+      .sort((a, b) => time(b.at) - time(a.at))[0] ?? null
     const green: GreenContactDisplay = { source: 'green-api', only: !existing, messageCount: row.providerMessageCount,
       activityAt: newerLive, activityBasis: newerLive ? acceptedAt ? 'provider-live-acceptance' : 'copy-received' : 'none',
       snippet: newerLive ? row.liveText?.trim() || null : !existing ? row.latestText?.trim() || null : null,
-      lastObservedAt: knownDate(row.latestObservedAt, now), historyUnverified: true }
+      lastObservedAt: knownDate(row.latestObservedAt, now), historyUnverified: true,
+      lastDirection: newest?.direction ?? null, lastAt: newest?.at ?? null }
     rows.set(identity, existing ? { ...existing, green } : {
       waId: row.waId, phoneNumberId: row.phoneNumberId, profileName: row.profileName?.trim() || null, businessName: row.businessName,
       pageId: row.pageId, displayPhone: '+' + row.businessPhone, canSend: false, outsideWindow: true,

@@ -401,6 +401,37 @@ export function computeDefaultDeliveryDate(
 }
 
 /**
+ * The delivery days that can honestly be offered to a customer right now: the
+ * default date first, then the following working days. One source for both
+ * the Quick Order chips and the facts handed to the AI, so the agent and the
+ * draft can never propose different days.
+ */
+export function upcomingDeliveryDates(
+  now: Date,
+  cutoff: string,
+  scheme: Record<string, string | number | null | undefined>,
+  holidays: Holiday[],
+  count = 4,
+): string[] {
+  const first = computeDefaultDeliveryDate(now, cutoff, scheme, holidays).date
+  const out = [first]
+  let cursor = first
+  while (out.length < count) {
+    cursor = nextWorkingDay(cursor, holidays)
+    if (cursor === out[out.length - 1]) break
+    out.push(cursor)
+  }
+  return out
+}
+
+/** "Tue 16 Sep" for a YYYY-MM-DD, parsed field-by-field to avoid the UTC day shift. */
+export function deliveryDayLabel(ymdDate: string, locale = 'en-GB'): string {
+  const [y, m, d] = ymdDate.split('-').map(Number)
+  if (!y || !m || !d) return ymdDate
+  return new Date(y, m - 1, d).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })
+}
+
+/**
  * Best-effort Mauritian mobile number found in free text.
  *
  * Local mobiles are 8 digits starting with 5, and customers write them with

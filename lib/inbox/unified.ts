@@ -63,6 +63,19 @@ export type UnifiedThread = {
   /** Triage bucket. Derived, never stored - see lib/inbox/stage.ts. */
   stage: LeadStage
   messageCount: number
+  /**
+   * Marked Done in Meta Business Suite and nothing newer has arrived since.
+   * A done chat is never "waiting", however the last message reads.
+   */
+  done?: { at: string } | null
+  /**
+   * WhatsApp only: Meta's record says the customer spoke last, but the phone
+   * (GREEN-API) saw a later outgoing message. Someone answered from the
+   * handset, so this chat is not waiting.
+   */
+  answeredByPhone?: boolean
+  /** Where "who spoke last" came from, so the UI can say it honestly. */
+  lastReplyBasis?: 'meta' | 'phone' | 'business-suite-done'
 }
 
 function attribution(
@@ -117,6 +130,21 @@ export type MessengerRow = AttributedRow & {
   adId?: string | null
   adName?: string | null
   productSource?: 'ad-click' | 'comment' | null
+  doneAt?: string | null
+}
+
+const knownTime = (value: string | null | undefined) => value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : Number.NEGATIVE_INFINITY
+
+/**
+ * Done holds only until something newer arrives - Business Suite reopens the
+ * chat the same way. Compared at whole seconds: Graph reports the Done folder's
+ * `updated_time` without milliseconds while our message times keep them
+ * (measured: 328 of 547 Done rows differed by under a second, none for real).
+ */
+export function effectiveDone(doneAt: string | null | undefined, updatedAt: string | null): { at: string } | null {
+  if (!doneAt || !Number.isFinite(Date.parse(doneAt))) return null
+  const seconds = (value: string | null) => Math.floor(knownTime(value) / 1000)
+  return seconds(doneAt) >= seconds(updatedAt) ? { at: doneAt } : null
 }
 
 export type WhatsAppRow = AttributedRow & {
@@ -140,7 +168,10 @@ export type WhatsAppRow = AttributedRow & {
 
 export function fromMessenger(c: MessengerRow): UnifiedThread {
   const updatedAt = c.updatedTime ?? null
+  const done = effectiveDone(c.doneAt, updatedAt)
   return {
+    done,
+    lastReplyBasis: done ? 'business-suite-done' : 'meta',
     key: `messenger:${c.id}`,
     channel: 'messenger',
     nativeId: c.id,
@@ -156,7 +187,7 @@ export function fromMessenger(c: MessengerRow): UnifiedThread {
     // thread that predates the subscription - Graph cannot backfill it.
     adId: c.adId ?? null,
     adName: c.adName ?? null,
-    ...attribution(c, updatedAt, c.product ? 'ad' : null),
+    ...attribution(done ? { ...c, lastFromCustomer: false } : c, updatedAt, c.product ? 'ad' : null),
   }
 }
 
@@ -168,13 +199,22 @@ export function fromWhatsApp(c: WhatsAppRow): UnifiedThread {
   const updatedAt = newerCopy ? liveCopyAt : canonicalAt
   const providerOnly = c.green?.only === true
   const copySnippet = c.green?.snippet ? `${newerCopy ? 'GREEN-API copy' : 'History copy'} · ${c.green.snippet}` : ''
+  // The phone's own record decides "who spoke last" whenever it is at least as
+  // recent as Meta's: replies typed on the handset never reach the Meta API.
+  const phoneDirection = c.green?.lastDirection ?? null
+  const phoneDecides = Boolean(phoneDirection && c.green?.lastAt && knownTime(c.green.lastAt) >= knownTime(canonicalAt))
+  const lastFromCustomer = phoneDecides ? phoneDirection === 'in' : c.lastFromCustomer ?? false
+  const answeredByPhone = phoneDecides && phoneDirection === 'out' && c.lastFromCustomer === true
+  const activityAt = phoneDecides && knownTime(c.green!.lastAt) > knownTime(updatedAt) ? c.green!.lastAt : updatedAt
   return {
+    answeredByPhone,
+    lastReplyBasis: phoneDecides ? 'phone' : 'meta',
     key: whatsappConversationKey(c),
     channel: 'whatsapp',
     nativeId: c.waId,
     name: c.profileName?.trim() || c.waId,
     snippet: (newerCopy || providerOnly) && copySnippet ? copySnippet : c.lastSnippet ?? '',
-    updatedAt,
+    updatedAt: activityAt,
     unreadCount: providerOnly ? 0 : c.unreadCount ?? 0,
     outsideWindow: providerOnly ? true : c.outsideWindow ?? false,
     source: ([c.businessName, c.displayPhone].filter(Boolean).join(' · ') || (c.phoneNumberId ? 'WhatsApp business number ' + c.phoneNumberId : 'WhatsApp · business number unconfirmed')) + (providerOnly ? ' · additional copies only' : ''),
@@ -189,7 +229,7 @@ export function fromWhatsApp(c: WhatsAppRow): UnifiedThread {
     // The headline Meta sends is the PAGE name on every ad, so it is only a
     // last resort - never preferred over the resolved ad name.
     adName: c.firstAdName ?? c.firstAdHeadline ?? null,
-    ...attribution(c, canonicalAt, c.product ? 'ad' : null),
+    ...attribution({ ...c, lastFromCustomer }, phoneDecides ? (c.green?.lastAt ?? canonicalAt) : canonicalAt, c.product ? 'ad' : null),
   }
 }
 

@@ -26,8 +26,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { offerLabel, priceFor, unitPrice, type QuickOrderProduct } from '@/lib/orders/quick-order'
+import { deliveryDayLabel, offerLabel, priceFor, unitPrice, upcomingDeliveryDates, type Holiday, type QuickOrderProduct } from '@/lib/orders/quick-order'
 import type { UnifiedThread } from '@/lib/inbox/unified'
+import { CustomerOrderHistory } from './customer-order-history'
 
 const fetcher = readInbox
 
@@ -88,11 +89,24 @@ export function QuickOrderPanel({
     products?: QuickOrderProduct[]
     regions?: string[]
     regionDelivery?: Record<string, { contractor: string; rider: string | null }>
-    settings?: { pageMappings?: { match: string; code: string; pageId?: string }[] }
+    settings?: {
+      pageMappings?: { match: string; code: string; pageId?: string }[]
+      cutoffTime?: string
+      deliveryDayScheme?: Record<string, string>
+      holidays?: Holiday[]
+    }
   }>('/api/extension', fetcher, { revalidateOnFocus: false })
 
   const products = data?.products ?? []
   const regions = data?.regions ?? []
+
+  // The same delivery-day rules the AI draft quotes to the customer, so the
+  // chips and the draft can never offer different days.
+  const deliveryOptions = useMemo(() => {
+    const s = data?.settings
+    if (!s) return []
+    return upcomingDeliveryDates(new Date(), s.cutoffTime || '20:00', s.deliveryDayScheme || {}, s.holidays || [])
+  }, [data?.settings])
 
   const product = useMemo(
     () => products.find((p) => p.id === draft.productId) ?? null,
@@ -218,6 +232,14 @@ export function QuickOrderPanel({
       </div>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+        {/* What we already know about this number: past orders and, critically,
+            any order still in flight - the guard against two agents raising the
+            same order. Falls back to the WhatsApp number until the phone fills. */}
+        <CustomerOrderHistory
+          phone={draft.contact1}
+          waId={thread.channel === 'whatsapp' ? thread.recipientId : null}
+        />
+
         {/* Say plainly what the AI could not resolve. A blank field with no
             explanation reads as a bug; this reads as a decision to confirm. */}
         {unmatched?.product || unmatched?.locality ? (
@@ -310,6 +332,29 @@ export function QuickOrderPanel({
             />
           </div>
         </div>
+        {deliveryOptions.length > 0 && (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Next delivery days">
+            {deliveryOptions.map((d, i) => {
+              const active = draft.deliveryDate === d
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => set('deliveryDate', d)}
+                  aria-pressed={active}
+                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    active
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                >
+                  {deliveryDayLabel(d)}
+                  {i === 0 && <span className="sr-only"> (next available)</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="qo-business">Business</Label>

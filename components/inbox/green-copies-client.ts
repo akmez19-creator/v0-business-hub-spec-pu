@@ -2,7 +2,7 @@ export type GreenScope = { phoneNumberId: string; waId: string }
 export type GreenMessage = {
   id: string; source: 'green-api'; providerInstanceId: string; providerChatId: string; providerMessageId: string
   direction: 'in' | 'out'; kind: 'text' | 'unsupported' | 'deleted'; text: string | null
-  providerAcceptedAt: string | null; sentAt: null; observedAt: string; edited: boolean; conflicted: boolean; canonicalReceiptMatch: 'unverified'
+  providerAcceptedAt: string | null; sentAt: null; observedAt: string; edited: boolean; conflicted: boolean; canonicalReceiptMatch: 'verified' | 'unverified'
 }
 export type GreenReadiness = { allowed: false; canDraft: boolean; reasons: string[]; draftReasons: string[]; contextVersion: number
   unresolvedOriginalCount: number; unsupportedOriginalCount: number; canonicalHasMore: boolean; providerConflictCount: number; pendingProviderCount: number; providerUnalignedCount: number; coverage: 'unknown' }
@@ -30,13 +30,13 @@ export const GREEN_REASON_LABELS: Record<string, string> = {
   NOT_CONFIGURED: 'This business is not configured for additional copies.',
   PAUSED: 'Receiving additional copies is paused.',
   CONNECTION_UNVERIFIED: 'The business connection has not been verified.',
-  ORIGINAL_CONTENT_MISSING: 'Some original message content is still missing.',
+  ORIGINAL_CONTENT_MISSING: 'Some original messages have no verified copy, so their content is still missing.',
   UNSUPPORTED_CONTENT: 'Some message content needs a person to review it.',
   HISTORY_TRUNCATED: 'Only part of the conversation history is available.',
   PROVIDER_CONFLICT: 'Conflicting message records need review.',
   PENDING_RECONCILIATION: 'Message coverage checks are still pending.',
   NO_READABLE_CONTEXT: 'No readable original conversation is stored yet.',
-  PROVIDER_CONTEXT_UNALIGNED: 'Additional copies have not been matched to the original conversation context.',
+  PROVIDER_CONTEXT_UNALIGNED: 'Some additional copies have no matching original message, so the AI transcript would omit them.',
 }
 
 export function parseGreenSnapshot(value: unknown, scope: GreenScope): GreenSnapshot {
@@ -62,12 +62,12 @@ export function parseGreenSnapshot(value: unknown, scope: GreenScope): GreenSnap
       !['in', 'out'].includes(String(item.direction)) || !['text', 'unsupported', 'deleted'].includes(String(item.kind)) ||
       !(item.text === null || typeof item.text === 'string' && item.text.length <= 100000) ||
       !date(item.providerAcceptedAt) || item.sentAt !== null || !date(item.observedAt) || item.observedAt === null ||
-      typeof item.edited !== 'boolean' || typeof item.conflicted !== 'boolean' || item.canonicalReceiptMatch !== 'unverified' ||
+      typeof item.edited !== 'boolean' || typeof item.conflicted !== 'boolean' || !['verified', 'unverified'].includes(String(item.canonicalReceiptMatch)) ||
       ((item.conflicted || item.kind === 'deleted') && item.text !== null)) throw new Error('invalid response')
     return { id: item.id, source: 'green-api', providerInstanceId: item.providerInstanceId, providerChatId: item.providerChatId,
       providerMessageId: item.providerMessageId, direction: item.direction as GreenMessage['direction'], kind: item.kind as GreenMessage['kind'],
       text: item.text, providerAcceptedAt: item.providerAcceptedAt, sentAt: null, observedAt: item.observedAt,
-      edited: item.edited, conflicted: item.conflicted, canonicalReceiptMatch: 'unverified' }
+      edited: item.edited, conflicted: item.conflicted, canonicalReceiptMatch: item.canonicalReceiptMatch as GreenMessage['canonicalReceiptMatch'] }
   })
   return { scope: { ...scope }, binding: { configured: binding.configured, enabled: binding.enabled, mode: 'observation',
     state: binding.state as GreenSnapshot['binding']['state'], lastEventAt: binding.lastEventAt, lastReconcileAt: binding.lastReconcileAt, lastError: binding.lastError },

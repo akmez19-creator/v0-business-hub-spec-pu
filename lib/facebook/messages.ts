@@ -65,6 +65,12 @@ export type InboxConversation = {
    * This is the single most commercially useful signal in the inbox.
    */
   lastFromCustomer?: boolean
+  /**
+   * When this chat was last seen in the Meta Business Suite "Done" folder.
+   * Effective only while it is not older than `updatedTime`: a newer customer
+   * message reopens the chat, exactly as Business Suite does.
+   */
+  doneAt?: string | null
 }
 
 export type InboxMessage = {

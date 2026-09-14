@@ -4,6 +4,7 @@ import { getInboxPages } from '@/lib/facebook/messages'
 import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
 import { cachedPageStats, cacheIsEmpty, listCachedConversations } from '@/lib/messenger/cache'
 import { syncConversations } from '@/lib/messenger/sync'
+import { syncDoneConversations } from '@/lib/messenger/done-sync'
 
 /**
  * Messenger conversations, served from Postgres.
@@ -49,6 +50,17 @@ export async function GET(request: Request) {
       }
     }
 
+    // Business Suite "Done" is one small call per Page, spaced five minutes
+    // apart on routine loads and forced on an explicit refresh. A failure here
+    // must never hide the conversations themselves.
+    let doneSyncError: string | undefined
+    try {
+      const done = await syncDoneConversations({ force: wantsRefresh })
+      if (!done.ok) doneSyncError = 'Business Suite Done status could not be refreshed for every Page.'
+    } catch {
+      doneSyncError = 'Business Suite Done status could not be refreshed.'
+    }
+
     const conversations = await listCachedConversations({
       pageId: requested === 'all' ? undefined : requested,
       limit: 200,
@@ -75,6 +87,7 @@ export async function GET(request: Request) {
       source: 'cache',
       rateLimited,
       syncError,
+      doneSyncError,
       partial,
       pages: pageRefs,
       pageStats,

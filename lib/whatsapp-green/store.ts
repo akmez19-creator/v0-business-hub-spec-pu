@@ -5,9 +5,12 @@ import { requireWhatsAppNumber, validateWhatsAppScope } from '@/lib/whatsapp/num
 import { configuredGreenBindings } from './config'
 import { greenFail, greenScope, type GreenBinding, type GreenEvent, type GreenReadiness, type GreenBlockReason, type GreenMessageView } from './contract'
 import { greenHash, stableGreenJson, normaliseWebhook, normaliseHistory } from './normalise'
+import { alignReceiptsWithCopies, decodeWamid } from './receipt-match'
 
 type Db={query:(sql:string,values?:any[])=>Promise<{rows:any[];rowCount?:number|null}>}
 const iso=(v:any):string|null=>v?new Date(v).toISOString():null
+/** Reasons a reconcile run records when it finished PARTIALLY, as opposed to a broken provider link. */
+const RECONCILE_PROGRESS_REASONS=new Set(['HISTORY_DEFERRED','JOURNAL_TRUNCATED','OUTSIDE_RECOVERY_WINDOW','STORED_RECOVERY_DEFERRED','QUARANTINED_EVENTS'])
 const activeKey=(b:GreenBinding)=>`green:v1:${b.phoneNumberId}:${b.instanceId}:journal`
 const fingerprint=(b:GreenBinding)=>stableGreenJson([b.phoneNumberId,b.instanceId,b.accountId,b.apiUrl,b.version,b.enabled,b.webhookToken,b.apiToken])
 export const GREEN_QUOTED_RECOVERY_RELEASE_KEY='green:quoted-current-text:v1:release'
@@ -172,11 +175,16 @@ export class PgGreenStore {
 
 export async function readGreenReadiness(db:Db,phoneNumberId:string,waId:string):Promise<GreenReadiness>{
   validateWhatsAppScope(waId,phoneNumberId)
-  const c=(await db.query(`select count(*)::integer as total,
-    count(*) filter(where type='external' or coalesce(raw #>> '{_inbox,receiptOnly}','false')='true')::integer as missing,
-    count(*) filter(where type<>'external' and (type<>'text' or media_id is not null or body is null or btrim(body)=''))::integer as unsupported
-    from public.whatsapp_messages where phone_number_id=$1 and wa_id=$2`,[phoneNumberId,waId])).rows[0]
-  const g=(await db.query(`select count(*)::integer as total,count(*) filter(where conflicted)::integer as conflicts,count(*) filter(where kind<>'text')::integer as unsupported from public.whatsapp_green_messages where phone_number_id=$1 and wa_id=$2`,[phoneNumberId,waId])).rows[0]
+  const canonical=(await db.query(`select id,wa_id,direction,type,body,media_id,created_at,
+    (type='external' or coalesce(raw #>> '{_inbox,receiptOnly}','false')='true') as receipt_only
+    from public.whatsapp_messages where phone_number_id=$1 and wa_id=$2 order by created_at desc,id desc limit 2000`,[phoneNumberId,waId])).rows
+  const copies=(await db.query(`select provider_message_id,wa_id,direction,kind,body,provider_accepted_at,deleted_observed,conflicted
+    from public.whatsapp_green_messages where phone_number_id=$1 and wa_id=$2 order by first_observed_at desc,id desc limit 2000`,[phoneNumberId,waId])).rows
+  const alignment=alignReceiptsWithCopies(canonical.map(r=>({...r,receiptOnly:r.receipt_only===true})),copies)
+  const c={total:canonical.length,missing:alignment.unresolvedOriginalCount,
+    unsupported:canonical.filter(r=>r.type!=='external'&&(r.type!=='text'||r.media_id||!(r.body??'').trim())).length}
+  // A copy is unaligned when no original carries its id; copies that fill a receipt are aligned by identity.
+  const g={total:alignment.unalignedCopyCount,conflicts:copies.filter(r=>r.conflicted).length,unsupported:copies.filter(r=>r.kind!=='text').length}
   const pending=(await db.query(`select count(*)::integer as count from public.whatsapp_green_events where phone_number_id=$1 and (wa_id=$2 or wa_id is null) and state='quarantined'`,[phoneNumberId,waId])).rows[0]
   const revision=(await db.query(`select coalesce((select context_version from public.whatsapp_green_conversations where phone_number_id=$1 and wa_id=$2),0)+coalesce((select activity_version from public.whatsapp_conversations where phone_number_id=$1 and wa_id=$2),0) as version`,[phoneNumberId,waId])).rows[0]
   const binding=(await db.query('select enabled,connection_state,last_error from public.whatsapp_green_bindings where phone_number_id=$1',[phoneNumberId])).rows[0]
@@ -186,9 +194,12 @@ export async function readGreenReadiness(db:Db,phoneNumberId:string,waId:string)
   if(Number(c.total)>100)draftReasons.push('HISTORY_TRUNCATED')
   if(Number(g.conflicts)>0)draftReasons.push('PROVIDER_CONFLICT')
   if(Number(pending.count)>0)draftReasons.push('PENDING_RECONCILIATION')
-  if(Number(g.total)>0)draftReasons.push('PROVIDER_CONTEXT_UNALIGNED')
-  if(!Number(c.total))draftReasons.push('NO_READABLE_CONTEXT')
-  if(binding&&(!binding.enabled||binding.connection_state!=='authorized'||binding.last_error))draftReasons.push('CONNECTION_UNVERIFIED')
+  // Readable copies without a Meta row are folded into both the thread and the draft transcript
+  // (listMessages / loadWhatsAppDraftContext), so they no longer block; the count stays reported.
+  if(!Number(c.total)&&!Number(g.total))draftReasons.push('NO_READABLE_CONTEXT')
+  // A partial reconcile (other chats' history still queued) is account-wide progress, not a connection fault;
+  // this chat's own gaps are already counted above. Only a lost/disabled/unauthorized link blocks here.
+  if(binding&&(!binding.enabled||binding.connection_state!=='authorized'||(binding.last_error&&!RECONCILE_PROGRESS_REASONS.has(binding.last_error))))draftReasons.push('CONNECTION_UNVERIFIED')
   return {allowed:false,canDraft:draftReasons.length===0,reasons:['OBSERVATION_MODE','COVERAGE_UNKNOWN',...draftReasons],draftReasons,contextVersion:Number(revision.version),unresolvedOriginalCount:Number(c.missing),unsupportedOriginalCount:Number(c.unsupported),canonicalHasMore:Number(c.total)>100,providerConflictCount:Number(g.conflicts),pendingProviderCount:Number(pending.count),providerUnalignedCount:Number(g.total),coverage:'unknown',mode:'observation'}
 }
 export async function getGreenReadiness(scope:{phoneNumberId:string;waId:string}):Promise<GreenReadiness>{validateWhatsAppScope(scope.waId,scope.phoneNumberId);await requireWhatsAppNumber(scope.phoneNumberId);const db=await connectInboxDatabase();try{await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const result=await readGreenReadiness(db,scope.phoneNumberId,scope.waId);await db.query('COMMIT');return result}finally{await db.end().catch(()=>{})}}
@@ -203,11 +214,14 @@ export async function readGreenConversation(scope:{phoneNumberId:string;waId:str
     const config=configuredGreenBindings().find(x=>x.phoneNumberId===scope.phoneNumberId)
     const rows=(await db.query(`select * from public.whatsapp_green_messages where phone_number_id=$1 and wa_id=$2 and ($3::timestamptz is null or (first_observed_at,id)<($3::timestamptz,$4::uuid)) order by first_observed_at desc,id desc limit 101`,[scope.phoneNumberId,scope.waId,before?.[0]??null,before?.[1]??null])).rows
     const hasMore=rows.length>100,selected=rows.slice(0,100),last=selected.at(-1)
-    const messages:GreenMessageView[]=selected.reverse().map(r=>({id:r.id,source:'green-api',providerInstanceId:r.instance_id,providerChatId:r.provider_chat_id,providerMessageId:r.provider_message_id,direction:r.direction,kind:r.deleted_observed?'deleted':r.kind,text:r.deleted_observed||r.conflicted?null:r.body,providerAcceptedAt:iso(r.provider_accepted_at),sentAt:null,observedAt:iso(r.first_observed_at)!,edited:r.edited,conflicted:r.conflicted,canonicalReceiptMatch:'unverified'}))
+    // An original whose wamid carries this copy's id proves the two are one message.
+    const originalIds=new Set((await db.query('select id from public.whatsapp_messages where phone_number_id=$1 and wa_id=$2',[scope.phoneNumberId,scope.waId])).rows
+      .map(r=>decodeWamid(r.id)).filter(d=>d&&d.waId===scope.waId).map(d=>d!.providerMessageId))
+    const messages:GreenMessageView[]=selected.reverse().map(r=>({id:r.id,source:'green-api',providerInstanceId:r.instance_id,providerChatId:r.provider_chat_id,providerMessageId:r.provider_message_id,direction:r.direction,kind:r.deleted_observed?'deleted':r.kind,text:r.deleted_observed||r.conflicted?null:r.body,providerAcceptedAt:iso(r.provider_accepted_at),sentAt:null,observedAt:iso(r.first_observed_at)!,edited:r.edited,conflicted:r.conflicted,canonicalReceiptMatch:originalIds.has(r.provider_message_id)?'verified':'unverified'}))
     const readiness=await readGreenReadiness(db,scope.phoneNumberId,scope.waId)
     const enabled=!!config?.enabled&&(!b||Number(b.version)===config.version&&b.instance_id===config.instanceId&&b.enabled)
     await db.query('COMMIT')
-    return{success:true,scope,binding:{configured:!!config,enabled,mode:'observation' as const,state:!config?'not_configured':!enabled?'paused':!b||b.connection_state!=='authorized'?'not_connected':b.last_error||readiness.pendingProviderCount||readiness.providerConflictCount?'needs_attention':'observing',lastEventAt:iso(b?.last_event_at),lastReconcileAt:iso(b?.last_reconcile_at),lastError:b?.last_error??null},messages,hasMore,nextCursor:hasMore&&last?Buffer.from(JSON.stringify([scope.phoneNumberId,scope.waId,iso(last.first_observed_at),last.id])).toString('base64url'):null,readiness}
+    return{success:true,scope,binding:{configured:!!config,enabled,mode:'observation' as const,state:!config?'not_configured':!enabled?'paused':!b||b.connection_state!=='authorized'?'not_connected':(b.last_error&&!RECONCILE_PROGRESS_REASONS.has(b.last_error))||readiness.pendingProviderCount||readiness.providerConflictCount?'needs_attention':'observing',lastEventAt:iso(b?.last_event_at),lastReconcileAt:iso(b?.last_reconcile_at),lastError:b?.last_error??null},messages,hasMore,nextCursor:hasMore&&last?Buffer.from(JSON.stringify([scope.phoneNumberId,scope.waId,iso(last.first_observed_at),last.id])).toString('base64url'):null,readiness}
   }finally{await db.end().catch(()=>{})}
 }
 

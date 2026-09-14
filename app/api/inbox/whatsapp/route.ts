@@ -41,11 +41,12 @@ export async function GET(request: Request) {
         return NextResponse.json({ success: true, messages: [], hasMore: false, nextCursor: null,
           canonicalHistory: 'unavailable', additionalCopiesOnly: true })
       }
-      const {messages,readVersion} = transcript
+      const {messages,readVersion,hasMore,nextCursor} = transcript
       // Paging backwards must not clear the badge - only opening the thread
       // (the first, uncursored request) counts as reading it.
       if (!before) await markRead(waId,phoneNumberId!,readVersion)
-      return NextResponse.json({ success: true, messages, hasMore: messages.length === 100, nextCursor:messages.length===100?messages[0].cursor:null })
+      // Folded history copies sit among the canonical rows, so paging comes from the store, not a length check.
+      return NextResponse.json({ success: true, messages, hasMore, nextCursor })
     }
 
     // Env-only flags, free to compute on every poll.

@@ -57,6 +57,30 @@ export function stableMessengerTranscriptUrl(thread: Pick<UnifiedThread, 'channe
     : null
 }
 
+/** Local Mauritian mobile (8 digits starting 5) from a wa_id, or '' if not one. */
+function localMobileFromWaId(waId: string | null | undefined): string {
+  if (!waId) return ''
+  let digits = waId.replace(/\D/g, '')
+  if (digits.length === 11 && digits.startsWith('230')) digits = digits.slice(3)
+  return /^5\d{7}$/.test(digits) ? digits : ''
+}
+
+/**
+ * Pre-fill the order from what the thread already tells us: the WhatsApp
+ * number as the phone, and the ad's resolved product. Only fills a field that
+ * is still empty AND untouched, and deliberately does NOT mark it touched, so
+ * the AI draft and the agent both still override it. A no-op returns the same
+ * reference so the effect that calls this cannot loop.
+ */
+export function seedOrderFromThread(state: LeadSession, thread: Pick<UnifiedThread, 'channel' | 'recipientId' | 'productId'>): LeadSession {
+  const phone = thread.channel === 'whatsapp' ? localMobileFromWaId(thread.recipientId) : ''
+  const next = { ...state.order }
+  let changed = false
+  if (phone && !state.order.contact1 && !state.orderTouched.contact1) { next.contact1 = phone; changed = true }
+  if (thread.productId && !state.order.productId && !state.orderTouched.productId) { next.productId = thread.productId; changed = true }
+  return changed ? { ...state, order: next } : state
+}
+
 export function beginAnotherOrder(state: OrderOperation): OrderOperation {
   return state.saving || !state.created ? state : { ...state, previousCreated: state.created, created: null }
 }

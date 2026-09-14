@@ -9,12 +9,15 @@ import { useEffectiveRole } from './role-switcher-context'
 import { RoleSwitcher } from './role-switcher'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { ArrowUpRight, ChevronDown, Command, Compass, Expand, Layers3, LogOut, Menu, Minimize2, Search, SlidersHorizontal, Sparkles, Star, Tv, User, X } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, Command, Compass, Expand, Layers3, LogOut, Menu, Minimize2, PanelTopClose, PanelTopOpen, Search, SlidersHorizontal, Sparkles, Star, Tv, User, X } from 'lucide-react'
 import { findCurrentDestination, getDefaultPins, getNavigationDestinations, navigationGroups, type NavigationGroup } from './navigation-model'
 import styles from './dashboard-workspace.module.css'
 
 type Filter = NavigationGroup | 'all' | 'pinned'
-type Preferences = { key: string; pins: string[]; wide: boolean }
+type Preferences = { key: string; pins: string[]; wide: boolean; compactInbox: boolean }
+
+/** Pages whose own layout is the work surface: the chrome collapses to one thin bar by default. */
+const COMPACT_ROUTES = ['/dashboard/inbox']
 
 export function DashboardWorkspace({ profile, children }: { profile: Profile; children: React.ReactNode }) {
   const pathname = usePathname()
@@ -37,15 +40,17 @@ export function DashboardWorkspace({ profile, children }: { profile: Profile; ch
   const mainRef = useRef<HTMLElement>(null)
   const storageKey = `akmez.workspace.v1.${profile.id}.${effectiveRole}`
   const [preferences, setPreferences] = useState<Preferences | null>(null)
-  const saved = preferences?.key === storageKey ? preferences : { key: storageKey, pins: getDefaultPins(destinations), wide: false }
+  const saved = preferences?.key === storageKey ? preferences : { key: storageKey, pins: getDefaultPins(destinations), wide: false, compactInbox: true }
   const pins = saved.pins.map(href => destinations.find(item => item.href === href)).filter(item => item !== undefined)
+  const compactRoute = COMPACT_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'))
+  const compact = compactRoute && saved.compactInbox
 
   useEffect(() => {
-    let next: Preferences = { key: storageKey, pins: getDefaultPins(getNavigationDestinations(effectiveRole)), wide: false }
+    let next: Preferences = { key: storageKey, pins: getDefaultPins(getNavigationDestinations(effectiveRole)), wide: false, compactInbox: true }
     try {
       const value = JSON.parse(localStorage.getItem(storageKey) ?? 'null')
       if (value && Array.isArray(value.pins)) {
-        next = { key: storageKey, pins: [...new Set<string>(value.pins.filter((item: unknown): item is string => typeof item === 'string'))].slice(0, 8), wide: value.wide === true }
+        next = { key: storageKey, pins: [...new Set<string>(value.pins.filter((item: unknown): item is string => typeof item === 'string'))].slice(0, 8), wide: value.wide === true, compactInbox: value.compactInbox !== false }
       }
     } catch { /* Storage is optional; the menu still works in private mode. */ }
     setPreferences(next)
@@ -53,7 +58,7 @@ export function DashboardWorkspace({ profile, children }: { profile: Profile; ch
 
   function updatePreferences(next: Preferences) {
     setPreferences(next)
-    try { localStorage.setItem(storageKey, JSON.stringify({ pins: next.pins, wide: next.wide })); return true }
+    try { localStorage.setItem(storageKey, JSON.stringify({ pins: next.pins, wide: next.wide, compactInbox: next.compactInbox })); return true }
     catch { setNotice('Your changes work for this visit. This browser could not save them.'); return false }
   }
 
@@ -119,7 +124,7 @@ export function DashboardWorkspace({ profile, children }: { profile: Profile; ch
   }
 
   return (
-    <div data-dashboard-shell data-width={saved.wide ? 'wide' : 'focus'} className={styles.shell}>
+    <div data-dashboard-shell data-width={saved.wide ? 'wide' : 'focus'} data-compact={compact ? 'true' : undefined} className={styles.shell}>
       <div className={styles.ambient} aria-hidden="true" />
       <a className={styles.skipLink} href="#akmez-workspace-content">Skip to page content</a>
       <header className={styles.canopy}>
@@ -133,6 +138,9 @@ export function DashboardWorkspace({ profile, children }: { profile: Profile; ch
             <Search aria-hidden="true" /><span>Where would you like to go?</span><kbd className={styles.shortcutKey}>Ctrl K</kbd>
           </button>
           <div className={styles.topActions}>
+            {compactRoute && <button type="button" className={styles.chromeToggle} onClick={() => updatePreferences({ ...saved, compactInbox: !saved.compactInbox })} aria-pressed={!saved.compactInbox} aria-label={saved.compactInbox ? 'Show navigation bars' : 'Hide navigation bars'} title={saved.compactInbox ? 'Show the navigation and shortcut bars' : 'Hide them to give the inbox the full screen'}>
+              {saved.compactInbox ? <PanelTopOpen aria-hidden="true" /> : <PanelTopClose aria-hidden="true" />}<span>{saved.compactInbox ? 'Menu' : 'Hide menu'}</span>
+            </button>}
             <div className={styles.roleWrap}><RoleSwitcher /></div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

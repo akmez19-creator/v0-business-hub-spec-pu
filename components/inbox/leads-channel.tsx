@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
-import { Inbox, MessageCircle, MessageSquare, Phone, RefreshCw, Search } from 'lucide-react'
+import { CheckCheck, Inbox, MessageCircle, MessageSquare, Phone, RefreshCw, Search, SlidersHorizontal, Smartphone } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,20 +47,31 @@ import {
 } from '@/lib/inbox/lead-actions'
 import { LeadConversation } from './lead-conversation'
 import { QuickOrderPanel } from './quick-order-panel'
-import { applyAssistResult, completeSend, newLeadSession, readInbox, stableThreadKey, stableMessengerTranscriptUrl, type LeadSession, type OrderOperation } from './inbox-session'
+import { applyAssistResult, completeSend, newLeadSession, readInbox, seedOrderFromThread, stableThreadKey, stableMessengerTranscriptUrl, type LeadSession, type OrderOperation } from './inbox-session'
 import { STAFF_CONVERSATION_EVENT, staffConversationIdentity, staffConversationThread } from './staff-conversation'
 import type { CommentItem } from './comments-channel'
-import { inboxInvalidationKeys, latestActivityAt, newestConversations, presentTranscript, whatsappAcceptedWarning, type PresentedLeadMessage, type QueueView } from './inbox-behavior'
+import { inboxInvalidationKeys, isWaitingOnUs, latestActivityAt, needsReplyWithin, NEEDS_REPLY_WINDOW_MS, newestConversations, presentTranscript, whatsappAcceptedWarning, type PresentedLeadMessage, type QueueView } from './inbox-behavior'
 import { whatsappDraftBlock, type GreenContextStatus } from './green-copies-client'
 
 const fetcher = readInbox
 const listPolling = { refreshInterval: 8_000, revalidateOnFocus: true, revalidateOnReconnect: true, refreshWhenHidden: false, refreshWhenOffline: false }
 
 const QUEUE_VIEWS: { value: QueueView; label: string }[] = [
+  { value: 'needs-reply-24h', label: 'Needs reply · last 24h · longest waiting first' },
   { value: 'all', label: 'All conversations · newest first' },
-  { value: 'needs-action', label: 'Needs action · newest first' },
+  { value: 'needs-action', label: 'Needs reply · any age · newest first' },
   { value: 'unread', label: 'Unread · newest first' },
 ]
+
+/** Compact "waited 3h" label for the needs-reply queue. */
+function waitedFor(updatedAt: string | null, now: number): string {
+  const at = updatedAt ? Date.parse(updatedAt) : Number.NaN
+  if (!Number.isFinite(at)) return ''
+  const minutes = Math.max(0, Math.round((now - at) / 60_000))
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  return hours < 48 ? `${hours}h ${String(minutes % 60).padStart(2, '0')}` : `${Math.floor(hours / 24)} days`
+}
 
 const CHANNELS: { value: ChannelFilter; label: string; icon: typeof Phone }[] = [
   { value: 'all', label: 'All', icon: Inbox },
@@ -93,7 +104,8 @@ export function mergePageOptions(references: { id: string; name?: string | null 
 
 export function LeadsChannel({ active = true }: { active?: boolean }) {
   const [query, setQuery] = useState('')
-  const [queueView, setQueueView] = useState<QueueView>('all')
+  const [queueView, setQueueView] = useState<QueueView>('needs-reply-24h')
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [channel, setChannel] = useState<ChannelFilter>('all')
   const [product, setProduct] = useState<string>('all')
   const [campaign, setCampaign] = useState<string>('all')
@@ -167,6 +179,7 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
     conversations?: Parameters<typeof fromMessenger>[0][]
     rateLimited?: boolean
     syncError?: string
+    doneSyncError?: string
     pages?: { id: string; name: string }[]
   }>(messengerListKey, fetcher, messagePolling)
 
@@ -259,6 +272,13 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
 
   useEffect(() => { if (selected) selectedSnapshot.current = selected }, [selected])
 
+  // Pre-fill the order with the WhatsApp number and the ad's product as soon as
+  // a lead is opened. seedOrderFromThread only fills empty, untouched fields and
+  // never marks them touched, so the AI draft and the agent still override it.
+  useEffect(() => {
+    if (selected) updateSession(selected.key, (state) => seedOrderFromThread(state, selected))
+  }, [selected, updateSession])
+
   // Transcript for the open lead. Comments have no thread, so the URL is null
   // and SWR simply does not fetch.
   const transcriptKey = selected ? stableMessengerTranscriptUrl(selected) ?? transcriptUrl(selected) : null
@@ -282,7 +302,7 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
       if (!selected) return []
       const normalized = normaliseMessages(selected, transcriptData)
       if (selected.channel !== 'whatsapp') return presentTranscript(normalized)
-      const raw = (transcriptData?.messages ?? []) as { id: string; type?: string; status?: string | null }[]
+      const raw = (transcriptData?.messages ?? []) as { id: string; type?: string; status?: string | null; copySource?: string | null }[]
       return presentTranscript(normalized, raw)
     },
     [selected, transcriptData],
@@ -402,13 +422,17 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
 
   const loading = (ml || wl || cl) && !mData && !wData && !cData
   const refreshing = mv || wv || cv || tv
-  const awaiting = rows.filter((r) => r.stage === 'awaiting').length
+  const awaiting = rows.filter(isWaitingOnUs).length
+  // Counted over the whole scope, so the pill stays true whichever view is open.
+  const now = Date.now()
+  const needsReply24h = scoped.filter((r) => needsReplyWithin(r, NEEDS_REPLY_WINDOW_MS, now)).length
+  const activeFilters = [channel !== 'all', product !== 'all', campaign !== 'all', liveOnly, page !== 'all'].filter(Boolean).length
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 overflow-hidden rounded-xl border border-border bg-card">
       {/* Column 1: the queue. */}
       <div className={`${selected && mobilePane !== 'queue' ? 'hidden lg:flex' : 'flex'} w-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-border lg:w-[320px] xl:w-[350px]`}>
-        <div className="flex min-w-0 flex-col gap-2 border-b border-border p-4">
+        <div className="flex min-w-0 flex-col gap-2 border-b border-border p-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-baseline gap-2">
               <h2 className="font-semibold">Leads</h2>
@@ -416,24 +440,77 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
                 {rows.length} shown · {awaiting} waiting
               </span>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => { void refresh() }}
-              disabled={refreshing}
-              aria-label="Refresh leads"
-              className="h-8 w-8"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
-                aria-hidden="true"
-              />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant={filtersOpen ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setFiltersOpen((value) => !value)}
+                aria-expanded={filtersOpen}
+                aria-controls="leads-filters"
+                className="h-8 gap-1.5 px-2 text-xs"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                Filters{activeFilters ? ` · ${activeFilters}` : ''}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { void refresh() }}
+                disabled={refreshing}
+                aria-label="Refresh leads"
+                className="h-8 w-8"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
+                  aria-hidden="true"
+                />
+              </Button>
+            </div>
           </div>
 
           <p className="text-[11px] text-muted-foreground" role="status">
             {errors.length ? 'Retrying ' + errors.join(', ') + ' · keeping loaded conversations' : lastChecked ? (isLive ? 'Messenger & WhatsApp live · checked ' : 'Updates automatically · checked ') + lastChecked : 'Connecting to your inbox…'}
           </p>
+          {syncError || mData?.syncError || cData?.syncError ? <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">Facebook updates are delayed; showing saved conversations. Retry sync later. {syncError || mData?.syncError || cData?.syncError}</p> : null}
+          {mData?.doneSyncError ? <p role="status" className="text-[11px] text-amber-600 dark:text-amber-400">{mData.doneSyncError} Chats closed in Business Suite may still show as waiting.</p> : null}
+
+          {/* The two questions an agent asks all day, one tap each. */}
+          <div className="grid grid-cols-2 gap-1" role="group" aria-label="Queue">
+            <button
+              type="button"
+              onClick={() => setQueueView('needs-reply-24h')}
+              aria-pressed={queueView === 'needs-reply-24h'}
+              className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${queueView === 'needs-reply-24h' ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-muted'}`}
+            >
+              <span className="truncate">Needs reply · 24h</span>
+              <span className="shrink-0 tabular-nums">{needsReply24h}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setQueueView('all')}
+              aria-pressed={queueView === 'all'}
+              className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${queueView === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-muted'}`}
+            >
+              <span className="truncate">All conversations</span>
+              <span className="shrink-0 tabular-nums">{scoped.length}</span>
+            </button>
+          </div>
+
+          <div className="relative">
+            <Search
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, message, product..."
+              className="h-9 pl-9"
+              aria-label="Search leads"
+            />
+          </div>
+
+          <div id="leads-filters" className={filtersOpen ? 'flex min-w-0 flex-col gap-2' : 'hidden'}>
           {lastEventAt !== null ? <p className="text-[11px] text-muted-foreground">
             Live update received <time dateTime={new Date(lastEventAt).toISOString()}>{new Date(lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
           </p> : null}
@@ -441,7 +518,6 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
             <span className="text-[11px] text-muted-foreground">Missing older messages?</span>
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { void syncFacebook() }} disabled={syncing}>{syncing ? 'Syncing Facebook…' : 'Sync Facebook'}</Button>
           </div>
-          {syncError || mData?.syncError || cData?.syncError ? <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">Facebook updates are delayed; showing saved conversations. Retry sync later. {syncError || mData?.syncError || cData?.syncError}</p> : null}
           <Select value={page} onValueChange={setPage}>
             <SelectTrigger className="h-8 w-full min-w-0 text-xs" aria-label="Filter inbox by Facebook Page"><SelectValue className="min-w-0 flex-1 truncate text-left" style={{ display: 'block' }} /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Pages & WhatsApp</SelectItem>
@@ -452,19 +528,6 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
             <p className="text-muted-foreground">Includes Messenger, comments and WhatsApp linked to this Page. Other WhatsApp numbers stay under All Pages.</p>
             <Button type="button" variant="link" size="sm" className="mt-1 h-auto px-0 py-1 text-xs" onClick={() => { setPage('all'); setChannel('whatsapp') }}>All WhatsApp numbers</Button>
           </div> : null}
-          <div className="relative">
-            <Search
-              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, message, product..."
-              className="pl-9"
-              aria-label="Search leads"
-            />
-          </div>
 
           {/* Channel filter replaces the old per-channel tabs: same reach, but
               the queue stays in one place. */}
@@ -554,6 +617,7 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
               </Select>
             ) : null}
           </div>
+          </div>
         </div>
 
         {/* Partial outage: name what is missing rather than under-reporting. */}
@@ -569,8 +633,10 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
           {loading ? (
             <p className="p-6 text-sm text-muted-foreground">Loading leads...</p>
           ) : rows.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">
-              {errors.length ? 'Some conversations could not load. Refresh to retry.' : 'No leads match these filters.'}
+            <p className="p-6 text-sm leading-relaxed text-muted-foreground text-pretty">
+              {errors.length ? 'Some conversations could not load. Refresh to retry.'
+                : queueView === 'needs-reply-24h' ? 'Everyone who wrote in the last 24 hours has been answered, closed in Business Suite, or replied to from the phone.'
+                : 'No leads match these filters.'}
             </p>
           ) : (
             <ul>
@@ -596,9 +662,17 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
                           <span className="block flex-1 truncate text-left text-sm font-medium">
                             {r.name}
                           </span>
-                          {r.stage === 'awaiting' ? (
-                            <Badge variant="default" className="h-5 shrink-0">
-                              Waiting
+                          {isWaitingOnUs(r) ? (
+                            <Badge variant="default" className="h-5 shrink-0 tabular-nums">
+                              {queueView === 'needs-reply-24h' ? `Waiting ${waitedFor(r.updatedAt, now)}` : 'Waiting'}
+                            </Badge>
+                          ) : r.done ? (
+                            <Badge variant="secondary" className="h-5 shrink-0 gap-1" title={`Marked Done in Meta Business Suite · ${new Date(r.done.at).toLocaleString()}`}>
+                              <CheckCheck className="h-3 w-3" aria-hidden="true" />Done
+                            </Badge>
+                          ) : r.answeredByPhone ? (
+                            <Badge variant="secondary" className="h-5 shrink-0 gap-1" title="The phone (GREEN-API) saw an outgoing reply after the customer's last message">
+                              <Smartphone className="h-3 w-3" aria-hidden="true" />Answered on phone
                             </Badge>
                           ) : null}
                         </span>
