@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, CheckCircle2, Clock3, Pause, Play, RefreshCw, ShieldCheck, Star, Truck, UserRound, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { autopilotDateBounds, autopilotReason, autopilotSettingsError, createAutopilotClient,
+import { autopilotDateBounds, autopilotReason, autopilotSettingsError, autopilotStateLabel, createAutopilotClient,
   type AutopilotBusiness, type AutopilotBusinessKey, type AutopilotJob, type AutopilotSettings, type AutopilotState, type AutopilotStaffTask } from './autopilot-client'
 import { openStaffConversation } from './staff-conversation'
 
@@ -131,13 +131,20 @@ function BusinessCard({ business, canManage, pending, hasError, now, onConfigure
 }
 
 function JobRow({ job, enabled, canManage, pending, onTakeover }: { job: AutopilotJob; enabled: boolean; canManage: boolean; pending: AutopilotState['loading']; onTakeover: PanelActions['onTakeover'] }) {
-  const review = ['unknown', 'needs_review', 'failed'].includes(job.state)
+  const handled = autopilotStateLabel(job)
+  const review = !handled && ['unknown', 'needs_review', 'failed'].includes(job.state)
   const agentAttention = needsAgentAttention(job)
+  const last = job.latestMessage
   return <li className={`flex flex-wrap items-start justify-between gap-3 rounded-lg border px-3 py-3 ${agentAttention ? 'border-amber-500/40 bg-amber-500/5' : ''}`}>
-    <div className="flex min-w-0 flex-1 gap-2.5">{agentAttention ? <Star className="mt-0.5 size-4 shrink-0 fill-current text-amber-600 dark:text-amber-300" aria-hidden="true" /> : job.state === 'sent' ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" /> : <Clock3 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+    <div className="flex min-w-0 flex-1 gap-2.5">{agentAttention ? <Star className="mt-0.5 size-4 shrink-0 fill-current text-amber-600 dark:text-amber-300" aria-hidden="true" /> : job.state === 'sent' || handled ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" /> : <Clock3 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
       <div className="min-w-0"><p className="break-words text-sm font-medium">{job.customerName ?? 'Customer conversation'}</p><p className="mt-0.5 text-xs text-muted-foreground">{BUSINESS_NAMES[job.businessKey]}{job.channel ? ` · ${job.channel === 'whatsapp' ? 'WhatsApp' : 'Messenger'}` : ''} · {displayTime(job.updatedAt)}</p>
         {agentAttention && <p className="mt-2 inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-200">Agent attention</p>}
-        <p className={`mt-1 text-xs ${review ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>{JOB_LABELS[job.state]}{job.manualTakeover ? ' · Staff in control' : ''}</p>
+        <p className={`mt-1 text-xs ${review ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>{handled || JOB_LABELS[job.state]}{job.manualTakeover ? ' · Staff in control' : ''}</p>
+        {last && <p className="mt-1.5 break-words text-xs leading-5">
+          <span className={`font-semibold ${last.direction === 'in' ? 'text-foreground' : 'text-muted-foreground'}`}>{last.direction === 'in' ? 'Customer' : 'Your team'}</span>
+          <span className="text-muted-foreground"> · {displayTime(last.at)} · </span>
+          {last.text ? <q className="text-foreground/90">{last.text}</q> : <span className="italic text-muted-foreground">photo, sticker or attachment</span>}
+        </p>}
         {job.state === 'unknown' ? <p className="mt-1 text-xs text-muted-foreground">Delivery could not be confirmed. Check the conversation before sending again.</p> : job.reason && <p className="mt-1 text-xs text-muted-foreground">{autopilotReason(job.reason)}</p>}
       </div></div>
     {job.channel && job.customerId && typeof job.manualTakeover === 'boolean' && <Button type="button" variant="outline" size="sm" disabled={!canManage || !!pending || job.manualTakeover && !enabled} onClick={() => onTakeover(job.id, !job.manualTakeover)} aria-label={`${job.manualTakeover ? 'Resume Autopilot for' : 'Take over'} ${job.customerName ?? 'this conversation'} on ${BUSINESS_NAMES[job.businessKey]}`}>{pending?.jobId === job.id ? 'Confirming…' : job.manualTakeover ? 'Resume' : 'Take over'}</Button>}

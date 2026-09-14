@@ -11,6 +11,7 @@ export type AutopilotJob = {
   state: 'queued' | 'processing' | 'sending' | 'sent' | 'needs_review' | 'failed' | 'unknown' | 'cancelled'
   reason: string | null; updatedAt: string
   channel?: 'messenger' | 'whatsapp'; customerId?: string; manualTakeover?: boolean
+  latestMessage?: { direction: 'in' | 'out'; text: string | null; at: string } | null
 }
 export type AutopilotStaffTask = {
   id:string; jobId:string; jobSource:'meta'|'green_api'; businessKey:AutopilotBusinessKey; channel:'messenger'|'whatsapp'; ownerId:string; customerId:string; conversationKey:string
@@ -59,11 +60,50 @@ export const AUTOPILOT_REASON_LABELS: Record<string, string> = {
   REPLY_GENERATION_FAILED: 'The AI could not prepare this reply. No message was sent.',
   CATALOGUE_UNAVAILABLE: 'The product catalogue could not be checked. No message was sent.',
   PROVIDER_CONFIGURATION_UNAVAILABLE: 'The messaging connection could not be prepared. No message was sent.',
+  // Reason codes the engines emit that had no label (measured 14 Sep: 18 + 13 + 7 + ... jobs all
+  // collapsed into the fallback sentence). Every label says what happened and who acts next.
+  MESSENGER_PREFLIGHT_UNSUPPORTED: 'A photo, sticker or blank message somewhere in this thread stops Autopilot here. Your team replies.',
+  MESSENGER_PREFLIGHT_SCOPE_MISMATCH: 'The Messenger thread could not be matched to this customer. Your team replies.',
+  MESSENGER_PREFLIGHT_INVALID: 'Messenger returned this thread in an unexpected form. Your team replies.',
+  MESSENGER_HISTORY_UNSUPPORTED: 'A photo, sticker or blank message somewhere in this thread stops Autopilot here. Your team replies.',
+  MESSENGER_HISTORY_CHANGED: 'The conversation changed while it was being checked. It will be re-checked.',
+  MESSENGER_HISTORY_INCOMPLETE: 'The local copy of this thread is incomplete. Your team replies.',
+  MESSENGER_HISTORY_TRUNCATED: 'This long thread exceeds what Autopilot can verify. Your team replies.',
+  MESSENGER_HISTORY_TOO_LARGE: 'This long thread exceeds what Autopilot can verify. Your team replies.',
+  MESSENGER_ALREADY_ANSWERED: 'Your team has already replied.',
+  MESSENGER_MESSAGE_ORDER_AMBIGUOUS: 'Two messages share the same second; the order cannot be verified. Your team replies.',
+  MESSENGER_FRESHNESS_EXPIRED: 'The live check took too long. It will be re-checked.',
+  MESSENGER_FRESHNESS_UNAVAILABLE: 'Messenger could not be reached for the live check. It will be re-checked.',
+  MESSENGER_CONTROL_UNVERIFIED: 'Who controls this thread in Messenger could not be confirmed. Your team replies.',
+  MESSENGER_CONTROL_REJECTED: 'Messenger refused to hand control of this thread to Autopilot. Your team replies.',
+  MESSENGER_CONTROL_PAUSED: 'Autopilot is paused for this conversation.',
+  MESSENGER_CONTROL_UNAVAILABLE: 'The Messenger connection could not be prepared. Your team replies.',
+  MESSENGER_CONTROL_RATE_LIMITED: 'Messenger is rate-limiting control requests. It will be re-checked.',
+  MESSENGER_TAKEOVER_NOT_ALLOWED: 'The Page does not allow Autopilot to take control here. Your team replies.',
+  MESSENGER_TAKEOVER_UNCONFIRMED: 'Taking control of this thread could not be confirmed. Your team replies.',
+  EXISTING_ORDER_NEEDS_REVIEW: 'An order was already confirmed in this thread; Autopilot does not reply after that. Your team handles any follow-up.',
+  STAFF_JUDGEMENT_REQUIRED: 'This message needs a human answer (complaint, change, collection or technical question).',
+  OUTGOING_SOURCE_UNCONFIRMED: 'A reply appeared whose sender could not be confirmed; held for your team.',
+  INITIAL_HISTORY_REQUIRES_STAFF: 'This conversation has history Autopilot could not verify. Your team replies first.',
+  LIVE_MESSAGE_UNVERIFIED: 'The latest message has not been confirmed by the provider yet.',
+  STAFF_REPLY_REQUIRES_HANDOVER: 'A team member replied from the phone. Autopilot stays out until you resume it.',
+  NATIVE_CONTROLS_UNAVAILABLE: 'A team member is in control of this conversation.',
+  DAILY_BUDGET_EXHAUSTED: 'Today’s reply limit has been reached.',
 }
 export const autopilotReason = (reason: string | null) => {
   if (!reason) return null
   const key=reason.toUpperCase()
-  return AUTOPILOT_REASON_LABELS[key] ?? (key.startsWith('HISTORY_') ? AUTOPILOT_REASON_LABELS[key.slice(8)] : undefined) ?? 'This conversation needs staff review.'
+  return AUTOPILOT_REASON_LABELS[key] ?? (key.startsWith('HISTORY_') ? AUTOPILOT_REASON_LABELS[key.slice(8)] : undefined) ?? `Autopilot stopped (${reason}). Your team replies.`
+}
+/** Reasons that mean the thread is closed or handled, not waiting for anyone. */
+const HANDLED_REASONS = new Set(['MESSENGER_ALREADY_ANSWERED', 'HISTORY_ALREADY_ANSWERED', 'ALREADY_ANSWERED', 'ALREADY_REPLIED', 'HUMAN_REPLIED', 'NO_REPLY_NEEDED', 'NO_UNANSWERED_MESSAGE', 'MANUAL_TAKEOVER', 'STAFF_REPLY_REQUIRES_HANDOVER', 'NATIVE_CONTROLS_UNAVAILABLE'])
+/** What the row should say about the job's state, given who spoke last. "Needs staff review" is only
+ * honest when the customer has the last word; when your team already replied, say so. */
+export function autopilotStateLabel(job: AutopilotJob): string {
+  if (!['needs_review', 'unknown', 'failed'].includes(job.state)) return ''
+  const key = job.reason?.toUpperCase() ?? ''
+  if (job.latestMessage?.direction === 'out' || HANDLED_REASONS.has(key)) return 'Handled by your team'
+  return ''
 }
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const string = (v: unknown, max = 300): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
@@ -112,8 +152,12 @@ export function parseAutopilotSnapshot(value: unknown): AutopilotSnapshot {
     jobIds.add(item.id)
     const takeover = item.channel !== undefined || item.customerId !== undefined || item.manualTakeover !== undefined
     if (takeover && (!['messenger', 'whatsapp'].includes(String(item.channel)) || !string(item.customerId, 40) || !/^\d{5,30}$/.test(item.customerId) || typeof item.manualTakeover !== 'boolean')) throw Error('Invalid conversation identity')
+    const lm = item.latestMessage
+    // Server trims to 240 code points; emoji take two UTF-16 units each, so allow 480 here.
+    const latestMessage = object(lm) && ['in', 'out'].includes(String(lm.direction)) && (lm.text === null || string(lm.text, 480)) && time(lm.at) && lm.at !== null
+      ? { direction: lm.direction as 'in' | 'out', text: lm.text as string | null, at: lm.at as string } : null
     return { id: item.id, businessKey: item.businessKey, conversationKey: item.conversationKey, customerName: typeof item.customerName === 'string' && item.customerName.trim() ? item.customerName : null,
-      state: item.state, reason: item.reason, updatedAt: item.updatedAt,
+      state: item.state, reason: item.reason, updatedAt: item.updatedAt, latestMessage,
       ...(takeover ? { channel: item.channel, customerId: item.customerId, manualTakeover: item.manualTakeover } : {}) } as AutopilotJob
   }).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id))
   if(!Array.isArray(value.staffTasks)||value.staffTasks.length>25||typeof value.staffTasksHasMore!=='boolean')throw Error('Invalid staff queue')
