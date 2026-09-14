@@ -1,3 +1,4 @@
+import { observeMetaOutgoing } from '@/lib/inbox-autopilot/handoff-runtime'
 import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { recordAdRef } from '@/lib/messenger/ad-refs'
@@ -210,6 +211,8 @@ export async function POST(request: Request) {
       handled = true
 
       try {
+        if (isEcho)
+          await observeMetaOutgoing('messenger', pageId, psid, message.mid, typeof event.timestamp === 'number' && Number.isFinite(event.timestamp) && Math.abs(event.timestamp) <= 8.64e15 ? new Date(event.timestamp).toISOString() : '', event)
         await recordMessengerMessage({
           pageId,
           psid,

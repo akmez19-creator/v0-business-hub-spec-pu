@@ -5,7 +5,8 @@ import { Bot, CheckCircle2, Clock3, Pause, Play, RefreshCw, ShieldCheck, Star, T
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { autopilotDateBounds, autopilotReason, autopilotSettingsError, createAutopilotClient,
-  type AutopilotBusiness, type AutopilotBusinessKey, type AutopilotJob, type AutopilotSettings, type AutopilotState } from './autopilot-client'
+  type AutopilotBusiness, type AutopilotBusinessKey, type AutopilotJob, type AutopilotSettings, type AutopilotState, type AutopilotStaffTask } from './autopilot-client'
+import { openStaffConversation } from './staff-conversation'
 
 const BUSINESS_NAMES: Record<AutopilotBusinessKey, string> = { made_by_moris: 'Made By Moris', destockage: 'Destockage' }
 const JOB_LABELS: Record<AutopilotJob['state'], string> = {
@@ -64,8 +65,14 @@ export function AutopilotPanelView({ state, now = new Date(), ...actions }: Pane
       {!snapshot ? <p role="status" className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">{error ? 'Status unavailable. Refresh before changing Autopilot.' : 'Checking Autopilot status…'}</p> : <>
         {!snapshot.permissions.canManage && <p className="rounded-lg bg-muted p-3 text-sm">You can view activity. An authorised administrator manages Autopilot.</p>}
         <div className="grid gap-4 xl:grid-cols-2">{snapshot.businesses.map(business => <BusinessCard key={business.key} business={business} now={now} canManage={snapshot.permissions.canManage} pending={loading} hasError={!!error} {...actions} />)}</div>
+        <div className="border-t pt-5" aria-labelledby="autopilot-staff-heading">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 id="autopilot-staff-heading" className="flex items-center gap-2 font-semibold"><Star className="size-4 fill-current text-amber-600" aria-hidden="true" />Staff review</h3><span className="text-xs text-muted-foreground">Oldest first · stays here until reviewed</span></div>
+          <p className="mb-3 text-sm text-muted-foreground">These conversations stay with your team, including later customer messages. Review the conversation and any existing order before deliberately resuming Autopilot.</p>
+          {snapshot.staffTasks.length?<ol aria-label="Open staff review tasks" className="max-h-[36rem] space-y-3 overflow-y-auto">{snapshot.staffTasks.map(task=><StaffTaskRow key={task.id} task={task} enabled={snapshot.businesses.find(b=>b.key===task.businessKey)?.enabled===true} canManage={snapshot.permissions.canManage&&!error} pending={loading} onTakeover={actions.onTakeover} onOpen={()=>{openStaffConversation(task);actions.onClose?.()}} />)}</ol>:<p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No open staff review tasks.</p>}
+          {snapshot.staffTasksHasMore&&<p className="mt-2 text-xs text-muted-foreground">Showing the oldest 25 tasks. Further tasks appear as these are reviewed.</p>}
+        </div>
         <div className="border-t pt-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Latest activity</h3><p className="text-xs text-muted-foreground">Newest first · Mauritius time</p></div>
-          {snapshot.jobs.some(needsAgentAttention) && <p aria-label="Agent attention in latest activity" className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-200"><Star className="size-4 shrink-0 fill-current" aria-hidden="true" />Starred for agent attention · {snapshot.jobs.filter(needsAgentAttention).length}</p>}
+          {snapshot.jobs.some(needsAgentAttention) && <p aria-label="Agent attention in latest activity" className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-200"><Star className="size-4 shrink-0 fill-current" aria-hidden="true" />Needs attention in Akmez · {snapshot.jobs.filter(needsAgentAttention).length}</p>}
           {snapshot.jobs.length ? <ol aria-label="Recent Autopilot activity" className="max-h-96 space-y-2 overflow-y-auto">{snapshot.jobs.map(job => <JobRow key={job.id} job={job} enabled={snapshot.businesses.find(b => b.key === job.businessKey)?.enabled === true} canManage={snapshot.permissions.canManage && !error} pending={loading} onTakeover={actions.onTakeover} />)}</ol>
             : <p className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground">No recent Autopilot activity. Enabling a business allows eligible conversations to be handled.</p>}
         </div>
@@ -73,6 +80,19 @@ export function AutopilotPanelView({ state, now = new Date(), ...actions }: Pane
       <p role="status" aria-live="polite" className="text-xs text-muted-foreground">{loading ? loading.kind === 'refresh' ? 'Checking status…' : loading.kind === 'pause' ? 'Confirming pause…' : loading.kind === 'run' ? 'Checking one batch of eligible conversations…' : 'Confirming your change…' : state.checkedAt ? `Last confirmed status: ${displayTime(state.checkedAt)}` : 'No server status confirmed yet.'}</p>
     </div>
   </section>
+}
+
+function StaffTaskRow({task,enabled,canManage,pending,onTakeover,onOpen}:{task:AutopilotStaffTask;enabled:boolean;canManage:boolean;pending:AutopilotState['loading'];onTakeover:PanelActions['onTakeover'];onOpen:()=>void}){
+  const order=task.kind==='order_ready_for_staff',details=task.evidence
+  const [reviewing,setReviewing]=useState(false)
+  return <li className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+    <div className="flex flex-wrap justify-between gap-2"><div><p className="break-words font-medium">{task.customerName||details.name||'Customer conversation'}</p><p className="mt-1 text-xs text-muted-foreground">{BUSINESS_NAMES[task.businessKey]} · {task.channel==='whatsapp'?'WhatsApp':'Messenger'} · {displayTime(task.createdAt)}</p></div><span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{order?'Order details to review':task.kind==='customer_issue'?'Customer issue':'Exchange or order change'}</span></div>
+    {order&&<><p className="mt-3 text-sm">Details collected. No order has been created or confirmed by Autopilot.</p><dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+      {[['Product',details.productName],['Quantity',details.quantity],['Proposed total',`Rs ${details.amount}`],['Contact',details.phone],['Customer',details.name],['Address',details.location],['Scheduled delivery',task.deliveryDate||'To check']].map(([label,value])=><div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="break-words">{value}</dd></div>)}
+      </dl><p className="mt-3 text-xs text-muted-foreground">Check the current product, price, address and any existing order before using Quick order. Ad attribution comes from the conversation; it is not inferred here.</p><details className="mt-2 text-xs text-muted-foreground"><summary className="cursor-pointer">Source references</summary><p className="mt-2 break-all">Product ID: {details.productId}</p>{Object.entries(details).filter(([k])=>k.endsWith('MessageId')).map(([k,v])=><p key={k} className="break-all">{k.replace('MessageId','')}: {v}</p>)}</details></>}
+    <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={onOpen}>Open conversation</Button><Button type="button" size="sm" variant="ghost" disabled={!canManage||!!pending||!enabled} onClick={()=>setReviewing(v=>!v)}>Review and resume</Button></div>
+    {reviewing&&<div className="mt-3 rounded-lg border bg-background p-3 text-sm"><p>Resume closes all open staff tasks for this conversation and lets Autopilot handle eligible new messages. It does not create or confirm an order.</p><div className="mt-3 flex gap-2"><Button type="button" size="sm" disabled={!canManage||!!pending||!enabled} onClick={()=>onTakeover('task:'+task.id,false)}>Reviewed — resume Autopilot</Button><Button type="button" size="sm" variant="ghost" onClick={()=>setReviewing(false)}>Keep with staff</Button></div></div>}
+  </li>
 }
 
 function BusinessCard({ business, canManage, pending, hasError, now, onConfigure, onPause, onRun }: PanelActions & {

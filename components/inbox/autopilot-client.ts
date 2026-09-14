@@ -12,7 +12,13 @@ export type AutopilotJob = {
   reason: string | null; updatedAt: string
   channel?: 'messenger' | 'whatsapp'; customerId?: string; manualTakeover?: boolean
 }
-export type AutopilotSnapshot = { businesses: AutopilotBusiness[]; jobs: AutopilotJob[]; permissions: { canManage: boolean } }
+export type AutopilotStaffTask = {
+  id:string; jobId:string; jobSource:'meta'|'green_api'; businessKey:AutopilotBusinessKey; channel:'messenger'|'whatsapp'; ownerId:string; customerId:string; conversationKey:string
+  inboundMessageId:string; customerName:string|null; kind:'customer_issue'|'exchange_or_change_request'|'order_ready_for_staff'; status:'open'; createdAt:string
+  evidence:Record<string,string>; catalogueFingerprint:string|null; deliveryDate:string|null; manualTakeover:boolean
+}
+export type AutopilotSnapshot = { businesses: AutopilotBusiness[]; jobs: AutopilotJob[]; staffTasks:AutopilotStaffTask[]; staffTasksHasMore:boolean; permissions: { canManage: boolean } }
+export const AUTOPILOT_OWNER_IDS={made_by_moris:{messenger:'308584892331429',whatsapp:'1090043534186338'},destockage:{messenger:'471644012696537',whatsapp:'968962882975955'}} as const
 export type AutopilotOperation = { kind: 'refresh' | 'save' | 'pause' | 'run' | 'takeover'; businessKey?: AutopilotBusinessKey; jobId?: string }
 export type AutopilotState = { snapshot: AutopilotSnapshot | null; loading: AutopilotOperation | null; error: string | null; checkedAt: string | null }
 export type AutopilotSettings = { deliveryDate: string; maxDailyReplies: number }
@@ -110,7 +116,24 @@ export function parseAutopilotSnapshot(value: unknown): AutopilotSnapshot {
       state: item.state, reason: item.reason, updatedAt: item.updatedAt,
       ...(takeover ? { channel: item.channel, customerId: item.customerId, manualTakeover: item.manualTakeover } : {}) } as AutopilotJob
   }).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id))
-  return { businesses: AUTOPILOT_BUSINESSES.map(key => businesses.find(b => b.key === key)!), jobs, permissions: { canManage: value.permissions.canManage } }
+  if(!Array.isArray(value.staffTasks)||value.staffTasks.length>25||typeof value.staffTasksHasMore!=='boolean')throw Error('Invalid staff queue')
+  const taskIds=new Set<string>(),staffTasks=value.staffTasks.map(item=>{
+    if(!object(item)||!string(item.id)||!string(item.jobId)||!['meta','green_api'].includes(String(item.jobSource))||taskIds.has(item.id)||!AUTOPILOT_BUSINESSES.includes(item.businessKey as AutopilotBusinessKey)||
+      !['messenger','whatsapp'].includes(String(item.channel))||!string(item.customerId,30)||!/^\d{5,30}$/.test(item.customerId)||!string(item.ownerId,30)||
+      !(item.customerName===null||typeof item.customerName==='string'&&item.customerName.length<=200)||!string(item.inboundMessageId,2048)||
+      !['customer_issue','exchange_or_change_request','order_ready_for_staff'].includes(String(item.kind))||item.status!=='open'||!time(item.createdAt)||item.createdAt===null||
+      typeof item.manualTakeover!=='boolean'||!object(item.evidence))throw Error('Invalid staff task')
+    const owner=AUTOPILOT_OWNER_IDS[item.businessKey as AutopilotBusinessKey][item.channel as 'messenger'|'whatsapp']
+    if(owner!==item.ownerId||item.conversationKey!==`${item.channel}:${owner}:${item.customerId}`||item.jobSource==='green_api'&&item.channel!=='whatsapp')throw Error('Invalid staff conversation')
+    const allowed=['productId','productName','productMessageId','quantity','quantityMessageId','amount','name','nameMessageId','phone','phoneMessageId','location','locationMessageId'],evidence=item.evidence
+    for(const [key,v]of Object.entries(evidence))if(!allowed.includes(key)||!string(v,key.endsWith('MessageId')?2048:300)||/[\u0000-\u001f]/.test(v))throw Error('Invalid staff evidence')
+    if(item.kind==='order_ready_for_staff'){
+      if(allowed.some(k=>!evidence[k])||!string(item.catalogueFingerprint,64)||!/^[a-f0-9]{64}$/.test(item.catalogueFingerprint)||!isAutopilotDate(item.deliveryDate))throw Error('Incomplete staff order')
+    }else if(Object.keys(item.evidence).length||item.catalogueFingerprint!==null||item.deliveryDate!==null)throw Error('Invalid staff issue')
+    taskIds.add(item.id)
+    return item as unknown as AutopilotStaffTask
+  }).sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)||a.id.localeCompare(b.id))
+  return { businesses: AUTOPILOT_BUSINESSES.map(key => businesses.find(b => b.key === key)!), jobs, staffTasks,staffTasksHasMore:value.staffTasksHasMore,permissions: { canManage: value.permissions.canManage } }
 }
 
 async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
@@ -200,7 +223,7 @@ export function createAutopilotClient(options: { fetcher?: typeof fetch; now?: (
       return success
     },
     takeover: (jobId: string, paused: boolean) => {
-      const job = state.snapshot?.jobs.find(j => j.id === jobId)
+      const job = jobId.startsWith('task:')?state.snapshot?.staffTasks.find(task=>task.id===jobId.slice(5)):state.snapshot?.jobs.find(j => j.id === jobId)
       if (!canManage() || !job?.channel || !job.customerId || typeof job.manualTakeover !== 'boolean' || !paused && !business(job.businessKey)?.enabled) return Promise.resolve(false)
       return execute({ kind: 'takeover', businessKey: job.businessKey, jobId }, { action: 'takeover', businessKey: job.businessKey, channel: job.channel, customerId: job.customerId, paused })
     },

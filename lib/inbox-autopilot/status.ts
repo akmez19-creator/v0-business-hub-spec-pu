@@ -4,7 +4,7 @@ import { AUTOPILOT_BUSINESSES } from './contract'
 import { autopilotStore } from './runtime'
 
 export async function autopilotStatus() {
-  const [configs,jobs]=await Promise.all([autopilotStore.listConfigs(),autopilotStore.listRecentJobs(undefined,30)])
+  const [configs,jobs,staffQueue]=await Promise.all([autopilotStore.listConfigs(),autopilotStore.listRecentJobs(undefined,30),autopilotStore.listStaffTasks(25)])
   const db=await connectInboxDatabase()
   let paused=new Set<string>()
   try {
@@ -12,6 +12,7 @@ export async function autopilotStatus() {
     paused=new Set(rows.map(r=>`${r.business_code}:${r.channel}:${r.owner_id}:${r.customer_id}`))
   } finally {await db.end().catch(()=>{})}
   return {
+    staffTasks:staffQueue.tasks,staffTasksHasMore:staffQueue.hasMore,
     businesses:configs.map(c=>({...c,state:!c.enabled?'paused':c.reason?'failed':'enabled'})),
     jobs:jobs.map(j=>{
       const owner=j.scope.channel==='messenger'?j.scope.pageId:j.scope.phoneNumberId

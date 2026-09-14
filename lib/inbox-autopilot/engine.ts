@@ -1,11 +1,11 @@
 import 'server-only'
 import { scopeIdentity, type AutopilotJob, type AutopilotScope, type BusinessKey } from './contract'
 import type { TrustedContext } from './context'
-import { buildReplyPlan, catalogueFingerprint, type CatalogueProduct, type ReplyDecision } from './policy'
+import { buildReplyPlan, catalogueFingerprint, knownStaffIssue, type CatalogueProduct, type ReplyDecision } from './policy'
 import type { AutopilotDb, createAutopilotStore } from './store'
 
 type Store = Pick<ReturnType<typeof createAutopilotStore>, 'getConfig' | 'isBlockedScope' | 'claimJobs' | 'beginSend' |
-  'finishSend' | 'markSendUnknown' | 'markNeedsReview' | 'markFailed'>
+  'finishSend' | 'markSendUnknown' | 'markNeedsReview' | 'markFailed' | 'escalateToStaff'>
 export type EngineDependencies = {
   store: Store
   loadContext(scope: AutopilotScope, db?: AutopilotDb): Promise<TrustedContext>
@@ -18,6 +18,8 @@ export type EngineDependencies = {
   prepareOwnership(scope: AutopilotScope, expectedVersion: number): Promise<{ ok: true; checkedAt: number } | { ok: false; reason: string }>
   /** Validate and capture the exact provider/scope before reserving. Preparing must not send. */
   prepareSend(scope: AutopilotScope): Promise<(text: string) => Promise<{ messageId: string; savedLocally: boolean }>>
+  /** Best-effort exact echo settlement after durable send acknowledgement; never changes its outcome or retries it. */
+  afterAcknowledged?(scope: AutopilotScope): Promise<void>
   now?: () => Date
   /** Lower values support isolated fixtures; runtime cannot raise the bounded timeouts. */
   timeouts?: { classifyMs?: number; sendMs?: number; freshnessMs?: number; ownershipMs?: number }
@@ -97,12 +99,30 @@ export function createAutopilotEngine(deps: EngineDependencies) {
       if (context.fingerprint !== job.contextFingerprint || context.latestInbound?.id !== job.inboundMessageId) return review('context_changed')
       const initialFreshness = await verifyMessenger(job.scope, context)
       if (!initialFreshness.ok) return review(initialFreshness.reason)
+      const knownIssue=knownStaffIssue(context)
+      if(knownIssue){
+        const held=await deps.store.escalateToStaff(job.id,job.leaseToken,knownIssue,context.fingerprint,async(db,lockedJob)=>{
+          const fresh=await deps.loadContext(job.scope,db)
+          return{...fresh,eligible:lockedJob.id===job.id&&sameScope(job.scope,fresh.scope)&&fresh.eligible&&fresh.fingerprint===context.fingerprint&&fresh.latestInbound?.id===job.inboundMessageId&&knownStaffIssue(fresh)===knownIssue}
+        })
+        return result('needs_review',held.ok?knownIssue:held.reason)
+      }
       stage = 'catalogue'
       const products = await deps.catalogue(job.scope)
       // No model call is made before the current controls, cap, scope and readable context pass.
       stage = 'classification'
       const decision = await bounded(() => deps.classify(context, products), timeoutLimit(deps.timeouts?.classifyMs, 30000))
       const plan = buildReplyPlan(decision, context, products, config.deliveryDate, now())
+      if(plan.action==='review'&&(plan.reason==='customer_issue'||plan.reason==='exchange_or_change_request')){
+        const kind=plan.reason
+        const held=await deps.store.escalateToStaff(job.id,job.leaseToken,kind,context.fingerprint,async(db,lockedJob)=>{
+          const fresh=await deps.loadContext(job.scope,db)
+          if(lockedJob.id!==job.id||!sameScope(job.scope,fresh.scope)||!fresh.eligible||fresh.fingerprint!==context.fingerprint||fresh.latestInbound?.id!==job.inboundMessageId)return{...fresh,eligible:false}
+          const current=buildReplyPlan(decision,fresh,products,config.deliveryDate!,now())
+          return{...fresh,eligible:current.action==='review'&&current.reason===kind}
+        })
+        return result('needs_review',held.ok?kind:held.reason)
+      }
       if (plan.action !== 'send') return review(plan.reason)
       if (!plan.text.trim() || plan.text.length > 4000) return review('invalid_send_plan')
       stage = 'provider_preparation'
@@ -120,6 +140,7 @@ export function createAutopilotEngine(deps: EngineDependencies) {
       beginAttempted = true
       const started = await deps.store.beginSend({ jobId: job.id, leaseToken: job.leaseToken, expectedVersion: config.version,
         expectedContextFingerprint: context.fingerprint, draftText: plan.text,
+        ...(plan.reason==='order_ready_for_staff'?{staffTask:{kind:'order_ready_for_staff' as const,evidence:plan.evidence,catalogueFingerprint:plan.catalogueFingerprint,deliveryDate:config.deliveryDate}}:{}),
         recheck: async (db, lockedJob) => {
           if (!proofCurrent(finalFreshness.expiresAt)) return { eligible: false, fingerprint: context.fingerprint, latestInbound: null }
           if (lockedJob.id !== job.id || lockedJob.inboundMessageId !== job.inboundMessageId || scopeIdentity(lockedJob.scope).conversationKey !== scopeIdentity(job.scope).conversationKey || lockedJob.businessKey !== job.businessKey) return { eligible: false, fingerprint: context.fingerprint, latestInbound: null }
@@ -128,7 +149,7 @@ export function createAutopilotEngine(deps: EngineDependencies) {
           const currentProducts = await deps.catalogue(job.scope, db)
           if (catalogueFingerprint(currentProducts) !== plan.catalogueFingerprint) return { ...fresh, eligible: false }
           const checkedPlan = buildReplyPlan(decision, fresh, currentProducts, config.deliveryDate!, now())
-          return { ...fresh, eligible: proofCurrent(finalFreshness.expiresAt) && checkedPlan.action === 'send' && checkedPlan.text === plan.text && checkedPlan.reason === plan.reason }
+          return { ...fresh, eligible: proofCurrent(finalFreshness.expiresAt) && checkedPlan.action === 'send' && checkedPlan.text === plan.text && checkedPlan.reason === plan.reason && JSON.stringify(checkedPlan.evidence)===JSON.stringify(plan.evidence) }
         } })
       if (!started.ok) return result('needs_review', started.reason)
       sendToken = started.sendToken
@@ -148,6 +169,7 @@ export function createAutopilotEngine(deps: EngineDependencies) {
         await deps.store.markSendUnknown(job.id, sendToken, 'send_confirmation_persistence_failed')
         return result('unknown', 'send_confirmation_persistence_failed')
       }
+      try { await deps.afterAcknowledged?.(job.scope) } catch { /* A saved send outcome is final. */ }
       return result('sent', reason)
     } catch (error) {
       if (sendToken) {

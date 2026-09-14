@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { priceFor, setSize, type QuickOrderProduct } from '@/lib/orders/quick-order'
-import type { ContextMessage, TrustedContext } from './context'
+import type { NativeContext } from './green-native-context'
+type ContextMessage=NativeContext['messages'][number]
+type TrustedContext=NativeContext
 
 export type ReplyLanguage = 'en' | 'fr' | 'mfe'
 export type ReplyIntent = 'greeting' | 'price' | 'buy' | 'delivery' | 'acknowledgement' | 'technical' | 'complaint' | 'change_order' | 'postal' | 'collection' | 'other'

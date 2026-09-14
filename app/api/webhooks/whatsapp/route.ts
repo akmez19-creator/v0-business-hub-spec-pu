@@ -1,3 +1,4 @@
+import { observeMetaOutgoing } from '@/lib/inbox-autopilot/handoff-runtime'
 import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { saveIncoming, updateStatus } from '@/lib/whatsapp/store'
@@ -193,6 +194,8 @@ export async function POST(request: Request) {
 
           const { mediaId, mediaMime } = readMedia(m)
           try {
+            if (direction === 'out' && !historical)
+              await observeMetaOutgoing('whatsapp', phoneNumberId, waId, m.id, new Date(Number(m.timestamp) * 1000).toISOString(), m)
             const { inserted } = await saveIncoming({
               waId,
               profileName: value.contacts?.find(contact => contact.wa_id === waId)?.profile?.name ?? null,

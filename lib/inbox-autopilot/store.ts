@@ -1,5 +1,6 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
+import { recordStaffTaskAndHold, resolveStaffTasksOnResume, staffTaskFromRow, validateStaffTask, type StaffTaskInput } from './staff-tasks'
 import { AUTOPILOT_BUSINESSES, AUTOPILOT_LIMITS, AutopilotError, assertFingerprint, assertMessageId, businessOf, scopeIdentity, validateConfigPatch,
   type AutopilotConfig, type AutopilotJob, type AutopilotScope, type BusinessKey, type ConfigPatch } from './contract'
 
@@ -171,7 +172,9 @@ export function createAutopilotStore(connect: AutopilotConnect) {
       return tx(async db => {
         await admin(db,actor)
         // An already committed send intent cannot be recalled; it remains visible as sending/unknown/sent.
-        return takeover(db,actor,scope,isPaused)
+        const result=await takeover(db,actor,scope,isPaused)
+        if(!isPaused)await resolveStaffTasksOnResume(db,scope,actor)
+        return result
       })
     },
     /** Existing manual-send routes call only after their usual authenticated inbox access check. */
@@ -246,9 +249,10 @@ export function createAutopilotStore(connect: AutopilotConnect) {
         return result
       })
     },
-    async beginSend(a: { jobId:string; leaseToken:string; expectedVersion:number; expectedContextFingerprint:string; draftText:string; recheck:ContextRecheck }) {
+    async beginSend(a: { jobId:string; leaseToken:string; expectedVersion:number; expectedContextFingerprint:string; draftText:string; recheck:ContextRecheck; staffTask?:StaffTaskInput }) {
       assertFingerprint(a.expectedContextFingerprint)
       if (!a.draftText?.trim() || a.draftText.length>4000 || typeof a.recheck!=='function') throw new AutopilotError('invalid_send_plan')
+      if(a.staffTask){validateStaffTask(a.staffTask);if(a.staffTask.kind!=='order_ready_for_staff')throw new AutopilotError('invalid_send_staff_task')}
       return tx(async db => {
         const {c,row}=await lockedJob(db,a.jobId)
         if (row.state!=='processing' || row.lease_token!==a.leaseToken || row.send_token || new Date(row.lease_expires_at).getTime()<=Date.now()) return {ok:false as const,reason:'lease_unavailable'}
@@ -273,6 +277,7 @@ export function createAutopilotStore(connect: AutopilotConnect) {
         const sendToken=randomUUID()
         const saved=(await db.query(`UPDATE public.inbox_autopilot_jobs SET state='sending',send_token=$2,send_started_at=clock_timestamp(),reservation_day=$3,
           draft_text=$4,lease_expires_at=clock_timestamp()+interval '120 seconds',updated_at=clock_timestamp() WHERE id=$1 RETURNING *`,[row.id,sendToken,day,a.draftText])).rows[0]
+        if(a.staffTask)await recordStaffTaskAndHold(db,jobOf(saved),a.staffTask)
         return {ok:true as const,job:jobOf(saved),config:configOf(c),sendToken}
       })
     },
@@ -298,6 +303,37 @@ export function createAutopilotStore(connect: AutopilotConnect) {
     },
     async markNeedsReview(jobId:string,leaseToken:string,reason:string) {
       return tx(async db=>{const {row}=await lockedJob(db,jobId);if(row.state!=='processing'||row.lease_token!==leaseToken||row.send_token)return false;await review(db,jobId,safeReason(reason));return true})
+    },
+    /** Complaint/change handoff is durable for the conversation, not only this
+     * inbound job. Recheck the same locked context before creating the task. */
+    async escalateToStaff(jobId:string,leaseToken:string,kind:'customer_issue'|'exchange_or_change_request',expectedFingerprint:string,recheck:ContextRecheck){
+      assertFingerprint(expectedFingerprint)
+      if(!['customer_issue','exchange_or_change_request'].includes(kind)||typeof recheck!=='function')throw new AutopilotError('invalid_staff_escalation')
+      return tx(async db=>{
+        const {row}=await lockedJob(db,jobId)
+        if(row.state!=='processing'||row.lease_token!==leaseToken||row.send_token||row.send_started_at||row.reservation_day||row.provider_message_id||row.draft_text||
+          !(new Date(row.lease_expires_at).getTime()>Date.now()))return{ok:false as const,reason:'lease_unavailable'}
+        const job=jobOf(row);await lockScope(db,job.scope)
+        const control=(await db.query('SELECT paused,updated_by,updated_at FROM public.inbox_autopilot_controls WHERE business_code=$1 AND channel=$2 AND owner_id=$3 AND customer_id=$4',
+          [row.business_code,row.channel,row.owner_id,row.customer_id])).rows[0]
+        // A deliberate Resume while classification was in flight wins over that
+        // stale decision. A later inbound starts a new job and can escalate anew.
+        if(control?.paused===false&&control.updated_by&&new Date(control.updated_at).getTime()>new Date(row.updated_at).getTime())return review(db,row.id,'manual_control_changed')
+        const checked=await recheck(db,job)
+        if(!checked.eligible||checked.fingerprint!==expectedFingerprint||row.context_fingerprint!==expectedFingerprint||checked.latestInbound?.id!==row.inbound_message_id)return review(db,row.id,'context_changed')
+        const task=await recordStaffTaskAndHold(db,job,{kind,evidence:{},catalogueFingerprint:null,deliveryDate:null})
+        return{ok:true as const,taskId:task.taskId}
+      })
+    },
+    /** Stable oldest-first staff queue; independent of the recent activity feed. */
+    async listStaffTasks(limit=50){
+      if(!Number.isInteger(limit)||limit<1||limit>100)throw new AutopilotError('invalid_staff_task_limit')
+      return read(async db=>{
+        const rows=(await db.query("SELECT t.*,COALESCE(c.paused,false) AS paused FROM public.inbox_autopilot_staff_tasks t LEFT JOIN public.inbox_autopilot_controls c " +
+          "ON c.business_code=t.business_code AND c.channel=t.channel AND c.owner_id=t.owner_id AND c.customer_id=t.customer_id WHERE t.status='open' " +
+          'ORDER BY t.created_at,t.id LIMIT $1',[limit+1])).rows
+        return{tasks:rows.slice(0,limit).map(staffTaskFromRow),hasMore:rows.length>limit}
+      })
     },
     /** Only definite pre-send failures qualify. Once sending, use markSendUnknown. */
     async markFailed(jobId:string,leaseToken:string,reason:string) {

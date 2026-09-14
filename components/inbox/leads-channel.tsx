@@ -48,6 +48,7 @@ import {
 import { LeadConversation } from './lead-conversation'
 import { QuickOrderPanel } from './quick-order-panel'
 import { applyAssistResult, completeSend, newLeadSession, readInbox, stableThreadKey, stableMessengerTranscriptUrl, type LeadSession, type OrderOperation } from './inbox-session'
+import { STAFF_CONVERSATION_EVENT, staffConversationIdentity, staffConversationThread } from './staff-conversation'
 import type { CommentItem } from './comments-channel'
 import { inboxInvalidationKeys, latestActivityAt, newestConversations, presentTranscript, whatsappAcceptedWarning, type PresentedLeadMessage, type QueueView } from './inbox-behavior'
 import { whatsappDraftBlock, type GreenContextStatus } from './green-copies-client'
@@ -194,6 +195,20 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
     ],
     [mData, wData, cData],
   )
+
+  useEffect(() => {
+    const openStaffThread = (event: Event) => {
+      const identity = staffConversationIdentity((event as CustomEvent<unknown>).detail)
+      if (!identity) return
+      const thread = staffConversationThread(identity, all)
+      selectedSnapshot.current = thread
+      setSelectedKey(thread.key)
+      setMobilePane('conversation')
+      setPage('all'); setChannel('all'); setProduct('all'); setCampaign('all'); setQuery(''); setLiveOnly(false); setQueueView('all')
+    }
+    window.addEventListener(STAFF_CONVERSATION_EVENT, openStaffThread)
+    return () => window.removeEventListener(STAFF_CONVERSATION_EVENT, openStaffThread)
+  }, [all])
 
   /**
    * Options come from the selected channel, not from everything.
