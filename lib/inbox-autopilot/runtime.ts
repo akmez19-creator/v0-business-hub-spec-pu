@@ -1,6 +1,7 @@
 import { reconcileHandoffScope, hasUnprocessedHandoff } from './handoff-runtime'
 import { createGreenNativeRuntime } from './green-native-runtime'
 import { nativeReleaseAllows } from './green-native-engine'
+import { selectNativeCandidate, recordNativePass } from './green-native-schedule'
 import { classifyConversation as classifyNativeConversation } from './green-native-generate'
 import { recordNativeStaffTaskAndHold } from './staff-tasks'
 import { PgGreenStore } from '@/lib/whatsapp-green/store'
@@ -257,24 +258,25 @@ export async function runAutopilot(key?:BusinessKey) {
           let nativePasses=0
           if(nativeSelected){
             const business=businessOf(businessKey)
-            const candidate=await usingDb(undefined,async db=>(await db.query(`SELECT c.wa_id FROM public.whatsapp_green_conversations c
-              JOIN LATERAL(SELECT provider_message_id,instance_id,direction,provider_accepted_at FROM public.whatsapp_green_messages
-                WHERE phone_number_id=c.phone_number_id AND wa_id=c.wa_id ORDER BY provider_accepted_at DESC NULLS LAST,id DESC LIMIT 1)m ON true
-              LEFT JOIN public.inbox_autopilot_green_jobs j ON j.phone_number_id=c.phone_number_id AND j.wa_id=c.wa_id AND j.instance_id=m.instance_id AND j.inbound_message_id=m.provider_message_id
-              WHERE c.phone_number_id=$1 AND m.direction='in' AND m.provider_accepted_at>clock_timestamp()-interval '24 hours' AND m.provider_accepted_at<=clock_timestamp()
-                AND NOT EXISTS(SELECT 1 FROM public.inbox_autopilot_controls h WHERE h.business_code=$2 AND h.channel='whatsapp' AND h.owner_id=$1 AND h.customer_id=c.wa_id AND h.paused)
-                AND (j.id IS NULL OR (j.state='processing' AND j.attempt_id IS NULL AND j.lease_expires_at<clock_timestamp()))
-              ORDER BY m.provider_accepted_at DESC,c.wa_id LIMIT 1`,[business.phoneNumberId,business.code])).rows[0])
+            // Fair rotation: a pass that ends before claim() writes no job row, so the
+            // ledger in green-native-schedule.ts is what stops one customer taking every slot.
+            const candidate=await usingDb(undefined,db=>selectNativeCandidate(db,business))
             if(candidate&&await canContinue()){
               summary.scanned++
               nativePasses++
-              const result=await nativeRuntime.runScope({businessKey,channel:'whatsapp',phoneNumberId:business.phoneNumberId,waId:candidate.wa_id})
+              const scope={businessKey,channel:'whatsapp' as const,phoneNumberId:business.phoneNumberId,waId:candidate.waId}
+              let result:{state:string;reason:string;jobId?:string}
+              try{result=await nativeRuntime.runScope(scope)}
+              catch{result={state:'failed',reason:'native_run_threw'};summary.errors++}
               summary.nativeState=result.state
               summary.nativeReason=/^[a-z_]{1,100}$/.test(result.reason)?result.reason:'native_run_unavailable'
               summary.processed++
               if(result.state==='accepted')summary.sent++
               else if(result.state==='unknown')summary.unknown++
+              else if(result.state==='failed')summary.failed++
               else summary.review++
+              // Recorded after the run: a crash between run and record only costs one extra pass.
+              await usingDb(undefined,db=>recordNativePass(db,scope,candidate.inboundMessageId,result)).catch(()=>{summary.errors++})
             }
           }
           let enginePasses=nativePasses
