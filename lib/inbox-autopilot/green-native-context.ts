@@ -18,8 +18,11 @@ export const nativeDigest=(value:unknown)=>greenHash(stableGreenJson(value))
 export const nativeTime=(value:unknown)=>value instanceof Date?value.getTime():typeof value==='string'?Date.parse(value):NaN
 const exactTime=(a:unknown,b:unknown)=>Number.isFinite(nativeTime(a))&&nativeTime(a)===nativeTime(b)
 const semantic=(r:Row)=>[r.provider_message_id,r.direction,r.kind,r.body,new Date(nativeTime(r.provider_accepted_at)).toISOString(),r.semantic_hash]
-export function reviewedNativeHash(rows:Row[],cutoff:string):string {
-  return nativeDigest(rows.filter(r=>nativeTime(r.provider_accepted_at)<=nativeTime(cutoff)).map(semantic).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))))
+/** Provider timestamps are whole seconds while the cutoff is a millisecond clock, so our own reply sent in the
+ * same second as enrolment is stamped UNDER the cutoff. Own accepted sends are therefore never part of the
+ * reviewed history (measured: cutoff 17:37:43.685, own echo 17:37:43 -> permanent reviewed_history_changed). */
+export function reviewedNativeHash(rows:Row[],cutoff:string,ownProviderMessageIds:ReadonlySet<string>=new Set()):string {
+  return nativeDigest(rows.filter(r=>nativeTime(r.provider_accepted_at)<=nativeTime(cutoff)&&!ownProviderMessageIds.has(String(r.provider_message_id))).map(semantic).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))))
 }
 export type NativeSnapshot = {scope:GreenSendScope;binding:GreenBinding;enrollment:NativeEnrollment|null;proof:NativeHistory|null;
   rows:Row[];events:Row[];attempts:Row[];pending:number;now:number;connection:Row|undefined;number:Row|undefined;oldMetaCount:number}
@@ -86,7 +89,7 @@ export function evaluateNativeSnapshot(s:NativeSnapshot):NativeContext {
   }
   if(history.size!==seen.size||[...history.keys()].some(id=>!seen.has(id)))fail('history_not_caught_up')
   if([...own.keys()].some(id=>!seen.has(id)))fail('own_send_not_observed')
-  if(e){try{if(reviewedNativeHash(s.rows,e.cutoff)!==e.reviewed_hash)fail('reviewed_history_changed')}catch{fail('reviewed_history_changed')}
+  if(e){try{if(reviewedNativeHash(s.rows,e.cutoff,new Set(own.keys()))!==e.reviewed_hash)fail('reviewed_history_changed')}catch{fail('reviewed_history_changed')}
     if(e.mode==='new_chat'&&(s.oldMetaCount>0||s.rows.filter(r=>nativeTime(r.provider_accepted_at)<=nativeTime(e.cutoff)).length!==1||s.rows.find(r=>r.provider_message_id===e.trigger_message_id)?.direction!=='in'))fail('new_chat_not_proven')}
   messages.sort((a,b)=>nativeTime(a.createdAt)-nativeTime(b.createdAt))
   const latest=messages.at(-1)

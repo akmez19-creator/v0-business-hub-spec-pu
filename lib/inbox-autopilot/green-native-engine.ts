@@ -74,8 +74,9 @@ export function createGreenNativeEngine(deps:NativeEngineDependencies){
   const p=(await db.query('SELECT id FROM public.inbox_autopilot_green_history WHERE phone_number_id=$1 AND wa_id=$2 ORDER BY fetched_at DESC,id DESC LIMIT 1',[scope.phoneNumberId,scope.waId])).rows[0]
   const latest=rows.filter(r=>r.direction==='in').at(-1)
   if(!p||!latest)throw Error('native_history_required')
+  const own=new Set<string>((await db.query("SELECT provider_message_id FROM public.inbox_autopilot_green_sends WHERE phone_number_id=$1 AND wa_id=$2 AND state='accepted' AND provider_message_id IS NOT NULL",[scope.phoneNumberId,scope.waId])).rows.map(r=>String(r.provider_message_id)))
   const e:NativeEnrollment={id:randomUUID(),business_code:code(scope),phone_number_id:scope.phoneNumberId,wa_id:scope.waId,instance_id:b.instanceId,
-   account_id:b.accountId,binding_version:b.version,mode:'provider_verified',cutoff,reviewed_hash:reviewedNativeHash(rows,cutoff),trigger_message_id:latest.provider_message_id}
+   account_id:b.accountId,binding_version:b.version,mode:'provider_verified',cutoff,reviewed_hash:reviewedNativeHash(rows,cutoff,own),trigger_message_id:latest.provider_message_id}
   const context=await readNativeContext(db,scope,b,e)
   if(!automaticNativeHistoryAllowed(context))return{...context,eligible:false,reasons:[...context.reasons,'initial_history_requires_staff']}
   await db.query(`INSERT INTO public.inbox_autopilot_green_enrollments(id,business_code,phone_number_id,wa_id,instance_id,account_id,binding_version,mode,cutoff,reviewed_hash,trigger_message_id,history_id)
@@ -83,16 +84,19 @@ export function createGreenNativeEngine(deps:NativeEngineDependencies){
   await db.query('INSERT INTO public.inbox_autopilot_green_scopes(phone_number_id,wa_id,enrollment_id,enabled) VALUES($1,$2,$3,true)',[scope.phoneNumberId,scope.waId,e.id])
   return context
  }
- async function claim(scope:GreenSendScope,b:GreenBinding):Promise<{job:NativeJob;context:NativeContext;config:Row}|null>{return tx(async db=>{
-  await lockNativeScope(db,scope);const c=await controls(db,scope);if(!c)return null
+ type Refused={refused:string}
+ // A refusal names the gate that closed so the pass ledger and dashboard can tell "staff must review this
+ // customer" from "controls or budget unavailable"; the behaviour of every gate is unchanged.
+ async function claim(scope:GreenSendScope,b:GreenBinding):Promise<{job:NativeJob;context:NativeContext;config:Row}|Refused>{return tx(async db=>{
+  await lockNativeScope(db,scope);const c=await controls(db,scope);if(!c)return{refused:'native_controls_unavailable'}
   const daily=(await db.query("SELECT reserved_count,sent_count FROM public.inbox_autopilot_daily WHERE business_code=$1 AND day=(clock_timestamp() AT TIME ZONE 'Indian/Mauritius')::date",[code(scope)])).rows[0]
-  if(Number(daily?.reserved_count??0)>=Number(c.max_daily_replies)||Number(daily?.sent_count??0)>=Number(c.max_daily_replies))return null
+  if(Number(daily?.reserved_count??0)>=Number(c.max_daily_replies)||Number(daily?.sent_count??0)>=Number(c.max_daily_replies))return{refused:'daily_budget_exhausted'}
   const context=await ensureEnrollment(db,scope,b),latest=context.latestInbound
-  if(!context.eligible||!latest||!context.enrollment)return null
+  if(!context.eligible||!latest||!context.enrollment)return{refused:reason(context.reasons.at(-1)??'native_context_unavailable')}
   const existing=(await db.query('SELECT * FROM public.inbox_autopilot_green_jobs WHERE phone_number_id=$1 AND wa_id=$2 AND instance_id=$3 AND inbound_message_id=$4 FOR UPDATE',[scope.phoneNumberId,scope.waId,b.instanceId,latest.nativeId])).rows[0]
   // Only abandoned pre-intent processing may be reclaimed. A new run never resets review/unknown/accepted.
-  if(existing&&(existing.state!=='processing'||existing.attempt_id||nativeTime(existing.lease_expires_at)>now()||existing.context_fingerprint!==context.fingerprint||Number(existing.config_version)!==Number(c.version)))return null
-  if(existing&&Number(existing.control_version)!==Number(c.control_version))return null
+  if(existing&&(existing.state!=='processing'||existing.attempt_id||nativeTime(existing.lease_expires_at)>now()||existing.context_fingerprint!==context.fingerprint||Number(existing.config_version)!==Number(c.version)))return{refused:'inbound_already_handled'}
+  if(existing&&Number(existing.control_version)!==Number(c.control_version))return{refused:'inbound_already_handled'}
   const job:NativeJob={id:existing?.id??randomUUID(),scope:{...scope},bindingVersion:b.version,enrollmentId:context.enrollment.id,configVersion:Number(c.version),controlVersion:Number(c.control_version),inboundId:latest.nativeId,eventKey:latest.eventKey,fingerprint:context.fingerprint,leaseToken:randomUUID()}
   if(existing)await db.query("UPDATE public.inbox_autopilot_green_jobs SET lease_token=$2,lease_expires_at=clock_timestamp()+interval '120 seconds',updated_at=clock_timestamp() WHERE id=$1",[job.id,job.leaseToken])
   else await db.query(`INSERT INTO public.inbox_autopilot_green_jobs(id,business_code,phone_number_id,wa_id,instance_id,chat_id,binding_version,enrollment_id,config_version,inbound_message_id,inbound_event_key,context_fingerprint,state,lease_token,lease_expires_at,control_version)
@@ -149,7 +153,7 @@ export function createGreenNativeEngine(deps:NativeEngineDependencies){
   if(!await withDb(db=>nativeReleaseAllows(db,scope)))return{state:'paused',reason:'native_transport_not_enabled'}
   await settle(scope)
   if(!(await deps.reconcileHandoff(scope)).complete)return{state:'needs_review',reason:'handover_pending'}
-  const claimed=await claim(scope,b);if(!claimed)return{state:'needs_review',reason:'native_context_or_controls_unavailable'}
+  const claimed=await claim(scope,b);if('refused'in claimed)return{state:'needs_review',reason:claimed.refused}
   const{job,context,config}=claimed
   let attempted=false
   try{
