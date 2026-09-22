@@ -1,17 +1,12 @@
 import 'server-only'
 import { connectInboxDatabase } from '@/lib/messenger/pg'
-import { configuredGreenBindings } from '@/lib/whatsapp-green/config'
-import { greenHash } from '@/lib/whatsapp-green/normalise'
+import { stableHash } from './stable-hash'
 import { AUTOPILOT_BUSINESSES, scopeIdentity, type AutopilotScope, type BusinessKey } from './contract'
 import type { AutopilotDb } from './store'
 import { createExternalHandoff, type HandoffReference } from './external-handoff'
 import { createHandoffObservations } from './handoff-observations'
 import { loadHandoffRelease } from './handoff-release'
-import { loadGreenHandoffEvidence } from './handoff-green-evidence'
 import { validatedMetaObservation } from './handoff-meta-evidence'
-import { loadGreenNativeHandoffProof } from './green-native-proof'
-import { loadGreenNativePending } from './green-native-pending'
-import { nativeReleaseAllows } from './green-native-engine'
 
 async function withDb<T>(read: (db: AutopilotDb) => Promise<T>): Promise<T> {
   const db = await connectInboxDatabase()
@@ -35,12 +30,7 @@ const observations = createHandoffObservations({
 })
 const handoff = createExternalHandoff({
   connect: connectInboxDatabase,
-  loadGreenNativeIdentity: async (db, reference) => await nativeReleaseAllows(db,reference.scope)
-    ? loadGreenNativeHandoffProof({query:db.query.bind(db),end:async()=>{}},reference,async phone=>configuredGreenBindings().find(b=>b.phoneNumberId===phone)??null) : null,
-  loadGreenNativePending: async (db, reference) => await nativeReleaseAllows(db,reference.scope)
-    ? loadGreenNativePending({query:db.query.bind(db),end:async()=>{}},reference,async phone=>configuredGreenBindings().find(b=>b.phoneNumberId===phone)??null) : null,
-  loadPersistedEvidence: async (db, reference) => reference.source === 'green_whatsapp'
-    ? loadGreenHandoffEvidence(db, reference, configuredGreenBindings()) : observations.read(db, reference),
+  loadPersistedEvidence: async (db, reference) => observations.read(db, reference),
   loadJournalWindow: async db => {
     const release = await loadHandoffRelease(db)
     return release ? { activatedAt: release.activatedAt, maxAgeSeconds: release.journalMaxAgeSeconds } : null
@@ -66,14 +56,6 @@ export async function observeMetaOutgoing(channel: 'messenger' | 'whatsapp', own
   if (captured.status !== 'disabled') await settle(input)
 }
 
-/** GREEN ingestion has its own durable authenticated ledger. This independent
- * post-commit transaction must never run while ingestion owns its binding lock. */
-export async function observeGreenOutgoing(owner: string, customer: string, eventKey: string, nativeMessageId: string): Promise<void> {
-  const scope = scopeFor('whatsapp', owner, customer)
-  if (!scope || !await withDb(loadHandoffRelease)) return
-  await settle({ scope, source: 'green_whatsapp', sourceEventId: eventKey, nativeMessageId })
-}
-
 type CatchupCursor = { schema: 1; activatedAt: string; nextLane: number; after: Array<string | null> }
 function catchupCursor(raw: unknown, activatedAt: string): CatchupCursor {
   const empty: CatchupCursor = { schema: 1, activatedAt, nextLane: 0, after: [null, null, null] }
@@ -95,7 +77,7 @@ function catchupCursor(raw: unknown, activatedAt: string): CatchupCursor {
 export async function reconcileHandoffScope(scope: AutopilotScope): Promise<{ complete: boolean }> {
   const startedAt = Date.now()
   const { business, owner, customer } = scopeIdentity(scope)
-  const cursorKey = 'inbox:autopilot:handoff:catchup:v1:' + greenHash(JSON.stringify([business.code, scope.channel, owner, customer]))
+  const cursorKey = 'inbox:autopilot:handoff:catchup:v1:' + stableHash(JSON.stringify([business.code, scope.channel, owner, customer]))
   const inventory = await withDb(async db => {
     const release = await loadHandoffRelease(db)
     if (!release) return null
@@ -113,18 +95,8 @@ export async function reconcileHandoffScope(scope: AutopilotScope): Promise<{ co
       "WHERE business_code=$1 AND channel=$2 AND owner_id=$3 AND customer_id=$4 AND source='green_whatsapp' AND disposition='pending_identity' " +
       'ORDER BY CASE WHEN $5::text IS NULL OR event_key>$5::text THEN 0 ELSE 1 END,event_key LIMIT 101',
     [business.code, scope.channel, owner, customer, cursor.after[1]])).rows
-    const recentGreen = scope.channel !== 'whatsapp' ? [] : (await db.query(
-      'SELECT e.event_key AS source_event_id,e.provider_message_id AS native_message_id,e.event_key AS cursor_key FROM public.whatsapp_green_events e ' +
-      'WHERE e.phone_number_id=$1 AND e.wa_id=$2 AND e.received_at>=$3::timestamptz ' +
-      "AND e.received_at>=clock_timestamp()-interval '10 minutes' AND e.provider_message_id IS NOT NULL AND " +
-      "((e.origin='webhook' AND e.event_type IN ('outgoingMessageReceived','outgoingAPIMessageReceived')) OR " +
-      "(e.origin='journal' AND e.event_type='journalMessage' AND e.raw->>'type'='outgoing')) " +
-      'AND NOT EXISTS(SELECT 1 FROM public.inbox_autopilot_handoff_events h WHERE h.business_code=$4 ' +
-      "AND h.channel='whatsapp' AND h.owner_id=e.phone_number_id AND h.customer_id=e.wa_id AND h.source='green_whatsapp' AND h.source_event_id=e.event_key) " +
-      'ORDER BY CASE WHEN $5::text IS NULL OR e.event_key>$5::text THEN 0 ELSE 1 END,e.event_key LIMIT 101',
-    [owner, customer, release.activatedAt, business.code, cursor.after[2]])).rows
-      .map(row => ({ source: 'green_whatsapp' as const, source_event_id: row.source_event_id, native_message_id: row.native_message_id, cursor_key: row.cursor_key }))
-    return { lanes: [meta, pending, recentGreen], cursor, original }
+    // Lane 3 held GREEN-API's own outgoing ledger; the Meta record is now the only source.
+    return { lanes: [meta, pending, []], cursor, original }
   })
   if (!inventory) return { complete: true }
   const { lanes, cursor, original } = inventory
@@ -169,15 +141,5 @@ export async function hasUnprocessedHandoff(db: AutopilotDb, scope: AutopilotSco
     'AND o.first_verified_at>=$5::timestamptz AND o.provider_occurred_at>=$5::timestamptz ' +
     'AND NOT EXISTS(SELECT 1 FROM public.inbox_autopilot_handoff_events h WHERE h.event_key=o.event_key) LIMIT 1',
   [business.code, scope.channel, owner, customer, release.activatedAt])).rows[0]
-  if (row || scope.channel !== 'whatsapp') return !!row
-  const green = (await db.query('SELECT 1 FROM public.whatsapp_green_events e ' +
-    'JOIN public.whatsapp_green_bindings b ON b.phone_number_id=e.phone_number_id AND b.instance_id=e.instance_id ' +
-    'WHERE e.phone_number_id=$1 AND e.wa_id=$2 AND e.received_at>=$3::timestamptz ' +
-    "AND e.received_at>=clock_timestamp()-interval '10 minutes' AND e.provider_message_id IS NOT NULL AND " +
-    "((e.origin='webhook' AND e.event_type IN ('outgoingMessageReceived','outgoingAPIMessageReceived')) OR " +
-    "(e.origin='journal' AND e.event_type='journalMessage' AND e.raw->>'type'='outgoing')) " +
-    'AND NOT EXISTS(SELECT 1 FROM public.inbox_autopilot_handoff_events h WHERE h.business_code=$4 ' +
-    "AND h.channel='whatsapp' AND h.owner_id=e.phone_number_id AND h.customer_id=e.wa_id AND h.source='green_whatsapp' AND h.source_event_id=e.event_key) LIMIT 1",
-  [owner, customer, release.activatedAt, business.code])).rows[0]
-  return !!green
+  return !!row
 }

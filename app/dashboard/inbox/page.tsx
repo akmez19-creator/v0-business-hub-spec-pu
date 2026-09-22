@@ -1,4 +1,5 @@
 import { headers } from 'next/headers'
+import { createClient } from '@/lib/supabase/server'
 import { InboxWorkspace } from '@/components/inbox/inbox-workspace'
 import { AutopilotLauncher } from '@/components/inbox/autopilot-launcher'
 import { ReplyPromptLauncher } from '@/components/inbox/reply-prompt-launcher'
@@ -9,6 +10,10 @@ export const metadata = {
 }
 
 export default async function InboxPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: profile } = user ? await supabase.from('profiles').select('name, email').eq('id', user.id).maybeSingle() : { data: null }
+  const viewer = user ? { id: user.id, name: profile?.name || profile?.email || user.email || 'Someone' } : null
   const h = await headers()
   const host = h.get('x-forwarded-host') ?? h.get('host') ?? ''
   const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https')
@@ -26,7 +31,7 @@ export default async function InboxPage() {
           <AutopilotLauncher />
         </div>
       </header>
-      <InboxWorkspace origin={origin} />
+      <InboxWorkspace origin={origin} viewer={viewer} />
     </main>
   )
 }

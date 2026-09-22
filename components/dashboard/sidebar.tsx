@@ -40,6 +40,7 @@ import {
   AlertTriangle,
   CalendarDays,
   CalendarClock,
+  History,
   Megaphone,
 } from 'lucide-react'
 
@@ -86,13 +87,19 @@ const navItems: NavItem[] = [
         icon: CalendarClock,
         roles: ['admin', 'manager', 'marketing_agent'],
       },
+        {
+          href: '/dashboard/order-changes',
+          label: 'Order Changes',
+          icon: History,
+          roles: ['admin', 'manager'],
+        },
     ],
   },
   {
     href: '/dashboard/inbox',
     label: 'Inbox',
     icon: MessageSquare,
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'marketing_agent'],
     color: '#3b82f6',
   },
   {
@@ -160,7 +167,7 @@ const navItems: NavItem[] = [
     href: '/dashboard/clients',
     label: 'Clients',
     icon: Database,
-    roles: ['admin', 'manager', 'marketing_agent'],
+    roles: ['admin', 'manager'],
     color: '#ec4899',
   },
   {

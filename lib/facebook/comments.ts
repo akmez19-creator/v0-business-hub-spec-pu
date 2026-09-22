@@ -228,6 +228,16 @@ export async function replyToComment(page: FbPage, commentId: string, message: s
   return fbWrite<{ id: string }>(`${GRAPH}/${commentId}/comments`, { body })
 }
 
+/**
+ * Ban a person from the Page: their existing comments are hidden and they can
+ * no longer comment or message the Page. Same as "Ban from Page" in Business
+ * Suite. `userId` is the commenter's Page-scoped id from the comment's `from`.
+ */
+export async function blockPageUser(page: FbPage, userId: string) {
+  const body = new URLSearchParams({ user: userId, access_token: page.access_token })
+  return fbWrite<Record<string, boolean>>(`${GRAPH}/${page.id}/blocked`, { body })
+}
+
 /** Hide or unhide a comment (moderation, needs pages_manage_engagement). */
 export async function setCommentHidden(page: FbPage, commentId: string, hidden: boolean) {
   const body = new URLSearchParams({ is_hidden: String(hidden), access_token: page.access_token })

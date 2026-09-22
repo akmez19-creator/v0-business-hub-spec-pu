@@ -24,9 +24,9 @@ export async function autopilotStatus() {
       for(const row of r.rows)latest.set(`messenger:${row.page_id}:${row.psid}`,{direction:row.direction==='in'?'in':'out',text:typeof row.text==='string'&&row.text.trim()?row.text:null,at:new Date(row.created_at).toISOString()})
     }
     if(whatsapp.length){
-      const r=await db.query(`SELECT k.phone_number_id,k.wa_id,m.direction,left(m.body,240) AS text,coalesce(m.provider_accepted_at,m.first_observed_at) AS created_at
+      const r=await db.query(`SELECT k.phone_number_id,k.wa_id,m.direction,left(m.body,240) AS text,m.created_at
         FROM unnest($1::text[],$2::text[]) AS k(phone_number_id,wa_id)
-        JOIN LATERAL (SELECT direction,body,provider_accepted_at,first_observed_at FROM public.whatsapp_green_messages x WHERE x.phone_number_id=k.phone_number_id AND x.wa_id=k.wa_id AND NOT x.deleted_observed ORDER BY coalesce(provider_accepted_at,first_observed_at) DESC,id DESC LIMIT 1) m ON true`,
+        JOIN LATERAL (SELECT direction,body,created_at FROM public.whatsapp_messages x WHERE x.phone_number_id=k.phone_number_id AND x.wa_id=k.wa_id ORDER BY created_at DESC,id DESC LIMIT 1) m ON true`,
         [whatsapp.map(k=>k[0]),whatsapp.map(k=>k[1])])
       for(const row of r.rows)latest.set(`whatsapp:${row.phone_number_id}:${row.wa_id}`,{direction:row.direction==='in'?'in':'out',text:typeof row.text==='string'&&row.text.trim()?row.text:null,at:new Date(row.created_at).toISOString()})
     }

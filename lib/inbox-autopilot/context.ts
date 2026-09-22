@@ -9,7 +9,6 @@ export type ContextDependencies = {
   authorizeScope(scope: ContextScope): Promise<void>
   connectDatabase(): Promise<ContextDb>
   /** Current server configuration only. Do not return provider credentials. */
-  getGreenBinding?(phoneNumberId: string): Promise<{ instanceId: string; version: number; enabled: boolean } | null>
   now?: () => Date
   /** Server-only integration option: existing transaction/locks and connection cleanup belong to caller. */
   transaction?: 'owned' | 'caller'
@@ -85,45 +84,6 @@ const unixSeconds = (value: unknown, stringValue: boolean): string | null => {
   const seconds = Number(value)
   return Number.isSafeInteger(seconds) && seconds > 0 && seconds < 253402300800 ? new Date(seconds * 1000).toISOString() : null
 }
-/** Read-only semantic coverage, not an identity link. No inferred time tolerance or new transcript turns. */
-function redundantGreenCopies(rows: Record<string, unknown>[], green: Record<string, unknown>[], scope: ContextScope,
-  binding: Record<string, unknown> | undefined, businessPhone: string): boolean {
-  if (scope.channel !== 'whatsapp' || !rows.length || !green.length) return false
-  const candidates = new Map<string, string[]>(), used = new Set<string>(), providerIds = new Set<string>()
-  for (const row of rows) {
-    const at = unixSeconds(row.canonical_timestamp, true)
-    if (row.phone_number_id !== scope.phoneNumberId || row.wa_id !== scope.waId || row.content_source !== 'webhook' ||
-      row.type !== 'text' || row.canonical_type !== 'text' || row.canonical_id !== row.id ||
-      typeof row.id !== 'string' || typeof row.body !== 'string' || !row.body.trim() || row.canonical_body !== row.body ||
-      row.canonical_peer !== scope.waId || !['in','out'].includes(String(row.direction)) || !at || at !== stamp(row.created_at)) continue
-    const key = stable([row.direction,row.body,at]), ids = candidates.get(key) ?? []
-    ids.push(row.id); candidates.set(key,ids)
-  }
-  for (const row of green) {
-    const w = row.webhook_witness as Record<string, unknown> | null
-    if (!w || typeof w !== 'object' || Array.isArray(w) || typeof w.id !== 'string' || !w.id ||
-      row.phone_number_id !== scope.phoneNumberId || row.wa_id !== scope.waId || row.instance_id !== binding?.instance_id ||
-      row.provider_chat_id !== scope.waId+'@c.us' || typeof row.provider_message_id !== 'string' || !row.provider_message_id ||
-      row.kind !== 'text' || typeof row.body !== 'string' || !row.body.trim() || flag(row.edited) || flag(row.conflicted) || flag(row.deleted_observed) || flag(row.has_reference) || flag(w.has_reference) ||
-      w.phone !== scope.phoneNumberId || w.customer !== scope.waId || w.instance !== row.instance_id ||
-      w.chat !== row.provider_chat_id || w.message_id !== row.provider_message_id || w.origin !== 'webhook' || w.state !== 'processed' ||
-      w.raw_type !== 'whatsapp' || typeof w.raw_account !== 'string' || ![binding?.account_id,businessPhone+'@c.us'].includes(w.raw_account) ||
-      !(typeof w.raw_instance === 'string' || typeof w.raw_instance === 'number' && Number.isSafeInteger(w.raw_instance)) ||
-      String(w.raw_instance) !== row.instance_id || w.raw_chat !== row.provider_chat_id || w.raw_id !== row.provider_message_id ||
-      w.raw_event !== w.event || w.raw_message_type !== 'textMessage' || w.raw_body !== row.body) return false
-    const direction = w.event === 'incomingMessageReceived' ? 'in' :
-      w.event === 'outgoingMessageReceived' || w.event === 'outgoingAPIMessageReceived' ? 'out' : null
-    const at = unixSeconds(w.raw_timestamp, false)
-    if (direction !== row.direction || !at || at !== stamp(w.provider_timestamp) || at !== stamp(row.provider_accepted_at)) return false
-    const providerKey = stable([row.instance_id,row.provider_chat_id,row.provider_message_id])
-    if (providerIds.has(providerKey)) return false
-    providerIds.add(providerKey)
-    const matches = candidates.get(stable([direction,row.body,at]))
-    if (!matches || matches.length !== 1 || used.has(matches[0])) return false
-    used.add(matches[0])
-  }
-  return true
-}
 const project = (row: Record<string, unknown> | undefined, fields: readonly string[]) => row
   ? Object.fromEntries(fields.map(key => [key, row[key] ?? null])) : null
 const CANONICAL_VERSION_FIELDS = ['id','page_id','psid','phone_number_id','wa_id','direction','type','body','created_at','total_count',
@@ -167,48 +127,6 @@ export const CONTEXT_SQL = {
     CASE WHEN raw->'context' IS NOT NULL AND raw->'context'<>'null'::jsonb THEN true ELSE false END AS has_reference,
     raw#>>'{text,body}' AS raw_body,md5(coalesce(raw::text,'')) AS raw_hash
     FROM public.whatsapp_messages WHERE phone_number_id=$1 AND wa_id=$2 ORDER BY created_at ASC,id ASC LIMIT 101`,
-  greenBinding: 'SELECT phone_number_id,instance_id,account_id,version,enabled,connection_state,last_error,last_reconcile_at FROM public.whatsapp_green_bindings WHERE phone_number_id=$1',
-  greenConversation: 'SELECT phone_number_id,wa_id,context_version,updated_at FROM public.whatsapp_green_conversations WHERE phone_number_id=$1 AND wa_id=$2',
-  greenPending: "SELECT count(*) AS count FROM public.whatsapp_green_events WHERE phone_number_id=$1 AND (wa_id=$2 OR wa_id IS NULL) AND state='quarantined'",
-  greenMessages: `SELECT m.id,m.phone_number_id,m.wa_id,m.instance_id,m.provider_chat_id,m.provider_message_id,m.direction,m.kind,m.body,
-    m.provider_accepted_at,m.first_observed_at,m.last_observed_at,m.edited,m.conflicted,m.deleted_observed,m.semantic_hash,
-    count(*) OVER() AS total_count,e.origin AS first_origin,e.state AS first_state,e.event_type AS first_event_type,
-    e.instance_id AS first_instance_id,e.provider_message_id AS first_provider_message_id,e.provider_chat_id AS first_provider_chat_id,
-    e.payload_hash AS first_payload_hash,z.payload_hash AS last_payload_hash,
-    e.raw#>>'{messageData,typeMessage}' AS first_message_type,
-    e.raw#>>'{messageData,textMessageData,textMessage}' AS first_body,
-    CASE WHEN coalesce(e.raw#>'{messageData,quotedMessage}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-      OR coalesce(e.raw#>'{messageData,extendedTextMessageData}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-      OR coalesce(e.raw->'quotedMessage','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-      OR coalesce(z.raw#>'{messageData,quotedMessage}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-      OR coalesce(z.raw->'quotedMessage','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-      THEN true ELSE false END AS has_reference,
-    jsonb_build_object('id',w.id,'phone',w.phone_number_id,'customer',w.wa_id,'instance',w.instance_id,
-      'chat',w.provider_chat_id,'message_id',w.provider_message_id,'origin',w.origin,'state',w.state,'event',w.event_type,
-      'provider_timestamp',w.provider_timestamp,'raw_instance',w.raw#>'{instanceData,idInstance}',
-      'raw_type',w.raw#>'{instanceData,typeInstance}','raw_account',w.raw#>'{instanceData,wid}',
-      'raw_chat',w.raw#>'{senderData,chatId}','raw_id',w.raw->'idMessage','raw_event',w.raw->'typeWebhook',
-      'raw_message_type',w.raw#>'{messageData,typeMessage}','raw_body',w.raw#>'{messageData,textMessageData,textMessage}',
-      'raw_timestamp',w.raw->'timestamp','has_reference',
-      coalesce(w.raw#>'{messageData,quotedMessage}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb) OR
-      coalesce(w.raw#>'{messageData,extendedTextMessageData}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb) OR
-      coalesce(w.raw->'quotedMessage','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb) OR w.reference_seen) AS webhook_witness
-    FROM public.whatsapp_green_messages m LEFT JOIN public.whatsapp_green_events e ON e.id=m.first_event_id
-    LEFT JOIN public.whatsapp_green_events z ON z.id=m.last_event_id
-    LEFT JOIN LATERAL (SELECT e.*,EXISTS(SELECT 1 FROM public.whatsapp_green_events r
-      WHERE r.phone_number_id=m.phone_number_id AND r.wa_id=m.wa_id AND r.instance_id=m.instance_id
-        AND r.provider_chat_id=m.provider_chat_id AND r.provider_message_id=m.provider_message_id
-        AND (coalesce(r.raw#>'{messageData,quotedMessage}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-          OR coalesce(r.raw#>'{messageData,extendedTextMessageData}','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
-          OR coalesce(r.raw->'quotedMessage','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb))) AS reference_seen
-      FROM public.whatsapp_green_events e
-      WHERE e.phone_number_id=m.phone_number_id AND e.wa_id=m.wa_id AND e.instance_id=m.instance_id
-        AND e.provider_chat_id=m.provider_chat_id AND e.provider_message_id=m.provider_message_id
-        AND e.origin='webhook' AND e.state='processed'
-        AND e.event_type IN ('incomingMessageReceived','outgoingMessageReceived','outgoingAPIMessageReceived')
-        AND e.raw#>>'{messageData,typeMessage}'='textMessage' AND e.raw#>>'{messageData,textMessageData,textMessage}'=m.body
-      ORDER BY e.received_at ASC,e.id ASC LIMIT 1) w ON true
-    WHERE m.phone_number_id=$1 AND m.wa_id=$2 ORDER BY m.first_observed_at ASC,m.id ASC LIMIT 101`,
 } as const
 
 /** No provider calls, AI, sends, orders or read marks. Caller gives an exclusive connection for this read snapshot. */
@@ -217,7 +135,6 @@ export async function loadTrustedContext(scope: ContextScope, deps: ContextDepen
   await deps.authorizeScope(scope)
   const now = (deps.now ?? (() => new Date()))().getTime()
   if (!Number.isFinite(now)) throw new ContextError('CONTEXT_UNAVAILABLE')
-  const configured = scope.channel === 'whatsapp' ? await deps.getGreenBinding?.(scope.phoneNumberId) ?? null : null
   const db = await deps.connectDatabase()
   const ownsTransaction = deps.transaction !== 'caller'
   let result: TrustedContext
@@ -229,26 +146,13 @@ export async function loadTrustedContext(scope: ContextScope, deps: ContextDepen
     const values = scope.channel === 'messenger' ? [scope.pageId, scope.psid] : [scope.phoneNumberId, scope.waId]
     const conversation = (await db.query(scope.channel === 'messenger' ? CONTEXT_SQL.messengerConversation : CONTEXT_SQL.whatsappConversation, values)).rows[0]
     const rows = (await db.query(scope.channel === 'messenger' ? CONTEXT_SQL.messengerMessages : CONTEXT_SQL.whatsappMessages, values)).rows
-    let binding: Record<string, unknown> | undefined, greenConversation: Record<string, unknown> | undefined, pending = 0
-    let green: Record<string, unknown>[] = []
-    if (scope.channel === 'whatsapp') {
-      binding = (await db.query(CONTEXT_SQL.greenBinding, [scope.phoneNumberId])).rows[0]
-      greenConversation = (await db.query(CONTEXT_SQL.greenConversation, values)).rows[0]
-      pending = Number((await db.query(CONTEXT_SQL.greenPending, values)).rows[0]?.count ?? 0)
-      green = (await db.query(CONTEXT_SQL.greenMessages, values)).rows
-    }
     const reasons = new Set<ContextReason>()
     if (!conversation) reasons.add('NO_CONVERSATION')
     else if (scope.channel === 'messenger' ? conversation.page_id !== scope.pageId || conversation.psid !== scope.psid
       : conversation.phone_number_id !== scope.phoneNumberId || conversation.wa_id !== scope.waId || conversation.page_id !== business.page || String(conversation.display_phone).replace(/\D/g, '') !== business.businessPhone) reasons.add('SCOPE_MISMATCH')
-    if (scope.channel === 'whatsapp') {
-      const reconciled = stamp(binding?.last_reconcile_at)
-      if (!conversation?.can_read || !conversation.can_send || !configured?.enabled || !binding?.enabled || binding.connection_state !== 'authorized' || binding.last_error ||
-        binding.phone_number_id !== scope.phoneNumberId || binding.instance_id !== configured.instanceId || Number(binding.version) !== configured.version ||
-        !reconciled || now - Date.parse(reconciled) > MAX_BINDING_AGE_MS || Date.parse(reconciled) > now + 60000) reasons.add('CONNECTION_UNVERIFIED')
-      if (greenConversation && (greenConversation.phone_number_id !== scope.phoneNumberId || greenConversation.wa_id !== scope.waId)) reasons.add('SCOPE_MISMATCH')
-    }
-    if (rows.length > MAX_MESSAGES || rows.some(r => Number(r.total_count) > MAX_MESSAGES) || green.length > MAX_MESSAGES || green.some(r => Number(r.total_count) > MAX_MESSAGES)) reasons.add('HISTORY_TRUNCATED')
+    // The Meta Cloud API is the only channel: the conversation's own read/send capability decides.
+    if (scope.channel === 'whatsapp' && (!conversation?.can_read || !conversation.can_send)) reasons.add('CONNECTION_UNVERIFIED')
+    if (rows.length > MAX_MESSAGES || rows.some(r => Number(r.total_count) > MAX_MESSAGES)) reasons.add('HISTORY_TRUNCATED')
     if (scope.channel === 'messenger' && Number(conversation?.message_count) > rows.length) reasons.add('HISTORY_TRUNCATED')
     if (!rows.length) reasons.add('EMPTY_CONTEXT')
     const messages: ContextMessage[] = [], identities = new Map<string, string>()
@@ -270,29 +174,7 @@ export async function loadTrustedContext(scope: ContextScope, deps: ContextDepen
       if (body) { characters += body.length; messages.push({ id: row.id, direction: row.direction as 'in' | 'out', text: body, createdAt: at }) }
     }
     if (characters > MAX_CHARACTERS) reasons.add('CONTEXT_TOO_LONG')
-    let providerHandling: TrustedContext['providerHandling'] = green.length ? 'staff_review' : 'none'
-    if (pending > 0) reasons.add('PENDING_RECONCILIATION')
-    for (const row of green) {
-      if (scope.channel !== 'whatsapp' || row.phone_number_id !== scope.phoneNumberId || row.wa_id !== scope.waId || row.instance_id !== configured?.instanceId || row.provider_chat_id !== scope.waId + '@c.us') reasons.add('SCOPE_MISMATCH')
-      if (flag(row.conflicted) || flag(row.edited) || flag(row.deleted_observed)) reasons.add('CONFLICTING_CONTENT')
-      if (row.kind !== 'text' || typeof row.body !== 'string' || !row.body.trim()) reasons.add('UNSUPPORTED_CONTENT')
-    }
-    // This is a tightly bounded semantic allowance, NOT a provider-ID mapping. One
-    // additional same-text incoming observation contains no additional request. Its
-    // identity remains unverified; never fill a blank or use time proximity as proof.
-    const one = rows.length === 1 && green.length === 1 ? green[0] : null
-    const canonical = rows[0]
-    if (one && canonical?.direction === 'in' && canonical.type === 'text' && canonical.content_source === 'webhook' &&
-      !flag(canonical.has_reference) && one.direction === 'in' && one.body === canonical.body && one.kind === 'text' &&
-      !flag(one.edited) && !flag(one.conflicted) && !flag(one.deleted_observed) && !flag(one.has_reference) &&
-      !flag((one.webhook_witness as Record<string, unknown> | null)?.has_reference) &&
-      one.first_origin === 'webhook' && one.first_state === 'processed' && one.first_event_type === 'incomingMessageReceived' &&
-      one.first_instance_id === one.instance_id && one.first_provider_message_id === one.provider_message_id && one.first_provider_chat_id === one.provider_chat_id &&
-      one.first_message_type === 'textMessage' && one.first_body === one.body && typeof one.first_payload_hash === 'string' && typeof one.last_payload_hash === 'string') {
-      providerHandling = 'redundant_incoming_observation'
-    } else if (redundantGreenCopies(rows, green, scope, binding, business.businessPhone)) {
-      providerHandling = 'redundant_canonical_observations'
-    } else if (green.length) reasons.add('PROVIDER_CONTEXT_UNACCOUNTED')
+    const providerHandling: TrustedContext['providerHandling'] = 'none'
     messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
     const inbound = [...messages].reverse().find(m => m.direction === 'in') ?? null
     const last = messages[messages.length - 1]
@@ -310,10 +192,8 @@ export async function loadTrustedContext(scope: ContextScope, deps: ContextDepen
     // conversation content. They must not invalidate an otherwise unchanged draft.
     const fingerprint = digest({ scope,
       conversation: project(conversation, ['page_id','psid','phone_number_id','wa_id','message_count','activity_version','can_read','can_send','display_phone']),
-      rows: rows.map(row => ({ ...project(row, CANONICAL_VERSION_FIELDS), failed: row.status === 'failed' })), configured,
-      binding: project(binding, ['phone_number_id','instance_id','account_id','version','enabled','connection_state','last_error']),
-      greenConversation: project(greenConversation, ['phone_number_id','wa_id','context_version']), pending,
-      green: green.map(row => project(row, GREEN_VERSION_FIELDS)), providerHandling, ...(messengerOrder ? { messengerOrder } : {}) })
+      rows: rows.map(row => ({ ...project(row, CANONICAL_VERSION_FIELDS), failed: row.status === 'failed' })),
+      providerHandling, ...(messengerOrder ? { messengerOrder } : {}) })
     result = { scope, eligible, reasons: [...reasons].sort(), fingerprint, ...(eligible && messengerOrder ? { messengerOrder } : {}),
       messages: eligible ? messages : [], transcript: eligible ? JSON.stringify(messengerOrder?.hasUnorderedHistory ? { messageGroups: messengerOrder.groups } : messages.map(m => ({ role: m.direction === 'in' ? 'customer' : 'business', text: m.text }))) : null,
       latestInbound: inbound ? { id: inbound.id, createdAt: inbound.createdAt } : null, providerHandling, coverage: 'all_stored_rows_only' }

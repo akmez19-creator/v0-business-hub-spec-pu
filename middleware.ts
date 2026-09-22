@@ -24,8 +24,39 @@ function redirectToLogin(request: NextRequest) {
   return NextResponse.redirect(url)
 }
 
+function withSessionCookies(response: NextResponse, sessionResponse: NextResponse) {
+  sessionResponse.cookies.getAll().forEach(cookie => response.cookies.set(cookie))
+  return response
+}
+
+function authUnavailableResponse(request: NextRequest) {
+  const headers = { 'Cache-Control': 'private, no-store, max-age=0', 'Retry-After': '15' }
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    return NextResponse.json({
+      error: 'Sign-in verification is temporarily unavailable. Please try again shortly.',
+      code: 'AUTH_SERVICE_UNAVAILABLE',
+    }, { status: 503, headers })
+  }
+  return new NextResponse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Temporarily unavailable | Business Hub</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a1a;color:#fafafa;font:16px/1.6 system-ui,sans-serif}main{max-width:30rem;padding:2rem}h1{font-size:1.5rem;line-height:1.3}p{color:#d4d4d8}a{display:inline-block;margin-top:1rem;padding:.65rem 1.1rem;border-radius:.5rem;background:#fb923c;color:#171717;font-weight:600;text-decoration:none}a:focus-visible{outline:3px solid #fafafa;outline-offset:4px}</style>
+</head><body><main><h1>Sign-in service temporarily unavailable</h1>
+<p>We could not verify your session. Please try again in a moment. You do not need to sign out.</p>
+<a href="">Reload page</a></main></body></html>`, {
+    status: 503,
+    headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8' },
+  })
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // These pages render without a session. In particular, an expired cookie
+  // must not make the login/recovery screen wait on the service it recovers.
+  // The callback exchanges and validates its own code in its route handler.
+  const publicRoutes = ['/auth/login', '/auth/sign-up', '/auth/sign-up-success', '/auth/error', '/auth/callback']
+  if (publicRoutes.includes(pathname)) return NextResponse.next()
 
   // ---- Storefront: fully anonymous, checked BEFORE updateSession ----
   // Customers browsing /shop never sign in, and updateSession() makes a
@@ -35,25 +66,35 @@ export async function middleware(request: NextRequest) {
   // order endpoint under /api/shop/ are covered by the same skip.
   // NOTE: this is a pass-through, NOT an auth decision - /shop has no private
   // data. Anything needing a session must stay out of this branch.
-  if (pathname.startsWith('/shop') || pathname.startsWith('/api/shop/')) {
+  if (pathname === '/shop' || pathname.startsWith('/shop/') || pathname.startsWith('/api/shop/')) {
     return NextResponse.next()
   }
 
   // These scheduled routes check CRON_SECRET in their own handlers. Vercel
   // has no user session; do not make scheduled work depend on Supabase sign-in.
   // Keep the match exact so other API routes retain their session gate.
-  if (pathname === '/api/cron/inbox-reconcile' || pathname === '/api/cron/whatsapp-green-reconcile' || pathname === '/api/cron/inbox-autopilot') {
+  if (pathname === '/api/cron/inbox-reconcile' || pathname === '/api/cron/inbox-autopilot' || pathname === '/api/cron/inbox-followups') {
+    return NextResponse.next()
+  }
+
+  // Provider signatures, not staff cookies, authenticate inbound webhooks.
+  if (pathname.startsWith('/api/webhooks/')) return NextResponse.next()
+
+  const tokenAuthPrefixes = ['/api/extension', '/api/clients/rating', '/api/clients/last-delivered']
+  const isTokenAuthRoute = tokenAuthPrefixes.some(p => pathname === p || pathname.startsWith(`${p}/`))
+  if (isTokenAuthRoute && /^Bearer\s+\S+/i.test(request.headers.get('authorization') ?? '')) {
     return NextResponse.next()
   }
 
   // ONE client, ONE getUser. This call is what refreshes the auth cookie, and
   // it is the only place allowed to write it.
-  const { response, user } = await updateSession(request)
+  const { response, user, authUnavailable } = await updateSession(request)
 
-  // Public routes that don't need auth
-  const publicRoutes = ['/auth/login', '/auth/sign-up', '/auth/sign-up-success', '/auth/error', '/auth/callback']
-  if (publicRoutes.some(route => pathname.startsWith(route))) {
-    return response
+  // An unavailable auth service is not an invalid session. Return a retryable
+  // response without clearing cookies, redirecting to login, or passing an
+  // unverified request to a protected handler that may mutate data.
+  if (authUnavailable) {
+    return withSessionCookies(authUnavailableResponse(request), response)
   }
 
   // ---- API auth gate ----
@@ -76,32 +117,21 @@ export async function middleware(request: NextRequest) {
       return response
     }
 
-    const tokenAuthPrefixes = [
-      '/api/extension',
-      '/api/clients/rating',
-      '/api/clients/last-delivered',
-      // Inbound provider webhooks. Meta has no Supabase session, so a session
-      // gate here silently 401s the handshake and no message can ever arrive.
-      // These routes are NOT open: GET checks hub.verify_token and POST
-      // verifies Meta's SHA-256 body signature before storing anything.
-      '/api/webhooks/',
-    ]
-    const isTokenAuthRoute = tokenAuthPrefixes.some((p) => pathname.startsWith(p))
     if (!isTokenAuthRoute) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return withSessionCookies(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }), response)
     }
   }
 
   // Redirect to login if not authenticated and trying to access protected routes
   if (!user && pathname.startsWith('/dashboard')) {
-    return redirectToLogin(request)
+    return withSessionCookies(redirectToLogin(request), response)
   }
 
   // Redirect root path based on auth status
   if (pathname === '/') {
     const url = request.nextUrl.clone()
     url.pathname = user ? '/dashboard' : '/auth/login'
-    return NextResponse.redirect(url)
+    return withSessionCookies(NextResponse.redirect(url), response)
   }
 
   return response

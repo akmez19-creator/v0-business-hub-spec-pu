@@ -67,25 +67,6 @@ async function recordTaskAndHold(db:AutopilotDb,job:TaskOrigin,input:StaffTaskIn
   return{created:true,taskId:inserted[0].id}
 }
 
-/** Native GREEN jobs have their own identity. Caller holds the same config and
- * scope locks, and keeps this write inside the native review/reservation transaction. */
-export async function recordNativeStaffTaskAndHold(db:AutopilotDb,input:{nativeJobId:string;scope:AutopilotScope;nativeInboundId:string;contextFingerprint:string;task:StaffTaskInput}):Promise<{created:boolean;taskId:string}>{
-  const {business,owner,customer}=scopeIdentity(input.scope)
-  if(input.scope.channel!=='whatsapp'||!/^[a-f0-9-]{36}$/i.test(input.nativeJobId))throw new AutopilotError('invalid_native_staff_identity')
-  assertMessageId(input.nativeInboundId);assertFingerprint(input.contextFingerprint);validateStaffTask(input.task)
-  const rows=(await db.query('SELECT id,state,attempt_id,reservation_day,lease_token,lease_expires_at,inbound_message_id,context_fingerprint,updated_at FROM public.inbox_autopilot_green_jobs ' +
-    'WHERE id=$1 AND business_code=$2 AND phone_number_id=$3 AND wa_id=$4 FOR UPDATE',[input.nativeJobId,business.code,owner,customer])).rows
-  const row=rows[0],ready=input.task.kind==='order_ready_for_staff'
-  if(rows.length!==1||row.inbound_message_id!==input.nativeInboundId||row.context_fingerprint!==input.contextFingerprint||
-    (ready?row.state!=='sending'||!row.attempt_id||!row.reservation_day:row.state!=='processing'||row.attempt_id!==null||row.reservation_day!==null)||
-    !row.lease_token||!(new Date(row.lease_expires_at).getTime()>Date.now()))throw new AutopilotError('native_staff_job_changed',409)
-  if(!ready){
-    const control=(await db.query('SELECT paused,updated_by,updated_at FROM public.inbox_autopilot_controls WHERE business_code=$1 AND channel=$2 AND owner_id=$3 AND customer_id=$4',[business.code,'whatsapp',owner,customer])).rows[0]
-    if(control?.paused===false&&control.updated_by&&new Date(control.updated_at).getTime()>new Date(row.updated_at).getTime())throw new AutopilotError('native_staff_resumed',409)
-  }
-  return recordTaskAndHold(db,{id:row.id,scope:input.scope,inboundMessageId:row.inbound_message_id,customerName:null,contextFingerprint:row.context_fingerprint,source:'green_api'},input.task)
-}
-
 /** Existing explicitly authorized Resume resolves the scoped staff queue. It
  * does not create an order, assert delivery, or reset an unknown send. */
 export async function resolveStaffTasksOnResume(db:AutopilotDb,scope:AutopilotScope,actor:string):Promise<void>{

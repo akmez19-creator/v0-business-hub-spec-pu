@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getInboxPage, getInboxPages } from '@/lib/facebook/messages'
+import { getInboxPage, getInboxPages, sendPrivateReply } from '@/lib/facebook/messages'
+
+const PUBLIC_INBOX_NOTE = 'Sent you a message! Please check your inbox.'
 import { getCapabilities } from '@/lib/facebook/capabilities'
 import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
-import { deleteComment, likeComment, replyToComment, setCommentHidden } from '@/lib/facebook/comments'
+import { deleteComment, likeComment, replyToComment, setCommentHidden, blockPageUser } from '@/lib/facebook/comments'
 import {
   cachedCommentStats,
   commentCacheIsEmpty,
@@ -12,6 +14,7 @@ import {
 } from '@/lib/facebook/comment-cache'
 import { markCommentDeleted, markCommentHidden } from '@/lib/facebook/comment-store'
 import { createAdminClient } from '@/lib/supabase/server'
+import { recordAgentActivity } from '@/lib/agent-activity'
 
 /**
  * Page comments as an inbox channel.
@@ -124,11 +127,12 @@ export async function GET(request: Request) {
   }
 }
 
-type Action = 'reply' | 'hide' | 'unhide' | 'delete' | 'like'
+type Action = 'reply' | 'hide' | 'unhide' | 'delete' | 'like' | 'block'
 
 export async function POST(request: Request) {
   try {
-    if (!(await requireUser())) {
+    const user = await requireUser()
+    if (!user) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 })
     }
 
@@ -157,15 +161,35 @@ export async function POST(request: Request) {
       // webhook will report the same change moments later and simply overwrite
       // with identical data, but doing it here means the UI updates at once
       // instead of appearing to do nothing until the webhook lands.
+      // The reply goes to the commenter's Messenger inbox, not under the post:
+      // prices and delivery questions are for the customer, not for everyone
+      // tagging a friend on the ad (16 Sep: "Rs 475 | 2 for Rs 775. Where to
+      // deliver?" sat publicly under a comment that only tagged someone). The
+      // public trace is a one-line pointer to the inbox, as the team does in
+      // Business Suite. Meta allows one private reply per comment within 7
+      // days; when that is spent the error says so and nothing is posted.
       case 'reply': {
         const message = (body.message ?? '').trim()
         if (!message) return NextResponse.json({ success: false, error: 'Message is empty' }, { status: 400 })
-        const res = await replyToComment(page, commentId, message)
+        const sent = await sendPrivateReply(page, commentId, message)
+        void recordAgentActivity({ userId: user.id, kind: 'inbox_reply', channel: 'comment', threadKey: `comment:${commentId}` })
+        let publicNote: string | null = null
+        try {
+          publicNote = (await replyToComment(page, commentId, PUBLIC_INBOX_NOTE)).id ?? null
+        } catch (e) {
+          console.log('[v0] public inbox note failed after private reply:', e instanceof Error ? e.message : e)
+        }
         await createAdminClient()
           .from('page_comments')
           .update({ replied_at: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq('comment_id', commentId)
-        return NextResponse.json({ success: true, id: res.id })
+        return NextResponse.json({
+          success: true,
+          id: sent.messageId,
+          viaPrivateReply: true,
+          publicNoteId: publicNote,
+          warning: publicNote ? undefined : 'The message reached their inbox, but the public "check your inbox" note could not be posted under the comment.',
+        })
       }
       case 'hide':
         await setCommentHidden(page, commentId, true)
@@ -182,6 +206,18 @@ export async function POST(request: Request) {
       case 'like':
         await likeComment(page, commentId)
         return NextResponse.json({ success: true })
+      // The person to ban comes from our own record of the comment, never from
+      // the browser, so a stale screen cannot ban the wrong account.
+      case 'block': {
+        const { data: row } = await createAdminClient().from('page_comments').select('author_id, from_page').eq('comment_id', commentId).maybeSingle()
+        if (!row?.author_id) return NextResponse.json({ success: false, error: 'Facebook did not share who wrote this comment, so they cannot be banned from here. Use Business Suite.' }, { status: 409 })
+        if (row.from_page) return NextResponse.json({ success: false, error: 'That comment is the Page\'s own.' }, { status: 400 })
+        await blockPageUser(page, row.author_id)
+        // Meta hides a banned person's comments; mirror that so the row leaves
+        // the queue now rather than when the feed webhook catches up.
+        await markCommentHidden(commentId, true)
+        return NextResponse.json({ success: true })
+      }
       default:
         return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 })
     }

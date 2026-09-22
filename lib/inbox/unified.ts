@@ -8,8 +8,10 @@
  */
 
 import { deriveStage, STAGE_PRIORITY, type LeadStage } from './stage'
+import { isClosingAcknowledgement } from './acknowledgement'
+import type { ThreadMark } from './thread-marks'
+import type { ThreadStar } from './thread-stars'
 import { whatsappConversationKey } from './whatsapp-identity'
-import type { GreenContactDisplay } from '@/lib/whatsapp-green/contact-overlay'
 
 export type UnifiedChannel = 'messenger' | 'whatsapp' | 'comment'
 
@@ -68,6 +70,15 @@ export type UnifiedThread = {
    * A done chat is never "waiting", however the last message reads.
    */
   done?: { at: string } | null
+  /**
+   * The customer spoke last but only to say "Okay" / "Thank you" / 👍 after a
+   * reply from the team. Nobody is waiting; see lib/inbox/acknowledgement.ts.
+   */
+  closingAck?: boolean
+  /** Agent-set outcome, effective until the customer writes again. Merged client-side. */
+  mark?: ThreadMark | null
+  /** Escalation flag with the agent's written explanation. Merged client-side. */
+  star?: ThreadStar | null
   /**
    * WhatsApp only: Meta's record says the customer spoke last, but the phone
    * (GREEN-API) saw a later outgoing message. Someone answered from the
@@ -163,7 +174,6 @@ export type WhatsAppRow = AttributedRow & {
   firstAdId?: string | null
   firstAdName?: string | null
   firstAdHeadline?: string | null
-  green?: GreenContactDisplay
 }
 
 export function fromMessenger(c: MessengerRow): UnifiedThread {
@@ -171,6 +181,7 @@ export function fromMessenger(c: MessengerRow): UnifiedThread {
   const done = effectiveDone(c.doneAt, updatedAt)
   return {
     done,
+    closingAck: !done && c.lastFromCustomer === true && (c.messageCount ?? 0) > 1 && isClosingAcknowledgement(c.snippet),
     lastReplyBasis: done ? 'business-suite-done' : 'meta',
     key: `messenger:${c.id}`,
     channel: 'messenger',
@@ -192,44 +203,33 @@ export function fromMessenger(c: MessengerRow): UnifiedThread {
 }
 
 export function fromWhatsApp(c: WhatsAppRow): UnifiedThread {
-  const canonicalAt = c.lastMessageAt ?? null
-  const liveCopyAt = c.green?.activityAt ?? null
-  const newerCopy = liveCopyAt && Number.isFinite(Date.parse(liveCopyAt)) &&
-    (!canonicalAt || Date.parse(liveCopyAt) > Date.parse(canonicalAt))
-  const updatedAt = newerCopy ? liveCopyAt : canonicalAt
-  const providerOnly = c.green?.only === true
-  const copySnippet = c.green?.snippet ? `${newerCopy ? 'GREEN-API copy' : 'History copy'} · ${c.green.snippet}` : ''
-  // The phone's own record decides "who spoke last" whenever it is at least as
-  // recent as Meta's: replies typed on the handset never reach the Meta API.
-  const phoneDirection = c.green?.lastDirection ?? null
-  const phoneDecides = Boolean(phoneDirection && c.green?.lastAt && knownTime(c.green.lastAt) >= knownTime(canonicalAt))
-  const lastFromCustomer = phoneDecides ? phoneDirection === 'in' : c.lastFromCustomer ?? false
-  const answeredByPhone = phoneDecides && phoneDirection === 'out' && c.lastFromCustomer === true
-  const activityAt = phoneDecides && knownTime(c.green!.lastAt) > knownTime(updatedAt) ? c.green!.lastAt : updatedAt
+  // Meta is the only record. A reply typed on the handset still comes back as an
+  // outgoing status receipt, so "who spoke last" is read from the Meta row alone.
+  const updatedAt = c.lastMessageAt ?? null
+  const lastFromCustomer = c.lastFromCustomer ?? false
   return {
-    answeredByPhone,
-    lastReplyBasis: phoneDecides ? 'phone' : 'meta',
+    answeredByPhone: false,
+    closingAck: lastFromCustomer && (c.messageCount ?? 0) > 1 && isClosingAcknowledgement(c.lastSnippet),
+    lastReplyBasis: 'meta',
     key: whatsappConversationKey(c),
     channel: 'whatsapp',
     nativeId: c.waId,
     name: c.profileName?.trim() || c.waId,
-    snippet: (newerCopy || providerOnly) && copySnippet ? copySnippet : c.lastSnippet ?? '',
-    updatedAt: activityAt,
-    unreadCount: providerOnly ? 0 : c.unreadCount ?? 0,
-    outsideWindow: providerOnly ? true : c.outsideWindow ?? false,
-    source: ([c.businessName, c.displayPhone].filter(Boolean).join(' · ') || (c.phoneNumberId ? 'WhatsApp business number ' + c.phoneNumberId : 'WhatsApp · business number unconfirmed')) + (providerOnly ? ' · additional copies only' : ''),
+    snippet: c.lastSnippet ?? '',
+    updatedAt,
+    unreadCount: c.unreadCount ?? 0,
+    outsideWindow: c.outsideWindow ?? false,
+    source: [c.businessName, c.displayPhone].filter(Boolean).join(' · ') || (c.phoneNumberId ? 'WhatsApp business number ' + c.phoneNumberId : 'WhatsApp · business number unconfirmed'),
     pageId: c.pageId ?? null,
     phoneNumberId: c.phoneNumberId ?? null,
-    canSend: providerOnly ? false : c.canSend,
-    unreadStateKnown: providerOnly ? false : c.unreadStateKnown,
-    additionalCopyCount: c.green?.messageCount,
-    additionalCopiesOnly: providerOnly,
+    canSend: c.canSend,
+    unreadStateKnown: c.unreadStateKnown,
     recipientId: c.waId,
     adId: c.firstAdId ?? null,
     // The headline Meta sends is the PAGE name on every ad, so it is only a
     // last resort - never preferred over the resolved ad name.
     adName: c.firstAdName ?? c.firstAdHeadline ?? null,
-    ...attribution({ ...c, lastFromCustomer }, phoneDecides ? (c.green?.lastAt ?? canonicalAt) : canonicalAt, c.product ? 'ad' : null),
+    ...attribution({ ...c, lastFromCustomer }, updatedAt, c.product ? 'ad' : null),
   }
 }
 
@@ -320,8 +320,8 @@ export function filterThreads(
     campaign?: string | 'all'
     liveOnly?: boolean
   },
-): UnifiedThread[] {
-  const q = opts.query.trim().toLowerCase()
+  ): UnifiedThread[] {
+  const words = searchWords(opts.query)
   return rows.filter((r) => {
     if (opts.channel !== 'all' && r.channel !== opts.channel) return false
     if (opts.unreadOnly && r.unreadCount === 0) return false
@@ -336,17 +336,46 @@ export function filterThreads(
       const key = r.productId ?? r.product
       if (key !== opts.product) return false
     }
-    if (!q) return true
-    return (
-      r.name.toLowerCase().includes(q) ||
-      r.snippet.toLowerCase().includes(q) ||
-      r.source.toLowerCase().includes(q) ||
-      (r.adName ?? '').toLowerCase().includes(q) ||
-      (r.product ?? '').toLowerCase().includes(q) ||
-      (r.campaignName ?? '').toLowerCase().includes(q) ||
-      (r.adId ?? '').includes(q)
-    )
+  if (!words.length) return true
+  const haystack = searchText(
+  r.name, r.snippet, r.source, r.adName, r.product, r.campaignName, r.adId,
+  )
+  // The phone is searched on digits alone so "5250 1972", "+230 5250 1972"
+  // and "23052501972" all reach the same WhatsApp thread.
+  const digits = r.channel === 'whatsapp' ? (r.recipientId ?? r.nativeId).replace(/\D/g, '') : ''
+  return words.every((w) => haystack.includes(w) || matchesPhone(w, digits))
   })
+  }
+
+/** A word made only of digits and phone punctuation ("+230", "5250-1972") is compared on its digits. */
+export function matchesPhone(word: string, digits: string): boolean {
+  if (!digits || !/^[+()./-]*\d[\d+()./-]*$/.test(word)) return false
+  return digits.includes(word.replace(/\D/g, ''))
+}
+
+/**
+ * Splits a search box value into words that are compared the way a person
+ * reads them: case-folded, accent-folded, and with runs of whitespace treated
+ * as one space. WhatsApp profile names arrive as the customer typed them -
+ * "V  GOWREESUNKER" with two spaces reached us and a one-space search found
+ * nothing while Business Suite, which collapses whitespace on screen, showed
+ * the name as expected.
+ */
+export function searchWords(query: string): string[] {
+  return foldText(query).split(' ').filter(Boolean)
+}
+
+export function searchText(...parts: Array<string | null | undefined>): string {
+  return foldText(parts.filter(Boolean).join(' '))
+}
+
+function foldText(value: string): string {
+  return value
+  .normalize('NFKD')
+  .replace(/\p{M}/gu, '')
+  .toLowerCase()
+  .replace(/\s+/g, ' ')
+  .trim()
 }
 
 /** Distinct products present, busiest first. Keyed by catalogue id when known. */

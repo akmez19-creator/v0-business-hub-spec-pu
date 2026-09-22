@@ -20,6 +20,7 @@ import {
 import { Calendar } from '@/components/ui/calendar'
 import { TvDashboard } from '@/components/ads/tv-dashboard'
 import { AdAttributionPanel } from '@/components/ads/ad-attribution-panel'
+import { AdvertisedPriceList, type AdvertisedProduct } from '@/components/ads/advertised-price-list'
 import { costPerResultRs, RESULT_LABEL, type ResultKind } from '@/lib/ads-conversions'
 import { USD_TO_RS } from '@/lib/ads/currency'
 import { Tv } from 'lucide-react'
@@ -124,6 +125,9 @@ interface Product {
   price: number
   quantity: number
   image_url?: string | null
+  bundle_prices?: Record<string, number | string> | null
+  is_b1g1?: boolean | null
+  sold_out?: boolean | null
 }
 
 interface CampaignProductLink {
@@ -827,13 +831,15 @@ function AdsManagerContent() {
     )
   }
 
-  // Account filter first (empty = all), then when showTodayOnly is on,
-  // keep only campaigns that actually have spend today.
+  // Account filter first (empty = all), then when showTodayOnly is on, keep
+  // campaigns that spent today PLUS every ACTIVE one: a campaign switched on
+  // this morning (or stalled in review) has Rs 0 so far, and it still needs
+  // to be visible to check it is linked to a product before it spends.
   const inAccountFilter = (c: Campaign) =>
     accountFilter.length === 0 || accountFilter.includes(c.accountId || '')
   const accountFiltered = campaigns.filter(inAccountFilter)
   const filteredCampaigns = showTodayOnly
-    ? accountFiltered.filter(c => parseFloat(c.spend || '0') > 0)
+    ? accountFiltered.filter(c => parseFloat(c.spend || '0') > 0 || c.status === 'ACTIVE')
     : accountFiltered
 
   // Group campaigns by their linked product (a product may have multiple campaigns)
@@ -856,6 +862,36 @@ function AdsManagerContent() {
     acc[key].totalSpend += parseFloat(campaign.spend || '0')
     return acc
   }, {} as Record<string, { key: string; productId: string | null; productName: string; productPrice?: number; productImage?: string | null; campaigns: Campaign[]; totalSpend: number }>)
+
+  // Products on air today: linked to a campaign that spent today or is ACTIVE.
+  // Account filter applies, the Today toggle does not - this list is about
+  // what the customer may be seeing right now, whatever the table shows.
+  const advertisedProducts: AdvertisedProduct[] = Object.values(
+    accountFiltered.reduce((acc, campaign) => {
+      const linked = campaignLinks[campaign.id]?.products
+      if (!linked) return acc
+      const spend = parseFloat(campaign.spend || '0')
+      const active = campaign.status === 'ACTIVE'
+      if (spend <= 0 && !active) return acc
+      const full = products.find(p => p.id === linked.id)
+      const row = acc[linked.id] ?? (acc[linked.id] = {
+        id: linked.id,
+        name: linked.name,
+        price: full?.price ?? linked.price,
+        image_url: full?.image_url ?? linked.image_url ?? null,
+        bundle_prices: full?.bundle_prices ?? null,
+        is_b1g1: full?.is_b1g1 ?? null,
+        sold_out: full?.sold_out ?? null,
+        spendToday: 0,
+        activeCampaigns: 0,
+        totalCampaigns: 0,
+      })
+      row.spendToday += spend
+      row.totalCampaigns += 1
+      if (active) row.activeCampaigns += 1
+      return acc
+    }, {} as Record<string, AdvertisedProduct>),
+  )
 
   // Cost per client (CAC) in Rs for a group, or null when it can't be computed
   const groupCac = (g: { productName: string; totalSpend: number }) => {
@@ -1334,6 +1370,8 @@ function AdsManagerContent() {
             TV Mode
           </Button>
           
+          <AdvertisedPriceList products={advertisedProducts} />
+
           {/* Group by Product Toggle */}
           <Button
             variant={groupByProduct ? "default" : "outline"}

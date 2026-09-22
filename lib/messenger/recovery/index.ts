@@ -12,6 +12,7 @@ export async function reconcileRecentMessenger() {
     const store = new PgHistoryStore(client, { dryRun: false, recentCycleMs: 60_000, reconcileRecentActivity: true })
     return await runRecovery(store, {
       mode: 'recent', token: process.env.FACEBOOK_ACCESS_TOKEN,
+      // Route maxDuration is 60s; ~0.9s per Graph read leaves headroom for the final status query.
       maxRequests: 45, maxSteps: 40, maxRunMs: 45_000, lookbackMs: 24 * 60 * 60 * 1000,
     })
   } finally { await client.end().catch(() => {}) }

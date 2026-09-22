@@ -70,24 +70,55 @@ function toConversation(row: ConversationRow): InboxConversation {
 const COLUMNS =
   'psid,conversation_id,page_id,page_name,customer_name,last_message_at,last_snippet,last_from_customer,message_count,unread_count,ad_id,ad_name,product,product_id,campaign_id,campaign_name,done_at'
 
+/** How far back a customer-waiting thread stays in the list regardless of the recency cap. */
+export const WAITING_WINDOW_DAYS = 7
+const WAITING_LIMIT = 600
+
 export async function listCachedConversations(options: {
   pageId?: string
   limit?: number
 }): Promise<InboxConversation[]> {
   const db = createAdminClient()
-  let q = db
-    .from('messenger_conversations')
-    .select(COLUMNS)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(options.limit ?? 200)
+  const scoped = <T extends { eq: (column: string, value: string) => T }>(q: T) =>
+    options.pageId && options.pageId !== 'all' ? q.eq('page_id', options.pageId) : q
 
-  if (options.pageId && options.pageId !== 'all') q = q.eq('page_id', options.pageId)
+  // Two reads instead of one. The recency cap alone hid every thread that fell
+  // below the newest N: with both Pages selected that was anything older than
+  // the same morning, and 184 threads where the customer had spoken last in the
+  // past week were not in the list at all, so no queue filter could show them.
+  const newest = scoped(
+    db
+      .from('messenger_conversations')
+      .select(COLUMNS)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(options.limit ?? 200),
+  )
+  const waitingSince = new Date(Date.now() - WAITING_WINDOW_DAYS * 86_400_000).toISOString()
+  const waiting = scoped(
+    db
+      .from('messenger_conversations')
+      .select(COLUMNS)
+      .eq('last_from_customer', true)
+      .is('done_at', null)
+      .gt('last_message_at', waitingSince)
+      .order('last_message_at', { ascending: false })
+      .limit(WAITING_LIMIT),
+  )
 
-  const { data, error } = await q
-  if (error) {
+  const [newestResult, waitingResult] = await Promise.all([newest, waiting])
+  if (newestResult.error) {
     throw new Error('Could not read cached Messenger conversations')
   }
-  return (data as unknown as ConversationRow[]).map(toConversation)
+  // The waiting read is a widening, never a gate: if it fails the newest list still renders.
+  const rows = [
+    ...(newestResult.data as unknown as ConversationRow[]),
+    ...((waitingResult.error ? [] : waitingResult.data) as unknown as ConversationRow[]),
+  ]
+  const byThread = new Map<string, ConversationRow>()
+  for (const row of rows) byThread.set(`${row.page_id}:${row.psid}`, row)
+  return [...byThread.values()]
+    .sort((a, b) => (Date.parse(b.last_message_at ?? '') || 0) - (Date.parse(a.last_message_at ?? '') || 0))
+    .map(toConversation)
 }
 
 /** Per-page counts for the channel rail, computed from the cache. */
@@ -193,7 +224,7 @@ export async function listCachedMessages(pageId: string, psid: string): Promise<
   })
 }
 
-export function normaliseAttachments(value: unknown): { type: string; url: string | null }[] {
+export function normaliseAttachments(value: unknown): { type: string; url: string | null; title: string | null }[] {
   // Webhook shape is { data: [...] }; the Graph shape is a bare array.
   const list = Array.isArray(value)
     ? value
@@ -201,11 +232,15 @@ export function normaliseAttachments(value: unknown): { type: string; url: strin
       ? (value as { data: unknown[] }).data
       : []
   return list.filter((a) => a && typeof a === 'object').map((a) => {
-    const att = a as { type?: string; mime_type?: string; url?: string; file_url?: string;
-      payload?: { url?: string }; image_data?: { url?: string } }
+    const att = a as { type?: string; mime_type?: string; url?: string; file_url?: string; title?: string; name?: string;
+      payload?: { url?: string; title?: string }; image_data?: { url?: string } }
+    // A shared reel/post carries its caption as `payload.title`: that text names
+    // the product the customer is pointing at, so the AI must see it.
+    const title = att.payload?.title ?? att.title ?? att.name ?? null
     return {
       type: att.type ?? att.mime_type ?? 'file',
       url: att.url ?? att.payload?.url ?? att.image_data?.url ?? att.file_url ?? null,
+      title: typeof title === 'string' && title.trim() ? title.trim().slice(0, 1000) : null,
     }
   })
 }

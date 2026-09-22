@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Package, Truck, Users, CheckCircle, Clock, AlertCircle } from 'lucide-react'
 import type { Profile } from '@/lib/types'
+import { MarketingAgentHome } from '@/components/dashboard/marketing-agent-home'
+import { getMyEntriesForDay } from '@/lib/agent-actions'
 
 async function getStats(profile: Profile) {
   try {
@@ -86,6 +88,13 @@ export default async function DashboardPage() {
   }
   if (profile.role === 'storekeeper') {
     redirect('/dashboard/storekeeper')
+  }
+
+  // The phone desk gets an order search, not the business totals: an agent
+  // has no reason to see delivery volumes or the client count.
+  if (profile.role === 'marketing_agent') {
+    const entries = await getMyEntriesForDay()
+    return <MarketingAgentHome agentName={profile.name || 'there'} initialEntries={entries} />
   }
 
   const stats = await getStats(profile as Profile)

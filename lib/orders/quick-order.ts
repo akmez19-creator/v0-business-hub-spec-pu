@@ -401,6 +401,21 @@ export function computeDefaultDeliveryDate(
 }
 
 /**
+ * An admin-pinned "general delivery date" (extension_settings.pinned_delivery_date)
+ * overrides the cut-off/scheme rule while it is still today or later; once the
+ * day has passed it is ignored, so a forgotten pin can never promise the past.
+ */
+export function activePinnedDeliveryDate(pinned: string | null | undefined, now: Date, holidays: Holiday[] = []): string | null {
+  if (!pinned) return null
+  // Postgres `date` can arrive as an ISO timestamp; keep the calendar day only.
+  const day = pinned.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < ymd(now)) return null
+  const [y, m, d] = day.split('-').map(Number)
+  // A pin on a Sunday or a holiday is never offered - the vans do not run.
+  return isNonWorkingDay(new Date(y, m - 1, d), holidays) ? null : day
+}
+
+/**
  * The delivery days that can honestly be offered to a customer right now: the
  * default date first, then the following working days. One source for both
  * the Quick Order chips and the facts handed to the AI, so the agent and the
@@ -412,8 +427,10 @@ export function upcomingDeliveryDates(
   scheme: Record<string, string | number | null | undefined>,
   holidays: Holiday[],
   count = 4,
+  pinned?: string | null,
 ): string[] {
-  const first = computeDefaultDeliveryDate(now, cutoff, scheme, holidays).date
+  const pin = activePinnedDeliveryDate(pinned, now, holidays)
+  const first = pin ?? computeDefaultDeliveryDate(now, cutoff, scheme, holidays).date
   const out = [first]
   let cursor = first
   while (out.length < count) {
@@ -439,8 +456,21 @@ export function deliveryDayLabel(ymdDate: string, locale = 'en-GB'): string {
  */
 export function extractPhone(text: string): string | null {
   if (!text) return null
-  const cleaned = text.replace(/[^\d+]/g, ' ')
-  const match = cleaned.match(/(?:\+?230)?\s*(5\d{3}\s*\d{4}|5\d{7})/)
-  if (!match) return null
-  return match[1].replace(/\s/g, '')
+  // Links carry long digit ids (Meta's "Learn More" notice ends in .../564030381383143,
+  // which used to read as 5640 3038): drop them before looking for a number.
+  const withoutLinks = text.replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
+  // Keep digits, '+' and the separators customers actually type between groups.
+  const cleaned = withoutLinks.replace(/[^\d+\s.\-]/g, ' ')
+  // A candidate is a run of exactly 8 digits (optionally split 4/4, optionally
+  // prefixed +230). Digits glued on either side mean it is part of a longer id.
+  const re = /(?:\+?230[\s.\-]*)?(5\d{3})[\s.\-]*(\d{4})(?![\d])/g
+  for (const match of cleaned.matchAll(re)) {
+    const start = match.index ?? 0
+    const before = cleaned[start - 1]
+    if (before && /\d/.test(before)) continue
+    const digits = match[1] + match[2]
+    // "2305xxxxxxx" written without a separator: the group itself is a valid mobile.
+    if (/^5\d{7}$/.test(digits)) return digits
+  }
+  return null
 }

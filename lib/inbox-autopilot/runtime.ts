@@ -1,13 +1,7 @@
 import { reconcileHandoffScope, hasUnprocessedHandoff } from './handoff-runtime'
-import { createGreenNativeRuntime } from './green-native-runtime'
-import { nativeReleaseAllows } from './green-native-engine'
-import { selectNativeCandidate, recordNativePass } from './green-native-schedule'
-import { classifyConversation as classifyNativeConversation } from './green-native-generate'
-import { recordNativeStaffTaskAndHold } from './staff-tasks'
-import { PgGreenStore } from '@/lib/whatsapp-green/store'
 import 'server-only'
 import { connectInboxDatabase } from '@/lib/messenger/pg'
-import { configuredGreenBindings } from '@/lib/whatsapp-green/config'
+import { recordAgentActivity } from '@/lib/agent-activity'
 import { getInboxPage, sendReply, MessagingPermissionError } from '@/lib/facebook/messages'
 import { FbGraphError } from '@/lib/facebook/graph'
 import { PgHistoryStore } from '@/lib/messenger/recovery/history-store.mjs'
@@ -79,20 +73,13 @@ function contextDependencies(): ContextDependencies {
   return {
     authorizeScope: async scope => { scopeIdentity(scope as AutopilotScope) },
     connectDatabase: connectInboxDatabase,
-    getGreenBinding: async phoneNumberId => {
-      const b = configuredGreenBindings().find(b => b.phoneNumberId === phoneNumberId)
-      return b ? { instanceId:b.instanceId,version:b.version,enabled:b.enabled } : null
-    },
   }
 }
 export async function trustedContext(scope: AutopilotScope, db?: AutopilotDb) {
   const deps = contextDependencies()
   const caughtUp = db ? { complete: true } : await reconcileHandoffScope(scope)
   const context = db ? await readTrustedContext(scope,deps,db) : await loadTrustedContext(scope,deps)
-  // Rechecked on the final existing Meta send transaction too. Native GREEN
-  // opt-in cannot let previously queued Meta WhatsApp jobs dispatch alongside it.
-  const nativeSelected=scope.channel==='whatsapp'&&await usingDb(db,client=>nativeReleaseAllows(client,scope))
-  const pending = nativeSelected || !caughtUp.complete || await usingDb(db, client => hasUnprocessedHandoff(client, scope))
+  const pending = !caughtUp.complete || await usingDb(db, client => hasUnprocessedHandoff(client, scope))
   return pending ? { ...context, eligible: false, reasons: ['PENDING_RECONCILIATION' as const, ...context.reasons] } : context
 }
 export async function catalogue(scope: AutopilotScope, db?: AutopilotDb): Promise<CatalogueProduct[]> {
@@ -163,14 +150,6 @@ const engine=createAutopilotEngine({store:autopilotStore,loadContext:trustedCont
     ?messengerOwnership.prepare(scope,{approvedReply:true,expectedVersion}):Promise.resolve({ok:true as const,checkedAt:Date.now()}),
   verifyFreshness:(scope,context)=>messengerFreshness.verify(scope,context)})
 
-const nativeRuntime=createGreenNativeRuntime({
-  connect:connectInboxDatabase,authorizeScope:async scope=>{scopeIdentity(scope)},
-  getBinding:async phone=>configuredGreenBindings().find(b=>b.phoneNumberId===phone)??null,
-  configuredBindings:configuredGreenBindings,portFactory:db=>new PgGreenStore(db,configuredGreenBindings),
-  catalogue,classify:classifyNativeConversation,reconcileHandoff:reconcileHandoffScope,hasUnprocessedHandoff,
-  recordStaffTask:async(db,input)=>{await recordNativeStaffTaskAndHold(db,input)},
-})
-
 /** Each candidate is the newest actual inbound on its exact Page/number. Done/read flags do not hide it. */
 export async function scanCandidates(key:BusinessKey):Promise<Array<{scope:AutopilotScope;inboundMessageId:string;customerName:string|null}>> {
   const b=businessOf(key)
@@ -230,7 +209,7 @@ export async function runAutopilot(key?:BusinessKey) {
   if (!process.env.OPENAI_API_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new AutopilotError('reply_worker_unavailable',503)
   return Promise.all((key?[key]:keys).map(async businessKey=>{
     const started=Date.now()
-    const summary={businessKey,state:'completed',scanned:0,eligible:0,queued:0,review:0,skipped:0,errors:0,processed:0,sent:0,unknown:0,failed:0,elapsedMs:0,nativeState:null as string|null,nativeReason:null as string|null}
+    const summary={businessKey,state:'completed',scanned:0,eligible:0,queued:0,review:0,skipped:0,errors:0,processed:0,sent:0,unknown:0,failed:0,elapsedMs:0}
     try {
       const initial=await autopilotStore.getConfig(businessKey)
       if (!initial.enabled || initial.reason || initial.reservedToday>=initial.maxDailyReplies) { summary.state='paused_or_limited'; return summary }
@@ -254,32 +233,7 @@ export async function runAutopilot(key?:BusinessKey) {
             return true
           }
           if (!await canContinue()) return
-          const nativeSelected=await usingDb(undefined,db=>nativeReleaseAllows(db,{businessKey}))
-          let nativePasses=0
-          if(nativeSelected){
-            const business=businessOf(businessKey)
-            // Fair rotation: a pass that ends before claim() writes no job row, so the
-            // ledger in green-native-schedule.ts is what stops one customer taking every slot.
-            const candidate=await usingDb(undefined,db=>selectNativeCandidate(db,business))
-            if(candidate&&await canContinue()){
-              summary.scanned++
-              nativePasses++
-              const scope={businessKey,channel:'whatsapp' as const,phoneNumberId:business.phoneNumberId,waId:candidate.waId}
-              let result:{state:string;reason:string;jobId?:string}
-              try{result=await nativeRuntime.runScope(scope)}
-              catch{result={state:'failed',reason:'native_run_threw'};summary.errors++}
-              summary.nativeState=result.state
-              summary.nativeReason=/^[a-z_]{1,100}$/.test(result.reason)?result.reason:'native_run_unavailable'
-              summary.processed++
-              if(result.state==='accepted')summary.sent++
-              else if(result.state==='unknown')summary.unknown++
-              else if(result.state==='failed')summary.failed++
-              else summary.review++
-              // Recorded after the run: a crash between run and record only costs one extra pass.
-              await usingDb(undefined,db=>recordNativePass(db,scope,candidate.inboundMessageId,result)).catch(()=>{summary.errors++})
-            }
-          }
-          let enginePasses=nativePasses
+          let enginePasses=0
           const processOne=async()=>{
             if(enginePasses>=4 || !await canContinue()) return false
             enginePasses++
@@ -299,7 +253,6 @@ export async function runAutopilot(key?:BusinessKey) {
           let messengerPreflightFailed=false,whatsappDiscoveryChecked=false
           for (const candidate of candidates) {
             const messenger=candidate.scope.channel==='messenger'
-            if(!messenger&&nativeSelected){summary.skipped++;continue}
             // A failed provider preflight cannot occupy every discovery slot.
             // Preserve one WhatsApp turn after a slow failure below 60s; the
             // overall 100s budget and four serial engine passes remain.
@@ -356,7 +309,6 @@ export async function runAutopilot(key?:BusinessKey) {
       })
     } catch { summary.errors++; summary.state='worker_failed' }
     finally {
-      if(summary.state==='completed'&&summary.nativeState&&summary.nativeState!=='accepted')summary.state='partial_native_review'
       summary.elapsedMs=Math.max(0,Date.now()-started)
       // Fixed counters only: no customer IDs, message bodies, provider output or secrets.
       console.info('[autopilot] pass',summary)
@@ -367,6 +319,8 @@ export async function runAutopilot(key?:BusinessKey) {
 
 /** Existing human send routes call this after their own authentication and scope validation. */
 export async function pauseForHumanReply(actor:string,channel:'messenger'|'whatsapp',owner:string,customer:string) {
+  // Every agent send passes through here, so it doubles as the attendance footprint.
+  void recordAgentActivity({ userId:actor, kind:'inbox_reply', channel, threadKey:`${channel}:${owner}:${customer}` })
   const businessKey=keys.find(k=>(channel==='messenger'?AUTOPILOT_BUSINESSES[k].pageId:AUTOPILOT_BUSINESSES[k].phoneNumberId)===owner)
   if (!businessKey) return
   const scope:AutopilotScope=channel==='messenger'?{businessKey,channel,pageId:owner,psid:customer}:{businessKey,channel,phoneNumberId:owner,waId:customer}

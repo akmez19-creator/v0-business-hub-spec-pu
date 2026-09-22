@@ -80,7 +80,7 @@ export type InboxMessage = {
   /** True when the Page sent it, false when the customer did. */
   fromPage: boolean
   fromName: string
-  attachments: { type: string; url: string | null }[]
+  attachments: { type: string; url: string | null; title?: string | null }[]
 }
 
 /**
@@ -395,11 +395,86 @@ export async function sendReply(
   recipientId: string,
   text: string,
 ): Promise<{ ok: true; usedHumanAgentTag: boolean; messageId: string | null }> {
+  return sendMessengerMessage(page, recipientId, { text }, text)
+}
+
+/**
+ * A photo or video by public URL. Messenger has no captions, so callers send
+ * the text as a second message afterwards.
+ */
+export async function sendAttachment(
+  page: FbPage,
+  recipientId: string,
+  media: { url: string; kind: 'image' | 'video' },
+): Promise<{ ok: true; usedHumanAgentTag: boolean; messageId: string | null }> {
+  return sendMessengerMessage(page, recipientId,
+    { attachment: { type: media.kind, payload: { url: media.url, is_reusable: false } } }, media.url)
+}
+
+/** Meta refused because the customer has not messaged the Page within the last 24 hours. */
+export class MessagingWindowClosedError extends Error {
+  constructor(message: string, readonly cause: FbGraphError) { super(message) }
+}
+
+/**
+ * Business Suite's "Message" button on a commenter. A commenter has never
+ * messaged the Page, so there is no 24-hour window; instead Meta allows ONE
+ * private reply per comment within 7 days, delivered into the same Messenger
+ * thread. Text only.
+ *
+ * MEASURED 15 Sep 2026: the old `/{comment_id}/private_replies` edge is gone
+ * in Graph v21 ("nonexisting field", code 100/33) even when the comment reports
+ * `can_reply_privately: true`. Private replies now go through the Send API with
+ * the comment as the recipient instead of a PSID.
+ */
+export async function sendPrivateReply(
+  page: FbPage,
+  commentId: string,
+  text: string,
+): Promise<{ ok: true; messageId: string | null }> {
+  // Bare ids come from the "created this chat because X commented" notice;
+  // the comments table stores Graph's composite `{post_id}_{comment_id}`.
+  // The Send API accepts both.
+  if (!/^\d{5,40}(_\d{5,40})?$/.test(commentId)) throw new Error('The comment this chat was created from could not be identified.')
+  const url = `${GRAPH}/${page.id}/messages?access_token=${encodeURIComponent(page.access_token)}`
+  const body = new URLSearchParams({
+    recipient: JSON.stringify({ comment_id: commentId }),
+    message: JSON.stringify({ text }),
+  })
+  try {
+    const res = await fbWrite<{ message_id?: unknown }>(url, { body, retries: 0 })
+    const id = typeof res?.message_id === 'string' && res.message_id.trim() && res.message_id.length <= 1024 ? res.message_id : null
+    return { ok: true, messageId: id }
+  } catch (e) {
+    if (!(e instanceof FbGraphError)) throw new Error('The private reply response could not be confirmed. Check the conversation before sending again.')
+    const providerMessage = typeof e.message === 'string' ? e.message : ''
+    // Meta allows exactly one private reply per comment; a second attempt or an
+    // expired comment (7 days) comes back as code 10 with its own subcode.
+    const description = /already|once|previously/i.test(providerMessage)
+      ? 'Meta allows only one private reply per comment and one was already sent. The customer must message the Page before you can reply again.'
+      : /expired|7 days|too old/i.test(providerMessage) || e.subcode === 2018278
+      ? 'The 7-day private-reply period for this comment has ended. Reply under the comment publicly or wait for the customer to message.'
+      : e.code === 200 || /pages_messaging|appropriate role/i.test(providerMessage)
+      ? 'Meta rejected the Messenger permission or Page role for private replies. Check the connection before sending again.'
+      : 'Meta rejected the private reply to this comment. Check the comment before sending again.'
+    const diagnostics = [e.code === undefined ? null : `code ${e.code}`, e.subcode === undefined ? null : `subcode ${e.subcode}`].filter(Boolean)
+    throw new FbGraphError(description + (diagnostics.length ? ` (Meta ${diagnostics.join('; ')}.)` : ''), e.code, { subcode: e.subcode })
+  }
+}
+
+async function sendMessengerMessage(
+  page: FbPage,
+  recipientId: string,
+  message: Record<string, unknown>,
+  /** The submitted content, so a provider trace echoing it is never surfaced. */
+  submitted: string,
+): Promise<{ ok: true; usedHumanAgentTag: boolean; messageId: string | null }> {
+  const text = submitted
   const url = `${GRAPH}/${page.id}/messages?access_token=${encodeURIComponent(page.access_token)}`
 
   const body = new URLSearchParams({
     recipient: JSON.stringify({ id: recipientId }),
-    message: JSON.stringify({ text }),
+    message: JSON.stringify(message),
     messaging_type: 'RESPONSE',
   })
 
@@ -430,12 +505,15 @@ export async function sendReply(
       e.subcode === undefined ? null : `subcode ${e.subcode}`, trace ? `trace ${trace}` : null].filter(Boolean)
     const providerMessage = typeof e.message === 'string' ? e.message : ''
     const missingPermission = code === 200 || /pages_messaging|appropriate role/i.test(providerMessage)
+    const windowClosed = e.subcode === 2018278 || /outside.*window|24.*hour/i.test(providerMessage)
     const description = code === undefined
       ? 'The Messenger send response could not be confirmed. Check the conversation before sending again.'
       : missingPermission
       ? 'Meta rejected the Messenger permission or Page role. Check the connection before sending again.'
-      : /outside.*window|24.*hour/i.test(providerMessage)
-        ? 'Meta rejected this reply outside the permitted messaging window. No message tag was added.'
+      : /outside.*window|24.*hour/i.test(providerMessage) || e.subcode === 2018278
+        // MEASURED 16 Sep 2026: the app has pages_messaging but NOT human_agent,
+        // so the 7-day human-agent window Business Suite uses is not open to us.
+        ? 'More than 24 hours since the customer last wrote, so Meta lets only Business Suite reach them now (its 7-day human-agent window). Reply from Business Suite, or wait for their next message. To send from here in future, the app needs the human_agent permission approved by Meta.'
         : /HUMAN_AGENT.*approv|approv.*HUMAN_AGENT/i.test(providerMessage)
           ? 'Meta reported that HUMAN_AGENT approval is missing. No alternative tag was attempted.'
           : code === 190
@@ -446,6 +524,7 @@ export async function sendReply(
     const safeError = new FbGraphError(description + (diagnostics.length ? ` (Meta ${diagnostics.join('; ')}.)` : ''), code,
       { subcode: e.subcode, fbtraceId: trace })
     if (missingPermission) throw new MessagingPermissionError(safeError.message, safeError)
+    if (windowClosed) throw new MessagingWindowClosedError(safeError.message, safeError)
     throw safeError
   }
 }

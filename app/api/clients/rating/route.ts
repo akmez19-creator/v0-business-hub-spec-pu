@@ -58,7 +58,29 @@ export async function GET(request: NextRequest) {
   // Goes through the RPC, not a .eq() on contact_1: 127 open deliveries store
   // the number with spaces ('5820 7097'), and a literal match would report
   // "no open orders" for precisely the clients most at risk of a duplicate.
-  const { data: openRows } = await adminDb.rpc('get_client_open_orders', { p_phone: phone })
+  const [{ data: openRows }, { data: lastRows }] = await Promise.all([
+    adminDb.rpc('get_client_open_orders', { p_phone: phone }),
+    // The most recent order on this number regardless of status: name, alt phone,
+    // locality and delivery notes as actually recorded, so a returning client's
+    // form is prefilled instead of retyped. Same normalised match as above.
+    adminDb.rpc('get_client_last_delivery', { p_phone: phone }),
+  ])
+
+  const last = (lastRows as {
+    id: string; customer_name: string | null; contact_2: string | null; locality: string | null
+    delivery_notes: string | null; products: string | null; status: string; created_at: string; past_orders: number
+  }[] | null)?.[0]
+  const lastDelivery = last ? {
+    id: last.id,
+    customerName: last.customer_name,
+    contact2: last.contact_2,
+    locality: last.locality,
+    notes: last.delivery_notes,
+    products: last.products,
+    status: last.status,
+    createdAt: last.created_at,
+    pastOrders: Number(last.past_orders || 0),
+  } : null
 
   const openOrders = (openRows || []).map((o: {
     id: string
@@ -69,6 +91,12 @@ export async function GET(request: NextRequest) {
     status: string
     created_at: string
     agent: string | null
+    customer_name: string | null
+    contact_2: string | null
+    locality: string | null
+    notes: string | null
+    medium: string | null
+    parent_delivery_id: string | null
   }) => ({
     id: o.id,
     products: o.products,
@@ -78,6 +106,12 @@ export async function GET(request: NextRequest) {
     createdAt: o.created_at,
     status: o.status,
     agent: o.agent,
+    customerName: o.customer_name,
+    contact2: o.contact_2,
+    locality: o.locality,
+    notes: o.notes,
+    business: o.medium,
+    parentDeliveryId: o.parent_delivery_id,
   }))
 
   const { data: client } = await adminDb
@@ -89,7 +123,7 @@ export async function GET(request: NextRequest) {
   if (!client) {
     // No rollup row yet, but there may still be open orders - a client created
     // minutes ago is exactly the duplicate-prone case, so report them anyway.
-    return NextResponse.json({ found: false, phone, rating: 'new', openOrders }, { headers: corsHeaders })
+    return NextResponse.json({ found: false, phone, rating: 'new', openOrders, lastDelivery }, { headers: corsHeaders })
   }
 
   const rated = (client.delivered_orders || 0) + (client.cms_orders || 0)
@@ -116,5 +150,6 @@ export async function GET(request: NextRequest) {
     // Separate from totalOrders on purpose: totalOrders is the rating figure
     // (delivered + CMS only), these are orders still in flight.
     openOrders,
+    lastDelivery,
   }, { headers: corsHeaders })
 }

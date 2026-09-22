@@ -2,8 +2,53 @@ import { NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getInboxPages } from '@/lib/facebook/messages'
 import { fbGet } from '@/lib/facebook/graph'
+import { connectInboxDatabase } from '@/lib/messenger/pg'
 
 export const dynamic = 'force-dynamic'
+
+type PageSummary = { id: string; name: string; lastMessageAt: string | null; conversationCount: number }
+
+// One grouped query instead of downloading every conversation row: the old
+// 1000-row pagination read the whole table on each check, which is costly
+// while the database is under load. Falls back to paging if the direct
+// connection is unavailable. No customer names or message text are read.
+async function pageSummaries(): Promise<Map<string, PageSummary>> {
+  const known = new Map<string, PageSummary>()
+  try {
+    const client = await connectInboxDatabase()
+    try {
+      const { rows } = await client.query<{
+        page_id: string; name: string; last_message_at: string | null; conversations: string
+      }>(`SELECT page_id, COALESCE(MAX(NULLIF(page_name, '')), page_id) AS name,
+          MAX(last_message_at) AS last_message_at, COUNT(*)::text AS conversations
+          FROM messenger_conversations GROUP BY page_id ORDER BY page_id`)
+      for (const row of rows)
+        known.set(row.page_id, { id: row.page_id, name: row.name,
+          lastMessageAt: row.last_message_at ? new Date(row.last_message_at).toISOString() : null,
+          conversationCount: Number(row.conversations) })
+      return known
+    } finally {
+      await client.end().catch(() => {})
+    }
+  } catch {
+    // Fall through to the REST path below.
+  }
+  const db = createAdminClient()
+  for (let offset = 0; ; offset += 1000) {
+    const result = await db.from('messenger_conversations').select('page_id,page_name,last_message_at')
+      .order('id').range(offset, offset + 999)
+    if (result.error) throw new Error('Message history is temporarily unavailable')
+    for (const row of result.data ?? []) {
+      const page = known.get(row.page_id) ?? { id: row.page_id, name: row.page_name || row.page_id, lastMessageAt: null, conversationCount: 0 }
+      page.conversationCount++
+      if (row.page_name) page.name = row.page_name
+      if (row.last_message_at && (!page.lastMessageAt || row.last_message_at > page.lastMessageAt)) page.lastMessageAt = row.last_message_at
+      known.set(row.page_id, page)
+    }
+    if ((result.data?.length ?? 0) < 1000) break
+  }
+  return known
+}
 
 // Ordinary checks read stored delivery evidence only. A Page with cached
 // history is not necessarily subscribed to receive new messages.
@@ -23,24 +68,7 @@ export async function GET(request: Request) {
     const state = await db.from('inbox_sync_state').select('key,last_run_at,last_ok_at,last_error')
       .or('key.eq.messenger,key.like.messenger:sync:%,key.like.messenger:webhook:%').limit(100)
     if (state.error) throw new Error('Connection history is temporarily unavailable')
-    // Paginate summaries rather than silently losing Pages beyond the REST
-    // default row cap. No customer names, text or identifiers leave this route.
-    const summaries: { page_id: string; page_name: string | null; last_message_at: string | null }[] = []
-    for (let offset = 0; ; offset += 1000) {
-      const result = await db.from('messenger_conversations').select('page_id,page_name,last_message_at')
-        .order('id').range(offset, offset + 999)
-      if (result.error) throw new Error('Message history is temporarily unavailable')
-      summaries.push(...(result.data ?? []))
-      if ((result.data?.length ?? 0) < 1000) break
-    }
-    const known = new Map<string, { id: string; name: string; lastMessageAt: string | null; conversationCount: number }>()
-    for (const row of summaries) {
-      const page = known.get(row.page_id) ?? { id: row.page_id, name: row.page_name || row.page_id, lastMessageAt: null, conversationCount: 0 }
-      page.conversationCount++
-      if (row.page_name) page.name = row.page_name
-      if (row.last_message_at && (!page.lastMessageAt || row.last_message_at > page.lastMessageAt)) page.lastMessageAt = row.last_message_at
-      known.set(row.page_id, page)
-    }
+    const known = await pageSummaries()
     const states = new Map((state.data ?? []).map(row => [row.key, row]))
     const configuredPages = verify ? await getInboxPages() : []
     for (const page of configuredPages) if (!known.has(page.id)) known.set(page.id, { id: page.id, name: page.name, lastMessageAt: null, conversationCount: 0 })

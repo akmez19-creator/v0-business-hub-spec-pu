@@ -20,6 +20,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { ChannelUnavailable } from './channel-unavailable'
 import { whatsappAcceptedWarning } from './inbox-behavior'
 import { whatsappConversationKey, whatsappIdentity, whatsappReplyUnavailable, whatsappTranscriptKey } from '@/lib/inbox/whatsapp-identity'
+import { matchesPhone, searchText, searchWords } from '@/lib/inbox/unified'
 
 type Contact = {
   waId: string
@@ -405,7 +406,7 @@ export function WhatsAppChannel({
   }
 
   const all = data.contacts ?? []
-  const q = query.trim().toLowerCase()
+  const words = searchWords(query)
 
   // Distinct ads present in the inbox, most leads first, so the busiest
   // campaigns are the easiest to jump to.
@@ -425,18 +426,14 @@ export function WhatsAppChannel({
   const contacts = all.filter((c) => {
     if (adFilter === 'ads' && !c.firstAdId) return false
     if (adFilter !== 'all' && adFilter !== 'ads' && c.firstAdId !== adFilter) return false
-    if (!q) return true
+    if (!words.length) return true
     // Searching the ad name too, so typing a product finds everyone who
     // clicked that ad - not just people whose message mentioned it.
-    return (
-      (c.profileName ?? '').toLowerCase().includes(q) ||
-      c.waId.includes(q) ||
-      (c.displayPhone ?? '').includes(q) ||
-      (c.businessName ?? '').toLowerCase().includes(q) ||
-      (c.lastSnippet ?? '').toLowerCase().includes(q) ||
-      (c.firstAdName ?? '').toLowerCase().includes(q) ||
-      (c.firstAdId ?? '').includes(q)
+    const haystack = searchText(
+      c.profileName, c.waId, c.displayPhone, c.businessName, c.lastSnippet, c.firstAdName, c.firstAdId,
     )
+    const digits = c.waId.replace(/\D/g, '')
+    return words.every((w) => haystack.includes(w) || matchesPhone(w, digits))
   })
 
   // Ask Meta to sync past conversations for every reachable number. Only

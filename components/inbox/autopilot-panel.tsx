@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { autopilotDateBounds, autopilotReason, autopilotSettingsError, autopilotStateLabel, createAutopilotClient,
   type AutopilotBusiness, type AutopilotBusinessKey, type AutopilotJob, type AutopilotSettings, type AutopilotState, type AutopilotStaffTask } from './autopilot-client'
 import { openStaffConversation } from './staff-conversation'
+import { FollowupsSection } from './followups-section'
 
 const BUSINESS_NAMES: Record<AutopilotBusinessKey, string> = { made_by_moris: 'Made By Moris', destockage: 'Destockage' }
 const JOB_LABELS: Record<AutopilotJob['state'], string> = {
@@ -71,6 +72,7 @@ export function AutopilotPanelView({ state, now = new Date(), ...actions }: Pane
           {snapshot.staffTasks.length?<ol aria-label="Open staff review tasks" className="max-h-[36rem] space-y-3 overflow-y-auto">{snapshot.staffTasks.map(task=><StaffTaskRow key={task.id} task={task} enabled={snapshot.businesses.find(b=>b.key===task.businessKey)?.enabled===true} canManage={snapshot.permissions.canManage&&!error} pending={loading} onTakeover={actions.onTakeover} onOpen={()=>{openStaffConversation(task);actions.onClose?.()}} />)}</ol>:<p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No open staff review tasks.</p>}
           {snapshot.staffTasksHasMore&&<p className="mt-2 text-xs text-muted-foreground">Showing the oldest 25 tasks. Further tasks appear as these are reviewed.</p>}
         </div>
+        <FollowupsSection canManage={snapshot.permissions.canManage && !error} />
         <div className="border-t pt-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Latest activity</h3><p className="text-xs text-muted-foreground">Newest first · Mauritius time</p></div>
           {snapshot.jobs.some(needsAgentAttention) && <p aria-label="Agent attention in latest activity" className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-200"><Star className="size-4 shrink-0 fill-current" aria-hidden="true" />Needs attention in Akmez · {snapshot.jobs.filter(needsAgentAttention).length}</p>}
           {snapshot.jobs.length ? <ol aria-label="Recent Autopilot activity" className="max-h-96 space-y-2 overflow-y-auto">{snapshot.jobs.map(job => <JobRow key={job.id} job={job} enabled={snapshot.businesses.find(b => b.key === job.businessKey)?.enabled === true} canManage={snapshot.permissions.canManage && !error} pending={loading} onTakeover={actions.onTakeover} />)}</ol>

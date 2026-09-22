@@ -1,6 +1,6 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { standbyNotice, withStandbyModel } from '@/lib/ai/standby'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   deliveryDayLabel,
@@ -14,12 +14,8 @@ import {
 // Do NOT use the edge runtime with the AI SDK.
 export const runtime = 'nodejs'
 
-/**
- * Uses the project's own OpenAI key. Routing through the AI Gateway made this
- * fail with a 429 on the free tier, so the extension's "AI reply" button would
- * intermittently do nothing. Keep this in step with /api/inbox/ai-assist.
- */
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY })
+// Provider order (own OpenAI key -> same model via Gateway -> Gemini) lives in
+// lib/ai/standby.ts, shared with /api/inbox/ai-assist.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -120,8 +116,10 @@ export async function POST(request: NextRequest) {
       businessContext ? `\nBusiness context and tone to follow:\n${businessContext}` : '',
     ].filter(Boolean).join('\n')
 
-    const { text } = await generateText({
-      model: openai('gpt-4.1'),
+    const { value: { text }, tier } = await withStandbyModel((model) => generateText({
+      model,
+      maxRetries: 0,
+      abortSignal: AbortSignal.timeout(25_000),
       system,
       messages: [
         {
@@ -129,9 +127,9 @@ export async function POST(request: NextRequest) {
           content: `Here is the recent conversation (newest last):\n\n${transcript}\n\nWrite the best reply to send now.`,
         },
       ],
-    })
+    }))
 
-    return NextResponse.json({ success: true, reply: (text || '').trim() }, { headers: corsHeaders })
+    return NextResponse.json({ success: true, reply: (text || '').trim(), notice: standbyNotice(tier) }, { headers: corsHeaders })
   } catch (error) {
     console.error('AI reply error:', error)
     return NextResponse.json({ success: false, error: 'Failed to generate reply' }, { status: 500, headers: corsHeaders })

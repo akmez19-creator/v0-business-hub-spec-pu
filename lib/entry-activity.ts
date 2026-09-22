@@ -3,6 +3,13 @@ import { MAURITIUS_TZ, todayInMauritius } from '@/lib/business-date'
 // Imported for use INSIDE this file. `export ... from` below only re-exports;
 // it does not put the names in local scope.
 import { buildVisits, clientKeyOf, minuteOfDay, type EntryRow } from './entry-activity-visits'
+import {
+  addActivity, countActivity, dayAttendance, EMPTY_ACTIVITY, footprintGaps, shiftForRole,
+  type ActivityCounts, type AttendanceSummary, type DayAttendance, type Footprint,
+} from './entry-attendance'
+import { loadAgentActivity } from './agent-activity'
+
+export { MARKETING_SHIFT, type Shift, type ActivityCounts, type AttendanceSummary, type DayAttendance } from './entry-attendance'
 
 /**
  * ENTRY ACTIVITY - who typed what into the system, and when.
@@ -111,6 +118,10 @@ export interface AgentDay {
   thin: boolean
   /** Quiet stretches >= GAP_MIN_TRACKED, in order. */
   gaps: EntryGap[]
+  /** Inbox footprints on this day (replies sent, leads opened, stars, order edits). */
+  activity: ActivityCounts
+  /** Lateness / early leave against the agent's shift; null when no shift applies. */
+  attendance: DayAttendance | null
 }
 
 export interface AgentSummary {
@@ -162,6 +173,10 @@ export interface AgentSummary {
   totalSpanMinutes: number
   earliest: { date: string; time: string } | null
   latest: { date: string; time: string } | null
+  /** Inbox footprints summed over the month. */
+  activity: ActivityCounts
+  /** Only for roles with a fixed shift (marketing agents, 08:00-16:30). */
+  attendance: AttendanceSummary | null
 }
 
 export interface DaySummary {
@@ -218,6 +233,14 @@ export interface EntryActivity {
   /** Months that actually contain hand-entered rows, newest first. */
   availableMonths: string[]
   scope: 'all' | 'self'
+  /**
+   * First day (Mauritius) with an inbox footprint anywhere, or null before any
+   * exist. Days before it show orders only, and the screen must say so rather
+   * than let an August day read as "never opened the inbox".
+   */
+  activityTrackedFrom: string | null
+  /** Today in Mauritius, so the client can tell a finished day from a running one. */
+  today: string
 }
 
 /** Mauritius day + hour + HH:MM from a UTC timestamp, in one pass. */
@@ -351,10 +374,42 @@ export async function getEntryActivity(
   // month opens empty and looks broken, and this data currently stops in August.
   const target = month && /^\d{4}-\d{2}$/.test(month) ? month : availableMonths[0] ?? todayInMauritius().slice(0, 7)
   const inMonth = parsed.filter((p) => p.day.startsWith(target))
+  const today = todayInMauritius()
 
   // --- day cells: every day of the month, empty ones included ---
   const [y, m] = target.split('-').map(Number)
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate()
+
+  /*
+   * Inbox footprints for the same month. The UTC window is padded by a day on
+   * each side and then filtered on the MAURITIUS day, the same way order rows
+   * are, so a reply sent at 01:00 local lands on the right calendar day.
+   */
+  const eventRows = await loadAgentActivity(
+    new Date(Date.UTC(y, m - 1, 1) - 86400000).toISOString(),
+    new Date(Date.UTC(y, m, 1) + 86400000).toISOString(),
+    seeAll ? undefined : [viewer.id],
+  )
+  const eventsByAgentDay = new Map<string, Map<string, Footprint[]>>()
+  for (const e of eventRows) {
+    const { day, time } = inMauritius(e.created_at)
+    if (!day.startsWith(target)) continue
+    const kind = e.kind === 'inbox_reply' || e.kind === 'inbox_open' || e.kind === 'inbox_star' || e.kind === 'order_change' ? e.kind : null
+    if (!kind) continue
+    let perDay = eventsByAgentDay.get(e.user_id)
+    if (!perDay) eventsByAgentDay.set(e.user_id, (perDay = new Map()))
+    const list = perDay.get(day)
+    const point: Footprint = { at: e.created_at, min: minuteOfDay(time), kind }
+    if (list) list.push(point)
+    else perDay.set(day, [point])
+  }
+  const { data: firstEvent } = await db
+    .from('agent_activity_events')
+    .select('created_at')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  const activityTrackedFrom = firstEvent?.created_at ? inMauritius(String(firstEvent.created_at)).day : null
   const rowsByDay: Record<string, EntryRow[]> = {}
   for (const r of inMonth) (rowsByDay[r.day] ??= []).push(r)
 
@@ -409,14 +464,21 @@ export async function getEntryActivity(
     if (list) list.push(r)
     else agentMap.set(r.agentId, [r])
   }
-  const agents: AgentSummary[] = [...agentMap.entries()]
-    .map(([id, list]) => {
+  // An agent who only answered the inbox this month has no order rows but is
+  // still working; the union keeps them on the board.
+  const agentIds = new Set<string>([...agentMap.keys(), ...eventsByAgentDay.keys()])
+  const agents: AgentSummary[] = [...agentIds]
+    .map((id) => {
+      const list = agentMap.get(id) ?? []
       const perDay = new Map<string, EntryRow[]>()
       for (const r of list) {
         const dayRows = perDay.get(r.day)
         if (dayRows) dayRows.push(r)
         else perDay.set(r.day, [r])
       }
+      const eventDays = eventsByAgentDay.get(id) ?? new Map<string, Footprint[]>()
+      const shift = shiftForRole(roleOf.get(id) || '')
+      const dayKeys = [...new Set([...perDay.keys(), ...eventDays.keys()])].sort()
 
       /*
        * Day windows are built from each agent's OWN rows, sorted by the raw
@@ -424,60 +486,106 @@ export async function getEntryActivity(
        * crosses midnight, which this data does - Munsah's 23 Aug session runs
        * 01:52-02:02 under the previous business date.
        */
-      const agentDays: AgentDay[] = [...perDay.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([date, rowsOfDay]) => {
-          const s = rowsOfDay.slice().sort((a, b) => a.at.localeCompare(b.at))
-          const first = s[0]
-          const last = s[s.length - 1]
-          const firstMin = minuteOfDay(first.time)
-          const lastMin = minuteOfDay(last.time)
+      const agentDays: AgentDay[] = dayKeys
+        .map((date) => {
+          const s = (perDay.get(date) ?? []).slice().sort((a, b) => a.at.localeCompare(b.at))
           const visits = buildVisits(s)
+          const events = eventDays.get(date) ?? []
 
           /*
-           * Quiet stretches measured BETWEEN VISITS, not between rows.
-           *
-           * This is the point of counting by client: a four-row order typed in
-           * one burst used to end each row's "gap" at 0-1 minutes, which is
-           * simply the speed of typing. Measuring visit-to-visit asks the real
-           * question - how long between finishing one client and starting the
-           * next - so the gap runs from the END of the previous visit.
-           *
-           * Length comes from the REAL INSTANTS, not from subtracting "HH:MM"
-           * strings: on a day that crosses midnight the clock reading goes
-           * backwards and a genuine 8-minute gap would compute as -1432. The
-           * drawing POSITION still needs a minute-of-day, so it is taken from
-           * the earlier visit and the width clamped to the end of the day.
+           * One timeline per day: order visits as intervals, inbox footprints
+           * as points. First/last/gaps come from the union, so an agent who
+           * opened the inbox at 08:02 and typed the first order at 09:40 is on
+           * time, not 1h40 late, and the 08:02-09:40 stretch is a quiet gap
+           * only if nothing else happened in it.
            */
-          const gaps: EntryGap[] = []
-          for (let i = 1; i < visits.length; i++) {
-            const minutes = Math.round(
-              (new Date(visits[i].startAt).getTime() - new Date(visits[i - 1].endAt).getTime()) / 60000,
-            )
-            if (minutes < GAP_MIN_TRACKED) continue
-            const startMin = visits[i - 1].endMin
-            gaps.push({ startMin, minutes: Math.min(minutes, 1440 - startMin) })
-          }
+          const points: Footprint[] = [
+            ...visits.map((v) => ({ at: v.startAt, min: v.startMin, kind: 'order' as const, endAt: v.endAt, endMin: v.endMin })),
+            ...events,
+          ].sort((a, b) => a.at.localeCompare(b.at))
+          const first = points[0]
+          const lastEnd = points.reduce((mx, p) => {
+            const end = p.endAt ?? p.at
+            return end > mx.at ? { at: end, min: p.endMin ?? p.min } : mx
+          }, { at: first.endAt ?? first.at, min: first.endMin ?? first.min })
+          const firstMin = first.min
+          const lastMin = lastEnd.min
+          const hmOf = (mm: number) => `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+
+          /*
+           * Quiet stretches measured BETWEEN FOOTPRINTS, not between rows: a
+           * four-row order typed in one burst is one visit, and a reply sent
+           * in the middle of a lull closes that lull. Lengths come from the
+           * REAL INSTANTS so a midnight-crossing day cannot go negative.
+           */
+          const gaps: EntryGap[] = footprintGaps(points, GAP_MIN_TRACKED)
 
           const clients = new Set(s.map((r) => r.clientKey)).size
+          const activity = countActivity(events)
+          const weekday = new Date(date + 'T12:00:00Z').getUTCDay()
 
           return {
             date,
             clients,
             entries: s.length,
-            firstTime: first.time,
-            lastTime: last.time,
+            firstTime: hmOf(firstMin),
+            lastTime: hmOf(lastMin),
             firstMin,
             lastMin,
             // Clamped at 0: a midnight-crossing day would otherwise go negative
             // and render as a bar pointing backwards.
             spanMinutes: Math.max(0, lastMin - firstMin),
-            // Threshold is in CLIENTS now, so a day of 5 rows that is really one
-            // client no longer passes as a readable shift.
-            thin: clients < 5 || lastMin - firstMin < 30,
+            // A day is readable as a shift once it has enough footprints of
+            // any kind - 5 clients, or 10 inbox actions - and lasts 30 minutes.
+            thin: (clients < 5 && events.length < 10) || lastMin - firstMin < 30,
             gaps,
+            activity,
+            attendance: shift ? dayAttendance(shift, weekday, firstMin, lastMin, date === today) : null,
           }
         })
+
+      /*
+       * Attendance against the shift. Only scheduled days that are OVER count
+       * as missing; today is still running. Before footprints existed
+       * (activityTrackedFrom) a missing day can only mean "no order typed",
+       * which is weaker evidence - the UI prints the tracking start for that.
+       */
+      let attendance: AttendanceSummary | null = null
+      if (shift) {
+        const present = agentDays.filter((d) => d.attendance?.scheduled)
+        const missingDays: string[] = []
+        let scheduledDays = 0
+        for (let d = 1; d <= daysInMonth; d++) {
+          const date = `${target}-${String(d).padStart(2, '0')}`
+          if (date >= today) break
+          const wd = new Date(date + 'T12:00:00Z').getUTCDay()
+          if (!shift.workdays.includes(wd)) continue
+          scheduledDays++
+          if (!present.some((p) => p.date === date)) missingDays.push(date)
+        }
+        if (present.some((p) => p.date === today)) scheduledDays++
+        const late = present.filter((d) => (d.attendance?.lateMinutes ?? 0) > 0)
+        const early = present.filter((d) => (d.attendance?.earlyLeaveMinutes ?? 0) > 0)
+        const worst = late.slice().sort((a, b) => (b.attendance!.lateMinutes) - (a.attendance!.lateMinutes))[0]
+        const avg = (nums: number[]) => (nums.length ? Math.round(nums.reduce((s, n) => s + n, 0) / nums.length) : null)
+        const hmOf = (mm: number) => `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+        const avgStart = avg(present.map((d) => d.firstMin))
+        const avgEnd = avg(present.filter((d) => d.date !== today).map((d) => d.lastMin))
+        attendance = {
+          shift,
+          scheduledDays,
+          presentDays: present.length,
+          missingDays,
+          onTimeDays: present.length - late.length,
+          lateDays: late.length,
+          lateMinutesTotal: late.reduce((s, d) => s + d.attendance!.lateMinutes, 0),
+          latestStart: worst ? { date: worst.date, time: worst.firstTime, lateMinutes: worst.attendance!.lateMinutes } : null,
+          earlyDays: early.length,
+          earlyMinutesTotal: early.reduce((s, d) => s + (d.attendance!.earlyLeaveMinutes ?? 0), 0),
+          averageStart: avgStart === null ? null : hmOf(avgStart),
+          averageEnd: avgEnd === null ? null : hmOf(avgEnd),
+        }
+      }
 
       // Median over SUBSTANTIAL days only where possible: a 7-minute day would
       // otherwise drag the typical window toward a session that never happened.
@@ -505,7 +613,7 @@ export async function getEntryActivity(
           0,
         ),
         revenue: list.reduce((s, r) => s + r.amount, 0),
-        activeDays: perDay.size,
+        activeDays: agentDays.length,
         bestDay: Math.max(0, ...agentDays.map((d) => d.clients)),
         firstHour: hoursUsed.length ? Math.min(...hoursUsed) : null,
         lastHour: hoursUsed.length ? Math.max(...hoursUsed) : null,
@@ -516,6 +624,8 @@ export async function getEntryActivity(
         totalSpanMinutes: agentDays.reduce((s, d) => s + d.spanMinutes, 0),
         earliest: byFirst[0] ? { date: byFirst[0].date, time: byFirst[0].firstTime } : null,
         latest: byLast[0] ? { date: byLast[0].date, time: byLast[0].lastTime } : null,
+        activity: agentDays.reduce((s, d) => addActivity(s, d.activity), EMPTY_ACTIVITY),
+        attendance,
       }
     })
     // Ranked by CLIENTS, so the order matches the headline number.
@@ -573,5 +683,7 @@ export async function getEntryActivity(
     excludedImports: excludedImports ?? 0,
     availableMonths,
     scope,
+    activityTrackedFrom,
+    today,
   }
 }

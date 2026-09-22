@@ -18,7 +18,13 @@ export type LeadMessage = {
   /** True when the business sent it - drives which side the bubble sits on. */
   fromBusiness: boolean
   /** Non-text payloads, already resolved to something renderable. */
-  attachments: { type: string; url: string | null }[]
+  attachments: { type: string; url: string | null; title?: string | null }[]
+  /**
+   * Meta delivered no content for this message (error 131060 "This message is
+   * unavailable": a reaction, a deleted or view-once message). Nobody can read it,
+   * so it is reviewable, not "missing text".
+   */
+  unavailable?: boolean
 }
 
 /**
@@ -46,7 +52,7 @@ type RawMessenger = {
   text?: string
   createdTime?: string
   fromPage?: boolean
-  attachments?: { type: string; url: string | null }[]
+  attachments?: { type: string; url: string | null; title?: string | null }[]
 }
 
 type RawWhatsApp = {
@@ -56,6 +62,7 @@ type RawWhatsApp = {
   body: string | null
   mediaId: string | null
   mediaMime: string | null
+  mediaUrl?: string | null
   createdAt: string
 }
 
@@ -77,7 +84,11 @@ export function normaliseMessages(
       attachments:
         m.type !== 'text' && m.mediaId
           ? [{ type: m.mediaMime ?? m.type, url: `/api/inbox/whatsapp/media/${m.mediaId}` }]
-          : [],
+          : m.type !== 'text' && m.mediaUrl
+            // A photo/video WE sent by link: our own public file, no proxy needed.
+            ? [{ type: m.mediaMime ?? m.type, url: m.mediaUrl }]
+            : [],
+      unavailable: m.type !== 'text' && !(m.body ?? '').trim() && !m.mediaId && !m.mediaUrl,
     }))
   }
 
@@ -96,16 +107,30 @@ export function normaliseMessages(
  * A comment has no history, so its own text becomes the single customer turn -
  * otherwise the model would be asked to reply to an empty conversation.
  */
+export type AssistTurn = {
+  from: 'customer' | 'business'
+  text: string
+  /** Messenger message id; lets the server refresh an expired media link. */
+  id?: string
+  /** Customer photos/videos/shares for the server to read before drafting. */
+  attachments?: { type: string; url: string | null; title?: string | null }[]
+}
+
 export function toTurns(
   thread: UnifiedThread,
   messages: LeadMessage[],
-): { from: 'customer' | 'business'; text: string }[] {
+): AssistTurn[] {
   if (thread.channel === 'comment') {
     return thread.snippet ? [{ from: 'customer', text: thread.snippet }] : []
   }
   return messages
-    .filter((m) => m.text.trim())
-    .map((m) => ({ from: m.fromBusiness ? 'business' : 'customer', text: m.text }))
+    .filter((m) => m.text.trim() || (!m.fromBusiness && m.attachments.length))
+    .map((m) => ({
+      from: m.fromBusiness ? 'business' : 'customer',
+      text: m.text,
+      id: m.id,
+      ...(!m.fromBusiness && m.attachments.length ? { attachments: m.attachments } : {}),
+    }))
 }
 
 export type SendResult = {
@@ -121,9 +146,12 @@ export type SendResult = {
  * Each channel is addressed differently: Messenger by PSID as a specific Page,
  * WhatsApp by business phone number plus customer wa_id, and a comment by its own comment id.
  */
-export async function sendLeadReply(thread: UnifiedThread, text: string): Promise<SendResult> {
+export type LeadAttachment = { url: string; kind: 'image' | 'video'; mime: string }
+
+export async function sendLeadReply(thread: UnifiedThread, text: string, media: LeadAttachment | null = null): Promise<SendResult> {
   const body = text.trim()
-  if (!body) return { success: false, error: 'Message is empty' }
+  if (!body && !media) return { success: false, error: 'Message is empty' }
+  if (media && thread.channel === 'comment') return { success: false, error: 'Photos and videos cannot be sent in a comment reply.' }
   if (!thread.recipientId) {
     return { success: false, error: 'This lead has no address to reply to.' }
   }
@@ -143,13 +171,14 @@ export async function sendLeadReply(thread: UnifiedThread, text: string): Promis
         recipientId: thread.recipientId,
         text: body,
         pageId: thread.pageId ?? undefined,
+        media: media ?? undefined,
       })
     case 'whatsapp': {
       const sender = { waId: thread.recipientId, phoneNumberId: thread.phoneNumberId, canSend: thread.canSend }
       const unavailable = whatsappReplyUnavailable(sender)
       if (unavailable) return { success: false, error: unavailable }
       const identity = whatsappIdentity(sender)!
-      return post('/api/inbox/whatsapp', { ...identity, message: body })
+      return post('/api/inbox/whatsapp', { ...identity, message: body, media: media ?? undefined })
     }
     default:
       if (!thread.pageId) return { success: false, error: 'This comment has no Page attached.' }

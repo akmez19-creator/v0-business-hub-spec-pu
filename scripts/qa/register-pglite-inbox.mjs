@@ -8,11 +8,13 @@ import { fileURLToPath } from 'node:url'
 
 const shim = fileURLToPath(new URL('./pglite-inbox-shim.mts', import.meta.url))
 const target = /[\\/]lib[\\/]messenger[\\/]pg\.ts$/
+const serverOnly = fileURLToPath(new URL('./server-only-shim.mjs', import.meta.url))
 
 Module.register('./pglite-inbox-loader.mjs', import.meta.url)
 
 const original = Module._resolveFilename
 Module._resolveFilename = function (request, parent, isMain, options) {
+  if (request === 'server-only') return serverOnly
   const resolved = original.call(this, request, parent, isMain, options)
   return target.test(resolved) ? shim : resolved
 }

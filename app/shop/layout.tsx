@@ -4,6 +4,11 @@ import { CartProvider } from '@/components/shop/cart-provider'
 import { ShopChrome } from '@/components/shop/shop-chrome'
 import { getCategoryList } from '@/lib/shop/catalog'
 
+// The shared category menu reads Supabase on EVERY shop page, including
+// checkout. Never let a database outage block a deployment's prerender step.
+// Unlike force-dynamic, this preserves the catalogue's explicit data cache.
+export const revalidate = 0
+
 // Loaded here rather than in the root layout so the dashboard never pays for
 // a font only the storefront uses.
 const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit', display: 'swap' })

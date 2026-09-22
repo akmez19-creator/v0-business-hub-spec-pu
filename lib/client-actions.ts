@@ -4,6 +4,19 @@ import { createClient as createSupabaseClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Client, ClientSortKey, ClientOrderHistoryItem } from '@/lib/types'
 
+/**
+ * Browsing the WHOLE client base (list, ratings, totals) is admin/manager only.
+ * A server action is a public endpoint whatever the nav shows, so the check has
+ * to live here, not just on the page. Single-client reads stay open because the
+ * agent's order search depends on them.
+ */
+async function canBrowseClients(supabase: Awaited<ReturnType<typeof createSupabaseClient>>) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  return !!profile && ['admin', 'manager'].includes(profile.role)
+}
+
 export async function getClients(filters?: {
   search?: string
   city?: string
@@ -185,6 +198,7 @@ export async function getClientsPage(opts: {
   sortDir?: 'asc' | 'desc'
 }) {
   const supabase = await createSupabaseClient()
+  if (!(await canBrowseClients(supabase))) return { clients: [] as Client[], total: 0 }
   const page = Math.max(1, opts.page || 1)
   const pageSize = Math.min(100, Math.max(10, opts.pageSize || 50))
   const from = (page - 1) * pageSize
@@ -249,6 +263,7 @@ export async function getClientDetail(clientId: string) {
 
 export async function getClientStats() {
   const supabase = await createSupabaseClient()
+  if (!(await canBrowseClients(supabase))) return { total: 0, good: 0, average: 0, bad: 0 }
 
   // Head-only count queries stay fast at 500k+ rows (indexed client_status)
   const [totalRes, goodRes, avgRes, badRes] = await Promise.all([

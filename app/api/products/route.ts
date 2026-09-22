@@ -8,7 +8,7 @@ export async function GET() {
     // Fetch all active products with id, name, and price
     const { data: products, error } = await adminDb
       .from('products')
-      .select('id, name, price, quantity')
+      .select('id, name, price, quantity, bundle_prices, is_b1g1, sold_out, image_url')
       .eq('is_active', true)
       .order('name')
     

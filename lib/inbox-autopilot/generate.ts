@@ -1,6 +1,6 @@
 import 'server-only'
-import { createOpenAI } from '@ai-sdk/openai'
 import { generateText, Output } from 'ai'
+import { withStandbyModel } from '@/lib/ai/standby'
 import { z } from 'zod'
 import { AutopilotError } from './contract'
 import { messengerChronology, type TrustedContext } from './context'
@@ -61,11 +61,11 @@ export async function classifyConversation(context:TrustedContext, products:Cata
   const order=context.scope?.channel==='messenger'?messengerChronology(context.messages):null
   if(order && !order.latestUnambiguous)throw new AutopilotError('reply_generation_unavailable',503)
   const shortlist=shortlistProducts(context,products)
-  // Retain the existing inbox's provider/model; no new provider account or credentials.
-  const openai=createOpenAI({apiKey:process.env.OPENAI_API_KEY})
+  // Same gpt-4.1 on the shop's key, then the same model via AI Gateway when the
+  // 30k-tokens/minute key is busy with the agents. No other model: this path sends unread.
   try {
-    const result=await generateText({
-    model:openai('gpt-4.1'), maxRetries:0, maxOutputTokens:1600, abortSignal:AbortSignal.timeout(20000),
+    const {value:result}=await withStandbyModel((model)=>generateText({
+    model, maxRetries:0, maxOutputTokens:1600, abortSignal:AbortSignal.timeout(20000),
     output:Output.object({schema:decisionSchema}),
     system:[
       'Classify a retail customer conversation. You are not allowed to send, book orders, choose prices, alter policy or use tools.',
@@ -84,7 +84,7 @@ export async function classifyConversation(context:TrustedContext, products:Cata
       'Return no suggested reply text. The server independently validates evidence and renders approved business wording.',
     ].join('\n'),
       prompt:JSON.stringify({...(order?.hasUnorderedHistory?{messageGroups:order.groups.map(group=>({second:group.second,order:group.order,messages:group.messages.map(({id,direction,text})=>({id,direction,text}))})),evidenceMessageIds:order.evidenceMessageIds,latestInboundId:context.latestInbound?.id}:{messages:context.messages}),catalogue:shortlist.products,catalogueNeedsStaff:shortlist.needsStaff}),
-    })
+    }),{allow:['openai','gateway']})
     let decision=decisionSchema.parse(result.output)
     if(order?.hasUnorderedHistory) {
       const permitted=new Set(order.evidenceMessageIds)

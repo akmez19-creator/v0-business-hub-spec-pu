@@ -3,7 +3,15 @@ import { after } from 'next/server'
 import { connectInboxDatabase } from '@/lib/messenger/pg'
 import { validateWhatsAppScope, requireWhatsAppNumber, decodeWhatsAppCursor, encodeWhatsAppCursor, WhatsAppScopeError } from './number-scope'
 import { persistWhatsAppMessage, persistWhatsAppStatus } from './persistence'
-import { alignReceiptsWithCopies, copyTime, historyCopyId, type CopyRow } from '@/lib/whatsapp-green/receipt-match'
+import { createProductMatcher } from '@/lib/products/match'
+import { productFromAdName } from '@/lib/facebook/ad-product-name'
+
+/** First ad per contact, with the referral's ad name for ads the post cache lacks. */
+function adNamesById(rows: { first_ad_id: string | null; first_ad_name: string | null }[]): Map<string, string | null> {
+  const out = new Map<string, string | null>()
+  for (const r of rows) if (r.first_ad_id && (!out.has(r.first_ad_id) || !out.get(r.first_ad_id))) out.set(r.first_ad_id, r.first_ad_name ?? null)
+  return out
+}
 
 /** WhatsApp content is persisted from webhooks, supported history imports and local sends.
  * Status webhooks contain delivery state, not the message body. */
@@ -75,11 +83,12 @@ export type WaMessage = {
   body: string | null
   mediaId: string | null
   mediaMime: string | null
+  /** Our own public link for a photo/video WE sent by link (Meta gives those no media id). */
+  mediaUrl?: string | null
   status: string | null
   error: string | null
   createdAt: string
-  /** Set when a status-only receipt's text came from its identity-verified GREEN-API copy. */
-  copySource?: 'green-api' | null
+
 }
 
 export function whatsappToken(): string | undefined {
@@ -164,9 +173,10 @@ function toContact(
  */
 async function adProducts(
   db: ReturnType<typeof createAdminClient>,
-  adIds: string[],
+  adNames: Map<string, string | null>,
 ): Promise<Map<string, { product: string | null; productId: string | null }>> {
   const out = new Map<string, { product: string | null; productId: string | null }>()
+  const adIds = [...adNames.keys()]
   if (!adIds.length) return out
 
   const { data, error } = await db
@@ -188,6 +198,26 @@ async function adProducts(
       product: (row.product as string | null) ?? null,
       productId: (row.product_id as string | null) ?? null,
     })
+  }
+
+  // page_post_ads is keyed by page POST, and a Click-to-WhatsApp ad often has
+  // none - so its id never appears there (16 Sep: "MBM - EMS Foot Massager - 3"
+  // sent three customers whose threads showed no ad and whose drafts asked
+  // "which product?"). Meta's referral carries the ad NAME, which follows the
+  // house convention, so read the product off that with the same parser and
+  // catalogue matcher the ad sync uses.
+  const unresolved = [...adNames.entries()].filter(([id, name]) => !out.get(id)?.product && productFromAdName(name))
+  if (unresolved.length) {
+    const [{ data: products }, { data: aliases }] = await Promise.all([
+      db.from('products').select('id, name, category'),
+      db.from('product_aliases').select('alias_name, product_id'),
+    ])
+    const matchProduct = createProductMatcher(products ?? [], aliases ?? [])
+    for (const [id, name] of unresolved) {
+      const label = productFromAdName(name)
+      const match = matchProduct(label)
+      out.set(id, { product: match?.productName ?? label, productId: match?.productId ?? null })
+    }
   }
   return out
 }
@@ -216,7 +246,7 @@ export async function listContacts(limit = 100, search?: string, phoneNumberId?:
       ORDER BY c.last_message_at DESC NULLS LAST,c.phone_number_id,c.wa_id LIMIT $3`,
       [phoneNumberId??null,search?.trim()?`%${search.trim()}%`:null,Math.min(200,Math.max(1,limit))])).rows
   } finally { await db.end().catch(()=>{}) }
-  const products=await adProducts(createAdminClient(),[...new Set(rows.map(r=>r.first_ad_id).filter((id):id is string=>Boolean(id)))])
+  const products=await adProducts(createAdminClient(),adNamesById(rows))
   return rows.map(r=>toContact(r,r.message_count??0,r.first_ad_id?products.get(r.first_ad_id)??null:null))
 }
 
@@ -237,7 +267,7 @@ export async function listContactsForScopes(scopes: { phoneNumberId: string; waI
         ON requested.phone_number_id=c.phone_number_id AND requested.wa_id=c.wa_id
       WHERE n.can_read`, [JSON.stringify(pairs.map(scope => ({ phone_number_id: scope.phoneNumberId, wa_id: scope.waId })))])).rows
   } finally { await db.end().catch(() => {}) }
-  const products = await adProducts(createAdminClient(), [...new Set(rows.map(row => row.first_ad_id).filter((id): id is string => Boolean(id)))])
+  const products = await adProducts(createAdminClient(), adNamesById(rows))
   return rows.map(row => toContact(row, row.message_count ?? 0, row.first_ad_id ? products.get(row.first_ad_id) ?? null : null))
 }
 
@@ -253,48 +283,23 @@ export async function listMessages(waId:string,phoneNumberId:string,limit=100,be
     const contact=(await db.query('SELECT activity_version FROM whatsapp_conversations WHERE wa_id=$1 AND phone_number_id=$2',[waId,phoneNumberId])).rows[0]
     if(!contact) throw new WhatsAppScopeError('This customer has no conversation on the selected business number.',404)
     const rows=(await db.query(`SELECT id,wa_id,phone_number_id,direction,type,body,media_id,media_mime,status,error,created_at,
+      CASE WHEN direction='out' THEN raw->>'mediaUrl' END AS media_url,
       (type='external' OR COALESCE(raw #>> '{_inbox,receiptOnly}','false')='true') AS receipt_only,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
       FROM whatsapp_messages WHERE wa_id=$1 AND phone_number_id=$2
         AND ($3::timestamptz IS NULL OR (created_at,id)<($3::timestamptz,$4::text))
       ORDER BY created_at DESC,id DESC LIMIT $5`,[waId,phoneNumberId,cursor?.[0]??null,cursor?.[1]??null,pageSize])).rows
-    // Phone-typed replies reach Meta as status receipts without text; GREEN-API keeps the text.
-    // Only a copy whose id Meta itself embedded in the wamid may fill a receipt. Copies with NO Meta
-    // row at all (history/journal imports) are the only record of that message and are folded in below.
-    const copies:(CopyRow&{first_observed_at:Date|string|null})[]=(await db.query(`SELECT provider_message_id,wa_id,direction,kind,body,provider_accepted_at,first_observed_at,deleted_observed,conflicted
-      FROM whatsapp_green_messages WHERE wa_id=$1 AND phone_number_id=$2`,[waId,phoneNumberId])).rows
-    const {fills,historyOnlyCopies}=alignReceiptsWithCopies(rows.map(r=>({...r,receiptOnly:r.receipt_only===true})),copies)
     await db.query('COMMIT')
-    // Paging is decided by canonical rows alone so folded copies can never hide an older page.
     const hasMore=rows.length===pageSize
     const oldest=rows.at(-1)
     const nextCursor=hasMore&&oldest?encodeWhatsAppCursor({createdAt:oldest.cursor_time,id:oldest.id}):null
-    const oldestTime=oldest?new Date(oldest.created_at).getTime():Number.NEGATIVE_INFINITY
-    const canonical:WaMessage[]=rows.map(r=>{
-      const fill=fills.get(r.id)
-      return {
-        id:r.id,waId:r.wa_id,phoneNumberId:r.phone_number_id,direction:r.direction,type:r.type,body:fill?fill.body:r.body,
-        mediaId:r.media_id,mediaMime:r.media_mime,status:r.status,error:r.error,createdAt:new Date(r.created_at).toISOString(),
-        cursor:encodeWhatsAppCursor({createdAt:r.cursor_time,id:r.id}),
-        copySource:fill?'green-api' as const:null,
-      }
-    }).reverse()
-    // Provider acceptance is the copy's own timestamp; first observation is only a fallback when it is absent.
-    const folded:WaMessage[]=historyOnlyCopies.flatMap(copy=>{
-      const source=copy as typeof copies[number]
-      const at=copyTime(copy.provider_accepted_at)
-      const when=Number.isFinite(at)?at:copyTime(source.first_observed_at)
-      if(!Number.isFinite(when))return []
-      // Older pages are still behind the cursor: only fold copies that belong to this page's window.
-      if(hasMore&&when<oldestTime)return []
-      if(cursor&&when>=Date.parse(cursor[0]))return []
-      return [{
-        id:historyCopyId(copy.provider_message_id),waId:copy.wa_id,phoneNumberId,direction:copy.direction as WaMessage['direction'],type:'text',
-        body:copy.body!.trim(),mediaId:null,mediaMime:null,status:null,error:null,createdAt:new Date(when).toISOString(),
-        cursor:oldest?encodeWhatsAppCursor({createdAt:oldest.cursor_time,id:oldest.id}):'',copySource:'green-api' as const,
-      }]
-    })
-    const messages=[...canonical,...folded].sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)||a.id.localeCompare(b.id))
+    // Replies an agent typed on their own phone arrive from Meta as receipts with no text.
+    // Those recovered before this business left GREEN-API carry their words in `body`.
+    const messages:WaMessage[]=rows.map(r=>({
+      id:r.id,waId:r.wa_id,phoneNumberId:r.phone_number_id,direction:r.direction,type:r.type,body:r.body,
+      mediaId:r.media_id,mediaMime:r.media_mime,mediaUrl:r.media_url??null,status:r.status,error:r.error,createdAt:new Date(r.created_at).toISOString(),
+      cursor:encodeWhatsAppCursor({createdAt:r.cursor_time,id:r.id}),
+    })).reverse()
     return {readVersion:String(contact.activity_version),messages,hasMore,nextCursor}
   } catch(error) { await db.query('ROLLBACK').catch(()=>{});throw error }
   finally { await db.end().catch(()=>{}) }
@@ -466,7 +471,22 @@ export async function updateStatus(
 }
 
 /** Send a free-form text message and record it locally. */
+export type OutboundWaMedia = { url: string; kind: 'image' | 'video'; mime: string }
+
 export async function sendText(waId: string, phoneNumberId:string, body: string): Promise<{ id: string; savedLocally: boolean; warning?: string }> {
+  return sendOutbound(waId, phoneNumberId, body, null)
+}
+
+/**
+ * A photo or video (public link) with the text as its caption - one bubble on
+ * the customer's phone. The link must be publicly fetchable by Meta; callers
+ * stage it through lib/inbox/outbound-media first.
+ */
+export async function sendMedia(waId: string, phoneNumberId:string, media: OutboundWaMedia, caption: string): Promise<{ id: string; savedLocally: boolean; warning?: string }> {
+  return sendOutbound(waId, phoneNumberId, caption, media)
+}
+
+async function sendOutbound(waId: string, phoneNumberId:string, body: string, media: OutboundWaMedia | null): Promise<{ id: string; savedLocally: boolean; warning?: string }> {
   const token = whatsappToken()
   if (!token) throw new Error('WhatsApp is not configured on this deployment.')
 
@@ -483,6 +503,13 @@ export async function sendText(waId: string, phoneNumberId:string, body: string)
     if(!inbound || Date.now()-inbound>WA_WINDOW_MS) throw new WhatsAppScopeError('The free-form reply window for this business number has closed.',409)
   } finally { await db.end().catch(()=>{}) }
 
+  // WhatsApp caps captions at 1024 characters; a longer text is refused here
+  // rather than silently truncated by Meta.
+  if (media && body.length > 1024) throw new Error('A caption must be 1024 characters or fewer. Shorten the text or send it separately.')
+  const payload = media
+    ? { type: media.kind, [media.kind]: { link: media.url, ...(body ? { caption: body } : {}) } }
+    : { type: 'text', text: { preview_url: false, body } }
+
   const res = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -490,8 +517,7 @@ export async function sendText(waId: string, phoneNumberId:string, body: string)
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: waId,
-      type: 'text',
-      text: { preview_url: false, body },
+      ...payload,
     }),
   })
   const json = (await res.json().catch(() => ({}))) as {
@@ -506,8 +532,11 @@ export async function sendText(waId: string, phoneNumberId:string, body: string)
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await persistWhatsAppMessage({ messageId:id, waId, phoneNumberId,
-        direction:'out', type:'text', body, status:'sent', timestamp:now,
-        source:'send', raw:{ localSend:true } })
+        direction:'out', type: media?.kind ?? 'text', body: body || null, mediaMime: media?.mime ?? null,
+        status:'sent', timestamp:now,
+        // The sent file is our own public link, kept so the thread can show it
+        // without the media-id proxy (Meta assigns no media id to link sends).
+        source:'send', raw:{ localSend:true, ...(media ? { mediaUrl: media.url } : {}) } })
       return { id, savedLocally:true }
     } catch { console.log('[inbox] Accepted WhatsApp send could not yet be stored locally') }
   }

@@ -1,7 +1,18 @@
 import type { UnifiedThread } from '@/lib/inbox/unified'
 import type { LeadMessage } from '@/lib/inbox/lead-actions'
 
-export type QueueView = 'all' | 'needs-reply-24h' | 'needs-action' | 'unread'
+export type QueueView = 'all' | 'needs-reply-24h' | 'client-silent-24h' | 'needs-action' | 'client-silent' | 'closed' | 'unread' | 'starred'
+
+type Outcome = Pick<UnifiedThread, 'done' | 'closingAck' | 'mark'>
+
+/**
+ * The exchange is over for now: Done in Business Suite, an agent marked it
+ * (order confirmed / not interested / no reply needed), or the customer just
+ * said "Okay"/"Thank you". None of these are waiting on anyone.
+ */
+export function isClosed(row: Outcome): boolean {
+  return Boolean(row.done || row.mark || row.closingAck)
+}
 
 export const NEEDS_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -9,19 +20,33 @@ export const NEEDS_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000
  * A customer is waiting when they spoke last and nobody closed the chat:
  * not marked Done in Business Suite, not answered from the phone.
  */
-export function isWaitingOnUs(row: Pick<UnifiedThread, 'stage' | 'done' | 'answeredByPhone'>): boolean {
-  return (row.stage === 'awaiting' || row.stage === 'new') && !row.done && !row.answeredByPhone
+export function isWaitingOnUs(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone'> & Outcome): boolean {
+  return (row.stage === 'awaiting' || row.stage === 'new') && !isClosed(row) && !row.answeredByPhone
 }
 
-/** The thread's last activity landed inside the window. Undated rows are not recent. */
-export function activeWithin(updatedAt: string | null, windowMs: number, now = Date.now()): boolean {
-  const at = updatedAt ? Date.parse(updatedAt) : Number.NaN
+/**
+ * The opposite side of the same question: WE spoke last (from the app, Business
+ * Suite or the phone) and the customer has not come back. Done chats are closed
+ * on purpose and dormant ones are too old to chase.
+ */
+export function isAwaitingCustomer(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone'> & Outcome): boolean {
+  if (isClosed(row) || row.stage === 'dormant') return false
+  return row.stage === 'active' || row.answeredByPhone === true
+}
+
+function within(row: Pick<UnifiedThread, 'updatedAt'>, windowMs: number, now: number): boolean {
+  const at = row.updatedAt ? Date.parse(row.updatedAt) : Number.NaN
   return Number.isFinite(at) && now - at <= windowMs
 }
 
 /** Waiting, and their last message landed inside the reply window. */
-export function needsReplyWithin(row: Pick<UnifiedThread, 'stage' | 'done' | 'answeredByPhone' | 'updatedAt'>, windowMs: number, now = Date.now()): boolean {
-  return isWaitingOnUs(row) && activeWithin(row.updatedAt, windowMs, now)
+export function needsReplyWithin(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone' | 'updatedAt'> & Outcome, windowMs: number, now = Date.now()): boolean {
+  return isWaitingOnUs(row) && within(row, windowMs, now)
+}
+
+/** We replied inside the window and the customer has stayed silent since. */
+export function clientSilentWithin(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone' | 'updatedAt'> & Outcome, windowMs: number, now = Date.now()): boolean {
+  return isAwaitingCustomer(row) && within(row, windowMs, now)
 }
 export type PresentedLeadMessage = LeadMessage & { status?: string | null; receiptOnly?: boolean; fromCopy?: boolean }
 
@@ -54,11 +79,12 @@ export function latestActivityAt(timestamps: (string | null | undefined)[]): str
   return latest
 }
 
-/**
- * Views narrow the queue; its order follows newest activity, except the 24h
- * needs-reply view, which puts the customer who has waited LONGEST first.
- */
-export function newestConversations<T extends Pick<UnifiedThread, 'key' | 'updatedAt' | 'stage' | 'unreadCount' | 'done' | 'answeredByPhone'>>(rows: T[], view: QueueView, now = Date.now()): T[] {
+/** Views narrow the queue; every view lists the most recent activity first (owner's call, 15 Sep). */
+export function newestConversations<T extends Pick<UnifiedThread, 'key' | 'updatedAt' | 'stage' | 'unreadCount' | 'answeredByPhone' | 'star'> & Outcome>(rows: T[], view: QueueView, now = Date.now()): T[] {
+  // Starred = escalated by a person; newest star first, regardless of chat activity.
+  if (view === 'starred') {
+    return rows.filter((r) => r.star).sort((a, b) => Date.parse(b.star!.starredAt) - Date.parse(a.star!.starredAt))
+  }
   const timestamp = (value: string | null) => {
     const parsed = value ? Date.parse(value) : Number.NaN
     return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
@@ -67,15 +93,18 @@ export function newestConversations<T extends Pick<UnifiedThread, 'key' | 'updat
     if (view === 'all') return true
     // Unread follows the same 24h window as needs-reply. History recovery back-fills months of
     // messages nobody ever read, and an unread pile that deep is not a list an agent can work.
-    if (view === 'unread') return row.unreadCount > 0 && activeWithin(row.updatedAt, NEEDS_REPLY_WINDOW_MS, now)
+    // "Needs reply - any age" stays unwindowed as the way back to the older ones.
+    if (view === 'unread') return row.unreadCount > 0 && within(row, NEEDS_REPLY_WINDOW_MS, now)
     if (view === 'needs-reply-24h') return needsReplyWithin(row, NEEDS_REPLY_WINDOW_MS, now)
+    if (view === 'client-silent-24h') return clientSilentWithin(row, NEEDS_REPLY_WINDOW_MS, now)
+    if (view === 'client-silent') return isAwaitingCustomer(row)
+    if (view === 'closed') return isClosed(row)
     return isWaitingOnUs(row)
   }
   return rows.filter(keep)
     .sort((a, b) => {
       const latest = timestamp(b.updatedAt) - timestamp(a.updatedAt)
-      const ordered = view === 'needs-reply-24h' ? -latest : latest
-      return Number.isNaN(ordered) || ordered === 0 ? a.key.localeCompare(b.key) : ordered
+      return Number.isNaN(latest) || latest === 0 ? a.key.localeCompare(b.key) : latest
     })
 }
 

@@ -19,6 +19,8 @@ import useSWR from 'swr'
 import { ArrowLeft, Settings2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LeadsChannel } from './leads-channel'
+import { CoverageCheck } from './coverage-check'
+import type { InboxViewer } from '@/hooks/use-inbox-presence'
 import { WhatsAppChannel } from './whatsapp-channel'
 import { readInbox } from './inbox-session'
 
@@ -41,7 +43,7 @@ type CapabilitiesResponse = {
 
 const fetcher = readInbox
 
-export function InboxWorkspace({ origin }: { origin: string }) {
+export function InboxWorkspace({ origin, viewer }: { origin: string; viewer: InboxViewer | null }) {
   const [setupOpen, setSetupOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -79,6 +81,7 @@ export function InboxWorkspace({ origin }: { origin: string }) {
         {health?.pages.map((page) => <div key={page.id}><p className="font-medium">{page.name}</p><p className="mt-1 text-muted-foreground">{page.conversationCount} conversations in history</p><p className="text-muted-foreground">Last received event: {page.lastWebhookAt ? new Date(page.lastWebhookAt).toLocaleString() : 'Not recorded'}</p>{page.lastWebhookError || page.lastSyncError ? <p className="mt-1 text-amber-600 dark:text-amber-400">{page.lastWebhookError || page.lastSyncError}</p> : null}</div>)}
         {health?.messenger?.lastError ? <p className="text-amber-600 dark:text-amber-400 sm:col-span-2">Facebook updates delayed: {health.messenger.lastError}</p> : null}
         <p className="text-muted-foreground sm:col-span-2">This shows received activity, not a live connection test.</p>
+        <CoverageCheck />
       </div> : null}
       {degraded.length > 0 ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
@@ -96,7 +99,7 @@ export function InboxWorkspace({ origin }: { origin: string }) {
         </div>
       ) : null}
 
-      <div className={setupOpen ? 'hidden' : 'flex min-h-0 flex-1 overflow-hidden'}><LeadsChannel active={!setupOpen} /></div>
+      <div className={setupOpen ? 'hidden' : 'flex min-h-0 flex-1 overflow-hidden'}><LeadsChannel active={!setupOpen} viewer={viewer} /></div>
       <div className={setupOpen ? 'flex min-h-0 flex-1 overflow-hidden' : 'hidden'}>
         {setupOpen ? <WhatsAppChannel origin={origin} initialWaId={null} /> : null}
       </div>

@@ -10,12 +10,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { whatsappReplyUnavailable } from '@/lib/inbox/whatsapp-identity'
 import { LeadAttachment } from './lead-attachment'
+import { StarDialog } from './star-dialog'
+import { MediaPicker, type ComposerAttachment } from './media-picker'
 import type { CommentItem } from './comments-channel'
 import { format } from 'date-fns'
 import {
   AlertTriangle,
   CheckCheck,
+  ChevronDown,
   Loader2,
+  PackageCheck,
+  ThumbsUp,
+  UserX,
   Smartphone,
   Megaphone,
   MessageCircle,
@@ -24,15 +30,27 @@ import {
   RefreshCw,
   Send,
   Sparkles,
+  X,
+  MoreHorizontal,
+  Star,
+  EyeOff,
+  Eye,
+  Trash2,
+  Ban,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { THREAD_MARK_DESCRIPTIONS, THREAD_MARK_KINDS, THREAD_MARK_LABELS, type ThreadMarkKind } from '@/lib/inbox/thread-marks'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+
+export type CommentModeration = 'hide' | 'unhide' | 'delete' | 'block'
 import type { LeadMessage } from '@/lib/inbox/lead-actions'
 import type { UnifiedChannel, UnifiedThread } from '@/lib/inbox/unified'
-import { GreenMessageCopies } from './green-message-copies'
-import type { GreenContextStatus } from './green-copies-client'
+import { DraftReadinessWatch } from './draft-readiness-watch'
+import type { DraftContextStatus } from './draft-readiness-client'
 
 const CHANNEL_ICON: Record<UnifiedChannel, typeof Phone> = {
   messenger: MessageCircle,
@@ -57,6 +75,24 @@ export function messengerReplyWindow(messages: Pick<LeadMessage, 'createdAt' | '
   return latestIncoming === null ? 'unverified' : now - latestIncoming >= 24 * 60 * 60 * 1000 ? 'closed' : 'open'
 }
 
+function MarkIcon({ kind, className }: { kind: ThreadMarkKind; className?: string }) {
+  const Icon = kind === 'confirmed' ? PackageCheck : kind === 'not-interested' ? UserX : CheckCheck
+  return <Icon className={className} aria-hidden="true" />
+}
+
+const URL_PATTERN = /(https?:\/\/[^\s<>"']+)/g
+
+/** Shared pins arrive as a maps link; make any URL in a bubble tappable. */
+function linkify(text: string) {
+  const parts = text.split(URL_PATTERN)
+  if (parts.length === 1) return text
+  return parts.map((part, index) =>
+    index % 2 === 1
+      ? <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 break-all">{part.startsWith('https://maps.google.com/') ? 'Open in Google Maps' : part}</a>
+      : part,
+  )
+}
+
 export function LeadConversation({
   thread,
   messages,
@@ -70,18 +106,39 @@ export function LeadConversation({
   onDismissSendError,
   aiPending,
   aiError,
+  aiNotice = null,
   aiHasRun,
   onRegenerate,
   error,
   onRefresh,
   updating,
+  onMark,
+  onStar,
+  onModerateComment,
   draftOrigin,
   comment,
   visible,
   aiBlockedReason,
+  readabilityNotice = null,
   onGreenContextChange,
+  sendCreatesOrder,
+  sendUpdatesOrder,
+  attachment,
+  onAttach,
+  onRemoveAttachment,
+  mediaProductId,
 }: {
   thread: UnifiedThread
+  /** Staged photo/video that goes out with the draft as its caption. */
+  attachment?: ComposerAttachment | null
+  onAttach?: (attachment: ComposerAttachment) => void
+  onRemoveAttachment?: () => void
+  /** Product the picker opens on: the Quick order product, else the ad's. */
+  mediaProductId?: string | null
+  /** The draft is an order confirmation, so Send will record the Quick Order first. */
+  sendCreatesOrder?: boolean
+  /** What this send changes on an order that already exists, e.g. "Delivery date, Locality". */
+  sendUpdatesOrder?: string | null
   messages: (LeadMessage & { status?: string | null; receiptOnly?: boolean; fromCopy?: boolean })[]
   loading: boolean
   rateLimited: boolean
@@ -93,22 +150,35 @@ export function LeadConversation({
   onDismissSendError?: () => void
   aiPending: boolean
   aiError: string | null
+  aiNotice?: string | null
   aiHasRun: boolean
   onRegenerate: () => void
   error: string | null
   onRefresh: () => void
   updating: boolean
+  /** Sets or clears the agent's outcome on this chat. Absent for read-only hosts. */
+  onMark?: (kind: ThreadMarkKind | null) => void
+  /** null removes the star; a string is the mandatory explanation. Resolves true when saved. */
+  onStar?: (note: string | null) => Promise<boolean>
+  /** Hide, delete or ban on a comment thread. Absent for read-only hosts. */
+  onModerateComment?: (action: CommentModeration) => Promise<void> | void
   draftOrigin: 'manual' | 'ai' | 'order'
   comment?: CommentItem
   visible: boolean
   aiBlockedReason?: string | null
-  onGreenContextChange?: (value: GreenContextStatus | null) => void
+  /** Present only when the block is one the agent may waive (photos they have looked at). */
+  /** What the AI could not read in this thread. Shown beside the finished draft; never blocks it. */
+  readabilityNotice?: string | null
+  onGreenContextChange?: (value: DraftContextStatus | null) => void
 }) {
   const endRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const nearBottom = useRef(true)
   const previousThread = useRef(thread.key)
   const [newMessages, setNewMessages] = useState(false)
+  const [confirmModeration, setConfirmModeration] = useState<'delete' | 'block' | null>(null)
+  const [moderating, setModerating] = useState(false)
+  const [starOpen, setStarOpen] = useState(false)
   const lastMessageId = messages.at(-1)?.id
   const lastCommentReplyId = comment?.replies.at(-1)?.id
   const previousActivity = useRef<string | undefined>(undefined)
@@ -162,7 +232,17 @@ export function LeadConversation({
               </span>
             </p>
           ) : null}
-          {thread.done ? (
+          {thread.mark ? (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <MarkIcon kind={thread.mark.kind} className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{THREAD_MARK_LABELS[thread.mark.kind]} · {format(new Date(thread.mark.at), 'd MMM HH:mm')}{thread.mark.by ? ` by ${thread.mark.by}` : ''} · reopens if the customer writes again</span>
+            </p>
+          ) : thread.closingAck ? (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <ThumbsUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Closed by the client: their last message only acknowledges your reply</span>
+            </p>
+          ) : thread.done ? (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <CheckCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="truncate">Marked Done in Meta Business Suite · {format(new Date(thread.done.at), 'd MMM HH:mm')} · reopens if the customer writes again</span>
@@ -174,13 +254,126 @@ export function LeadConversation({
             </p>
           ) : null}
         </div>
-        {replyWindow !== 'open' ? (
-          <Badge variant="outline" title={thread.channel === 'messenger' ? 'Based on loaded messages from the customer' : undefined} className="shrink-0 gap-1.5 border-amber-500/40 text-amber-500">
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {replyWindow === 'unverified' ? 'Reply window unverified' : '24h window closed'}
-          </Badge>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {replyWindow !== 'open' ? (
+            <Badge variant="outline" title={thread.channel === 'messenger' ? 'Based on loaded messages from the customer' : undefined} className="shrink-0 gap-1.5 border-amber-500/40 text-amber-500">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              {replyWindow === 'unverified' ? 'Reply window unverified' : '24h window closed'}
+            </Badge>
+          ) : null}
+          {onStar ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className={`h-7 gap-1.5 text-xs ${thread.star ? 'border-amber-500/50 text-amber-500 hover:text-amber-500' : ''}`}
+              onClick={() => setStarOpen(true)}
+              title={thread.star ? `Starred by ${thread.star.starredByName ?? 'a teammate'}: ${thread.star.note}` : 'Flag this conversation for the team with an explanation'}
+            >
+              <Star className={`h-3.5 w-3.5 ${thread.star ? 'fill-current' : ''}`} aria-hidden="true" />
+              {thread.star ? 'Starred' : 'Star'}
+            </Button>
+          ) : null}
+          {onMark ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant={thread.mark ? 'secondary' : 'outline'} className="h-7 gap-1.5 text-xs">
+                  {thread.mark ? <MarkIcon kind={thread.mark.kind} className="h-3.5 w-3.5" /> : null}
+                  {thread.mark ? THREAD_MARK_LABELS[thread.mark.kind] : 'Mark as'}
+                  <ChevronDown className="h-3 w-3 opacity-60" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">{isComment ? 'Takes this comment out of Needs reply until they comment again' : 'Takes this chat out of Needs reply until the customer writes again'}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {THREAD_MARK_KINDS.map((kind) => (
+                  <DropdownMenuItem key={kind} onSelect={() => onMark(kind)} className="flex-col items-start gap-0.5" aria-checked={thread.mark?.kind === kind} role="menuitemradio">
+                    <span className="flex items-center gap-2 text-sm"><MarkIcon kind={kind} className="h-3.5 w-3.5" />{THREAD_MARK_LABELS[kind]}{thread.mark?.kind === kind ? <span className="text-xs text-muted-foreground">· current</span> : null}</span>
+                    <span className="text-xs text-muted-foreground">{THREAD_MARK_DESCRIPTIONS[kind]}</span>
+                  </DropdownMenuItem>
+                ))}
+                {thread.mark ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => onMark(null)}>Remove mark</DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {isComment && onModerateComment ? (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="h-7 w-7 p-0" aria-label="Comment actions" disabled={moderating}>
+                    <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">Moderate on Facebook</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {comment?.hidden ? (
+                    <DropdownMenuItem onSelect={() => { setModerating(true); void Promise.resolve(onModerateComment('unhide')).finally(() => setModerating(false)) }} className="gap-2">
+                      <Eye className="h-3.5 w-3.5" aria-hidden="true" />Unhide comment
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onSelect={() => { setModerating(true); void Promise.resolve(onModerateComment('hide')).finally(() => setModerating(false)) }} className="flex-col items-start gap-0.5">
+                      <span className="flex items-center gap-2"><EyeOff className="h-3.5 w-3.5" aria-hidden="true" />Hide comment</span>
+                      <span className="text-xs text-muted-foreground">Only they and their friends still see it</span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => setConfirmModeration('delete')} className="flex-col items-start gap-0.5">
+                    <span className="flex items-center gap-2"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />Delete comment</span>
+                    <span className="text-xs text-muted-foreground">Removed from the post for everyone</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setConfirmModeration('block')} className="flex-col items-start gap-0.5 text-destructive focus:text-destructive">
+                    <span className="flex items-center gap-2"><Ban className="h-3.5 w-3.5" aria-hidden="true" />Ban {thread.name} from the Page</span>
+                    <span className="text-xs text-muted-foreground">Hides all their comments; they can no longer comment or message the Page</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <AlertDialog open={confirmModeration !== null} onOpenChange={(open) => { if (!open) setConfirmModeration(null) }}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{confirmModeration === 'block' ? `Ban ${thread.name} from ${thread.source}?` : 'Delete this comment?'}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {confirmModeration === 'block'
+                        ? 'All their comments on the Page are hidden and they can no longer comment on posts or message the Page. This is the same as "Ban from Page" in Business Suite and can be undone there.'
+                        : 'The comment is removed from the post on Facebook for everyone. This cannot be undone.'}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={moderating}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={moderating}
+                      className={confirmModeration === 'block' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : undefined}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        const action = confirmModeration
+                        if (!action) return
+                        setModerating(true)
+                        void Promise.resolve(onModerateComment(action)).finally(() => { setModerating(false); setConfirmModeration(null) })
+                      }}
+                    >
+                      {moderating ? 'Working...' : confirmModeration === 'block' ? 'Ban from Page' : 'Delete comment'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          ) : null}
+        </div>
       </header>
+
+      {onStar ? (
+        <StarDialog
+          open={starOpen}
+          onOpenChange={setStarOpen}
+          existing={thread.star ?? null}
+          customerName={thread.name}
+          onSave={onStar}
+        />
+      ) : null}
 
       {error ? <div role="status" className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs"><span className="flex-1">{error} Loaded history has been kept.</span><Button size="sm" variant="ghost" onClick={onRefresh}>Retry</Button></div> : null}
       <div ref={scrollRef} onScroll={(event) => { const el = event.currentTarget; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96; if (nearBottom.current) setNewMessages(false) }} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
@@ -234,21 +427,21 @@ export function LeadConversation({
                     m.fromBusiness ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
                   }`}
                 >
-                  {m.text.trim() ? <p className="whitespace-pre-wrap break-words text-pretty text-sm leading-relaxed">{m.text}</p> : !m.attachments.length ? <p className="text-xs italic opacity-70">{m.receiptOnly ? 'Delivery status only · message content is unavailable.' : 'Message content is unavailable.'}</p> : null}
+                  {m.text.trim() ? <p className="whitespace-pre-wrap break-words text-pretty text-sm leading-relaxed">{linkify(m.text)}</p> : !m.attachments.length ? <p className="text-xs italic opacity-70">{m.receiptOnly ? 'Delivery status only · message content is unavailable.' : m.unavailable ? 'Unavailable from WhatsApp · a reaction, deleted or view-once message. Nothing to read.' : 'Message content is unavailable.'}</p> : null}
                   {m.attachments.map((attachment, index) => <LeadAttachment key={`${m.id}:${index}:${attachment.url}`} {...attachment} />)}
                   <span className="text-[11px] opacity-60 tabular-nums">
                     {m.createdAt ? format(new Date(m.createdAt), 'd MMM HH:mm') : ''}
                     {m.fromBusiness && m.status ? ` · ${m.status}` : ''}
-                    {m.fromCopy ? (m.id.startsWith('green:') ? ' · from WhatsApp history' : ' · text from WhatsApp copy') : ''}
+                    {m.fromCopy ? ' · from WhatsApp history' : ''}
                   </span>
                 </div>
               </li>
             ))}
           </ul>
         )}
-        {thread.channel === 'whatsapp' && thread.phoneNumberId && thread.recipientId && onGreenContextChange && <GreenMessageCopies
+        {thread.channel === 'whatsapp' && thread.phoneNumberId && thread.recipientId && onGreenContextChange && <DraftReadinessWatch
           key={`${thread.phoneNumberId}:${thread.recipientId}`} scope={{ phoneNumberId: thread.phoneNumberId, waId: thread.recipientId }}
-          businessName={thread.source} visible={visible} onContextChange={onGreenContextChange} />}
+          visible={visible} onContextChange={onGreenContextChange} />}
         <div ref={endRef} />
       </div>
 
@@ -265,7 +458,17 @@ export function LeadConversation({
             <p className="mt-1 text-xs text-muted-foreground">Your draft is kept. Check the conversation before sending again.</p>
           </div>
         ) : null}
-        {aiBlockedReason && <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">{aiBlockedReason}</p>}
+        {aiBlockedReason ? (
+          <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">{aiBlockedReason}</p>
+        ) : null}
+        {/* The draft is already written; this only says what the AI could not
+            read, so the agent checks it before sending. It never blocks. */}
+        {readabilityNotice ? (
+          <p role="status" className="flex items-start gap-1.5 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+            <Eye className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">{readabilityNotice}</span>
+          </p>
+        ) : null}
         {replyUnavailable ? <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">{replyUnavailable}</p> : null}
         <div className="flex items-center justify-between gap-2">
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -280,24 +483,53 @@ export function LeadConversation({
               <>
                 <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                 AI draft — edit before sending
+                {aiNotice ? <span className="text-amber-500"> · {aiNotice}</span> : null}
               </>
             ) : (
               updating ? 'Checking for new messages…' : 'Write a reply'
             )}
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onRegenerate}
-            disabled={aiPending || Boolean(aiBlockedReason)}
-            aria-label={aiHasRun ? 'Redraft reply and order with AI' : 'Draft reply and order with AI'}
-            title="Suggest a reply and fill untouched order fields. Nothing is sent or ordered automatically."
-            className="h-7 gap-1.5 text-xs"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${aiPending ? 'animate-spin' : ''}`} aria-hidden="true" />
-            {aiPending ? 'Working…' : aiError ? 'Retry AI assistance' : aiHasRun ? 'Redraft with AI' : 'Draft with AI'}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {!isComment && onAttach ? (
+              <MediaPicker
+                productId={mediaProductId ?? thread.productId ?? null}
+                adId={thread.adId ?? null}
+                disabled={sending || Boolean(replyUnavailable) || Boolean(attachment)}
+                onAttach={onAttach}
+                onInsertLink={(url) => onDraftChange(draft.trim() ? `${draft.trimEnd()}\n${url}` : url)}
+              />
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRegenerate}
+              disabled={aiPending || Boolean(aiBlockedReason)}
+              aria-label={aiHasRun ? 'Redraft reply and order with AI' : 'Draft reply and order with AI'}
+              title="Suggest a reply and fill untouched order fields. Nothing is sent or ordered automatically."
+              className="h-7 gap-1.5 text-xs"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${aiPending ? 'animate-spin' : ''}`} aria-hidden="true" />
+              {aiPending ? 'Working…' : aiError ? 'Retry AI assistance' : aiHasRun ? 'Redraft with AI' : 'Draft with AI'}
+            </Button>
+          </div>
         </div>
+
+        {attachment ? (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 p-1.5 pr-2">
+            {attachment.kind === 'image' ? (
+              <img src={attachment.url} alt="" className="h-12 w-12 shrink-0 rounded object-cover" />
+            ) : (
+              <video src={attachment.url} muted playsInline preload="metadata" className="h-12 w-12 shrink-0 rounded bg-black object-cover" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium">{attachment.kind === 'image' ? 'Photo' : 'Video'} · {attachment.label}</p>
+              <p className="text-xs text-muted-foreground">{thread.channel === 'messenger' ? 'Sent first, then your text as a message' : 'Your text is sent as the caption'}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={onRemoveAttachment} disabled={sending} className="h-7 px-2 text-xs" aria-label="Remove the attachment">
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          </div>
+        ) : null}
 
         <Textarea
           value={draft}
@@ -310,7 +542,7 @@ export function LeadConversation({
               if (!replyUnavailable) onSend()
             }
           }}
-          placeholder={isComment ? 'Reply publicly to this comment...' : 'Write a reply...'}
+          placeholder={isComment ? 'Reply privately to their inbox (a "check your inbox" note is posted under the comment)...' : 'Write a reply...'}
           rows={3}
           className="resize-none"
           aria-label="Reply message"
@@ -318,11 +550,17 @@ export function LeadConversation({
 
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            {replyUnavailable ? thread.source : `Replying as ${thread.source} · Enter to send`}
+            {replyUnavailable ? thread.source
+              : sendCreatesOrder ? 'Confirmation: the order is created from Quick order, then sent'
+              : sendUpdatesOrder ? `${sendUpdatesOrder} on the open order, then sent`
+              : `Replying as ${thread.source} · Enter to send`}
           </p>
-          <Button onClick={onSend} disabled={!draft.trim() || sending || Boolean(replyUnavailable)} size="sm">
+          <Button onClick={onSend} disabled={(!draft.trim() && !attachment) || sending || Boolean(replyUnavailable)} size="sm">
             <Send className="mr-1.5 h-4 w-4" aria-hidden="true" />
-            {sending ? 'Sending...' : 'Send'}
+            {sending ? (sendCreatesOrder ? 'Creating order...' : sendUpdatesOrder ? 'Updating order...' : 'Sending...')
+              : sendCreatesOrder ? 'Create order & send'
+              : sendUpdatesOrder ? 'Update order & send'
+              : attachment ? (attachment.kind === 'image' ? 'Send photo' : 'Send video') : 'Send'}
           </Button>
         </div>
       </div>

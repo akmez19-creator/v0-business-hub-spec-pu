@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import useSWR from 'swr'
-import { Loader2, AlertTriangle, X, Pencil, History } from 'lucide-react'
+import { Loader2, AlertTriangle, X, Pencil, History, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -291,6 +291,10 @@ export function AgentOrderEditor({
   const isCancelled = order.status === 'cancelled'
   /** The client physically has the goods - the precondition for a trade-in. */
   const isDelivered = order.status === 'delivered'
+  /** Pending is the only state the phone desk may amend; the server enforces
+   *  the same rule (agentLockReason), this just avoids a guaranteed error. */
+  const canAmend = order.status === 'pending'
+  const withRider = !canAmend && !isDelivered && !isCancelled
 
   // One save writes one log row PER FIELD, so a single change of product + qty
   // + amount is three rows sharing a timestamp. Grouped back into saves, or the
@@ -392,17 +396,28 @@ export function AgentOrderEditor({
         </span>
       </div>
 
-      {mode === 'view' && !isCancelled && (
+      {mode === 'view' && !isCancelled && withRider && (
+        <p className="mt-2 flex items-start gap-2 rounded-md bg-muted p-2 text-xs text-muted-foreground">
+          <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          <span>
+            Already with a rider - the sheet may be printed. To change or cancel it, ask dispatch (admin or manager).
+          </span>
+        </p>
+      )}
+
+      {mode === 'view' && !isCancelled && !withRider && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" onClick={beginEdit}>
-            <Pencil className="mr-1 h-3 w-3" /> Change
-          </Button>
+          {canAmend && (
+            <Button size="sm" variant="outline" onClick={beginEdit}>
+              <Pencil className="mr-1 h-3 w-3" /> Change
+            </Button>
+          )}
           {/* Cancelling is only offered while the goods are still with us.
               cancelOrderAsAgent refuses a delivered order outright, so showing
               the button there was a guaranteed error message - the client
               already has the item, and taking it back is a trade-in or a
               refund, not a cancellation. */}
-          {!isDelivered && (
+          {canAmend && (
             <Button
               size="sm"
               variant="ghost"

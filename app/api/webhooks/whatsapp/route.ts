@@ -2,6 +2,7 @@ import { observeMetaOutgoing } from '@/lib/inbox-autopilot/handoff-runtime'
 import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { saveIncoming, updateStatus } from '@/lib/whatsapp/store'
+import { contactsBody, locationBody, type WaContact, type WaLocation } from '@/lib/whatsapp/message-body'
 import { createWhatsAppWebhookTrace } from '@/lib/whatsapp/webhook-trace'
 import { createAutopilotWake } from '@/lib/inbox-autopilot/wake'
 
@@ -63,6 +64,8 @@ type WaMessagePayload = {
   document?: { id?: string; mime_type?: string; filename?: string }
   button?: { text?: string }
   interactive?: { list_reply?: { title?: string }; button_reply?: { title?: string } }
+  location?: WaLocation
+  contacts?: WaContact[]
 }
 
 type WaValue = {
@@ -108,6 +111,8 @@ function readBody(m: WaMessagePayload): string | null {
     m.button?.text ??
     m.interactive?.button_reply?.title ??
     m.interactive?.list_reply?.title ??
+    locationBody(m.location) ??
+    contactsBody(m.contacts) ??
     null
   )
 }

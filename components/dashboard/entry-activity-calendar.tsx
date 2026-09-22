@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChevronLeft, ChevronRight, Clock, Info, Users, Sunrise, Moon } from 'lucide-react'
 import type { AgentSummary, EntryActivity, EntryRow } from '@/lib/entry-activity'
+import { AgentAttendance } from './agent-attendance'
 /*
  * VALUE import, so it MUST come from the pure module, not from
  * '@/lib/entry-activity' - that file imports lib/supabase/server ->
@@ -481,6 +482,9 @@ export function EntryActivityCalendar({ data }: { data: EntryActivity }) {
         </Card>
       )}
 
+      {/* ---------- attendance against the fixed shift ---------- */}
+      <AgentAttendance data={data} colorOf={colorOf} />
+
       {/* ---------- per-agent working time, day by day ---------- */}
       {data.agents.length > 0 && (
         <Card className="border-border/60 bg-card/40 p-4">
@@ -911,10 +915,12 @@ function AgentShifts({ agent, color, gapMin }: { agent: AgentSummary; color: str
           <div className="flex items-center gap-2 text-[9px] uppercase tracking-wider text-muted-foreground/50">
             <span className="w-14 shrink-0">Day</span>
             <span className="w-12 shrink-0 text-right">Clients</span>
-            <span className="flex-1">First order to last</span>
+            <span className="flex-1">First footprint to last</span>
             <span className="w-[5.25rem] shrink-0">Window</span>
             <span className="w-12 shrink-0 text-right">Span</span>
             <span className="w-14 shrink-0 text-right">Quiet</span>
+            <span className="w-12 shrink-0 text-right" title="Replies sent from the inbox">Sent</span>
+            {agent.attendance ? <span className="w-20 shrink-0 text-right">Shift</span> : null}
           </div>
           {agent.days.map((d) => {
             const label = new Date(d.date + 'T12:00:00Z').toLocaleDateString('en-GB', {
@@ -937,6 +943,15 @@ function AgentShifts({ agent, color, gapMin }: { agent: AgentSummary; color: str
                       aria-hidden
                     />
                   ))}
+                  {/* The expected shift, faint, so a bar starting to its right reads as late at a glance. */}
+                  {agent.attendance ? (
+                    <span
+                      className="absolute inset-y-0 border-x border-dashed border-foreground/25 bg-foreground/[0.04]"
+                      style={{ left: `${pct(agent.attendance.shift.startMin)}%`, width: `${pct(agent.attendance.shift.endMin - agent.attendance.shift.startMin)}%` }}
+                      title={`Shift ${agent.attendance.shift.label}`}
+                      aria-hidden
+                    />
+                  ) : null}
                   <span
                     className={`absolute inset-y-0.5 rounded-[2px] ${d.thin ? 'opacity-40' : ''}`}
                     style={{
@@ -1011,6 +1026,27 @@ function AgentShifts({ agent, color, gapMin }: { agent: AgentSummary; color: str
                     </span>
                   )
                 })()}
+                <span
+                  className="w-12 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground"
+                  title={`${d.activity.replies} replies · ${d.activity.opens} leads opened · ${d.activity.stars} starred · ${d.activity.orderChanges} order edits`}
+                >
+                  {d.activity.replies || d.activity.opens ? d.activity.replies : <span className="text-muted-foreground/25">-</span>}
+                </span>
+                {agent.attendance ? (
+                  <span className="w-20 shrink-0 text-right font-mono text-[10px] tabular-nums">
+                    {!d.attendance?.scheduled ? (
+                      <span className="text-muted-foreground/40" title="Not a scheduled day">off day</span>
+                    ) : d.attendance.lateMinutes > 0 ? (
+                      <span className="text-amber-500" title={`Started ${d.firstTime}, shift ${agent.attendance.shift.label}`}>+{dur(d.attendance.lateMinutes)} late</span>
+                    ) : (d.attendance.earlyLeaveMinutes ?? 0) > 0 ? (
+                      <span className="text-amber-500" title={`Last footprint ${d.lastTime}, shift ends 16:30`}>-{dur(d.attendance.earlyLeaveMinutes!)} early</span>
+                    ) : d.attendance.earlyLeaveMinutes === null ? (
+                      <span className="text-muted-foreground/60" title="Today - still running">on time</span>
+                    ) : (
+                      <span className="text-emerald-500">on time</span>
+                    )}
+                  </span>
+                ) : null}
               </div>
             )
           })}

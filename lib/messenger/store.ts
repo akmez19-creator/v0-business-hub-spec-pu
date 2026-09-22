@@ -250,6 +250,38 @@ async function attributionFor(pageId: string, psid: string) {
   }
 }
 
+const COMMENT_OPENER = /^Facebook created this chat because .+ commented on your post\./
+const PRIVATE_REPLY_DAYS = 7
+
+/**
+ * A thread Facebook opened from a comment ("Message" on a commenter) carries
+ * Meta's notice with the comment id in its link. Returns that comment while it
+ * is still inside the 7-day private-reply period and the customer has not
+ * written anything themselves; null for an ordinary conversation.
+ */
+export async function findCommentOpener(pageId: string, psid: string): Promise<{ commentId: string; openedAt: string; alreadyReplied: boolean } | null> {
+  const db = createAdminClient()
+  const { data, error } = await db.from('messenger_messages')
+    .select('direction,body,created_at')
+    .eq('page_id', pageId).eq('psid', psid)
+    .order('created_at', { ascending: false }).limit(50)
+  if (error || !data) return null
+  const opener = data.find((m) => m.direction === 'in' && typeof m.body === 'string' && COMMENT_OPENER.test(m.body))
+  if (!opener) return null
+  const commentId = /[?&]comment_id=(\d{5,40})/.exec(opener.body as string)?.[1]
+  if (!commentId) return null
+  const openedAt = new Date(opener.created_at as string)
+  if (Date.now() - openedAt.getTime() > PRIVATE_REPLY_DAYS * 86_400_000) return null
+  // Business Suite adds the comment's text as a second inbound bubble a second
+  // later; anything the customer writes after that is a real message and the
+  // normal 24-hour window applies again.
+  const openerTs = openedAt.getTime()
+  const customerWrote = data.some((m) => m.direction === 'in' && new Date(m.created_at as string).getTime() > openerTs + 60_000)
+  if (customerWrote) return null
+  const alreadyReplied = data.some((m) => m.direction === 'out' && new Date(m.created_at as string).getTime() > openerTs)
+  return { commentId, openedAt: openedAt.toISOString(), alreadyReplied }
+}
+
 /** Clear the unread badge when a thread is opened in the dashboard. */
 export async function markMessengerRead(pageId: string, psid: string, seenThrough?: string): Promise<void> {
   const through = seenThrough ?? new Date().toISOString()

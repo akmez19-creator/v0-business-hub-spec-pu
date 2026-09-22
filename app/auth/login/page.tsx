@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from "react"
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { loginErrorMessage, safeLoginDestination } from '@/lib/supabase/sign-in'
 import { AlertCircle, Loader2, ArrowRight } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
@@ -35,39 +36,38 @@ function LoginForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (loading) return
     setError(null)
     setLoading(true)
 
-    const supabase = createClient()
+    try {
+      const supabase = createClient()
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (signInError) throw signInError
+      if (!data.user || !data.session) throw new Error('Missing sign-in session')
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+      // Login activity is best-effort; a slow profile update must not block access.
+      void Promise.resolve(
+        supabase
+          .from('profiles')
+          .update({ last_login: new Date().toISOString() })
+          .eq('id', data.user.id)
+          .abortSignal(AbortSignal.timeout(4_000)),
+      ).catch(() => {})
 
-    if (error) {
-      setError(error.message)
+      // Back to whatever the middleware interrupted, not a generic landing page.
+      // Re-checked here rather than trusted: only a same-site path is allowed,
+      // so a crafted ?next=https://evil.example cannot bounce anyone off-site.
+      router.replace(safeLoginDestination(searchParams.get('next')))
+      router.refresh()
+    } catch (signInError) {
+      setError(loginErrorMessage(signInError))
+    } finally {
       setLoading(false)
-      return
     }
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await supabase
-        .from('profiles')
-        .update({ last_login: new Date().toISOString() })
-        .eq('id', user.id)
-    }
-
-    // Back to whatever the middleware interrupted, not a generic landing page.
-    // Re-checked here rather than trusted: only a same-site path is allowed,
-    // so a crafted ?next=https://evil.example cannot bounce anyone off-site.
-    const next = searchParams.get('next')
-    const safeNext =
-      next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
-
-    router.push(safeNext)
-    router.refresh()
   }
 
   return (
@@ -206,15 +206,15 @@ function LoginForm() {
 
                 <form onSubmit={handleSubmit} className="space-y-5">
                   {error && (
-                    <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400/80 text-sm">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
+                    <div id="login-error" role="alert" className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400/80 text-sm">
+                      <AlertCircle aria-hidden="true" className="w-4 h-4 shrink-0" />
                       <span className="font-mono text-xs">{error}</span>
                     </div>
                   )}
 
                   {/* Email Field - World-Class Glass Input */}
                   <div className="space-y-2.5">
-                    <label className="text-[11px] tracking-[0.15em] text-white/60 font-medium uppercase">Email Address</label>
+                    <label htmlFor="login-email" className="text-[11px] tracking-[0.15em] text-white/60 font-medium uppercase">Email Address</label>
                     <div className="relative group/input">
                       {/* Animated glow on focus */}
                       <div className={`absolute -inset-[2px] rounded-2xl transition-all duration-500 ${focusedField === 'email' ? 'opacity-100' : 'opacity-0'}`}>
@@ -225,7 +225,10 @@ function LoginForm() {
                         {/* Inner highlight */}
                         <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                         <input
+                          id="login-email"
                           type="email"
+                          disabled={loading}
+                          aria-describedby={error ? 'login-error' : undefined}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           onFocus={() => setFocusedField('email')}
@@ -241,7 +244,7 @@ function LoginForm() {
 
                   {/* Password Field - World-Class Glass Input */}
                   <div className="space-y-2.5">
-                    <label className="text-[11px] tracking-[0.15em] text-white/60 font-medium uppercase">Password</label>
+                    <label htmlFor="login-password" className="text-[11px] tracking-[0.15em] text-white/60 font-medium uppercase">Password</label>
                     <div className="relative group/input">
                       {/* Animated glow on focus */}
                       <div className={`absolute -inset-[2px] rounded-2xl transition-all duration-500 ${focusedField === 'password' ? 'opacity-100' : 'opacity-0'}`}>
@@ -252,7 +255,10 @@ function LoginForm() {
                         {/* Inner highlight */}
                         <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                         <input
+                          id="login-password"
                           type="password"
+                          disabled={loading}
+                          aria-describedby={error ? 'login-error' : undefined}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           onFocus={() => setFocusedField('password')}
@@ -270,6 +276,7 @@ function LoginForm() {
                   <button 
                     type="submit" 
                     disabled={loading}
+                    aria-busy={loading}
                     className="group relative w-full h-14 mt-4 rounded-2xl font-semibold text-sm overflow-hidden disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-300 active:scale-[0.97]"
                   >
                     {/* Animated outer glow */}

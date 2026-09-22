@@ -2,7 +2,6 @@
 
 import { useMemo, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createBrowserClient } from '@supabase/ssr'
 
 import { DeliveryMap, type DeliveryPin, type RegionCluster, type DeliveryRegionGroup } from '@/components/delivery-map/delivery-map'
 import { getRegionCoords } from '@/lib/mauritius-regions'
@@ -95,41 +94,33 @@ export function MapPageContent({ deliveries, riderMap, deliveryDate, apiKey, use
     return deliveries.filter(d => d.rider_id === selectedRiderId || (!d.rider_id && selectedRiderId === 'unassigned'))
   }, [deliveries, selectedRiderId])
 
-  // Real-time: auto-refresh when a client shares their location
+  // Refresh shared client locations on a timer while the tab is visible.
+  // A Realtime `postgres_changes` subscription on `deliveries` made Realtime decode the
+  // WAL for every delivery update on the busiest table; that polling was the single
+  // largest CPU consumer on the database.
   useEffect(() => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    if (!supabaseUrl || !supabaseKey) return
-
-    const supabase = createBrowserClient(supabaseUrl, supabaseKey)
-    const deliveryIds = deliveries.map(d => d.id)
-    if (deliveryIds.length === 0) return
-
-    const channel = supabase
-      .channel('map-delivery-updates')
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'deliveries',
-      }, (payload) => {
-        // Only refresh if it's one of our deliveries and location/response changed
-        if (deliveryIds.includes(payload.new.id)) {
-          const oldRec = payload.old as Record<string, unknown>
-          const newRec = payload.new as Record<string, unknown>
-          if (
-            newRec.latitude !== oldRec.latitude ||
-            newRec.longitude !== oldRec.longitude ||
-            newRec.client_response !== oldRec.client_response ||
-            newRec.status !== oldRec.status
-          ) {
-            router.refresh()
-          }
-        }
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [router])
+    if (deliveries.length === 0) return
+    const REFRESH_MS = 60_000
+    let timer: ReturnType<typeof setInterval> | undefined
+    const start = () => {
+      if (timer !== undefined) return
+      timer = setInterval(() => router.refresh(), REFRESH_MS)
+    }
+    const stop = () => {
+      if (timer === undefined) return
+      clearInterval(timer)
+      timer = undefined
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') { router.refresh(); start() } else stop()
+    }
+    if (document.visibilityState === 'visible') start()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [router, deliveries.length])
 
   const { exactPins, regions, regionGroups, totalMapped, totalUnmapped } = useMemo(() => {
     const exact: DeliveryPin[] = []

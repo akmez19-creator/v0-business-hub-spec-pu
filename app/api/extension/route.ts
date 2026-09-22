@@ -2,6 +2,9 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
+import { canRideWith } from '@/lib/inbox/ride-with'
+import { todayInMauritius } from '@/lib/business-date'
+import { settle } from '@/lib/orders/follow-up'
 
 // CORS headers for Chrome extension
 const corsHeaders = {
@@ -166,7 +169,7 @@ export async function GET(request: NextRequest) {
     // Get shared, admin-configured extension settings (single row, id=1)
     const { data: settingsRow } = await supabase
       .from('extension_settings')
-      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme, holidays, message_selectors, sendbox_selectors, ai_reply_prompt')
+      .select('name_selectors, phone_selectors, adid_selectors, cutoff_time, page_mappings, delivery_day_scheme, holidays, message_selectors, sendbox_selectors, ai_reply_prompt, pinned_delivery_date')
       .eq('id', 1)
       .single()
     const settings = {
@@ -174,6 +177,8 @@ export async function GET(request: NextRequest) {
       phoneSelectors: settingsRow?.phone_selectors || [],
       adidSelectors: settingsRow?.adid_selectors || [],
       cutoffTime: settingsRow?.cutoff_time || '20:00',
+      // Admin-pinned general delivery date; readers ignore it once it has passed.
+      pinnedDeliveryDate: typeof settingsRow?.pinned_delivery_date === 'string' ? settingsRow.pinned_delivery_date : null,
       pageMappings: settingsRow?.page_mappings || [],
       // Per-weekday delivery-date scheme (order weekday -> target weekday)
       deliveryDayScheme: settingsRow?.delivery_day_scheme || {},
@@ -283,7 +288,74 @@ export async function POST(request: NextRequest) {
     }
     
     const body = await request.json()
-    const { customerName, contact1, contact2, region, products, qty, amount, deliveryDate, notes, adId, pageCode, salesType, returnProduct, productLines } = body
+    const { customerName, contact1, contact2, region, products, qty, deliveryDate, notes, adId, pageCode, salesType, returnProduct, productLines, parentDeliveryId, sourceDeliveryId, outValue, returnQty } = body
+    let amount: number = Number(body.amount) || 0
+
+    // An exchange or trade-in points at the delivered order it replaces. Only a
+    // row on the same phone may be linked; for an exchange anything else is
+    // dropped silently (the amount stays 0 either way), for a trade-in the link
+    // is what the money is read from, so it is required.
+    let sourceId: string | null = null
+    let sourceRow: { id: string; products: string | null; qty: number | null; amount: number | string | null } | null = null
+    if (typeof sourceDeliveryId === 'string' && /^[0-9a-f-]{36}$/i.test(sourceDeliveryId)) {
+      const { data: source } = await supabase
+        .from('deliveries')
+        .select('id, contact_1, contact_2, products, qty, amount')
+        .eq('id', sourceDeliveryId)
+        .maybeSingle()
+      const local = (v: unknown) => String(v || '').replace(/\D/g, '').replace(/^230(?=\d{8}$)/, '')
+      if (source && [source.contact_1, source.contact_2].some((c) => c && local(c) === local(contact1))) {
+        sourceId = source.id
+        sourceRow = source
+      }
+    }
+    if (String(salesType || '').toLowerCase() === 'trade_in' && !sourceRow) {
+      return NextResponse.json(
+        { success: false, error: 'A trade-in needs the order the item comes from, on this same number, so the credit can be read from what the client paid.' },
+        { status: 409, headers: corsHeaders },
+      )
+    }
+    if (sourceRow && String(salesType || '').toLowerCase() === 'trade_in') {
+      // The door money is never the browser's to decide: credit = what they paid
+      // for the units coming back, less the catalogue value of what goes out.
+      const settlement = settle({
+        kind: 'trade_in',
+        orderAmount: Number(sourceRow.amount || 0),
+        orderQty: sourceRow.qty,
+        returnQty: Math.max(1, Number(returnQty) || Number(sourceRow.qty) || 1),
+        outValue: Number(outValue) || 0,
+        allowance: 0,
+      })
+      amount = settlement.amount
+    }
+
+    // An add-on rides with an order that is still open for the same phone. Verify
+    // that before linking, so a stale panel can never attach a row to a delivered,
+    // cancelled or someone else's order.
+    let parentId: string | null = null
+    if (typeof parentDeliveryId === 'string' && /^[0-9a-f-]{36}$/i.test(parentDeliveryId)) {
+      const { data: parent } = await supabase
+        .from('deliveries')
+        .select('id, contact_1, status, parent_delivery_id, delivery_date, medium')
+        .eq('id', parentDeliveryId)
+        .maybeSingle()
+      const samePhone = parent && String(parent.contact_1 || '').replace(/\D/g, '').replace(/^230(?=\d{8}$)/, '') === String(contact1 || '').replace(/\D/g, '').replace(/^230(?=\d{8}$)/, '')
+      if (!parent || !samePhone || !['pending', 'assigned'].includes(parent.status)) {
+        return NextResponse.json(
+          { success: false, error: 'The order this item should be added to is no longer open for this number. Refresh and create it as a new order instead.' },
+          { status: 409, headers: corsHeaders },
+        )
+      }
+      // Same rule as the panel and the AI: the drop must still be ahead and in this business.
+      if (!canRideWith({ deliveryDate: parent.delivery_date, business: parent.medium }, todayInMauritius(), typeof pageCode === 'string' ? pageCode : null)) {
+        return NextResponse.json(
+          { success: false, error: 'That open order is dated in the past or belongs to the other business, so a new item cannot ride with it. Create this as a new order.' },
+          { status: 409, headers: corsHeaders },
+        )
+      }
+      // Always point at the root order so every add-on of one drop shares a parent.
+      parentId = parent.parent_delivery_id || parent.id
+    }
 
     // Agents can log the order as Sale / Exchange / Trade In / Refund / Drop Off
     const ALLOWED_SALES_TYPES = ['sale', 'exchange', 'trade_in', 'refund', 'drop_off']
@@ -337,6 +409,17 @@ export async function POST(request: NextRequest) {
     }
     const requested = deliveryDate || new Date().toISOString().split('T')[0]
     const safeDate = new Date(requested + 'T00:00:00Z')
+    // A day the agent CHOSE (and may already have promised to the customer) is
+    // never moved behind their back: refuse with the reason so they pick again.
+    // Only the implicit "today" default is pushed to the next working day.
+    if (deliveryDate && isNonWorkingDay(safeDate)) {
+      const holiday = holidayList.find(h => h.start && requested >= h.start && requested <= (h.end || h.start)) as { label?: string } | undefined
+      const reason = safeDate.getUTCDay() === 0 ? 'a Sunday' : holiday?.label ? `a holiday (${holiday.label})` : 'a closed day'
+      return NextResponse.json(
+        { success: false, error: `${requested} is ${reason} - no deliveries that day. Choose another delivery date.` },
+        { status: 409 },
+      )
+    }
     let guard = 0
     while (isNonWorkingDay(safeDate) && guard < 60) { safeDate.setUTCDate(safeDate.getUTCDate() + 1); guard++ }
     const resolvedDeliveryDate = ymdUTC(safeDate)
@@ -383,7 +466,10 @@ export async function POST(request: NextRequest) {
       // For Exchange / Trade In, the product the client is returning (what the
       // rider must collect) so stock reconciliation stays accurate.
       return_product: (typeof returnProduct === 'string' && returnProduct.trim()) ? returnProduct.trim() : null,
+      // Follow-up conversion reads this to find the sale the exchange or trade-in came from.
+      source_delivery_id: orderSalesType === 'exchange' || orderSalesType === 'trade_in' ? sourceId : null,
       ad_id: adId?.trim() || null,
+      parent_delivery_id: parentId,
       status: 'pending',
       entry_date: nowIso.split('T')[0],
       delivery_date: resolvedDeliveryDate,

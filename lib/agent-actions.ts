@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { recordAgentActivity } from '@/lib/agent-activity'
 
 export interface AgentClientResult {
   id: string
@@ -187,6 +188,25 @@ async function requireOrderEditor() {
   return { userId: user.id, role: profile.role }
 }
 
+/**
+ * An agent may only touch an order that is still ours to change: pending, not
+ * yet given to a rider. Once assigned the rider's sheet may be printed and the
+ * parcel packed, so a change from the phone desk has to go through dispatch.
+ * Admin and manager are not bound by this - they ARE dispatch.
+ */
+function agentLockReason(role: string, status: string): string | null {
+  if (role !== 'marketing_agent') return null
+  if (status === 'pending') return null
+  const where = status === 'assigned' || status === 'picked_up'
+    ? 'already with a rider'
+    : `already ${status}`
+  return `This order is ${where}. Ask dispatch (admin or manager) to change it.`
+}
+
+function footprint(userId: string, detail: string) {
+  void recordAgentActivity({ userId, kind: 'order_change', detail })
+}
+
 /** Only these may be changed here. Anything else - rider, payment, status -
  *  stays with the roles that own it. */
 type EditableField = 'products' | 'qty' | 'amount' | 'locality' | 'delivery_date'
@@ -219,6 +239,8 @@ export async function updateOrderAsAgent(
 
   if (readErr || !before) return { error: 'Order not found' }
   if (before.status === 'cancelled') return { error: 'This order is already cancelled' }
+  const locked = agentLockReason(auth.role, before.status)
+  if (locked) return { error: locked }
 
   // Build the update from the whitelist only, and keep just the fields that
   // genuinely differ so the log does not fill with no-op rows.
@@ -264,6 +286,7 @@ export async function updateOrderAsAgent(
 
   const { error: logErr } = await db.from('delivery_change_log').insert(logRows)
   if (logErr) console.log('[v0] change log insert failed:', logErr.message)
+  footprint(auth.userId, `changed ${logRows.map((r) => r.field).join(', ')} on ${orderId}`)
 
   // Moving an order to a different locality can invalidate the rider it was
   // routed to. Surfaced to the agent rather than silently reassigning, which
@@ -334,6 +357,10 @@ export async function setFreeItemAsAgent(
     // The box has already gone out. Adding a unit now would take stock off the
     // shelf for something nobody is going to pack.
     return { error: 'This order was already delivered - the free unit cannot be changed' }
+  }
+  {
+    const locked = agentLockReason(auth.role, parent.status ?? 'pending')
+    if (locked) return { error: locked }
   }
 
   const { data: existing } = await db
@@ -447,6 +474,8 @@ export async function cancelOrderAsAgent(orderId: string, reason: string) {
   if (before.status === 'delivered') {
     return { error: 'This order was already delivered - it cannot be cancelled' }
   }
+  const locked = agentLockReason(auth.role, before.status)
+  if (locked) return { error: locked }
 
   const { error: updErr } = await db
     .from('deliveries')
@@ -461,6 +490,7 @@ export async function cancelOrderAsAgent(orderId: string, reason: string) {
 
   if (updErr) return { error: updErr.message }
 
+  footprint(auth.userId, `cancelled ${orderId}`)
   await db.from('delivery_change_log').insert({
     delivery_id: orderId,
     changed_by: auth.userId,
@@ -472,4 +502,71 @@ export async function cancelOrderAsAgent(orderId: string, reason: string) {
 
   revalidatePath('/dashboard')
   return { ok: true }
+}
+
+export interface OrderChangeRow {
+  id: string
+  created_at: string
+  field: string
+  old_value: string | null
+  new_value: string | null
+  reason: string | null
+  changed_by_name: string
+  changed_by_role: string | null
+  delivery_id: string
+  customer_name: string | null
+  contact_1: string | null
+  products: string | null
+  status: string | null
+}
+
+/**
+ * Every amendment made from the order search, newest first, for the owner's
+ * "Order changes" page. Admin and manager only: the rows name customers and
+ * the agent who touched them.
+ */
+export async function getRecentOrderChanges(limit = 300): Promise<OrderChangeRow[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  if (!profile || !['admin', 'manager'].includes(profile.role)) return []
+
+  const { createAdminClient } = await import('@/lib/supabase/server')
+  const db = createAdminClient()
+  const { data: rows, error } = await db
+    .from('delivery_change_log')
+    .select('id, created_at, field, old_value, new_value, reason, changed_by, delivery_id')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error || !rows?.length) return []
+
+  const userIds = [...new Set(rows.map((r) => r.changed_by).filter(Boolean))]
+  const deliveryIds = [...new Set(rows.map((r) => r.delivery_id).filter(Boolean))]
+  const [{ data: people }, { data: orders }] = await Promise.all([
+    db.from('profiles').select('id, name, role').in('id', userIds),
+    db.from('deliveries').select('id, customer_name, contact_1, products, status').in('id', deliveryIds),
+  ])
+  const who = new Map((people ?? []).map((p) => [p.id, p]))
+  const order = new Map((orders ?? []).map((o) => [o.id, o]))
+
+  return rows.map((r) => {
+    const p = who.get(r.changed_by)
+    const o = order.get(r.delivery_id)
+    return {
+      id: r.id,
+      created_at: r.created_at,
+      field: r.field,
+      old_value: r.old_value,
+      new_value: r.new_value,
+      reason: r.reason,
+      changed_by_name: p?.name ?? 'Unknown user',
+      changed_by_role: p?.role ?? null,
+      delivery_id: r.delivery_id,
+      customer_name: o?.customer_name ?? null,
+      contact_1: o?.contact_1 ?? null,
+      products: o?.products ?? null,
+      status: o?.status ?? null,
+    }
+  })
 }

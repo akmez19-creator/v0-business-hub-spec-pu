@@ -1,7 +1,7 @@
 import 'server-only'
 import { AUTOPILOT_BUSINESSES, assertMessageId, scopeIdentity, type AutopilotScope, type BusinessKey } from './contract'
 import type { MetaObservationInput } from './handoff-observations'
-import { greenHash, stableGreenJson } from '@/lib/whatsapp-green/normalise'
+import { stableHash as greenHash, stableJson as stableGreenJson } from './stable-hash'
 
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, unknown> : {}

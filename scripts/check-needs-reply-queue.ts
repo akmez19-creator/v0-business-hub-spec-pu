@@ -4,8 +4,9 @@
  */
 import assert from 'node:assert/strict'
 import { fromMessenger, fromWhatsApp } from '../lib/inbox/unified'
-import { overlayGreenContacts, type GreenContactRow } from '../lib/whatsapp-green/contact-overlay'
-import { isWaitingOnUs, needsReplyWithin, newestConversations, NEEDS_REPLY_WINDOW_MS } from '../components/inbox/inbox-behavior'
+import { clientSilentWithin, isAwaitingCustomer, isClosed, isWaitingOnUs, needsReplyWithin, newestConversations, NEEDS_REPLY_WINDOW_MS } from '../components/inbox/inbox-behavior'
+import { isClosingAcknowledgement } from '../lib/inbox/acknowledgement'
+import { effectiveMark } from '../lib/inbox/thread-marks'
 
 const NOW = Date.parse('2026-09-15T12:00:00Z')
 const iso = (hoursAgo: number) => new Date(NOW - hoursAgo * 3_600_000).toISOString()
@@ -37,57 +38,81 @@ const stale = fromMessenger({ id: 't_4', pageId: 'p', pageName: 'MBM', customer:
 assert.equal(isWaitingOnUs(stale), true)
 assert.equal(needsReplyWithin(stale, NEEDS_REPLY_WINDOW_MS, NOW), false)
 
-// 5. WhatsApp: Meta says customer last at 5h ago; phone (Green) saw an OUT at 4h ago -> answered on phone.
-const greenRow: GreenContactRow = {
-  canonicalExists: true, profileName: 'Eve', phoneNumberId: '968962882975955', waId: '23059273187', providerMessageCount: 12,
-  latestText: 'Merci', latestDirection: 'out', latestObservedAt: iso(0.5), latestProviderAcceptedAt: iso(4),
-  hasLiveObservation: false, liveText: null, liveDirection: null, liveObservedAt: null, liveProviderAcceptedAt: null,
-  businessName: 'Made By Moris', pageId: '471644012696537', businessPhone: '23052500684',
-}
 const canonical = {
   waId: '23059273187', phoneNumberId: '968962882975955', profileName: 'Eve', businessName: 'Made By Moris', pageId: '471644012696537',
   displayPhone: '+23052500684', canSend: true, outsideWindow: false, unreadStateKnown: true, unreadCount: 1, lastInboundAt: iso(5),
   lastMessageAt: iso(5), lastSnippet: 'Prix?', lastFromCustomer: true, messageCount: 6, firstAdId: null, firstAdName: null,
   firstAdHeadline: null, firstAdSourceUrl: null, firstAdAt: null, product: null, productId: null,
 }
-const [withGreen] = overlayGreenContacts([canonical as never], [greenRow], { now: NOW })
-assert.equal(withGreen.green?.lastDirection, 'out')
-assert.equal(withGreen.green?.lastAt, iso(4))
-const answered = fromWhatsApp(withGreen as never)
-assert.equal(answered.answeredByPhone, true)
-assert.equal(answered.lastReplyBasis, 'phone')
+// 5. WhatsApp: an agent answered from their own phone 4h ago. Meta reports that reply as an
+// outgoing row on the conversation, so the thread is no longer waiting on us.
+const answered = fromWhatsApp({ ...canonical, lastFromCustomer: false, lastMessageAt: iso(4), lastSnippet: 'Merci' } as never)
+assert.equal(answered.lastReplyBasis, 'meta')
+assert.equal(answered.answeredByPhone, false, 'there is no second source to attribute a reply to any more')
 assert.equal(isWaitingOnUs(answered), false)
 
-// 6. Phone saw a NEWER inbound (webhook copy) while Meta's row is older and says WE spoke last -> waiting.
-const inboundRow: GreenContactRow = { ...greenRow, latestDirection: 'in', latestProviderAcceptedAt: iso(1), latestText: 'Toujours dispo?' }
-const [reopenedWa] = overlayGreenContacts([{ ...canonical, lastFromCustomer: false } as never], [inboundRow], { now: NOW })
-const waitingWa = fromWhatsApp(reopenedWa as never)
-assert.equal(waitingWa.answeredByPhone, false)
-assert.equal(isWaitingOnUs(waitingWa), true, 'a customer message the phone saw counts even when Meta has not')
-assert.equal(waitingWa.updatedAt, iso(1), 'the row is dated by the phone message, not the stale Meta record')
+// 6. A newer customer message -> waiting, dated by that message.
+const waitingWa = fromWhatsApp({ ...canonical, lastFromCustomer: true, lastMessageAt: iso(1), lastSnippet: 'Toujours dispo?' } as never)
+assert.equal(isWaitingOnUs(waitingWa), true)
+assert.equal(waitingWa.updatedAt, iso(1))
 
-// 7. Phone's copy OLDER than Meta's record -> Meta decides.
-const oldRow: GreenContactRow = { ...greenRow, latestDirection: 'out', latestProviderAcceptedAt: iso(9) }
-const [metaWins] = overlayGreenContacts([canonical as never], [oldRow], { now: NOW })
-const metaThread = fromWhatsApp(metaWins as never)
+// 7. Customer spoke last 5h ago and nobody has answered -> still waiting.
+const metaThread = fromWhatsApp(canonical as never)
 assert.equal(metaThread.lastReplyBasis, 'meta')
 assert.equal(isWaitingOnUs(metaThread), true)
 
-// 8. Queue: 24h view keeps only waiting-within-24h, LONGEST wait first.
+// 8. Queue: 24h view keeps only waiting-within-24h, MOST RECENT first (owner, 15 Sep).
 const queue = newestConversations([waiting, done, reopened, stale, answered, waitingWa, metaThread], 'needs-reply-24h', NOW)
-// 5h, 3h, then the two 1h rows tie and fall back to key order.
-assert.deepEqual(queue.map((r) => r.key), [metaThread.key, waiting.key, reopened.key, waitingWa.key])
+// the two 1h rows tie and fall back to key order, then 3h, then 5h.
+assert.deepEqual(queue.map((r) => r.key), [reopened.key, waitingWa.key, waiting.key, metaThread.key])
+
+// 9. "No reply from client": WE spoke last (app or phone), not Done, not dormant, inside 24h.
+assert.equal(isAwaitingCustomer(answered), true, 'we replied last -> client silent')
+assert.equal(isAwaitingCustomer(waiting), false)
+assert.equal(isAwaitingCustomer(done), false, 'Done is closed on purpose, not silent')
+assert.equal(clientSilentWithin(answered, NEEDS_REPLY_WINDOW_MS, NOW), true)
+assert.equal(clientSilentWithin({ ...answered, updatedAt: iso(30) }, NEEDS_REPLY_WINDOW_MS, NOW), false, 'outside 24h')
+const silent = newestConversations([waiting, done, reopened, stale, answered, waitingWa, metaThread], 'client-silent-24h', NOW)
+assert.deepEqual(silent.map((r) => r.key), [answered.key])
 const all = newestConversations([waiting, done, reopened, stale], 'all', NOW)
 assert.deepEqual(all.map((r) => r.key), [reopened.key, waiting.key, done.key, stale.key])
 
-// 9. Unread follows the same 24h window. History recovery back-fills months of never-read
-// messages, so an unread view with no window buries today's customers under last month's.
-const unreadFresh = { ...waiting, unreadCount: 2 }
-const unreadStale = { ...stale, unreadCount: 7 }
-const unread = newestConversations([unreadFresh, unreadStale, { ...reopened, unreadCount: 0 }], 'unread', NOW)
-assert.deepEqual(unread.map((r) => r.key), [unreadFresh.key], 'unread keeps 24h only, and never an already-read row')
-// The escape hatch is explicit: "any age" still reaches the older ones.
-const anyAge = newestConversations([unreadFresh, unreadStale], 'needs-action', NOW)
-assert.deepEqual(anyAge.map((r) => r.key).sort(), [unreadFresh.key, unreadStale.key].sort())
 
-console.log('needs-reply queue: 11 checks passed')
+// 11. Closing acknowledgements (real snippets from the 15 Sep screenshot) leave Needs reply.
+{
+  for (const t of ['Okay', 'Ok', 'Thank you', 'Thanks', 'Merci bcp', 'Noted', '👍', '❤️❤️❤️', 'Ok merci', 'GREEN-API copy · Okay', 'Alright thanks', 'Got it', 'D’accord', 'Thnks u', '👍🏼']) {
+    assert.equal(isClosingAcknowledgement(t), true, `ack: ${t}`)
+  }
+  for (const t of ['Ok but when?', 'Thanks, and the price?', 'Ki prix svp', 'I didnt get my order', 'Okay send me the account number', 'Hello! Can I get more info on this?', 'Price plz', '1 please', 'On delivery, cash', 'Need one plz at mare tabac', '59201755', '5920 1755', 'No thank you', '']) {
+    assert.equal(isClosingAcknowledgement(t), false, `not ack: ${t}`)
+  }
+  const acked = { ...waiting, closingAck: true }
+  assert.equal(isWaitingOnUs(acked), false, '"Okay" after our reply is not waiting')
+  assert.equal(isClosed(acked), true)
+  assert.equal(newestConversations([acked, waiting], 'needs-reply-24h', NOW).map((r) => r.key).join(), waiting.key)
+  assert.equal(newestConversations([acked, waiting], 'closed', NOW).map((r) => r.key).join(), acked.key)
+  // 12. A manual mark holds until the customer writes again.
+  const mark = { key: waiting.key, kind: 'confirmed' as const, at: iso(1) }
+  assert.deepEqual(effectiveMark(mark, iso(2)), mark, 'marked after the last message -> effective')
+  assert.equal(effectiveMark(mark, iso(0.5)), null, 'customer wrote after the mark -> reopened')
+  assert.equal(isWaitingOnUs({ ...waiting, mark }), false)
+  assert.equal(isWaitingOnUs({ ...waiting, mark: null }), true)
+}
+// 13. Unread follows the same 24h window. History recovery back-fills months of never-read
+// messages, so an unwindowed Unread view buries today's customers under last month's.
+{
+  const freshUnread = { ...waiting, unreadCount: 2 }
+  const oldUnread = { ...waiting, key: 'old-unread', unreadCount: 7, updatedAt: iso(24 * 9) }
+  const alreadyRead = { ...waiting, key: 'read', unreadCount: 0 }
+  assert.deepEqual(
+    newestConversations([freshUnread, oldUnread, alreadyRead], 'unread', NOW).map((r) => r.key),
+    [freshUnread.key],
+    'unread keeps the last 24h only, and never an already-read row',
+  )
+  // The escape hatch stays open: "any age" still reaches the older ones.
+  assert.deepEqual(
+    newestConversations([freshUnread, oldUnread], 'needs-action', NOW).map((r) => r.key).sort(),
+    [freshUnread.key, oldUnread.key].sort(),
+  )
+}
+console.log('needs-reply queue: 13 checks passed')

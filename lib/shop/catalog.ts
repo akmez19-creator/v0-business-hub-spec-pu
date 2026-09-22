@@ -1,4 +1,5 @@
 import { cache } from 'react'
+import { unstable_cache } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import {
   offerLabel,
@@ -132,7 +133,7 @@ const SELECT =
  * One pass over three tables rather than a per-product query: the grid shows
  * hundreds of cards, so N+1 here would be hundreds of round trips.
  */
-export const getAllProducts = cache(async function getAllProducts(): Promise<ShopProduct[]> {
+const getCachedProducts = unstable_cache(async function getAllProducts(): Promise<ShopProduct[]> {
   const db = createAdminClient()
 
   const [{ data: products, error }, { data: images }, { data: clips }] = await Promise.all([
@@ -164,7 +165,9 @@ export const getAllProducts = cache(async function getAllProducts(): Promise<Sho
   return (products ?? []).map((r) =>
     toShopProduct(r as Row, imagesBy.get(r.id) ?? [], videoBy.get(r.id) ?? null),
   )
-})
+}, ['shop-catalogue'], { revalidate: 300 })
+
+export const getAllProducts = cache(getCachedProducts)
 
 /** Categories that actually have something in them, biggest first. */
 export function buildCategories(products: ShopProduct[]): ShopCategory[] {
@@ -229,13 +232,14 @@ export function linePrice(p: ShopProduct, qty: number): number {
   return p.minQty > 1 ? p.fromPrice * Math.max(1, Math.round(qty / p.minQty)) : p.fromPrice * qty
 }
 
-/* ───────────���────────────────────────────────────────────────────────────────
+/*
    Page-level read models.
 
    getAllProducts() is ONE query set for the whole catalog, so every page below
-   derives from that single fetch rather than issuing its own. Next's request
-   memoisation + the pages' `revalidate` keep this to one round trip per pass.
-   ──────────────────────────────────────────────────────────────────────────── */
+   derives from that single fetch rather than issuing its own. React's cache
+   deduplicates within a render; the explicit five-minute data cache shares the
+   result across requests without requiring any build-time database reads.
+ */
 
 /** Everything the storefront home page needs, in one pass. */
 export async function getShopHome(): Promise<{

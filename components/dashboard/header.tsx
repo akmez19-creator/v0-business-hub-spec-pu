@@ -68,7 +68,7 @@ const navItems: NavItem[] = [
     href: '/dashboard/inbox',
     label: 'Inbox',
     icon: MessageSquare,
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'marketing_agent'],
   },
   {
     href: '/dashboard/deliveries',
@@ -103,7 +103,7 @@ const navItems: NavItem[] = [
     href: '/dashboard/clients',
     label: 'Client Database',
     icon: Database,
-    roles: ['admin', 'manager', 'marketing_agent'],
+    roles: ['admin', 'manager'],
   },
   {
     href: '/dashboard/riders',

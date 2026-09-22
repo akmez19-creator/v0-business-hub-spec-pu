@@ -8,131 +8,100 @@ export type InboxLiveStatus = 'subscribed' | 'not-connected'
 type Client = ReturnType<typeof createClient>
 const CHANNELS: InboxLiveChannel[] = ['messenger', 'whatsapp']
 
-/** Injectable lifecycle for focused reconnect/cleanup tests; contains no message data. */
+/**
+ * Version polling instead of Realtime `postgres_changes`.
+ *
+ * Realtime's WAL polling (`realtime.list_changes`) was 54% of all database time on
+ * this project (7M calls since February) and starved the Micro instance. Reading the
+ * two-row `inbox_live_events` table by primary key every few seconds costs a few
+ * microseconds per staff tab and needs no WAL decoding, publication or Realtime RLS.
+ *
+ * Injectable lifecycle for focused tests; contains no message data.
+ */
 export function connectInboxLive(client: Client, options: {
   onInvalidate: (channels: InboxLiveChannel[]) => void
   onStatus: (status: InboxLiveStatus) => void
   onEventReceived?: (receivedAt: number) => void
-  debounceMs?: number
+  pollMs?: number
+  hiddenPollMs?: number
+  isVisible?: () => boolean
 }) {
   let disposed = false
-  let generation = 0
-  let readinessSequence = 0
-  let socketReady = false
-  let configurationReady = false
-  let debounce: ReturnType<typeof setTimeout> | undefined
-  let retry: ReturnType<typeof setTimeout> | undefined
-  let channel: ReturnType<Client['channel']> | undefined
-  const pending = new Set<InboxLiveChannel>()
-  const status = () => { if (!disposed) options.onStatus(socketReady && configurationReady ? 'subscribed' : 'not-connected') }
-  const invalidate = (channels: InboxLiveChannel[] = CHANNELS) => {
+  let inFlight = false
+  let signedIn = false
+  let healthy = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const seen = new Map<InboxLiveChannel, string>()
+  const pollMs = options.pollMs ?? 10_000
+  const hiddenPollMs = options.hiddenPollMs ?? 60_000
+  const visible = options.isVisible ?? (() => typeof document === 'undefined' || document.visibilityState === 'visible')
+  const status = () => { if (!disposed) options.onStatus(signedIn && healthy ? 'subscribed' : 'not-connected') }
+  const schedule = (delay: number) => {
     if (disposed) return
-    channels.forEach(value => pending.add(value))
-    if (debounce !== undefined) return
-    debounce = setTimeout(() => {
-      debounce = undefined
-      const changed = [...pending]
-      pending.clear()
-      if (!disposed && changed.length) options.onInvalidate(changed)
-    }, options.debounceMs ?? 300)
+    if (timer !== undefined) clearTimeout(timer)
+    timer = setTimeout(() => { timer = undefined; void poll() }, delay)
   }
-  const scheduleRecovery = (token: number) => {
-    if (disposed || token !== generation || retry !== undefined) return
-    retry = setTimeout(() => {
-      retry = undefined
-      if (disposed || token !== generation) return
-      if (socketReady) void checkReady(token)
-      else void reconnect()
-    }, 15_000)
-  }
-  const checkReady = async (token: number) => {
-    const sequence = ++readinessSequence
+  const poll = async () => {
+    if (disposed || inFlight) return
+    inFlight = true
     try {
-      // Socket SUBSCRIBED alone does not prove publication, trigger or RLS readiness.
-      const [readiness, rows] = await Promise.all([
-        client.rpc('inbox_live_ready'),
-        client.from('inbox_live_events').select('channel,version,updated_at'),
-      ])
-      if (disposed || token !== generation || sequence !== readinessSequence) return
-      configurationReady = !readiness.error && readiness.data === true && !rows.error &&
-        CHANNELS.every(value => rows.data?.some(row => row.channel === value))
-      if (!configurationReady) scheduleRecovery(token)
-      else if (socketReady && retry !== undefined) { clearTimeout(retry); retry = undefined }
-      status()
-    } catch {
-      if (disposed || token !== generation || sequence !== readinessSequence) return
-      configurationReady = false
-      status()
-      scheduleRecovery(token)
-    }
-  }
-  const reconnect = async () => {
-    const token = ++generation
-    socketReady = false
-    configurationReady = false
-    status()
-    if (retry !== undefined) { clearTimeout(retry); retry = undefined }
-    const oldChannel = channel
-    channel = undefined
-    if (oldChannel) void client.removeChannel(oldChannel)
-    try {
-      const { data, error } = await client.auth.getSession()
-      if (disposed || token !== generation) return
-      if (error) { scheduleRecovery(token); return }
+      const { data: auth } = await client.auth.getSession()
+      if (disposed) return
+      signedIn = !!auth.session?.access_token
       // A signed-out client waits for an auth event instead of polling for a token.
-      if (!data.session?.access_token) return
-      await client.realtime.setAuth(data.session.access_token)
-      if (disposed || token !== generation) return
-      channel = client.channel('inbox-live-' + Math.random().toString(36).slice(2))
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_live_events' }, (payload) => {
-          if (disposed || token !== generation) return
-          const changed = payload.new?.channel
-          if (changed === 'messenger' || changed === 'whatsapp') {
-            // Receipt time proves an actual event, not a successful health check.
-            // This contains no customer data and may update while the view is hidden.
-            options.onEventReceived?.(Date.now())
-            invalidate([changed])
-          }
-        })
-        .subscribe((state) => {
-          if (disposed || token !== generation) return
-          socketReady = state === 'SUBSCRIBED'
-          if (socketReady) {
-            if (retry !== undefined) { clearTimeout(retry); retry = undefined }
-            invalidate() // Reconcile anything missed before subscription/reconnection.
-            void checkReady(token)
-          } else {
-            configurationReady = false
-            if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
-              scheduleRecovery(token)
-            }
-          }
-          status()
-        })
-      void checkReady(token)
+      if (!signedIn) { healthy = false; status(); return }
+      const { data, error } = await client.from('inbox_live_events').select('channel,version,updated_at')
+      if (disposed) return
+      if (error || !data || !CHANNELS.every(value => data.some(row => row.channel === value))) {
+        healthy = false
+        status()
+        schedule(pollMs * 3)
+        return
+      }
+      const changed: InboxLiveChannel[] = []
+      for (const row of data) {
+        const channel = row.channel as InboxLiveChannel
+        if (!CHANNELS.includes(channel)) continue
+        const stamp = String(row.version) + ':' + String(row.updated_at)
+        const previous = seen.get(channel)
+        seen.set(channel, stamp)
+        // The first poll only records the baseline; the caller already loaded fresh data.
+        if (previous !== undefined && previous !== stamp) changed.push(channel)
+      }
+      healthy = true
+      status()
+      if (changed.length) {
+        // Receipt time proves an actual event, not a successful health check.
+        options.onEventReceived?.(Date.now())
+        options.onInvalidate(changed)
+      }
+      schedule(visible() ? pollMs : hiddenPollMs)
     } catch {
-      if (!disposed && token === generation) { configurationReady = false; status(); scheduleRecovery(token) }
+      if (disposed) return
+      healthy = false
+      status()
+      schedule(pollMs * 3)
+    } finally {
+      inFlight = false
     }
   }
   const recover = () => {
     if (disposed) return
-    invalidate()
-    if (!socketReady) void reconnect()
-    else void checkReady(generation)
+    // Anything missed while hidden/offline is reconciled by the caller's own refetch.
+    options.onInvalidate(CHANNELS)
+    schedule(0)
   }
   // Avoid doing additional auth operations inside Supabase's auth callback.
-  const auth = client.auth.onAuthStateChange(() => { queueMicrotask(() => { if (!disposed) void reconnect() }) })
-  void reconnect()
+  const auth = client.auth.onAuthStateChange(() => { queueMicrotask(() => { if (!disposed) schedule(0) }) })
+  status()
+  schedule(0)
   return {
     recover,
     disconnect() {
       disposed = true
-      generation += 1
-      if (debounce !== undefined) clearTimeout(debounce)
-      if (retry !== undefined) clearTimeout(retry)
-      pending.clear()
+      if (timer !== undefined) clearTimeout(timer)
+      seen.clear()
       auth.data.subscription.unsubscribe()
-      if (channel) void client.removeChannel(channel)
     },
   }
 }
