@@ -28,7 +28,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { deliveryDayLabel, isNonWorkingDay, offerLabel, priceFor, unitPrice, upcomingDeliveryDates, type Holiday, type QuickOrderProduct } from '@/lib/orders/quick-order'
 import type { UnifiedThread } from '@/lib/inbox/unified'
-import { todayInMauritius } from '@/lib/business-date'
+import { todayInMauritius, mauritiusNow } from '@/lib/business-date'
 import { composeReturnLine, settle } from '@/lib/orders/follow-up'
 import { Checkbox } from '@/components/ui/checkbox'
 import { amendmentLabel, describeAmendments, detectAmendments, type AmendableField, type Amendment } from '@/lib/inbox/order-amendment'
@@ -157,7 +157,9 @@ export function QuickOrderPanel({
   const deliveryOptions = useMemo(() => {
     const s = data?.settings
     if (!s) return []
-    return upcomingDeliveryDates(new Date(), s.cutoffTime || '20:00', s.deliveryDayScheme || {}, s.holidays || [], 4, s.pinnedDeliveryDate)
+    // Mauritius, not the agent's device clock: a laptop left on another
+    // timezone must not offer a different day from the server.
+    return upcomingDeliveryDates(mauritiusNow(), s.cutoffTime || '20:00', s.deliveryDayScheme || {}, s.holidays || [], 4, s.pinnedDeliveryDate)
   }, [data?.settings])
 
   const product = useMemo(

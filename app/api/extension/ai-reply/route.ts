@@ -10,6 +10,7 @@ import {
   type Holiday,
   type QuickOrderProduct,
 } from '@/lib/orders/quick-order'
+import { mauritiusNow } from '@/lib/business-date'
 
 // Do NOT use the edge runtime with the AI SDK.
 export const runtime = 'nodejs'
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
       .join('\n')
     const holidays: Holiday[] = Array.isArray(settingsRow?.holidays) ? settingsRow.holidays : []
     const deliveryOptions = upcomingDeliveryDates(
-      new Date(),
+      mauritiusNow(),
       settingsRow?.cutoff_time || '20:00',
       (settingsRow?.delivery_day_scheme as Record<string, string>) || {},
       holidays,

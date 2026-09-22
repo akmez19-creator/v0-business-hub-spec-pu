@@ -24,7 +24,7 @@ import { shortlistForPrompt } from '@/lib/inbox/prompt-catalogue'
 import { rideableOrders } from '@/lib/inbox/ride-with'
 import { isAfterSalesMessage, isExchangeThread, requestedDeliveryDay } from '@/lib/inbox/after-sales'
 import { readCustomerAttachments, type AttachmentTurn } from '@/lib/inbox/attachment-reader'
-import { todayInMauritius } from '@/lib/business-date'
+import { todayInMauritius, mauritiusNow } from '@/lib/business-date'
 import { loadWhatsAppDraftContext, assertWhatsAppDraftContextCurrent, type WhatsAppDraftContext } from '@/lib/whatsapp/draft-context'
 import { ATTACHMENT_MARKER, MISSING_TEXT_MARKER, TRUNCATED_MARKER, UNAVAILABLE_MARKER, WhatsAppDraftBlocked } from '@/lib/whatsapp/draft-policy'
 import { WhatsAppScopeError } from '@/lib/whatsapp/number-scope'
@@ -205,7 +205,7 @@ export async function POST(request: Request) {
     const scheme = (settingsRow?.delivery_day_scheme as Record<string, string>) || {}
     const cutoff = settingsRow?.cutoff_time || '20:00'
     const pinned = typeof settingsRow?.pinned_delivery_date === 'string' ? settingsRow.pinned_delivery_date : null
-    const deliveryOptions = upcomingDeliveryDates(new Date(), cutoff, scheme, holidays, 4, pinned)
+    const deliveryOptions = upcomingDeliveryDates(mauritiusNow(), cutoff, scheme, holidays, 4, pinned)
     const deliveryFacts = deliveryOptions.map((d) => `${deliveryDayLabel(d)} (${d})`).join(', ')
     const nextDelivery = deliveryOptions[0] ? `${confirmationDayLabel(deliveryOptions[0])} (${deliveryOptions[0]})` : ''
 
@@ -405,7 +405,7 @@ export async function POST(request: Request) {
     const exchangeLocality = exchangeSource?.locality
       ? matchLocality(exchangeSource.locality, (localities ?? []) as { name: string }[], (l) => l.name)?.row ?? locality
       : locality
-    const requestedDay = requestedDeliveryDay(lastCustomerText, upcomingDeliveryDates(new Date(), cutoff, scheme, holidays, 7, pinned))
+    const requestedDay = requestedDeliveryDay(lastCustomerText, upcomingDeliveryDates(mauritiusNow(), cutoff, scheme, holidays, 7, pinned))
     const exchangeDate = requestedDay ?? delivery.date
     const returnQty = Math.max(1, exchangeSource?.qty ?? 1)
     const tradeIn = isTradeIn && exchangeSource && exchangeProduct

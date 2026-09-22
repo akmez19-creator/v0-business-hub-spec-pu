@@ -6,6 +6,7 @@ import {
   upcomingDeliveryDates,
   type Holiday,
 } from '@/lib/orders/quick-order'
+import { mauritiusNow } from '@/lib/business-date'
 
 export const runtime = 'nodejs'
 
@@ -38,7 +39,8 @@ async function describe(supabase: Awaited<ReturnType<typeof createClient>>) {
     .eq('id', 1)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  const now = new Date()
+  // The cut-off and the weekday scheme are Mauritius times, not UTC.
+  const now = mauritiusNow()
   const cutoff = data?.cutoff_time || '20:00'
   const scheme = (data?.delivery_day_scheme as Record<string, string>) || {}
   const holidays: Holiday[] = Array.isArray(data?.holidays) ? data.holidays : []
@@ -84,10 +86,10 @@ export async function PUT(request: NextRequest) {
     if (pinned) {
       const { data: row } = await auth.supabase.from('extension_settings').select('holidays').eq('id', 1).single()
       const holidays: Array<{ start: string; end: string; label?: string }> = Array.isArray(row?.holidays) ? row.holidays : []
-      if (!activePinnedDeliveryDate(pinned, new Date())) {
+      if (!activePinnedDeliveryDate(pinned, mauritiusNow())) {
         return NextResponse.json({ success: false, error: 'The delivery date cannot be in the past.' }, { status: 400 })
       }
-      if (!activePinnedDeliveryDate(pinned, new Date(), holidays)) {
+      if (!activePinnedDeliveryDate(pinned, mauritiusNow(), holidays)) {
         const hit = holidays.find(h => pinned >= h.start && pinned <= (h.end || h.start))
         const why = hit?.label ? `a holiday (${hit.label})` : 'a Sunday'
         return NextResponse.json({ success: false, error: `${pinned} is ${why} - no deliveries that day.` }, { status: 400 })

@@ -33,6 +33,42 @@ export function muToday(): string {
 export const MAURITIUS_TZ = 'Indian/Mauritius'
 
 /**
+ * NOW, AS A MAURITIUS WALL CLOCK.
+ *
+ * `muToday()` fixes the calendar day, but the delivery-date rule also needs the
+ * TIME OF DAY: it compares `now.getHours()` against the cut-off and reads
+ * `now.getDay()` for the weekday scheme. On a UTC server both are four hours
+ * behind the shop, which broke the rule twice over:
+ *   - between 00:00 and 04:00 local the server is still on YESTERDAY, so the
+ *     "next working day" was computed from the wrong day and the default came
+ *     out one day early - measured live at 00:26 MU on 23 Sep, which offered
+ *     23 Sep (today) instead of 24 Sep;
+ *   - the 22:00 cut-off only fired when UTC reached 22:00, i.e. 02:00 local, so
+ *     orders taken between 22:00 and midnight still got the pre-cut-off day.
+ *
+ * Returns a Date whose LOCAL fields carry the Mauritius wall clock, because
+ * every helper in `quick-order.ts` (`ymd`, `addWorkingDays`, `isNonWorkingDay`,
+ * `nextDateForWeekday`) reads local fields. Do not hand this to anything that
+ * formats an absolute instant - `toISOString()` on it is meaningless.
+ *
+ * `hourCycle: 'h23'` matters: with `hour12: false` midnight can format as "24".
+ */
+export function mauritiusNow(now: Date = new Date()): Date {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: MAURITIUS_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now)
+  const n = (type: string) => Number(parts.find((p) => p.type === type)?.value)
+  return new Date(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second'))
+}
+
+/**
  * Today in Mauritius, with an injectable clock.
  *
  * Same value as `muToday()`, kept as a separate export because screens that

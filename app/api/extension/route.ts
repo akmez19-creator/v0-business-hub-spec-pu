@@ -135,8 +135,9 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    // Get worktime data for the user
-    const today = new Date().toISOString().split('T')[0]
+    // Get worktime data for the user. Mauritius day: a shift started at 01:00
+    // local belongs to today, but UTC still calls it yesterday.
+    const today = todayInMauritius()
     const { data: todayShift } = await supabase
       .from('staff_shifts')
       .select('*')
@@ -407,7 +408,9 @@ export async function POST(request: NextRequest) {
       const s = ymdUTC(d)
       return holidayList.some(h => h.start && s >= h.start && s <= (h.end || h.start))
     }
-    const requested = deliveryDate || new Date().toISOString().split('T')[0]
+    // Mauritius, not UTC: between midnight and 04:00 local the UTC date is
+    // still yesterday, which dated the order a day into the past.
+    const requested = deliveryDate || todayInMauritius()
     const safeDate = new Date(requested + 'T00:00:00Z')
     // A day the agent CHOSE (and may already have promised to the customer) is
     // never moved behind their back: refuse with the reason so they pick again.
