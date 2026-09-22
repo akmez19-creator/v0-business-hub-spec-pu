@@ -24,8 +24,13 @@ export type CommentReply = {
   fromPage: boolean
 }
 
+/** Which network the comment was written on. Both use the same Page token. */
+export type CommentPlatform = 'facebook' | 'instagram'
+
 export type CommentItem = {
   id: string
+  /** Absent on rows stored before Instagram existed; those are all Facebook. */
+  platform?: CommentPlatform
   message: string
   createdTime: string
   from: CommentAuthor | null

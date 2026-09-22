@@ -2,6 +2,7 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getInboxPages } from './messages'
 import { listAllComments, type CommentItem, type CommentPageStat } from './comments'
+import { listAllInstagramComments } from './instagram-comments'
 import { isRateLimit } from './rate-limit-response'
 
 /**
@@ -15,6 +16,7 @@ import { isRateLimit } from './rate-limit-response'
 
 type Row = {
   comment_id: string
+  platform: string | null
   post_id: string
   parent_id: string | null
   page_id: string
@@ -39,7 +41,7 @@ type Row = {
 }
 
 const COLUMNS =
-  'comment_id,post_id,parent_id,page_id,page_name,author_id,author_name,message,created_time,from_page,replied_at,is_hidden,like_count,permalink,post_message,post_permalink,ad_id,ad_name,product,product_id,campaign_id,campaign_name'
+  'comment_id,platform,post_id,parent_id,page_id,page_name,author_id,author_name,message,created_time,from_page,replied_at,is_hidden,like_count,permalink,post_message,post_permalink,ad_id,ad_name,product,product_id,campaign_id,campaign_name'
 
 /**
  * Rebuild the nested comment/reply structure the UI expects from flat rows.
@@ -80,6 +82,7 @@ export async function listCachedComments(pageId?: string): Promise<CommentItem[]
       )
       return {
         id: r.comment_id,
+        platform: r.platform === 'instagram' ? ('instagram' as const) : ('facebook' as const),
         message: r.message ?? '',
         createdTime: r.created_time ?? new Date(0).toISOString(),
         from: r.author_id ? { id: r.author_id, name: r.author_name ?? undefined } : null,
@@ -140,7 +143,30 @@ export async function syncComments(): Promise<{
     const pages = await getInboxPages()
     if (pages.length === 0) return { ok: false, stored: 0, rateLimited: false, error: 'No Page reachable' }
 
-    const { comments, pageStats } = await listAllComments(pages)
+    const { comments: fbComments, pageStats } = await listAllComments(pages)
+
+    // Instagram rides along with the same refresh. Its comments sit on ad
+    // creatives rather than the profile grid, so they are collected separately,
+    // but from here on they are the same channel: same table, same queue, same
+    // private-reply-plus-public-note answer.
+    let comments = fbComments
+    try {
+      const ig = await listAllInstagramComments(pages)
+      comments = [...fbComments, ...ig.comments]
+      for (const stat of ig.pageStats) {
+        const existing = pageStats.find((p) => p.id === stat.id)
+        if (existing) {
+          existing.total = (existing.total ?? 0) + (stat.total ?? 0)
+          existing.needsReply = (existing.needsReply ?? 0) + (stat.needsReply ?? 0)
+          existing.error ??= stat.error
+          existing.rateLimited ||= stat.rateLimited
+        } else pageStats.push(stat)
+      }
+    } catch (e) {
+      // Instagram must never take the Facebook comments down with it.
+      console.log('[v0] instagram comment refresh failed:', e instanceof Error ? e.message : e)
+    }
+
     const rows: Record<string, unknown>[] = []
 
     for (const c of comments) {
@@ -148,6 +174,7 @@ export async function syncComments(): Promise<{
       for (const r of c.replies) {
         rows.push({
           comment_id: r.id,
+          platform: c.platform ?? 'facebook',
           post_id: c.postId,
           parent_id: c.id,
           page_id: c.pageId,
@@ -212,6 +239,7 @@ export async function syncComments(): Promise<{
 function toRow(c: CommentItem, parentId: string | null): Record<string, unknown> {
   return {
     comment_id: c.id,
+    platform: c.platform ?? 'facebook',
     post_id: c.postId,
     parent_id: parentId,
     page_id: c.pageId,

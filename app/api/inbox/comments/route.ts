@@ -7,6 +7,13 @@ import { getCapabilities } from '@/lib/facebook/capabilities'
 import { isRateLimit, rateLimitResponse } from '@/lib/facebook/rate-limit-response'
 import { deleteComment, likeComment, replyToComment, setCommentHidden, blockPageUser } from '@/lib/facebook/comments'
 import {
+  deleteInstagramComment,
+  replyToInstagramComment,
+  sendInstagramPrivateReply,
+  setInstagramCommentHidden,
+  unlinkedInstagramAdAccounts,
+} from '@/lib/facebook/instagram-comments'
+import {
   cachedCommentStats,
   commentCacheIsEmpty,
   listCachedComments,
@@ -107,10 +114,25 @@ export async function GET(request: Request) {
       }
     }
 
+    // An Instagram account that advertises but is not linked to a Page we hold
+    // a token for produces comments we can read and never answer, so instead of
+    // storing dead rows the channel reports it once here, on refresh only.
+    let instagramUnlinked: { igUserId: string; ads: number }[] | undefined
+    if (wantsRefresh || !hasCache) {
+      try {
+        const pages = await getInboxPages()
+        const unlinked = await unlinkedInstagramAdAccounts(pages)
+        if (unlinked.length) instagramUnlinked = unlinked
+      } catch {
+        instagramUnlinked = undefined
+      }
+    }
+
     return NextResponse.json({
       success: true,
       scope: requested,
       source: 'cache',
+      instagramUnlinked,
       rateLimited,
       syncError,
       pages: pageRefs,
@@ -156,6 +178,13 @@ export async function POST(request: Request) {
     const page = await getInboxPage(pageId)
     if (!page) return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 })
 
+    // Which network this comment lives on decides which Graph edge answers it.
+    // Read from our own row, never from the browser, so a stale screen cannot
+    // send an Instagram reply down the Facebook edge (it would 404 the id).
+    const { data: platformRow } = await createAdminClient()
+      .from('page_comments').select('platform').eq('comment_id', commentId).maybeSingle()
+    const isInstagram = platformRow?.platform === 'instagram'
+
     switch (action) {
       // Each action writes through to the cache as well as Graph. The `feed`
       // webhook will report the same change moments later and simply overwrite
@@ -171,11 +200,15 @@ export async function POST(request: Request) {
       case 'reply': {
         const message = (body.message ?? '').trim()
         if (!message) return NextResponse.json({ success: false, error: 'Message is empty' }, { status: 400 })
-        const sent = await sendPrivateReply(page, commentId, message)
+        const sent = isInstagram
+          ? await sendInstagramPrivateReply(page, commentId, message)
+          : await sendPrivateReply(page, commentId, message)
         void recordAgentActivity({ userId: user.id, kind: 'inbox_reply', channel: 'comment', threadKey: `comment:${commentId}` })
         let publicNote: string | null = null
         try {
-          publicNote = (await replyToComment(page, commentId, PUBLIC_INBOX_NOTE)).id ?? null
+          publicNote = isInstagram
+            ? (await replyToInstagramComment(page, commentId, PUBLIC_INBOX_NOTE)).id ?? null
+            : (await replyToComment(page, commentId, PUBLIC_INBOX_NOTE)).id ?? null
         } catch (e) {
           console.log('[v0] public inbox note failed after private reply:', e instanceof Error ? e.message : e)
         }
@@ -192,18 +225,26 @@ export async function POST(request: Request) {
         })
       }
       case 'hide':
-        await setCommentHidden(page, commentId, true)
+        if (isInstagram) await setInstagramCommentHidden(page, commentId, true)
+        else await setCommentHidden(page, commentId, true)
         await markCommentHidden(commentId, true)
         return NextResponse.json({ success: true })
       case 'unhide':
-        await setCommentHidden(page, commentId, false)
+        if (isInstagram) await setInstagramCommentHidden(page, commentId, false)
+        else await setCommentHidden(page, commentId, false)
         await markCommentHidden(commentId, false)
         return NextResponse.json({ success: true })
       case 'delete':
-        await deleteComment(page, commentId)
+        if (isInstagram) await deleteInstagramComment(page, commentId)
+        else await deleteComment(page, commentId)
         await markCommentDeleted(commentId)
         return NextResponse.json({ success: true })
       case 'like':
+        // Graph exposes no like edge for Instagram comments; hiding is the
+        // moderation Meta offers there. Say so rather than failing obscurely.
+        if (isInstagram) {
+          return NextResponse.json({ success: false, error: 'Instagram does not allow liking a comment from here. Use hide, reply, or the Instagram app.' }, { status: 400 })
+        }
         await likeComment(page, commentId)
         return NextResponse.json({ success: true })
       // The person to ban comes from our own record of the comment, never from
@@ -212,6 +253,10 @@ export async function POST(request: Request) {
         const { data: row } = await createAdminClient().from('page_comments').select('author_id, from_page').eq('comment_id', commentId).maybeSingle()
         if (!row?.author_id) return NextResponse.json({ success: false, error: 'Facebook did not share who wrote this comment, so they cannot be banned from here. Use Business Suite.' }, { status: 409 })
         if (row.from_page) return NextResponse.json({ success: false, error: 'That comment is the Page\'s own.' }, { status: 400 })
+        // Banning is a Page-level control and does not reach Instagram accounts.
+        if (isInstagram) {
+          return NextResponse.json({ success: false, error: 'Instagram accounts cannot be banned from here. Hide the comment, or block them in the Instagram app.' }, { status: 400 })
+        }
         await blockPageUser(page, row.author_id)
         // Meta hides a banned person's comments; mirror that so the row leaves
         // the queue now rather than when the feed webhook catches up.

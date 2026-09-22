@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Heart,
+  Instagram,
   Megaphone,
   MessageSquareText,
   RefreshCw,
@@ -37,6 +38,8 @@ type Reply = {
 
 export type CommentItem = {
   id: string
+  /** Which network. Absent on rows stored before Instagram was added. */
+  platform?: 'facebook' | 'instagram'
   message: string
   createdTime: string
   from: Author | null
@@ -71,6 +74,8 @@ type Response = {
   pages?: { id: string; name: string }[]
   pageStats?: Stat[]
   comments?: CommentItem[]
+  /** Instagram accounts advertising without a Page link - see the note below. */
+  instagramUnlinked?: { igUserId: string; ads: number }[]
   error?: string
 }
 
@@ -177,6 +182,7 @@ export function CommentsChannel() {
   const stats: Stat[] = data.pageStats ?? []
   const combined = scope === ALL_PAGES
   const failed = stats.filter((s) => s.error)
+  const unlinkedInstagram = data.instagramUnlinked ?? []
   const canModerate = !(data.capability?.degraded ?? []).includes('pages_manage_engagement')
 
   const q = query.trim().toLowerCase()
@@ -292,6 +298,19 @@ export function CommentsChannel() {
             </p>
           ) : null}
 
+          {/* Only actionable Instagram comments are stored. An account that
+              advertises without a Page link cannot be replied to through the
+              API at all, so the fix is named instead of hidden. */}
+          {unlinkedInstagram.length > 0 ? (
+            <p className="text-xs leading-relaxed text-amber-500 text-pretty">
+              {unlinkedInstagram.length === 1 ? 'An Instagram account is' : `${unlinkedInstagram.length} Instagram accounts are`}{' '}
+              running {unlinkedInstagram.reduce((n, u) => n + u.ads, 0)} ads but{' '}
+              {unlinkedInstagram.length === 1 ? 'is' : 'are'} not linked to a Facebook Page here, so comments on those ads
+              cannot be answered. Link the account to its Page in Meta Business Suite and they will appear on the next
+              refresh.
+            </p>
+          ) : null}
+
           {anonymous ? (
             <p className="text-xs leading-relaxed text-muted-foreground text-pretty">
               Facebook hides commenter names until the app passes App Review for Page Public Content Access.
@@ -331,7 +350,14 @@ export function CommentsChannel() {
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-medium">{c.from?.name ?? 'Facebook user'}</span>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          {c.platform === 'instagram' ? (
+                            <Instagram className="h-3.5 w-3.5 shrink-0 text-pink-500" aria-label="Instagram" />
+                          ) : null}
+                          <span className="truncate font-medium">
+                            {c.from?.name ?? (c.platform === 'instagram' ? 'Instagram user' : 'Facebook user')}
+                          </span>
+                        </span>
                         <span className="shrink-0 text-xs text-muted-foreground">{relative(c.createdTime)}</span>
                       </div>
                       <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground text-pretty">
@@ -387,10 +413,16 @@ export function CommentsChannel() {
           <>
             <div className="flex items-start justify-between gap-4 border-b border-border p-4">
               <div className="flex min-w-0 flex-col gap-1">
-                <h3 className="font-semibold">{selected.from?.name ?? 'Facebook user'}</h3>
+                <h3 className="flex items-center gap-1.5 font-semibold">
+                  {selected.platform === 'instagram' ? (
+                    <Instagram className="h-4 w-4 shrink-0 text-pink-500" aria-label="Instagram" />
+                  ) : null}
+                  {selected.from?.name ?? (selected.platform === 'instagram' ? 'Instagram user' : 'Facebook user')}
+                </h3>
                 <p className="text-xs text-muted-foreground">
                   {relative(selected.createdTime)}
                   {combined ? ` · via ${selected.pageName}` : ''}
+                  {selected.platform === 'instagram' ? ' · Instagram' : ''}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
@@ -402,16 +434,20 @@ export function CommentsChannel() {
                     </a>
                   </Button>
                 ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  disabled={busy !== null}
-                  onClick={() => act('like', selected)}
-                  aria-label="Like this comment as the Page"
-                >
-                  <Heart className="h-4 w-4" aria-hidden="true" />
-                </Button>
+                {/* Graph has no like edge for Instagram comments, so the
+                    button is absent there rather than present and failing. */}
+                {selected.platform === 'instagram' ? null : (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={busy !== null}
+                    onClick={() => act('like', selected)}
+                    aria-label="Like this comment as the Page"
+                  >
+                    <Heart className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -482,7 +518,7 @@ export function CommentsChannel() {
                       }`}
                     >
                       <p className="text-xs font-medium">
-                            {r.from?.name ?? 'Facebook user'}
+                        {r.from?.name ?? (selected.platform === 'instagram' ? 'Instagram user' : 'Facebook user')}
                         {r.fromPage ? ' (you)' : ''}
                         <span className="ml-2 font-normal text-muted-foreground">{relative(r.createdTime)}</span>
                       </p>
@@ -506,7 +542,7 @@ export function CommentsChannel() {
                     e.preventDefault()
                     if (draft.trim()) act('reply', selected, draft.trim())
                   }}
-                  placeholder={`Reply publicly as ${selected.pageName}...`}
+                  placeholder={`Reply to ${selected.from?.name ?? 'them'} as ${selected.pageName}...`}
                   className="min-h-[44px] resize-none"
                   aria-label="Reply to this comment"
                 />
@@ -518,8 +554,13 @@ export function CommentsChannel() {
                   <Send className="h-4 w-4" aria-hidden="true" />
                 </Button>
               </div>
+              {/* What actually happens: the answer goes to their private
+                  inbox and only a short "check your inbox" line is posted
+                  publicly, so prices and addresses are not left under an ad. */}
               <p className="text-xs text-muted-foreground">
-                Replying as {selected.pageName} · this reply is public on the post
+                Replying as {selected.pageName} · goes to their{' '}
+                {selected.platform === 'instagram' ? 'Instagram' : 'Messenger'} inbox, with a short public note
+                under the comment
               </p>
             </div>
           </>
