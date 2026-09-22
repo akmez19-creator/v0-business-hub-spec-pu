@@ -80,4 +80,14 @@ assert.deepEqual(queue.map((r) => r.key), [metaThread.key, waiting.key, reopened
 const all = newestConversations([waiting, done, reopened, stale], 'all', NOW)
 assert.deepEqual(all.map((r) => r.key), [reopened.key, waiting.key, done.key, stale.key])
 
-console.log('needs-reply queue: 9 checks passed')
+// 9. Unread follows the same 24h window. History recovery back-fills months of never-read
+// messages, so an unread view with no window buries today's customers under last month's.
+const unreadFresh = { ...waiting, unreadCount: 2 }
+const unreadStale = { ...stale, unreadCount: 7 }
+const unread = newestConversations([unreadFresh, unreadStale, { ...reopened, unreadCount: 0 }], 'unread', NOW)
+assert.deepEqual(unread.map((r) => r.key), [unreadFresh.key], 'unread keeps 24h only, and never an already-read row')
+// The escape hatch is explicit: "any age" still reaches the older ones.
+const anyAge = newestConversations([unreadFresh, unreadStale], 'needs-action', NOW)
+assert.deepEqual(anyAge.map((r) => r.key).sort(), [unreadFresh.key, unreadStale.key].sort())
+
+console.log('needs-reply queue: 11 checks passed')

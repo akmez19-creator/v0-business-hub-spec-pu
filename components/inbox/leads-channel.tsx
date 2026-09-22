@@ -60,7 +60,7 @@ const QUEUE_VIEWS: { value: QueueView; label: string }[] = [
   { value: 'needs-reply-24h', label: 'Needs reply · last 24h · longest waiting first' },
   { value: 'all', label: 'All conversations · newest first' },
   { value: 'needs-action', label: 'Needs reply · any age · newest first' },
-  { value: 'unread', label: 'Unread · newest first' },
+  { value: 'unread', label: 'Unread · last 24h · newest first' },
 ]
 
 /** Compact "waited 3h" label for the needs-reply queue. */
@@ -636,6 +636,7 @@ export function LeadsChannel({ active = true }: { active?: boolean }) {
             <p className="p-6 text-sm leading-relaxed text-muted-foreground text-pretty">
               {errors.length ? 'Some conversations could not load. Refresh to retry.'
                 : queueView === 'needs-reply-24h' ? 'Everyone who wrote in the last 24 hours has been answered, closed in Business Suite, or replied to from the phone.'
+                : queueView === 'unread' ? 'Nothing unread from the last 24 hours. Older unread conversations are in "Needs reply · any age".'
                 : 'No leads match these filters.'}
             </p>
           ) : (

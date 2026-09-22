@@ -13,10 +13,15 @@ export function isWaitingOnUs(row: Pick<UnifiedThread, 'stage' | 'done' | 'answe
   return (row.stage === 'awaiting' || row.stage === 'new') && !row.done && !row.answeredByPhone
 }
 
+/** The thread's last activity landed inside the window. Undated rows are not recent. */
+export function activeWithin(updatedAt: string | null, windowMs: number, now = Date.now()): boolean {
+  const at = updatedAt ? Date.parse(updatedAt) : Number.NaN
+  return Number.isFinite(at) && now - at <= windowMs
+}
+
 /** Waiting, and their last message landed inside the reply window. */
 export function needsReplyWithin(row: Pick<UnifiedThread, 'stage' | 'done' | 'answeredByPhone' | 'updatedAt'>, windowMs: number, now = Date.now()): boolean {
-  const at = row.updatedAt ? Date.parse(row.updatedAt) : Number.NaN
-  return isWaitingOnUs(row) && Number.isFinite(at) && now - at <= windowMs
+  return isWaitingOnUs(row) && activeWithin(row.updatedAt, windowMs, now)
 }
 export type PresentedLeadMessage = LeadMessage & { status?: string | null; receiptOnly?: boolean; fromCopy?: boolean }
 
@@ -60,7 +65,9 @@ export function newestConversations<T extends Pick<UnifiedThread, 'key' | 'updat
   }
   const keep = (row: T) => {
     if (view === 'all') return true
-    if (view === 'unread') return row.unreadCount > 0
+    // Unread follows the same 24h window as needs-reply. History recovery back-fills months of
+    // messages nobody ever read, and an unread pile that deep is not a list an agent can work.
+    if (view === 'unread') return row.unreadCount > 0 && activeWithin(row.updatedAt, NEEDS_REPLY_WINDOW_MS, now)
     if (view === 'needs-reply-24h') return needsReplyWithin(row, NEEDS_REPLY_WINDOW_MS, now)
     return isWaitingOnUs(row)
   }
