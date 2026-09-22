@@ -143,15 +143,26 @@ export async function syncComments(): Promise<{
     const pages = await getInboxPages()
     if (pages.length === 0) return { ok: false, stored: 0, rateLimited: false, error: 'No Page reachable' }
 
-    const { comments: fbComments, pageStats } = await listAllComments(pages)
-
     // Instagram rides along with the same refresh. Its comments sit on ad
     // creatives rather than the profile grid, so they are collected separately,
     // but from here on they are the same channel: same table, same queue, same
     // private-reply-plus-public-note answer.
+    //
+    // The two networks are independent reads, so they go out together - run in
+    // sequence they simply added up.
+    const [fb, igResult] = await Promise.all([
+      listAllComments(pages),
+      listAllInstagramComments(pages).catch((e) => {
+        // Instagram must never take the Facebook comments down with it.
+        console.log('[v0] instagram comment refresh failed:', e instanceof Error ? e.message : e)
+        return null
+      }),
+    ])
+    const { comments: fbComments, pageStats } = fb
+
     let comments = fbComments
-    try {
-      const ig = await listAllInstagramComments(pages)
+    if (igResult) {
+      const ig = igResult
       comments = [...fbComments, ...ig.comments]
       for (const stat of ig.pageStats) {
         const existing = pageStats.find((p) => p.id === stat.id)
@@ -162,9 +173,6 @@ export async function syncComments(): Promise<{
           existing.rateLimited ||= stat.rateLimited
         } else pageStats.push(stat)
       }
-    } catch (e) {
-      // Instagram must never take the Facebook comments down with it.
-      console.log('[v0] instagram comment refresh failed:', e instanceof Error ? e.message : e)
     }
 
     const rows: Record<string, unknown>[] = []

@@ -69,29 +69,33 @@ export async function listInstagramAccounts(pages: FbPage[]): Promise<IgAccount[
  */
 async function adMediaForPage(page: FbPage, adAccountIds: string[]): Promise<Map<string, AdMedia>> {
   const media = new Map<string, AdMedia>()
-  for (const acct of adAccountIds) {
-    try {
-      const json = await fbGet<{ data?: { id: string; name?: string; creative?: { effective_instagram_media_id?: string; instagram_permalink_url?: string; instagram_user_id?: string } }[] }>(
+  // Ad accounts are independent reads, so they go out together rather than one
+  // after another. Serially this was the bulk of a 10s refresh.
+  const settled = await Promise.allSettled(
+    adAccountIds.map((acct) =>
+      fbGet<{ data?: { id: string; name?: string; creative?: { effective_instagram_media_id?: string; instagram_permalink_url?: string; instagram_user_id?: string } }[] }>(
         `${GRAPH}/${acct}/ads?fields=id,name,creative{effective_instagram_media_id,instagram_permalink_url,instagram_user_id}` +
           `&effective_status=${encodeURIComponent('["ACTIVE"]')}&limit=50&access_token=${encodeURIComponent(page.access_token)}`,
         { cacheTtl: AD_MEDIA_TTL },
-      )
-      for (const ad of json.data ?? []) {
-        const id = ad.creative?.effective_instagram_media_id
-        if (id && !media.has(id)) {
-          media.set(id, {
-            adId: ad.id,
-            adName: ad.name ?? '',
-            permalink: ad.creative?.instagram_permalink_url,
-            // Which Instagram account published the ad. Every token sees every
-            // ad account here, so this - not the ad account - is what says
-            // whose post it is.
-            igUserId: ad.creative?.instagram_user_id ?? null,
-          })
-        }
+      ),
+    ),
+  )
+  for (const r of settled) {
+    // One unreadable ad account must not blank the channel.
+    if (r.status !== 'fulfilled') continue
+    for (const ad of r.value.data ?? []) {
+      const id = ad.creative?.effective_instagram_media_id
+      if (id && !media.has(id)) {
+        media.set(id, {
+          adId: ad.id,
+          adName: ad.name ?? '',
+          permalink: ad.creative?.instagram_permalink_url,
+          // Which Instagram account published the ad. Every token sees every
+          // ad account here, so this - not the ad account - is what says
+          // whose post it is.
+          igUserId: ad.creative?.instagram_user_id ?? null,
+        })
       }
-    } catch {
-      // One unreadable ad account must not blank the channel.
     }
   }
   return media
@@ -147,8 +151,18 @@ export async function listAdAccountIds(): Promise<string[]> {
 }
 
 /** Every Instagram comment on this account's active ad posts, newest first. */
-export async function listInstagramComments(account: IgAccount, adAccountIds: string[]): Promise<CommentItem[]> {
-  const media = await adMediaForPage(account.page, adAccountIds)
+export async function listInstagramComments(
+  account: IgAccount,
+  adAccountIds: string[],
+  /**
+   * The ad-media map, when the caller already built it. The ad scan returns the
+   * same creatives no matter which Page token asks, so building it per account
+   * fetched identical data once per account - and because the token is part of
+   * the request URL, the response cache could not collapse them either.
+   */
+  shared?: Map<string, AdMedia>,
+): Promise<CommentItem[]> {
+  const media = shared ?? (await adMediaForPage(account.page, adAccountIds))
   if (!media.size) return []
 
   const out: CommentItem[] = []
@@ -157,22 +171,39 @@ export async function listInstagramComments(account: IgAccount, adAccountIds: st
   // comment would arrive once per account (measured: 32 rows for 16 comments).
   const entries = ownedBy(media, account.igId)
   if (!entries.length) return []
-  // Bounded concurrency: 110 ad posts serially took minutes, and the comments
-  // edge is one cheap call each.
-  const size = 8
+  // Graph's multi-get reads every post's comments in ONE request. Asking each
+  // ad post separately meant 50 calls in 7 serial rounds (~6s) to surface 6
+  // comments, because almost every ad post has none; batched it is ~1s.
+  const size = 50
   for (let i = 0; i < entries.length; i += size) {
     const batch = entries.slice(i, i + size)
-    const settled = await Promise.allSettled(
-      batch.map(async ([mediaId, ad]) => {
-        const json = await fbGet<{ data?: RawIgComment[] }>(
-          `${GRAPH}/${mediaId}/comments?fields=id,text,username,timestamp,like_count,hidden,from,` +
-            `replies{id,text,username,timestamp,from}&limit=25&access_token=${encodeURIComponent(account.page.access_token)}`,
-          { cacheTtl: COMMENT_TTL },
-        )
-        return (json.data ?? []).map((c) => toItem(account, mediaId, ad, c))
-      }),
-    )
-    for (const r of settled) if (r.status === 'fulfilled') out.push(...r.value)
+    try {
+      const json = await fbGet<Record<string, { comments?: { data?: RawIgComment[] } }>>(
+        `${GRAPH}/?ids=${batch.map(([id]) => id).join(',')}` +
+          `&fields=comments{id,text,username,timestamp,like_count,hidden,from,replies{id,text,username,timestamp,from}}` +
+          `&access_token=${encodeURIComponent(account.page.access_token)}`,
+        { cacheTtl: COMMENT_TTL },
+      )
+      for (const [mediaId, ad] of batch) {
+        for (const c of json?.[mediaId]?.comments?.data ?? []) out.push(toItem(account, mediaId, ad, c))
+      }
+    } catch (e) {
+      // Multi-get is all-or-nothing: one deleted or unreadable post fails the
+      // whole request. Fall back to reading this batch one post at a time so a
+      // single bad id cannot hide every comment on the account.
+      console.log(`[v0] instagram comments: batch of ${batch.length} failed, retrying singly:`, e instanceof Error ? e.message : e)
+      const settled = await Promise.allSettled(
+        batch.map(async ([mediaId, ad]) => {
+          const json = await fbGet<{ data?: RawIgComment[] }>(
+            `${GRAPH}/${mediaId}/comments?fields=id,text,username,timestamp,like_count,hidden,from,` +
+              `replies{id,text,username,timestamp,from}&limit=25&access_token=${encodeURIComponent(account.page.access_token)}`,
+            { cacheTtl: COMMENT_TTL },
+          )
+          return (json.data ?? []).map((c) => toItem(account, mediaId, ad, c))
+        }),
+      )
+      for (const r of settled) if (r.status === 'fulfilled') out.push(...r.value)
+    }
   }
 
   // An Instagram ad post has no post copy to fall back on, so the ad name is
@@ -206,7 +237,11 @@ export async function listAllInstagramComments(
   const accountIds = adAccountIds ?? (await listAdAccountIds())
   if (!accountIds.length) return { comments: [], pageStats: [] }
 
-  const settled = await Promise.allSettled(accounts.map((a) => listInstagramComments(a, accountIds)))
+  // Scanned once and shared: the creatives are the same for every account, and
+  // each one is attributed by its own instagram_user_id further down.
+  const media = await adMediaForPage(accounts[0].page, accountIds)
+
+  const settled = await Promise.allSettled(accounts.map((a) => listInstagramComments(a, accountIds, media)))
   const comments: CommentItem[] = []
   const pageStats: CommentPageStat[] = []
 
