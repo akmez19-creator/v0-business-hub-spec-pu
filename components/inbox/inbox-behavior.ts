@@ -29,8 +29,12 @@ export function isWaitingOnUs(row: Pick<UnifiedThread, 'stage' | 'answeredByPhon
  * Suite or the phone) and the customer has not come back. Done chats are closed
  * on purpose and dormant ones are too old to chase.
  */
-export function isAwaitingCustomer(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone'> & Outcome): boolean {
+export function isAwaitingCustomer(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone'> & Partial<Pick<UnifiedThread, 'channel'>> & Outcome): boolean {
   if (isClosed(row) || row.stage === 'dormant') return false
+  // A comment we answered is finished, not a chat waiting on a reply. The public
+  // thread ends at our answer and anything further happens in Messenger, as its
+  // own thread - so chasing the commenter here would chase nobody.
+  if (row.channel === 'comment') return false
   return row.stage === 'active' || row.answeredByPhone === true
 }
 
@@ -45,7 +49,7 @@ export function needsReplyWithin(row: Pick<UnifiedThread, 'stage' | 'answeredByP
 }
 
 /** We replied inside the window and the customer has stayed silent since. */
-export function clientSilentWithin(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone' | 'updatedAt'> & Outcome, windowMs: number, now = Date.now()): boolean {
+export function clientSilentWithin(row: Pick<UnifiedThread, 'stage' | 'answeredByPhone' | 'updatedAt'> & Partial<Pick<UnifiedThread, 'channel'>> & Outcome, windowMs: number, now = Date.now()): boolean {
   return isAwaitingCustomer(row) && within(row, windowMs, now)
 }
 export type PresentedLeadMessage = LeadMessage & { status?: string | null; receiptOnly?: boolean; fromCopy?: boolean }
@@ -80,7 +84,7 @@ export function latestActivityAt(timestamps: (string | null | undefined)[]): str
 }
 
 /** Views narrow the queue; every view lists the most recent activity first (owner's call, 15 Sep). */
-export function newestConversations<T extends Pick<UnifiedThread, 'key' | 'updatedAt' | 'stage' | 'unreadCount' | 'answeredByPhone' | 'star'> & Outcome>(rows: T[], view: QueueView, now = Date.now()): T[] {
+export function newestConversations<T extends Pick<UnifiedThread, 'key' | 'updatedAt' | 'stage' | 'unreadCount' | 'answeredByPhone' | 'star'> & Partial<Pick<UnifiedThread, 'channel'>> & Outcome>(rows: T[], view: QueueView, now = Date.now()): T[] {
   // Starred = escalated by a person; newest star first, regardless of chat activity.
   if (view === 'starred') {
     return rows.filter((r) => r.star).sort((a, b) => Date.parse(b.star!.starredAt) - Date.parse(a.star!.starredAt))

@@ -114,6 +114,26 @@ export async function GET(request: NextRequest) {
     parentDeliveryId: o.parent_delivery_id,
   }))
 
+  // The customer-facing receipt for each order the card shows. Same public
+  // /reply/[token] page the rider shares: a proforma before delivery, an
+  // invoice once delivered. The RPCs above do not return the token, so it is
+  // read here by id rather than duplicating their phone-normalising logic.
+  const openOrderIds = (openOrders as { id: string }[]).map((o) => o.id)
+  const receiptIds = [...new Set([...openOrderIds, ...(last ? [last.id as string] : [])])]
+  const receipts = new Map<string, string>()
+  if (receiptIds.length) {
+    const { data: tokenRows } = await adminDb
+      .from('deliveries')
+      .select('id, reply_token')
+      .in('id', receiptIds)
+    const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin).replace(/\/$/, '')
+    for (const row of (tokenRows || []) as { id: string; reply_token: string | null }[]) {
+      if (row.reply_token) receipts.set(row.id, `${base}/reply/${row.reply_token}`)
+    }
+  }
+  const withReceipts = (openOrders as { id: string }[]).map((o) => ({ ...o, receiptUrl: receipts.get(o.id) ?? null }))
+  const lastWithReceipt = lastDelivery ? { ...lastDelivery, receiptUrl: receipts.get(lastDelivery.id) ?? null } : null
+
   const { data: client } = await adminDb
     .from('clients')
     .select('id, name, phone, region, city, client_status, total_orders, delivered_orders, cms_orders, total_sales, last_order_date')
@@ -123,7 +143,7 @@ export async function GET(request: NextRequest) {
   if (!client) {
     // No rollup row yet, but there may still be open orders - a client created
     // minutes ago is exactly the duplicate-prone case, so report them anyway.
-    return NextResponse.json({ found: false, phone, rating: 'new', openOrders, lastDelivery }, { headers: corsHeaders })
+    return NextResponse.json({ found: false, phone, rating: 'new', openOrders: withReceipts, lastDelivery: lastWithReceipt }, { headers: corsHeaders })
   }
 
   const rated = (client.delivered_orders || 0) + (client.cms_orders || 0)
@@ -149,7 +169,7 @@ export async function GET(request: NextRequest) {
     badSeverity,
     // Separate from totalOrders on purpose: totalOrders is the rating figure
     // (delivered + CMS only), these are orders still in flight.
-    openOrders,
-    lastDelivery,
+    openOrders: withReceipts,
+    lastDelivery: lastWithReceipt,
   }, { headers: corsHeaders })
 }

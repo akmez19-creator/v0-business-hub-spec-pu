@@ -115,4 +115,20 @@ assert.deepEqual(all.map((r) => r.key), [reopened.key, waiting.key, done.key, st
     [freshUnread.key, oldUnread.key].sort(),
   )
 }
-console.log('needs-reply queue: 13 checks passed')
+// 14. An answered comment is finished, not a chat waiting on the commenter.
+// The owner found a replied-to comment sitting in "No reply from client", where
+// it read as a customer who had gone quiet - there is nobody to chase: the
+// public thread ends at our answer and the rest happens in Messenger.
+{
+  const answeredComment = { ...waiting, key: 'comment:123', channel: 'comment' as const, stage: 'active' as const }
+  assert.equal(isAwaitingCustomer(answeredComment), false, 'an answered comment is not awaiting the customer')
+  assert.deepEqual(newestConversations([answeredComment], 'client-silent-24h', NOW).map((r) => r.key), [])
+  assert.deepEqual(newestConversations([answeredComment], 'client-silent', NOW).map((r) => r.key), [])
+  // A comment still unanswered is a real lead and stays in Needs reply.
+  const openComment = { ...waiting, key: 'comment:456', channel: 'comment' as const }
+  assert.equal(isWaitingOnUs(openComment), true, 'an unanswered comment still needs a reply')
+  assert.deepEqual(newestConversations([openComment], 'needs-reply-24h', NOW).map((r) => r.key), [openComment.key])
+  // Messaging channels are untouched by the comment rule.
+  assert.equal(isAwaitingCustomer({ ...waiting, channel: 'messenger' as const, stage: 'active' as const }), true)
+}
+console.log('needs-reply queue: 14 checks passed')

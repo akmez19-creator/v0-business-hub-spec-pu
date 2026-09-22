@@ -1046,7 +1046,13 @@ export function LeadsChannel({ active = true, viewer = null }: { active?: boolea
                   orderTouched: { ...state.orderTouched, [field]: true } }))}
                 aiPending={assisting} unmatched={unmatched} onPrefill={prefillOrder}
                 onOrderCreated={({ proformaLink }) => updateSession(selected.key, (state) => proformaLink && !state.draft.trim()
-                  ? { ...state, draft: 'Here is your order confirmation: ' + proformaLink, draftTouched: true, draftVersion: state.draftVersion + 1, draftOrigin: 'order' } : state)} />
+                  ? { ...state, draft: 'Here is your order confirmation: ' + proformaLink, draftTouched: true, draftVersion: state.draftVersion + 1, draftOrigin: 'order' } : state)}
+                // An existing order's receipt is appended, never overwriting what the agent already wrote.
+                onInsertReceipt={(url) => updateSession(selected.key, (state) => state.draft.includes(url) ? state : {
+                  ...state,
+                  draft: state.draft.trim() ? `${state.draft.trim()}\n${url}` : `Here is your receipt: ${url}`,
+                  draftTouched: true, draftVersion: state.draftVersion + 1, draftOrigin: 'order',
+                })} />
             </div>
           </div>
         </div>

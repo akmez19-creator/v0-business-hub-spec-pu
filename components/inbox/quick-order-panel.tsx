@@ -95,6 +95,7 @@ export function QuickOrderPanel({
   aiPending,
   unmatched,
   onOrderCreated,
+  onInsertReceipt,
   onPrefill,
   operation,
   onOperationChange,
@@ -122,6 +123,8 @@ export function QuickOrderPanel({
   onOrderCreated: (result: { proformaLink: string | null }) => void
   /** Details recorded on this number's last delivery; the session fills only empty, untouched fields. */
   onPrefill: (fields: RecordSeedFields) => void
+  /** Append an existing order's receipt link to the reply being written. */
+  onInsertReceipt?: (url: string) => void
 }) {
   const { saving, created, previousCreated, business } = operation
   const submitting = useRef(false)
@@ -484,6 +487,7 @@ export function QuickOrderPanel({
           localityNotInList={prefill?.localityNotInList ?? false}
           addingToId={addingTo?.id ?? null}
           sameAsOpen={sameAsOpen}
+          onInsertReceipt={onInsertReceipt}
         />
 
         {/* This reply changes an order that already exists. Ticked items are

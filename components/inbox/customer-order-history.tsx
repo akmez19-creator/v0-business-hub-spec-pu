@@ -10,11 +10,50 @@
  * which details below were carried over from the last delivery. Read-only.
  */
 
-import { History, MapPin, PackagePlus, Phone, StickyNote, TriangleAlert, UserRound } from 'lucide-react'
+import { useState } from 'react'
+import { Check, Copy, History, MapPin, PackagePlus, Phone, Receipt, StickyNote, TriangleAlert, UserRound } from 'lucide-react'
 import { useCustomerRecord, localMobile, type CustomerRecord, type LastDelivery } from './use-customer-record'
 import type { OrderDraft } from './quick-order-panel'
 
 const RATING_LABEL: Record<string, string> = { good: 'Good client', bad: 'Bad client', new: 'New client' }
+
+/**
+ * The customer-facing receipt for an order that already exists, so an agent
+ * answering "can you send my invoice?" copies it from the chat instead of
+ * creating a throwaway order to get a link.
+ *
+ * `delivered` only changes the wording: the same page renders a proforma
+ * before delivery and an invoice after, so the label must not claim otherwise.
+ */
+function ReceiptLink({ url, delivered, onInsert }: { url: string; delivered: boolean; onInsert?: (url: string) => void }) {
+  const [copied, setCopied] = useState(false)
+  const label = delivered ? 'invoice' : 'proforma'
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+      <a href={url} target="_blank" rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-primary underline underline-offset-2">
+        <Receipt className="h-3 w-3 shrink-0" aria-hidden="true" />
+        View {label}
+      </a>
+      <button type="button"
+        onClick={() => {
+          void navigator.clipboard.writeText(url)
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 2000)
+        }}
+        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground">
+        {copied ? <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" /> : <Copy className="h-3 w-3 shrink-0" aria-hidden="true" />}
+        {copied ? 'Copied' : 'Copy link'}
+      </button>
+      {onInsert ? (
+        <button type="button" onClick={() => onInsert(url)}
+          className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground">
+          Add to reply
+        </button>
+      ) : null}
+    </span>
+  )
+}
 
 function formatDate(value: string | null) {
   if (!value) return ''
@@ -35,7 +74,7 @@ function carriedOver(last: LastDelivery, draft: OrderDraft) {
   }
 }
 
-export function CustomerOrderHistory({ phone, waId, draft, localityNotInList, addingToId = null, sameAsOpen = false, exchangeOfId = null }: {
+export function CustomerOrderHistory({ phone, waId, draft, localityNotInList, addingToId = null, sameAsOpen = false, exchangeOfId = null, onInsertReceipt }: {
   phone: string
   waId: string | null
   draft: OrderDraft
@@ -47,6 +86,8 @@ export function CustomerOrderHistory({ phone, waId, draft, localityNotInList, ad
   sameAsOpen?: boolean
   /** The form is an exchange replacing this delivered order (no duplicate warning). */
   exchangeOfId?: string | null
+  /** Drop a receipt link straight into the reply the agent is writing. */
+  onInsertReceipt?: (url: string) => void
 }) {
   // Prefer what the agent typed; fall back to the WhatsApp number so the
   // history is there even before any field is filled.
@@ -78,7 +119,7 @@ export function CustomerOrderHistory({ phone, waId, draft, localityNotInList, ad
         </p>
       ) : null}
 
-      {last ? <LastDeliveryDetails last={last} draft={draft} localityNotInList={localityNotInList} /> : null}
+      {last ? <LastDeliveryDetails last={last} draft={draft} localityNotInList={localityNotInList} onInsertReceipt={onInsertReceipt} /> : null}
 
       {open.length ? (
         <div className="flex flex-col gap-1.5">
@@ -118,6 +159,7 @@ export function CustomerOrderHistory({ phone, waId, draft, localityNotInList, ad
                     {order.agent ? ` · ${order.agent}` : ''}
                     {replaced ? <span className="text-primary"> · being replaced by this exchange</span> : target ? <span className="text-primary"> · new item rides with this</span> : null}
                   </span>
+                  {order.receiptUrl ? <ReceiptLink url={order.receiptUrl} delivered={false} onInsert={onInsertReceipt} /> : null}
                 </li>
               )
             })}
@@ -156,7 +198,7 @@ function Header({ data, last }: { data: CustomerRecord; last: LastDelivery | nul
 }
 
 /** The last delivery as recorded, each line marked when the form below is still using it. */
-function LastDeliveryDetails({ last, draft, localityNotInList }: { last: LastDelivery; draft: OrderDraft; localityNotInList: boolean }) {
+function LastDeliveryDetails({ last, draft, localityNotInList, onInsertReceipt }: { last: LastDelivery; draft: OrderDraft; localityNotInList: boolean; onInsertReceipt?: (url: string) => void }) {
   const used = carriedOver(last, draft)
   const altPhone = localMobile(last.contact2)
   const rows = [
@@ -165,7 +207,14 @@ function LastDeliveryDetails({ last, draft, localityNotInList }: { last: LastDel
     { key: 'contact2', icon: Phone, label: 'Alt. phone', value: altPhone, used: used.contact2 },
     { key: 'notes', icon: StickyNote, label: 'Instructions', value: last.notes?.trim() || null, used: used.notes },
   ].filter(r => r.value)
-  if (!rows.length) return null
+  // The receipt stands on its own: worth showing even when no detail line matched.
+  if (!rows.length) {
+    return last.receiptUrl
+      ? <p className="rounded-md border border-primary/20 bg-primary/5 px-2.5 py-2">
+          <ReceiptLink url={last.receiptUrl} delivered={last.status === 'delivered'} onInsert={onInsertReceipt} />
+        </p>
+      : null
+  }
   const usedCount = rows.filter(r => r.used).length
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-2">
@@ -193,6 +242,7 @@ function LastDeliveryDetails({ last, draft, localityNotInList }: { last: LastDel
       <p className="text-[11px] text-muted-foreground">
         {usedCount === rows.length ? 'All details prefilled below. Confirm with the customer before creating.' : usedCount ? `${usedCount} of ${rows.length} details prefilled below.` : 'Details below differ from the last order.'}
       </p>
+      {last.receiptUrl ? <ReceiptLink url={last.receiptUrl} delivered={last.status === 'delivered'} onInsert={onInsertReceipt} /> : null}
     </div>
   )
 }

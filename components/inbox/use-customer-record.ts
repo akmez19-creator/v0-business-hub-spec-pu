@@ -24,6 +24,8 @@ export type OpenOrder = {
   business: string | null
   /** Set when this row is itself an add-on riding with another open order. */
   parentDeliveryId: string | null
+  /** Public /reply/[token] page: proforma before delivery, invoice after. */
+  receiptUrl?: string | null
 }
 
 /**
@@ -63,6 +65,8 @@ export type LastDelivery = {
   status: string
   createdAt: string
   pastOrders: number
+  /** Public /reply/[token] page: proforma before delivery, invoice after. */
+  receiptUrl?: string | null
 }
 
 export type CustomerRecord = {
