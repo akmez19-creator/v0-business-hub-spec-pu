@@ -300,14 +300,17 @@ export function CommentsChannel() {
 
           {/* Only actionable Instagram comments are stored. An account that
               advertises without a Page link cannot be replied to through the
-              API at all, so the fix is named instead of hidden. */}
+              API at all, so the fix is named instead of hidden. The copy says
+              "from Instagram" on purpose: this is NOT a Page permission, and
+              granting someone Page admin does not change it. */}
           {unlinkedInstagram.length > 0 ? (
             <p className="text-xs leading-relaxed text-amber-500 text-pretty">
               {unlinkedInstagram.length === 1 ? 'An Instagram account is' : `${unlinkedInstagram.length} Instagram accounts are`}{' '}
               running {unlinkedInstagram.reduce((n, u) => n + u.ads, 0)} ads but{' '}
-              {unlinkedInstagram.length === 1 ? 'is' : 'are'} not linked to a Facebook Page here, so comments on those ads
-              cannot be answered. Link the account to its Page in Meta Business Suite and they will appear on the next
-              refresh.
+              {unlinkedInstagram.length === 1 ? 'is' : 'are'} not connected to a Facebook Page, so comments on those ads
+              can be read but not answered from here. This is not a Page permission — it has to be done from the
+              Instagram account: Instagram app → Settings → Accounts Centre → connect it to the Page. They appear on the
+              next refresh.
             </p>
           ) : null}
 
