@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/inbox-reconcile", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/inbox-reconcile", "schedule": "* * * * *" },
     { "path": "/api/cron/whatsapp-green-reconcile", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/inbox-autopilot", "schedule": "* * * * *" }
   ]

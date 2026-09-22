@@ -7,10 +7,12 @@ import { runRecovery } from './history-worker.mjs'
 export async function reconcileRecentMessenger() {
   const client = await connectInboxDatabase()
   try {
-    const store = new PgHistoryStore(client, { dryRun: false, recentCycleMs: 300_000, reconcileRecentActivity: true })
+    // recentCycleMs matches the 60s cron schedule: a thread already complete is not re-read
+    // within the same minute, so the budget goes to threads that have never been read.
+    const store = new PgHistoryStore(client, { dryRun: false, recentCycleMs: 60_000, reconcileRecentActivity: true })
     return await runRecovery(store, {
       mode: 'recent', token: process.env.FACEBOOK_ACCESS_TOKEN,
-      maxRequests: 20, maxSteps: 18, maxRunMs: 40_000, lookbackMs: 24 * 60 * 60 * 1000,
+      maxRequests: 45, maxSteps: 40, maxRunMs: 45_000, lookbackMs: 24 * 60 * 60 * 1000,
     })
   } finally { await client.end().catch(() => {}) }
 }
