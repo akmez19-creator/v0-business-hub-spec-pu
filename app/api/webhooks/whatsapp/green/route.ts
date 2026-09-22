@@ -1,4 +1,3 @@
-import { observeGreenOutgoing } from '@/lib/inbox-autopilot/handoff-runtime'
 import { configuredGreenBindings, greenBindingForBearer } from '@/lib/whatsapp-green/config'
 import { GreenError } from '@/lib/whatsapp-green/contract'
 import { normaliseWebhook } from '@/lib/whatsapp-green/normalise'
@@ -36,8 +35,10 @@ export async function POST(request:Request){
     const event=normaliseWebhook(binding,raw,new Date().toISOString())
     db=await connectInboxDatabase()
     const result=await new PgGreenStore(db).ingest(binding,event)
-    if(event.origin==='webhook'&&event.observation?.direction==='out'&&event.observation.waId)
-      await observeGreenOutgoing(binding.phoneNumberId,event.observation.waId,event.eventKey,event.observation.providerMessageId)
+    // Green is no longer a send transport (Meta is the only one), so there is no
+    // outgoing Green reply for autopilot to observe and hand off on. Straggler
+    // provider events are still ingested and acknowledged, because a non-200
+    // would make the provider retry this event forever.
     if(!result.quarantined&&!event.quarantineReason&&event.origin==='webhook'&&event.eventType==='incomingMessageReceived'&&event.observation?.direction==='in'&&event.observation.kind==='text'&&event.observation.waId){
       const autopilotWake=createAutopilotWake()
       autopilotWake.add('whatsapp',binding.phoneNumberId)
