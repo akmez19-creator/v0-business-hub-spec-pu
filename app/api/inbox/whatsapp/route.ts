@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireWhatsAppInboxUser, validateWhatsAppScope, WhatsAppScopeError } from '@/lib/whatsapp/number-scope'
 import { getCapabilities } from '@/lib/facebook/capabilities'
-import { listContacts, listContactsForScopes, listMessages, markRead, sendMedia, sendText, whatsappToken, type OutboundWaMedia } from '@/lib/whatsapp/store'
+import { listContacts, listContactsForScopes, listMessages, listWaitingContacts, markRead, sendMedia, sendText, whatsappToken, type OutboundWaMedia } from '@/lib/whatsapp/store'
 import { validOutboundMedia } from '@/lib/inbox/outbound-media'
 import { listWhatsAppNumbers } from '@/lib/whatsapp/accounts'
 import { pauseForHumanReply } from '@/lib/inbox-autopilot/runtime'
@@ -18,41 +18,61 @@ import { createAdminClient } from '@/lib/supabase/server'
  */
 
 /**
- * Adds starred conversations that the newest-100 page missed.
+ * Adds the conversations the newest-100 page missed: customers still waiting,
+ * and threads someone starred.
  *
- * A star is an agent flagging something unresolved, so the thread has to stay
- * reachable however old it is. Measured on 23 Sep: both WhatsApp stars sat at
- * rank 764 and 1290, so the Starred filter counted them but could not show
- * them. Mirrors the same widening on the Messenger side.
+ * The 100 newest is a page size, not a day's work. Measured 23 Sep 2026 it
+ * reached back only 2h44m, so a customer who wrote in the morning silently
+ * dropped off the list before anyone answered - 390 waiting customers hidden,
+ * 135 with unread messages - which is what "messages disappear" looked like.
+ * A star is an agent flagging something unresolved, and the two that existed
+ * sat at rank 764 and 1290. Both widenings mirror the Messenger cache.
  *
  * Skipped while a search is active - then the list is the search result, and a
- * star must not reappear as a row the query did not match. Returns the original
- * list unchanged on any failure: a widener, never a gate.
+ * widened row must not reappear as something the query did not match. Returns
+ * the original list on any failure: a widener, never a gate.
  */
-async function withStarredContacts(
+async function withMissedContacts(
   contacts: Awaited<ReturnType<typeof listContacts>>,
   search: string | undefined,
   phoneNumberId: string | null,
 ) {
   if (search?.trim()) return contacts
+  const merged = [...contacts]
+  const seen = new Set(contacts.map((c) => `${c.phoneNumberId}:${c.waId}`))
+  const add = (rows: Awaited<ReturnType<typeof listContacts>>) => {
+    for (const row of rows) {
+      const key = `${row.phoneNumberId}:${row.waId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(row)
+    }
+  }
+
+  // Waiting customers first: the reason a thread vanishes mid-conversation.
+  try {
+    add(await listWaitingContacts(600, phoneNumberId ?? undefined))
+  } catch (e) {
+    console.log('[v0] waiting whatsapp widening failed:', e instanceof Error ? e.message : e)
+  }
+
   try {
     const stars = await loadStars(createAdminClient())
-    const present = new Set(contacts.map((c) => `${c.phoneNumberId}:${c.waId}`))
     const missing = [...stars.keys()]
       .map((key) => key.split(':'))
       .filter((parts) => parts[0] === 'whatsapp' && parts[1] && parts[2])
       .map((parts) => ({ phoneNumberId: parts[1], waId: parts[2] }))
-      .filter((scope) => !present.has(`${scope.phoneNumberId}:${scope.waId}`))
+      .filter((scope) => !seen.has(`${scope.phoneNumberId}:${scope.waId}`))
       // Honour the number filter the caller asked for.
       .filter((scope) => !phoneNumberId || scope.phoneNumberId === phoneNumberId)
-    if (!missing.length) return contacts
     // listContactsForScopes applies the same can_read check, so a number the
     // user may not read stays unreadable even when someone starred it.
-    return [...contacts, ...(await listContactsForScopes(missing))]
+    if (missing.length) add(await listContactsForScopes(missing))
   } catch (e) {
     console.log('[v0] starred whatsapp widening failed:', e instanceof Error ? e.message : e)
-    return contacts
   }
+
+  return merged
 }
 
 export async function GET(request: Request) {
@@ -87,7 +107,7 @@ export async function GET(request: Request) {
     // Contacts live in Postgres, so the 30s poll costs no Graph quota.
     // Search runs in the database so it can reach past the newest page.
     const q = params.get('q') ?? undefined
-    const contacts = await withStarredContacts(
+    const contacts = await withMissedContacts(
       await listContacts(100, q, phoneNumberId ?? undefined),
       q,
       phoneNumberId,

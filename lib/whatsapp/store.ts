@@ -250,6 +250,36 @@ export async function listContacts(limit = 100, search?: string, phoneNumberId?:
   return rows.map(r=>toContact(r,r.message_count??0,r.first_ad_id?products.get(r.first_ad_id)??null:null))
 }
 
+/**
+ * Conversations where the customer spoke last and nobody has answered yet.
+ *
+ * The newest-100 page is only as deep as the traffic allows: measured 23 Sep
+ * 2026 it reached back just 2h44m, so a customer who wrote this morning fell
+ * off the list before anyone replied - the thread looked like it had vanished.
+ * 390 waiting customers were hidden that way, 135 of them with unread messages.
+ *
+ * Mirrors the widening the Messenger cache already does. Seven days matches
+ * NEEDS_REPLY_WINDOW_MS; older threads are reached through search.
+ */
+export async function listWaitingContacts(limit = 600, phoneNumberId?: string): Promise<WaContact[]> {
+  if (phoneNumberId) await requireWhatsAppNumber(phoneNumberId)
+  const db = await connectInboxDatabase()
+  let rows: ContactRow[]
+  try {
+    rows = (await db.query(`SELECT c.*,n.business_name,n.page_id,n.can_send,
+      COALESCE(n.display_phone,c.display_phone) AS display_phone,
+      (SELECT count(*)::integer FROM whatsapp_messages m WHERE m.wa_id=c.wa_id AND m.phone_number_id=c.phone_number_id) AS message_count
+      FROM whatsapp_conversations c JOIN whatsapp_inbox_numbers n USING(phone_number_id)
+      WHERE n.can_read AND ($1::text IS NULL OR c.phone_number_id=$1)
+        AND c.last_inbound_at IS NOT NULL AND c.last_inbound_at >= c.last_message_at
+        AND c.last_message_at > now() - interval '7 days'
+      ORDER BY c.last_message_at DESC NULLS LAST,c.phone_number_id,c.wa_id LIMIT $2`,
+      [phoneNumberId ?? null, Math.min(600, Math.max(1, limit))])).rows
+  } finally { await db.end().catch(() => {}) }
+  const products = await adProducts(createAdminClient(), adNamesById(rows))
+  return rows.map(r => toContact(r, r.message_count ?? 0, r.first_ad_id ? products.get(r.first_ad_id) ?? null : null))
+}
+
 /** Hydrate exact canonical pairs discovered through additional providers without losing stored read/send/ad state. */
 export async function listContactsForScopes(scopes: { phoneNumberId: string; waId: string }[]): Promise<WaContact[]> {
   if (scopes.length > 200) throw new WhatsAppScopeError('Too many WhatsApp conversation scopes.')

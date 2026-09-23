@@ -883,7 +883,7 @@ export function LeadsChannel({ active = true, viewer = null }: { active?: boolea
         </div>
 
         {/* Partial outage: name what is missing rather than under-reporting. */}
-        {(mData?.conversations?.length ?? 0) >= 200 ? <p className="border-b px-4 py-2 text-[11px] leading-relaxed text-muted-foreground">Showing the latest 200 Messenger conversations plus every thread where the customer spoke last in the past 7 days. Older, answered threads load through search.</p> : null}
+        {(mData?.conversations?.length ?? 0) >= 200 ? <p className="border-b px-4 py-2 text-[11px] leading-relaxed text-muted-foreground">Showing the newest 200 Messenger and 100 WhatsApp conversations, plus every thread where the customer spoke last in the past 7 days and everything starred. The count below is what is loaded, not your total. Older, answered threads load through search.</p> : null}
         {throttled ? (
           <p className="border-b border-sky-500/20 bg-sky-500/10 px-4 py-2 text-xs leading-relaxed text-pretty">
             Facebook has limited an update request. Available conversations are still shown;
