@@ -5,6 +5,8 @@ import { listContacts, listContactsForScopes, listMessages, markRead, sendMedia,
 import { validOutboundMedia } from '@/lib/inbox/outbound-media'
 import { listWhatsAppNumbers } from '@/lib/whatsapp/accounts'
 import { pauseForHumanReply } from '@/lib/inbox-autopilot/runtime'
+import { loadStars } from '@/lib/inbox/thread-stars'
+import { createAdminClient } from '@/lib/supabase/server'
 
 /**
  * WhatsApp conversations, served from Postgres rather than Graph.
@@ -14,6 +16,44 @@ import { pauseForHumanReply } from '@/lib/inbox-autopilot/runtime'
  * the webhook was connected", which the UI states explicitly rather than
  * implying the customer has never written.
  */
+
+/**
+ * Adds starred conversations that the newest-100 page missed.
+ *
+ * A star is an agent flagging something unresolved, so the thread has to stay
+ * reachable however old it is. Measured on 23 Sep: both WhatsApp stars sat at
+ * rank 764 and 1290, so the Starred filter counted them but could not show
+ * them. Mirrors the same widening on the Messenger side.
+ *
+ * Skipped while a search is active - then the list is the search result, and a
+ * star must not reappear as a row the query did not match. Returns the original
+ * list unchanged on any failure: a widener, never a gate.
+ */
+async function withStarredContacts(
+  contacts: Awaited<ReturnType<typeof listContacts>>,
+  search: string | undefined,
+  phoneNumberId: string | null,
+) {
+  if (search?.trim()) return contacts
+  try {
+    const stars = await loadStars(createAdminClient())
+    const present = new Set(contacts.map((c) => `${c.phoneNumberId}:${c.waId}`))
+    const missing = [...stars.keys()]
+      .map((key) => key.split(':'))
+      .filter((parts) => parts[0] === 'whatsapp' && parts[1] && parts[2])
+      .map((parts) => ({ phoneNumberId: parts[1], waId: parts[2] }))
+      .filter((scope) => !present.has(`${scope.phoneNumberId}:${scope.waId}`))
+      // Honour the number filter the caller asked for.
+      .filter((scope) => !phoneNumberId || scope.phoneNumberId === phoneNumberId)
+    if (!missing.length) return contacts
+    // listContactsForScopes applies the same can_read check, so a number the
+    // user may not read stays unreadable even when someone starred it.
+    return [...contacts, ...(await listContactsForScopes(missing))]
+  } catch (e) {
+    console.log('[v0] starred whatsapp widening failed:', e instanceof Error ? e.message : e)
+    return contacts
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -47,7 +87,11 @@ export async function GET(request: Request) {
     // Contacts live in Postgres, so the 30s poll costs no Graph quota.
     // Search runs in the database so it can reach past the newest page.
     const q = params.get('q') ?? undefined
-    const contacts = await listContacts(100, q, phoneNumberId ?? undefined)
+    const contacts = await withStarredContacts(
+      await listContacts(100, q, phoneNumberId ?? undefined),
+      q,
+      phoneNumberId,
+    )
 
     // Number/scope discovery costs ~6 Graph calls (businesses, owned + client
     // WABAs, phone_numbers and subscribed_apps per WABA, debug_token) and the
