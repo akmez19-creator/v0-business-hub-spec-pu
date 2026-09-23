@@ -544,7 +544,12 @@ export function LeadConversation({
           }}
           placeholder={isComment ? 'Reply privately to their inbox (a "check your inbox" note is posted under the comment)...' : 'Write a reply...'}
           rows={3}
-          className="resize-none"
+          // The shared Textarea sets `field-sizing-content`, so the box grows
+          // with the draft and never stops. The composer is shrink-0, so a long
+          // AI draft (order confirmations run ~20 lines) ate the whole panel and
+          // collapsed the transcript above it to a sliver - the conversation was
+          // still there, just squeezed to nothing. Cap it and scroll instead.
+          className="max-h-[30vh] resize-none overflow-y-auto"
           aria-label="Reply message"
         />
 

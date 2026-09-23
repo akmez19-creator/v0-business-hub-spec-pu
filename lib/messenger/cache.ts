@@ -74,6 +74,37 @@ const COLUMNS =
 export const WAITING_WINDOW_DAYS = 7
 const WAITING_LIMIT = 600
 
+/**
+ * Conversation rows for every starred Messenger thread.
+ *
+ * Returns [] on any failure: a star that cannot be resolved must not stop the
+ * inbox from rendering. Keys are written as `messenger:<pageId>:<psid>`; the
+ * psid itself never contains ':', so splitting on the first two separators is
+ * safe. WhatsApp stars are ignored here - that channel loads its own threads.
+ */
+async function starredMessengerRows(
+  db: ReturnType<typeof createAdminClient>,
+  scoped: <T extends { eq: (column: string, value: string) => T }>(q: T) => T,
+): Promise<ConversationRow[]> {
+  try {
+    const { data: stars } = await db.from('inbox_thread_stars').select('thread_key')
+    const pairs = (stars ?? [])
+      .map((s) => String(s.thread_key ?? '').split(':'))
+      .filter((p) => p[0] === 'messenger' && p[1] && p[2])
+      .map((p) => ({ pageId: p[1], psid: p[2] }))
+    if (!pairs.length) return []
+
+    // One request for all of them. PostgREST needs the commas inside and(...)
+    // escaped by quoting each value, or a psid would be read as a new filter.
+    const filter = pairs.map((p) => `and(page_id.eq."${p.pageId}",psid.eq."${p.psid}")`).join(',')
+    const { data, error } = await scoped(db.from('messenger_conversations').select(COLUMNS).or(filter))
+    if (error || !data) return []
+    return data as unknown as ConversationRow[]
+  } catch {
+    return []
+  }
+}
+
 export async function listCachedConversations(options: {
   pageId?: string
   limit?: number
@@ -105,14 +136,24 @@ export async function listCachedConversations(options: {
       .limit(WAITING_LIMIT),
   )
 
-  const [newestResult, waitingResult] = await Promise.all([newest, waiting])
+  // Third read: starred threads, at any age and outside every cap. A star is a
+  // person escalating a problem, so the thread has to stay reachable until the
+  // star is cleared - and because we reply to escalations, the thread usually
+  // has US speaking last, which excludes it from the waiting read above. All
+  // three stars on 23 Sep sat at rank 733/1122/1345, so the Starred filter
+  // counted 5 and could only show the 2 WhatsApp ones.
+  const starred = starredMessengerRows(db, scoped)
+
+  const [newestResult, waitingResult, starredRows] = await Promise.all([newest, waiting, starred])
   if (newestResult.error) {
     throw new Error('Could not read cached Messenger conversations')
   }
-  // The waiting read is a widening, never a gate: if it fails the newest list still renders.
+  // The waiting and starred reads are wideners, never gates: if either fails the
+  // newest list still renders.
   const rows = [
     ...(newestResult.data as unknown as ConversationRow[]),
     ...((waitingResult.error ? [] : waitingResult.data) as unknown as ConversationRow[]),
+    ...starredRows,
   ]
   const byThread = new Map<string, ConversationRow>()
   for (const row of rows) byThread.set(`${row.page_id}:${row.psid}`, row)
