@@ -506,10 +506,21 @@ async function sendMessengerMessage(
     const providerMessage = typeof e.message === 'string' ? e.message : ''
     const missingPermission = code === 200 || /pages_messaging|appropriate role/i.test(providerMessage)
     const windowClosed = e.subcode === 2018278 || /outside.*window|24.*hour/i.test(providerMessage)
+    // Code 551 / subcode 1545041: Meta refuses to deliver to this person from
+    // this Page. MEASURED 23 Sep 2026 on Kayode Oguns: the customer had written
+    // two hours earlier, so the 24-hour window was wide open, yet Graph reported
+    // `can_reply: false` on the conversation itself - the block is on their side
+    // (Page blocked or messages restricted, or the account is deactivated), not
+    // on our token, our permissions or the window. Nothing we send can land, so
+    // say so plainly instead of inviting the agent to retry forever. Rare:
+    // 8 of the newest 600 threads across all 6 Pages, only this one active.
+    const recipientUnavailable = code === 551 || e.subcode === 1545041
     const description = code === undefined
       ? 'The Messenger send response could not be confirmed. Check the conversation before sending again.'
       : missingPermission
       ? 'Meta rejected the Messenger permission or Page role. Check the connection before sending again.'
+      : recipientUnavailable
+      ? 'This person is not receiving messages from this Page, so Meta will not deliver the reply. This is set on their side - they have blocked or restricted the Page, or the account is closed - so it is not the 24-hour window and not a problem with the connection. Sending again will fail the same way. Mark the conversation as done.'
       : /outside.*window|24.*hour/i.test(providerMessage) || e.subcode === 2018278
         // MEASURED 16 Sep 2026: the app has pages_messaging but NOT human_agent,
         // so the 7-day human-agent window Business Suite uses is not open to us.
